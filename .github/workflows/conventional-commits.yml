@@ -1,0 +1,27 @@
+name: Conventional commits
+
+# Runs on pull requests only: GitHub's own merge commits ("Merge pull
+# request #1...") would never pass the lint, so push to main is not checked.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  commits:
+    name: commit messages (commitlint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: wagoid/commitlint-github-action@v6
+
+  pr-title:
+    # the PR title becomes the commit message on squash-merge
+    name: PR title (conventional)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: amannn/action-semantic-pull-request@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

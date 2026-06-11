@@ -1,0 +1,4 @@
+composers.db
+__pycache__/
+.venv/
+*.egg-info/
