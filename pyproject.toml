@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
+    "kagglehub>=0.3",
     "sqlalchemy>=2.0",
 ]
 
@@ -29,6 +30,10 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.mypy]
 strict = true
 files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = "kagglehub.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

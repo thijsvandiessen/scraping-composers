@@ -48,6 +48,9 @@ class SourceLike(Protocol):
     def fetch_records(self, max_pages: int | None = None) -> Iterator[SourceRecord]: ...
 
 
-from . import imslp  # noqa: E402
+from . import imslp, nyphil  # noqa: E402
 
-REGISTRY: dict[str, SourceLike] = {imslp.NAME: imslp}
+REGISTRY: dict[str, SourceLike] = {
+    imslp.NAME: imslp,
+    nyphil.NAME: nyphil,
+}
