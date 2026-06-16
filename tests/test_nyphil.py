@@ -1,7 +1,8 @@
 """Tests for aggregating the NY Phil performance-history JSON into records."""
 
 from composer_ingest.sources import SourceClaim, SourceRecord
-from composer_ingest.sources.nyphil import ROLES, _aggregate, _record
+from composer_ingest.sources.nyphil.people import ROLES, _aggregate, _record
+from composer_ingest.sources.nyphil.performances import _performances
 
 # Trimmed copy of the real structure: double-spaced names, ";"-joined
 # conductors, the "Not conducted" sentinel, soloists with and without an
@@ -10,6 +11,14 @@ PROGRAMS = [
     {
         "season": "1842-43",
         "programID": "3853",
+        "concerts": [
+            {
+                "Date": "1842-12-07T05:00:00Z",
+                "eventType": "Subscription Season",
+                "Venue": "Apollo Rooms",
+                "Location": "Manhattan, NY",
+            },
+        ],
         "works": [
             {
                 "ID": "52446*",
@@ -34,6 +43,10 @@ PROGRAMS = [
     {
         "season": "1844-45",
         "programID": "5178",
+        "concerts": [
+            {"Date": "1844-11-16T05:00:00Z", "Venue": "Apollo Rooms", "Location": "Manhattan, NY"},
+            {"Date": "1844-11-23T05:00:00Z", "Venue": "Apollo Rooms", "Location": "Manhattan, NY"},
+        ],
         "works": [
             {
                 "ID": "52446*2",
@@ -53,6 +66,13 @@ PROGRAMS = [
                 "ID": "52446*3",
                 "workTitle": "EGMONT",
                 "composerName": "Beethoven, Ludwig van",
+                "conductorName": "Timm, Henry C.",
+                "soloists": [],
+            },
+            {
+                "ID": "9001*",
+                "workTitle": {"em": "PRINCE IGOR", "_": "CHORUS FROM  (ARR.)"},
+                "composerName": "Borodin, Alexander",
                 "conductorName": "Timm, Henry C.",
                 "soloists": [],
             },
@@ -124,6 +144,7 @@ def test_blank_soloist_names_and_intervals_are_skipped() -> None:
     assert "soloist:" not in parsed
     expected = {
         "composer:Beethoven, Ludwig van",
+        "composer:Borodin, Alexander",
         "composer:Weber, Carl Maria Von",
         "conductor:Hill, Ureli Corelli",
         "conductor:Rudel, Julius",
@@ -132,3 +153,52 @@ def test_blank_soloist_names_and_intervals_are_skipped() -> None:
         "soloist:Timm, Henry C.",
     }
     assert set(parsed) == expected
+
+
+def performances() -> dict[str, SourceRecord]:
+    return {record.external_id: record for record in _performances(PROGRAMS)}
+
+
+def test_performance_record_links_work_to_people_and_concert() -> None:
+    record = performances()["perf:3853:0:0"]
+    assert record.kind == "work"
+    assert record.name == "SYMPHONY NO. 5"
+    assert record.url is None
+    assert record.raw["date"] == "1842-12-07"
+    assert record.raw["venue"] == "Apollo Rooms"
+    # no soloists on this work -> no performed_by claim; names are collapsed
+    assert record.claims == (
+        SourceClaim("composed_by", "person", "Beethoven, Ludwig van"),
+        SourceClaim("conducted_by", "person", "Hill, Ureli Corelli"),
+        SourceClaim("performed_on", value="1842-12-07"),
+        SourceClaim("performed_in", "place", "Manhattan, NY"),
+    )
+
+
+def test_interval_entries_skipped_but_work_index_preserved() -> None:
+    parsed = performances()
+    # OBERON is the second work (index 1); the interval (index 2) yields nothing
+    assert parsed["perf:3853:0:1"].name == "OBERON"
+    assert "perf:3853:0:2" not in parsed
+
+
+def test_multi_concert_program_yields_one_record_per_concert() -> None:
+    parsed = performances()
+    first, second = parsed["perf:5178:0:0"], parsed["perf:5178:1:0"]
+    assert first.name == second.name == "SYMPHONY NO. 5"
+    assert first.raw["date"] == "1844-11-16"
+    assert second.raw["date"] == "1844-11-23"
+
+
+def test_performance_drops_not_conducted_and_keeps_named_soloists() -> None:
+    record = performances()["perf:3853:0:1"]  # OBERON
+    conductors = [c.object_label for c in record.claims if c.predicate == "conducted_by"]
+    soloists = [c.object_label for c in record.claims if c.predicate == "performed_by"]
+    assert conductors == ["Rudel, Julius"]  # "Not conducted" sentinel dropped
+    assert soloists == ["Otto, Antoinette"]  # blank soloist name dropped
+
+
+def test_dict_work_title_is_joined_into_one_string() -> None:
+    record = performances()["perf:5178:0:2"]  # third work of the first concert
+    assert record.name == "PRINCE IGOR CHORUS FROM (ARR.)"
+    assert SourceClaim("composed_by", "person", "Borodin, Alexander") in record.claims

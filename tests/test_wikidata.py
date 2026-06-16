@@ -7,12 +7,8 @@ import httpx
 import pytest
 
 from composer_ingest.sources import SourceClaim
-from composer_ingest.sources.wikidata import (
-    _fetch_metrics,
-    _fetch_page,
-    _format_time,
-    _records_from_rows,
-)
+from composer_ingest.sources.wikidata.parse import _format_time, _records_from_rows
+from composer_ingest.sources.wikidata.query import _fetch_metrics, _fetch_page
 
 
 def row(qid: str, label: str | None = None, **vars: str) -> dict[str, Any]:
