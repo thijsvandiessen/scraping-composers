@@ -13,6 +13,11 @@ popularity metrics (sitelink/statement/identifier counts and the number of
 works naming the item as composer, P86); these become literal-valued claims
 like ``sitelink_count``.
 
+Birth/death dates are stored at the precision Wikidata records for them (see
+``_format_time``): a year-only fact lands as ``1756``, not the padded
+``1756-01-01``, so the stored string never overstates how precisely the date
+is known.
+
 Items (or claim objects) without an English label come back from the label
 service as their bare QID ("Q12345"); those are skipped since a QID is not a
 name we can deduplicate on.
@@ -43,12 +48,23 @@ RETRIES = 5
 log = logging.getLogger(__name__)
 
 QUERY = """\
-SELECT ?item ?itemLabel ?birth ?death ?birthPlaceLabel ?deathPlaceLabel ?countryLabel ?genreLabel
-       ?movementLabel
+SELECT ?item ?itemLabel ?birth ?birthPrecision ?death ?deathPrecision
+       ?birthPlaceLabel ?deathPlaceLabel ?countryLabel ?genreLabel ?movementLabel
 WHERE {{
   {{ SELECT ?item WHERE {{ ?item wdt:P106 wd:Q36834 . }} ORDER BY ?item LIMIT {page_size} OFFSET {offset} }}
-  OPTIONAL {{ ?item wdt:P569 ?birth . }}
-  OPTIONAL {{ ?item wdt:P570 ?death . }}
+  # Take the truthy (best-rank) date via wdt:, then join the statement value
+  # node carrying that same value to read its precision. Wikidata pads unknown
+  # components to 01, so without timePrecision a year-only birth is
+  # indistinguishable from 1 January. Matching the value node by ?birth keeps
+  # truthy semantics -- p:/psv: alone also returns deprecated/lower-rank
+  # statements (Beethoven has three P569 values) -- and an "unknown value" date
+  # has no timeValue to match, so it drops out instead of leaking a blank node.
+  OPTIONAL {{ ?item wdt:P569 ?birth .
+              ?item p:P569/psv:P569
+                [ wikibase:timeValue ?birth ; wikibase:timePrecision ?birthPrecision ] . }}
+  OPTIONAL {{ ?item wdt:P570 ?death .
+              ?item p:P570/psv:P570
+                [ wikibase:timeValue ?death ; wikibase:timePrecision ?deathPrecision ] . }}
   OPTIONAL {{ ?item wdt:P19 ?birthPlace . }}
   OPTIONAL {{ ?item wdt:P20 ?deathPlace . }}
   OPTIONAL {{ ?item wdt:P27 ?country . }}
@@ -96,6 +112,39 @@ METRICS: tuple[tuple[str, str], ...] = (
 )
 
 _BARE_QID = re.compile(r"^Q\d+$")
+
+# A Wikidata time literal: optional BCE sign, year (>=1 digit), zero-padded
+# month and day. The time component is split off before this matches.
+_TIME = re.compile(r"(-?)(\d+)-(\d{2})-(\d{2})")
+
+
+def _format_time(value: str, precision: str | None) -> str:
+    """Truncate a Wikidata time literal to the granularity its ``precision``
+    warrants: day (11) keeps YYYY-MM-DD, month (10) keeps YYYY-MM, year (9) or
+    coarser keeps just the year. Wikidata pads unknown components to 01, so
+    without this a year-only date masquerades as 1 January. Precision below
+    year (decade/century/...) is still rendered as the year and remains a
+    coarse approximation; modeling those as ranges is left to downstream.
+
+    Non-time values (e.g. an "unknown value" node that slips through) and a
+    missing/garbled precision are passed through / treated as full-precision
+    so this never raises."""
+    date = value.split("T", 1)[0]  # "1756-01-27T00:00:00Z" -> "1756-01-27"
+    match = _TIME.fullmatch(date)
+    if match is None:
+        return date
+    sign, year, month, day = match.groups()
+    try:
+        prec = int(precision) if precision is not None else 11
+    except ValueError:
+        prec = 11
+    if prec >= 11:
+        body = f"{year}-{month}-{day}"
+    elif prec == 10:
+        body = f"{year}-{month}"
+    else:
+        body = year
+    return sign + body
 
 
 def _run_query(client: httpx.Client, query: str, desc: str) -> list[dict[str, Any]]:
@@ -164,7 +213,7 @@ def _records_from_rows(
             if value is None:
                 continue
             if kind is None:
-                value = value.split("T")[0]  # "1756-01-27T00:00:00Z" -> date part
+                value = _format_time(value, _literal(row, f"{var}Precision"))
             elif _BARE_QID.match(value):
                 continue  # claim object has no English label
             item["values"].setdefault(var, set()).add(value)

@@ -7,7 +7,12 @@ import httpx
 import pytest
 
 from composer_ingest.sources import SourceClaim
-from composer_ingest.sources.wikidata import _fetch_metrics, _fetch_page, _records_from_rows
+from composer_ingest.sources.wikidata import (
+    _fetch_metrics,
+    _fetch_page,
+    _format_time,
+    _records_from_rows,
+)
 
 
 def row(qid: str, label: str | None = None, **vars: str) -> dict[str, Any]:
@@ -80,6 +85,60 @@ def test_unknown_value_blank_nodes_are_ignored() -> None:
 def test_negative_years_survive_date_truncation() -> None:
     (record,) = _records_from_rows([row("Q7", "Ancient Composer", birth="-0500-01-01T00:00:00Z")])
     assert SourceClaim("born_on", value="-0500-01-01") in record.claims
+
+
+def test_year_precision_dates_are_truncated_to_the_year() -> None:
+    # precision 9 = year: the padded 01-01 is not real, so it must be dropped
+    (record,) = _records_from_rows(
+        [
+            row(
+                "Q10",
+                "Year Only",
+                birth="1756-01-01T00:00:00Z",
+                birthPrecision="9",
+                death="1791-12-05T00:00:00Z",
+                deathPrecision="11",
+            )
+        ]
+    )
+    assert SourceClaim("born_on", value="1756") in record.claims
+    assert SourceClaim("died_on", value="1791-12-05") in record.claims  # day precision kept in full
+
+
+def test_month_precision_dates_keep_year_and_month() -> None:
+    # precision 10 = month: keep YYYY-MM, drop the padded day
+    (record,) = _records_from_rows(
+        [row("Q11", "Month Only", birth="1810-03-01T00:00:00Z", birthPrecision="10")]
+    )
+    assert SourceClaim("born_on", value="1810-03") in record.claims
+
+
+def test_year_precision_negative_year_keeps_its_sign() -> None:
+    (record,) = _records_from_rows([row("Q12", "Ancient", birth="-0550-01-01T00:00:00Z", birthPrecision="9")])
+    assert SourceClaim("born_on", value="-0550") in record.claims
+
+
+@pytest.mark.parametrize(
+    "value,precision,expected",
+    [
+        ("1756-01-27T00:00:00Z", "11", "1756-01-27"),  # day
+        ("1810-03-01T00:00:00Z", "10", "1810-03"),  # month
+        ("1756-01-01T00:00:00Z", "9", "1756"),  # year
+        ("1700-01-01T00:00:00Z", "8", "1700"),  # decade -> coarse, rendered as the year
+        ("1700-01-01T00:00:00Z", "7", "1700"),  # century -> coarse, rendered as the year
+        ("-0550-01-01T00:00:00Z", "9", "-0550"),  # BCE keeps its sign
+        ("1756-01-27T00:00:00Z", None, "1756-01-27"),  # missing precision -> assume full
+        ("1756-01-27T00:00:00Z", "garbage", "1756-01-27"),  # unparseable precision -> assume full
+        # not a time literal (e.g. an "unknown value" node) -> passed through, never raises
+        (
+            "http://www.wikidata.org/.well-known/genid/abc",
+            "11",
+            "http://www.wikidata.org/.well-known/genid/abc",
+        ),
+    ],
+)
+def test_format_time(value: str, precision: str | None, expected: str) -> None:
+    assert _format_time(value, precision) == expected
 
 
 def test_truncated_body_is_retried_via_uncached_post(monkeypatch: pytest.MonkeyPatch) -> None:
