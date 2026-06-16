@@ -18,6 +18,12 @@ uv run composer-ingest ingest imslp --max-pages 1
 # inspect the dataset and the collection log
 uv run composer-ingest stats
 uv run composer-ingest runs
+
+# inspect one entity's claims and which source asserts each — every claim
+# keeps its source and the raw record it came from, so you can compare
+# disagreeing facts and decide which to trust
+uv run composer-ingest claims "Beethoven, Ludwig van" --kind person
+uv run composer-ingest claims "Beethoven, Ludwig van" --predicate born_on
 ```
 
 Data lands in `composers.db` (SQLite) by default. To use Postgres instead:
@@ -57,10 +63,13 @@ moves into the golden research index.
 
 ## Adding a source
 
-Create `src/composer_ingest/sources/<name>.py` exposing `NAME`, `BASE_URL`,
-and `fetch_records(max_pages=None)` yielding `SourceRecord`s (with optional
-`SourceClaim`s for what the source asserts about each entity), then add it to
-`REGISTRY` in `sources/__init__.py`.
+Create a package `src/composer_ingest/sources/<name>/` whose `__init__.py`
+exposes `NAME`, `BASE_URL`, and `fetch_records(max_pages=None)` yielding
+`SourceRecord`s (with optional `SourceClaim`s for what the source asserts about
+each entity), then add it to `REGISTRY` in `sources/__init__.py`. Each source is
+a package split by responsibility — e.g. `fetch.py`/`query.py` for the HTTP or
+API access and one module per view/parser (see `concertgebouw/` and `nyphil/`);
+keep the public `fetch_records` orchestration in `__init__.py`.
 
 ## Development
 
@@ -82,5 +91,5 @@ every pull request.
 The endpoint (`/imslpscripts/API.ISCR.php`) takes its parameters as a single
 slash-separated string, returns rows keyed by stringified indices alongside a
 `metadata` entry holding the pagination flag, and embeds names in MediaWiki
-category titles (`Category:Beethoven, Ludwig van`). `sources/imslp.py`
+category titles (`Category:Beethoven, Ludwig van`). `sources/imslp/`
 handles all of this, plus retries and a polite request delay.
