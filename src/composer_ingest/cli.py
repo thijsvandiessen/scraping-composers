@@ -4,11 +4,13 @@ import argparse
 import logging
 import sys
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from .db import get_engine, init_db
 from .ingest import run_ingest
 from .models import Claim, Entity, EntityRecord, IngestRun, Source
+from .normalize import dedup_key
 from .sources import REGISTRY
 
 
@@ -43,6 +45,75 @@ def cmd_stats(args: argparse.Namespace) -> int:
         ).all()
         for name, count in per_source:
             print(f"  {name}: {count}")
+    return 0
+
+
+EntityClaims = list[tuple[Entity, list[tuple[str, str | None, str | None, str, int | None]]]]
+
+
+def entity_claims(
+    session: Session,
+    name: str,
+    *,
+    kind: str | None = None,
+    predicate: str | None = None,
+    source: str | None = None,
+    limit: int = 10,
+) -> EntityClaims:
+    """For each entity matching ``name`` (exact dedup key or label substring),
+    its outgoing claims as (predicate, value, object_label, source_name,
+    record_id). The ingest already collapses identical assertions per source,
+    so competing values for a predicate line up one row per source that made
+    them — the basis for deciding which to trust."""
+    query = select(Entity).where(or_(Entity.dedup_key == dedup_key(name), Entity.label.ilike(f"%{name}%")))
+    if kind is not None:
+        query = query.where(Entity.kind == kind)
+    entities = session.scalars(query.order_by(Entity.kind, Entity.label).limit(limit)).all()
+
+    obj = aliased(Entity)
+    results: EntityClaims = []
+    for entity in entities:
+        claims = (
+            select(Claim.predicate, Claim.value, obj.label, Source.name, Claim.record_id)
+            .join(Source, Source.id == Claim.source_id)
+            .outerjoin(obj, obj.id == Claim.object_id)
+            .where(Claim.subject_id == entity.id)
+            .order_by(Claim.predicate, Source.name, Claim.value)
+        )
+        if predicate is not None:
+            claims = claims.where(Claim.predicate == predicate)
+        if source is not None:
+            claims = claims.where(Source.name == source)
+        results.append((entity, list(session.execute(claims).tuples())))
+    return results
+
+
+def cmd_claims(args: argparse.Namespace) -> int:
+    engine = get_engine(args.database_url)
+    session_factory = init_db(engine)
+    with session_factory() as session:
+        results = entity_claims(
+            session,
+            args.name,
+            kind=args.kind,
+            predicate=args.predicate,
+            source=args.source,
+            limit=args.limit,
+        )
+    if not results:
+        print(f"no entity matching {args.name!r}")
+        return 1
+    for entity, rows in results:
+        print(f"\nentity {entity.id}: {entity.label} ({entity.kind})")
+        if not rows:
+            print("  (no matching claims)")
+        current = None
+        for predicate, value, object_label, source_name, record_id in rows:
+            if predicate != current:
+                print(f"  {predicate}:")
+                current = predicate
+            shown = object_label if object_label is not None else (value or "")
+            print(f"    {shown:<34} {source_name:<14} record={record_id}")
     return 0
 
 
@@ -87,6 +158,16 @@ def main() -> None:
 
     p_stats = sub.add_parser("stats", help="show dataset counts")
     p_stats.set_defaults(func=cmd_stats)
+
+    p_claims = sub.add_parser(
+        "claims", help="show an entity's claims and which source asserts each (to compare and choose)"
+    )
+    p_claims.add_argument("name", help="entity name (exact dedup-key match or label substring)")
+    p_claims.add_argument("--kind", help="restrict to an entity kind (person, work, place, ...)")
+    p_claims.add_argument("--predicate", help="restrict to one predicate (e.g. born_on)")
+    p_claims.add_argument("--source", help="restrict to one source (e.g. wikidata)")
+    p_claims.add_argument("--limit", type=int, default=10, help="max matching entities to show")
+    p_claims.set_defaults(func=cmd_claims)
 
     p_runs = sub.add_parser("runs", help="show the ingest run log")
     p_runs.add_argument("--limit", type=int, default=20)
