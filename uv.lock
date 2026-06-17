@@ -217,6 +217,7 @@ postgres = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "fastapi" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "ruff" },
@@ -235,6 +236,7 @@ provides-extras = ["postgres", "api"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "fastapi", specifier = ">=0.111" },
     { name = "mypy", specifier = ">=1.10" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.4" },
