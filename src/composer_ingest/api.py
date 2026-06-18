@@ -55,6 +55,7 @@ class ClaimOut(BaseModel):
     value: str | None
     object_label: str | None
     source: str
+    source_url: str | None
 
 
 class ComposerDetail(BaseModel):
@@ -102,7 +103,7 @@ def get_composer(composer_id: int, db: DbSession) -> ComposerDetail:
 
     obj = aliased(Entity)
     rows = db.execute(
-        select(Claim.predicate, Claim.value, obj.label, Source.name)
+        select(Claim.predicate, Claim.value, obj.label, Source.name, Source.base_url)
         .join(Source, Source.id == Claim.source_id)
         .outerjoin(obj, obj.id == Claim.object_id)
         .where(Claim.subject_id == entity.id)
@@ -115,8 +116,8 @@ def get_composer(composer_id: int, db: DbSession) -> ComposerDetail:
         kind=entity.kind,
         created_at=entity.created_at,
         claims=[
-            ClaimOut(predicate=pred, value=val, object_label=obj_label, source=src)
-            for pred, val, obj_label, src in rows
+            ClaimOut(predicate=pred, value=val, object_label=obj_label, source=src, source_url=src_url)
+            for pred, val, obj_label, src, src_url in rows
         ],
     )
 

@@ -72,7 +72,7 @@ def test_ingest_creates_entities_records_and_claims(session: Session) -> None:
 
     record = session.scalars(select(EntityRecord)).one()
     claims = session.scalars(select(Claim)).all()
-    assert len(claims) == 6
+    assert len(claims) == 7  # 6 source claims + 1 auto-injected mentioned_in
     for claim in claims:
         # every claim carries full provenance back to its source and record
         assert claim.source.name == "fake"
@@ -97,7 +97,7 @@ def test_reingest_is_idempotent(session: Session) -> None:
     assert (second.records_seen, second.records_new) == (2, 0)
     assert session.scalar(select(Entity.id).where(Entity.kind == "person")) is not None
     assert len(session.scalars(select(EntityRecord)).all()) == 2
-    assert len(session.scalars(select(Claim)).all()) == 6  # nothing duplicated
+    assert len(session.scalars(select(Claim)).all()) == 8  # 6 Mozart + 2 mentioned_in, nothing duplicated
 
     # re-ingest refreshes provenance: records now point at the second run
     for record in session.scalars(select(EntityRecord)):

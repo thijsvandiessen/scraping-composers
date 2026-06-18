@@ -106,6 +106,22 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
                 existing_records[record.external_id] = db_record.id
                 new += 1
 
+                # Auto-inject a "mentioned_in" claim so every entity carries
+                # a reference back to the source page where it was found.
+                mention_url = record.url or source.base_url
+                mention_key = (entity_id, "mentioned_in", None, mention_url)
+                if mention_key not in existing_claims:
+                    session.add(
+                        Claim(
+                            subject_id=entity_id,
+                            predicate="mentioned_in",
+                            value=mention_url,
+                            source_id=source.id,
+                            record_id=db_record.id,
+                        )
+                    )
+                    existing_claims.add(mention_key)
+
                 for claim in record.claims:
                     object_id = (
                         _get_or_create_entity(session, entities_by_key, claim.object_kind, claim.object_label)
