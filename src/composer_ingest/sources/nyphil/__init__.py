@@ -4,8 +4,9 @@ One kagglehub-cached download (see ``data``), parsed into two record types:
 
 1. Per-(role, name) ``person`` records aggregating each composer/conductor/
    soloist's appearances (see ``people``).
-2. One ``work`` record per titled work at each concert (see ``performances``),
-   linking it to composer/conductor/soloists/date/location as claims.
+2. One work mention per titled work at each concert (see ``performances``),
+   carrying its composer and title for the resolution pipeline (with the
+   concert's date/location/soloists kept in ``raw``).
 
 ``text`` holds the name cleanup both share.
 """
@@ -15,7 +16,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 
-from .. import SourceRecord
+from .. import SourceRecord, SourceWorkMention
 from .data import BASE_URL, _load_programs
 from .people import ROLES, _aggregate, _record
 from .performances import _performances
@@ -27,10 +28,10 @@ log = logging.getLogger(__name__)
 __all__ = ["BASE_URL", "NAME", "ROLES", "fetch_records"]
 
 
-def fetch_records(max_pages: int | None = None) -> Iterator[SourceRecord]:
+def fetch_records(max_pages: int | None = None) -> Iterator[SourceRecord | SourceWorkMention]:
     """Yield every composer/conductor/soloist in the performance history (one
     aggregated ``person`` record each) followed by every work-performance (one
-    ``work`` record each). The whole source is one (kagglehub-cached) download;
+    work mention each). The whole source is one (kagglehub-cached) download;
     ``max_pages`` is accepted for interface compatibility and ignored."""
     programs = _load_programs()
     log.info("nyphil: %d programs", len(programs))

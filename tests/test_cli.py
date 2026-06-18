@@ -7,13 +7,26 @@ import sys
 from pathlib import Path
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from composer_ingest.cli import cmd_claims, cmd_ingest, cmd_runs, cmd_stats, entity_claims, main
+from composer_ingest.cli import (
+    cmd_claims,
+    cmd_ingest,
+    cmd_rematch,
+    cmd_review,
+    cmd_runs,
+    cmd_stats,
+    cmd_works,
+    entity_claims,
+    main,
+)
 from composer_ingest.db import get_engine, init_db
 from composer_ingest.ingest import run_ingest
+from composer_ingest.models import RawWorkMention, Work
 from composer_ingest.sources import SourceClaim
 from test_ingest import FakeSource, person
+from test_ingest_mentions import mention
 
 
 def _ns(**kwargs: object) -> argparse.Namespace:
@@ -135,6 +148,96 @@ def test_cmd_stats_shows_entity_and_claim_counts(tmp_path: Path, capsys: pytest.
     out = capsys.readouterr().out
     assert "person: 1" in out
     assert "fake:" in out
+
+
+# ---------------------------------------------------------------------------
+# works / review / rematch
+# ---------------------------------------------------------------------------
+
+
+def _ingest(db_url: str, *records: object) -> None:
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        run_ingest(session, FakeSource(records=records))  # type: ignore[arg-type]
+
+
+def test_cmd_stats_shows_work_and_mention_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest(db_url, mention("Symphony No. 5, Op. 67", "Beethoven, Ludwig van"))
+
+    assert cmd_stats(_ns(database_url=db_url)) == 0
+    out = capsys.readouterr().out
+    assert "works (resolved):        1" in out
+    assert "work mentions:           1" in out
+    assert "created: 1" in out
+
+
+def test_cmd_works_lists_work_with_aliases(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest(
+        db_url,
+        mention("Symphony No. 5 in C minor, Op. 67", "Beethoven, Ludwig van", "m1"),
+        mention("Sinfonie Nr. 5 c-moll, op. 67", "Ludwig van Beethoven", "m2"),
+    )
+
+    assert cmd_works(_ns(database_url=db_url, name="Beethoven", limit=20)) == 0
+    out = capsys.readouterr().out
+    assert "Symphony No. 5 in C minor, Op. 67" in out
+    assert "mentions: 2" in out
+    assert "alias: Sinfonie Nr. 5 c-moll, op. 67" in out
+
+
+def test_cmd_works_returns_1_for_unknown(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    init_db(get_engine(db_url))
+    assert cmd_works(_ns(database_url=db_url, name="Nobody", limit=20)) == 1
+    assert "no work" in capsys.readouterr().out
+
+
+def test_cmd_review_lists_flagged_mentions(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest(
+        db_url,
+        mention("Songs of a Wayfarer", "Mahler, Gustav", "m1"),
+        mention("Songs of a Traveller", "Mahler, Gustav", "m2"),
+    )
+
+    assert cmd_review(_ns(database_url=db_url, limit=20, accept=None, new=None)) == 0
+    assert "Songs of a Traveller" in capsys.readouterr().out
+
+
+def test_cmd_review_new_creates_work_from_mention(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest(
+        db_url,
+        mention("Songs of a Wayfarer", "Mahler, Gustav", "m1"),
+        mention("Songs of a Traveller", "Mahler, Gustav", "m2"),
+    )
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        review_id = session.scalar(
+            select(RawWorkMention.id).where(RawWorkMention.match_status == "needs_review")
+        )
+        before = session.scalar(select(func.count(Work.id))) or 0
+
+    assert cmd_review(_ns(database_url=db_url, limit=20, accept=None, new=review_id)) == 0
+
+    with factory() as session:
+        assert session.scalar(select(func.count(Work.id))) == before + 1
+        row = session.get(RawWorkMention, review_id)
+        assert row is not None and row.match_status == "manual_matched"
+        assert row.work_id is not None
+
+
+def test_cmd_rematch_processes_pending_mentions(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest(
+        db_url,
+        mention("Songs of a Wayfarer", "Mahler, Gustav", "m1"),
+        mention("Songs of a Traveller", "Mahler, Gustav", "m2"),
+    )
+    assert cmd_rematch(_ns(database_url=db_url)) == 0
+    assert "re-matched" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

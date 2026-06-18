@@ -1,6 +1,6 @@
 """Tests for parsing Digital Concert Hall concert payloads into records."""
 
-from composer_ingest.sources import SourceClaim, SourceRecord
+from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
 from composer_ingest.sources.berlinphil.artists import _Artist, _artist_records, _collect, _register
 from composer_ingest.sources.berlinphil.performances import _performances
 
@@ -138,46 +138,48 @@ CONCERTS = [
 ]
 
 
-def performances() -> dict[str, SourceRecord]:
-    records: dict[str, SourceRecord] = {}
+def performances() -> dict[str, SourceWorkMention]:
+    mentions: dict[str, SourceWorkMention] = {}
     for concert in CONCERTS:
-        for record in _performances(concert):
-            records[record.external_id] = record
-    return records
+        for mention in _performances(concert):
+            mentions[mention.external_id] = mention
+    return mentions
 
 
-def test_work_with_soloist_links_everyone_and_the_period() -> None:
-    record = performances()["perf:56434-2"]
-    assert record.kind == "work"
-    assert record.name == "Fantasy for Violin and Orchestra in G minor, op. 24"
-    assert record.url == "https://www.digitalconcerthall.com/en/concert/56434"
-    assert record.raw["date"] == "2026-06-06"
-    assert record.raw["season"] == "2025/26"
-    assert record.claims == (
-        SourceClaim("composed_by", "person", "Josef Suk"),
-        SourceClaim("conducted_by", "person", "Jakub Hrůša"),
-        SourceClaim("performed_by", "person", "Julia Fischer"),
-        SourceClaim("performed_by_ensemble", "ensemble", "Berliner Philharmoniker"),
-        SourceClaim("in_period", "period", "Late Romanticism"),
-        SourceClaim("performed_on", value="2026-06-06"),
-    )
+def test_work_mention_carries_first_composer_title_and_context() -> None:
+    mention = performances()["perf:56434-2"]
+    assert mention.title == "Fantasy for Violin and Orchestra in G minor, op. 24"
+    assert mention.composer == "Josef Suk"
+    assert mention.raw["url"] == "https://www.digitalconcerthall.com/en/concert/56434"
+    assert mention.raw["date"] == "2026-06-06"
+    assert mention.raw["season"] == "2025/26"
+    assert mention.raw["conductors"] == ["Jakub Hrůša"]
+    # ensembles and periods are kept in raw (dropped from structured fields for now)
+    assert mention.raw["ensembles"] == ["Berliner Philharmoniker"]
+    assert mention.raw["periods"] == ["Late Romanticism"]
 
 
-def test_work_without_soloist_omits_performed_by() -> None:
-    record = performances()["perf:56434-1"]
-    assert not any(c.predicate == "performed_by" for c in record.claims)
-    assert SourceClaim("composed_by", "person", "Vítězslava Kaprálová") in record.claims
-    assert record.raw["is_encore"] is False
+def test_soloist_role_name_becomes_discipline() -> None:
+    mention = performances()["perf:56434-2"]
+    assert mention.raw["soloists"] == [{"name": "Julia Fischer", "discipline": "violin"}]
+
+
+def test_work_without_soloist_has_empty_soloists() -> None:
+    mention = performances()["perf:56434-1"]
+    assert mention.raw["soloists"] == []
+    assert mention.composer == "Vítězslava Kaprálová"
+    assert mention.raw["is_encore"] is False
 
 
 def test_encore_flag_and_local_date_are_recorded() -> None:
-    record = performances()["perf:56465-3"]
-    assert record.raw["is_encore"] is True
-    assert record.raw["date"] == "2025-10-04"
-    assert SourceClaim("in_period", "period", "Classical") in record.claims
+    mention = performances()["perf:56465-3"]
+    assert mention.raw["is_encore"] is True
+    assert mention.raw["date"] == "2025-10-04"
+    assert mention.raw["periods"] == ["Classical"]
+    assert mention.composer == "Ludwig van Beethoven"
 
 
-def test_untitled_work_yields_no_record() -> None:
+def test_untitled_work_yields_no_mention() -> None:
     assert "perf:56465-9" not in performances()
 
 

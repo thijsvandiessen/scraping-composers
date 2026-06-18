@@ -1,6 +1,6 @@
 """Tests for parsing the Concertgebouw archive search page dropdowns."""
 
-from composer_ingest.sources import SourceClaim, SourceRecord
+from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
 from composer_ingest.sources.concertgebouw.dropdowns import _options, _record
 from composer_ingest.sources.concertgebouw.performances import _performances
 
@@ -147,69 +147,60 @@ LIST_PAGE = """\
 """
 
 
-def performances() -> list[SourceRecord]:
+def performances() -> list[SourceWorkMention]:
     return list(_performances(LIST_PAGE))
 
 
-def test_concert_start_row_becomes_a_work_record() -> None:
-    record = performances()[0]
-    assert record.external_id == "perf:0"
-    assert record.kind == "work"
-    assert record.name == "Symfonie nr. 092 in G gr.t., Hob. I:92"
-    assert record.url is None
-    assert record.raw["idx"] == 0
-    # no soloist on this work -> no performed_by claim
-    assert record.claims == (
-        SourceClaim("composed_by", "person", "Haydn, Joseph"),
-        SourceClaim("conducted_by", "person", "Beinum, Eduard van"),
-        SourceClaim("performed_on", value="30-06-1929"),
-        SourceClaim("performed_in", "place", "Amsterdam"),
-    )
+def test_concert_start_row_becomes_a_work_mention() -> None:
+    mention = performances()[0]
+    assert mention.external_id == "perf:0"
+    assert mention.title == "Symfonie nr. 092 in G gr.t., Hob. I:92"
+    assert mention.composer == "Haydn, Joseph"
+    assert mention.raw["idx"] == 0
+    assert mention.raw["date"] == "30-06-1929"
+    assert mention.raw["city"] == "Amsterdam"
+    assert mention.raw["conductor"] == "Beinum, Eduard van"
+    assert mention.raw["soloists"] == []  # no soloist on this work
 
 
 def test_continuation_work_inherits_concert_date_and_city() -> None:
-    record = performances()[1]
-    assert record.external_id == "perf:1"
-    assert record.name == "Pianoconcert in cis kl.t., op. 30"
-    assert SourceClaim("composed_by", "person", "Rimski-Korsakov, Nikolaj") in record.claims
-    assert SourceClaim("performed_by", "person", "Hagedorn, Meta") in record.claims
+    mention = performances()[1]
+    assert mention.external_id == "perf:1"
+    assert mention.title == "Pianoconcert in cis kl.t., op. 30"
+    assert mention.composer == "Rimski-Korsakov, Nikolaj"
+    assert mention.raw["soloists"] == [{"name": "Hagedorn, Meta", "discipline": None}]
     # date/city carried over from the concert-start row
-    assert SourceClaim("performed_on", value="30-06-1929") in record.claims
-    assert SourceClaim("performed_in", "place", "Amsterdam") in record.claims
+    assert mention.raw["date"] == "30-06-1929"
+    assert mention.raw["city"] == "Amsterdam"
 
 
 def test_composer_name_is_html_unescaped_and_in_dropdown_format() -> None:
-    record = performances()[2]
+    mention = performances()[2]
     # "Last, First" like the dropdown, so dedup_key unifies the two entities
-    assert SourceClaim("composed_by", "person", "Saint-Saëns, Camille") in record.claims
+    assert mention.composer == "Saint-Saëns, Camille"
 
 
-def test_multi_soloist_work_folds_extra_rows_into_performed_by_claims() -> None:
-    record = performances()[3]
-    assert record.name == "Das Lied von der Erde"
-    assert record.claims == (
-        SourceClaim("composed_by", "person", "Mahler, Gustav"),
-        SourceClaim("conducted_by", "person", "Schuricht, Carl"),
-        SourceClaim("performed_by", "person", "Oehman, Martin"),
-        SourceClaim("performed_by", "person", "Thorborg, Kerstin"),
-        SourceClaim("performed_on", value="05-10-1939"),
-        SourceClaim("performed_in", "place", "Amsterdam"),
-    )
+def test_multi_soloist_work_folds_extra_rows_into_one_mention() -> None:
+    mention = performances()[3]
+    assert mention.title == "Das Lied von der Erde"
+    assert mention.composer == "Mahler, Gustav"
+    assert mention.raw["conductor"] == "Schuricht, Carl"
+    assert [s["name"] for s in mention.raw["soloists"]] == ["Oehman, Martin", "Thorborg, Kerstin"]
 
 
-def test_work_without_composer_omits_the_composed_by_claim() -> None:
-    record = performances()[4]
-    assert record.external_id == "perf:4"
-    assert record.name == "Magna res est amor"
-    assert not any(claim.predicate == "composed_by" for claim in record.claims)
+def test_work_without_composer_has_none_composer() -> None:
+    mention = performances()[4]
+    assert mention.external_id == "perf:4"
+    assert mention.title == "Magna res est amor"
+    assert mention.composer is None
     # still inherits the second concert's date/city
-    assert SourceClaim("performed_on", value="05-10-1939") in record.claims
+    assert mention.raw["date"] == "05-10-1939"
 
 
 def test_only_work_rows_advance_the_index() -> None:
-    records = performances()
+    mentions = performances()
     # five works total; the extra-soloist row did not create a sixth
-    assert [r.external_id for r in records] == ["perf:0", "perf:1", "perf:2", "perf:3", "perf:4"]
+    assert [m.external_id for m in mentions] == ["perf:0", "perf:1", "perf:2", "perf:3", "perf:4"]
 
 
 # A small page with soloists that carry voice/instrument types in parentheses.
@@ -231,31 +222,16 @@ LIST_PAGE_WITH_VOICE = """\
 """
 
 
-def performances_with_voice() -> list[SourceRecord]:
-    return list(_performances(LIST_PAGE_WITH_VOICE))
+def test_soloist_voice_type_is_split_into_name_and_discipline() -> None:
+    mention = list(_performances(LIST_PAGE_WITH_VOICE))[0]
+    # the parenthetical is stripped from the name and kept as the discipline
+    assert mention.raw["soloists"] == [
+        {"name": "Oehman, Martin", "discipline": "tenor"},
+        {"name": "Thorborg, Kerstin", "discipline": "alt"},
+    ]
 
 
-def test_soloist_voice_type_stripped_from_performed_by_claim() -> None:
-    work = next(r for r in performances_with_voice() if r.kind == "work")
-    assert SourceClaim("performed_by", "person", "Oehman, Martin") in work.claims
-    assert SourceClaim("performed_by", "person", "Thorborg, Kerstin") in work.claims
-    # raw soloists list uses clean names too
-    assert work.raw["soloists"] == ["Oehman, Martin", "Thorborg, Kerstin"]
-
-
-def test_soloist_voice_type_becomes_performs_as_claim() -> None:
-    person_records = [r for r in performances_with_voice() if r.kind == "person"]
-    by_name = {r.name: r for r in person_records}
-    assert "Oehman, Martin" in by_name
-    assert SourceClaim("performs_as", value="tenor") in by_name["Oehman, Martin"].claims
-    assert SourceClaim("has_profession", "profession", "soloist") in by_name["Oehman, Martin"].claims
-    assert by_name["Oehman, Martin"].external_id == "soloist:Oehman, Martin:tenor"
-
-    assert "Thorborg, Kerstin" in by_name
-    assert SourceClaim("performs_as", value="alt") in by_name["Thorborg, Kerstin"].claims
-
-
-def test_soloist_without_voice_type_emits_no_person_record() -> None:
-    # The original LIST_PAGE has soloists with no parentheticals; no extra person records.
-    person_records = [r for r in _performances(LIST_PAGE) if r.kind == "person"]
-    assert person_records == []
+def test_soloist_without_voice_type_has_no_discipline() -> None:
+    # The original LIST_PAGE has soloists with no parentheticals.
+    mention = list(_performances(LIST_PAGE))[1]
+    assert mention.raw["soloists"] == [{"name": "Hagedorn, Meta", "discipline": None}]

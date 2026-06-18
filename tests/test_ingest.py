@@ -8,19 +8,19 @@ from sqlalchemy.orm import Session
 
 from composer_ingest.ingest import run_ingest
 from composer_ingest.models import Claim, Entity, EntityRecord, IngestRun
-from composer_ingest.sources import SourceClaim, SourceRecord
+from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
 
 
 @dataclass
 class FakeSource:
     """In-memory stand-in for a source module (satisfies ``SourceLike``)."""
 
-    records: tuple[SourceRecord, ...]
+    records: tuple[SourceRecord | SourceWorkMention, ...]
     NAME: str = "fake"
     BASE_URL: str = "https://fake.example"
     fail_after: int | None = None
 
-    def fetch_records(self, max_pages: int | None = None) -> Iterator[SourceRecord]:
+    def fetch_records(self, max_pages: int | None = None) -> Iterator[SourceRecord | SourceWorkMention]:
         for i, record in enumerate(self.records):
             if self.fail_after is not None and i >= self.fail_after:
                 raise RuntimeError("source exploded")
