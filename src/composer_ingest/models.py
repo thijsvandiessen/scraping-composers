@@ -73,6 +73,9 @@ class Entity(Base):
     dedup_key: Mapped[str] = mapped_column(String(300))
     label: Mapped[str] = mapped_column(String(300))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    first_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_edited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     records: Mapped[list[EntityRecord]] = relationship(back_populates="entity")
 
