@@ -2,7 +2,7 @@
 
 import pytest
 
-from composer_ingest.sources import SourceClaim, SourceRecord
+from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
 from composer_ingest.sources.nyphil.people import ROLES, _aggregate, _record
 from composer_ingest.sources.nyphil.performances import _performances
 from composer_ingest.sources.nyphil.text import _names
@@ -158,47 +158,49 @@ def test_blank_soloist_names_and_intervals_are_skipped() -> None:
     assert set(parsed) == expected
 
 
-def performances() -> dict[str, SourceRecord]:
-    return {record.external_id: record for record in _performances(PROGRAMS)}
+def performances() -> dict[str, SourceWorkMention]:
+    return {mention.external_id: mention for mention in _performances(PROGRAMS)}
 
 
-def test_performance_record_links_work_to_people_and_concert() -> None:
-    record = performances()["perf:3853:0:0"]
-    assert record.kind == "work"
-    assert record.name == "SYMPHONY NO. 5"
-    assert record.url is None
-    assert record.raw["date"] == "1842-12-07"
-    assert record.raw["venue"] == "Apollo Rooms"
-    # no soloists on this work -> no performed_by claim; names are collapsed
-    assert record.claims == (
-        SourceClaim("composed_by", "person", "Beethoven, Ludwig van"),
-        SourceClaim("conducted_by", "person", "Hill, Ureli Corelli"),
-        SourceClaim("performed_on", value="1842-12-07"),
-        SourceClaim("performed_in", "place", "Manhattan, NY"),
-    )
+def test_performance_mention_carries_composer_title_and_context() -> None:
+    mention = performances()["perf:3853:0:0"]
+    assert mention.title == "SYMPHONY NO. 5"
+    assert mention.composer == "Beethoven, Ludwig van"  # first composer, name collapsed
+    assert mention.raw["date"] == "1842-12-07"
+    assert mention.raw["venue"] == "Apollo Rooms"
+    assert mention.raw["location"] == "Manhattan, NY"
+    assert mention.raw["conductors"] == ["Hill, Ureli Corelli"]
+    assert mention.raw["soloists"] == []  # no soloists on this work
 
 
 def test_interval_entries_skipped_but_work_index_preserved() -> None:
     parsed = performances()
     # OBERON is the second work (index 1); the interval (index 2) yields nothing
-    assert parsed["perf:3853:0:1"].name == "OBERON"
+    assert parsed["perf:3853:0:1"].title == "OBERON"
     assert "perf:3853:0:2" not in parsed
 
 
-def test_multi_concert_program_yields_one_record_per_concert() -> None:
+def test_multi_concert_program_yields_one_mention_per_concert() -> None:
     parsed = performances()
     first, second = parsed["perf:5178:0:0"], parsed["perf:5178:1:0"]
-    assert first.name == second.name == "SYMPHONY NO. 5"
+    assert first.title == second.title == "SYMPHONY NO. 5"
     assert first.raw["date"] == "1844-11-16"
     assert second.raw["date"] == "1844-11-23"
 
 
 def test_performance_drops_not_conducted_and_keeps_named_soloists() -> None:
-    record = performances()["perf:3853:0:1"]  # OBERON
-    conductors = [c.object_label for c in record.claims if c.predicate == "conducted_by"]
-    soloists = [c.object_label for c in record.claims if c.predicate == "performed_by"]
-    assert conductors == ["Rudel, Julius"]  # "Not conducted" sentinel dropped
-    assert soloists == ["Otto, Antoinette"]  # blank soloist name dropped
+    mention = performances()["perf:3853:0:1"]  # OBERON
+    assert mention.raw["conductors"] == ["Rudel, Julius"]  # "Not conducted" sentinel dropped
+    # blank soloist name dropped; the named soloist keeps its instrument
+    assert mention.raw["soloists"] == [{"name": "Otto, Antoinette", "discipline": "Soprano"}]
+
+
+def test_soloist_instrument_becomes_discipline() -> None:
+    mention = performances()["perf:5178:0:0"]
+    assert mention.raw["soloists"] == [
+        {"name": "Otto, Antoinette", "discipline": "Mezzo-Soprano"},
+        {"name": "Timm, Henry C.", "discipline": None},  # empty instrument -> None
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +226,6 @@ def test_names(value: str | None, expected: list[str]) -> None:
 
 
 def test_dict_work_title_is_joined_into_one_string() -> None:
-    record = performances()["perf:5178:0:2"]  # third work of the first concert
-    assert record.name == "PRINCE IGOR CHORUS FROM (ARR.)"
-    assert SourceClaim("composed_by", "person", "Borodin, Alexander") in record.claims
+    mention = performances()["perf:5178:0:2"]  # third work of the first concert
+    assert mention.title == "PRINCE IGOR CHORUS FROM (ARR.)"
+    assert mention.composer == "Borodin, Alexander"

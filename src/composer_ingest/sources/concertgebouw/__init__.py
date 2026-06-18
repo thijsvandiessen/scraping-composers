@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 
-from .. import SourceRecord
+from .. import SourceRecord, SourceWorkMention
 from .dropdowns import SELECTS, _options, _record
 from .fetch import BASE_URL, _fetch_list_page, _fetch_search_page
 from .performances import _performances
@@ -27,10 +27,10 @@ log = logging.getLogger(__name__)
 __all__ = ["BASE_URL", "NAME", "fetch_records"]
 
 
-def fetch_records(max_pages: int | None = None) -> Iterator[SourceRecord]:
+def fetch_records(max_pages: int | None = None) -> Iterator[SourceRecord | SourceWorkMention]:
     """Yield every composer/conductor/soloist in the archive's search filters
     (one ``person`` record each) followed by every work-performance in the List
-    view (one ``work`` record each). The whole source is two fetches;
+    view (one work mention each). The whole source is two fetches;
     ``max_pages`` is accepted for interface compatibility and ignored."""
     page = _fetch_search_page()
     for select_id, profession in SELECTS:
@@ -43,7 +43,7 @@ def fetch_records(max_pages: int | None = None) -> Iterator[SourceRecord]:
         log.info("concertgebouw %s: %d records", select_id, count)
 
     count = 0
-    for record in _performances(_fetch_list_page()):
+    for mention in _performances(_fetch_list_page()):
         count += 1
-        yield record
+        yield mention
     log.info("concertgebouw performances: %d records", count)

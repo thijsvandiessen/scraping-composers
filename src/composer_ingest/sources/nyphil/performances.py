@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-from .. import SourceClaim, SourceRecord
+from .. import SourceWorkMention
 from .text import _WS, _names
 
 
@@ -41,22 +41,17 @@ def _performance_record(
     work_idx: int,
     concert: dict[str, Any],
     work: dict[str, Any],
-) -> SourceRecord:
+) -> SourceWorkMention:
     title = _title(work.get("workTitle"))
     composers = list(_names(work.get("composerName")))
     conductors = list(_names(work.get("conductorName")))
-    soloists = [name for s in work.get("soloists", ()) for name in _names(s.get("soloistName"))]
+    soloists = [
+        {"name": name, "discipline": (s.get("soloistInstrument") or None)}
+        for s in work.get("soloists", ())
+        for name in _names(s.get("soloistName"))
+    ]
     date = _date(concert.get("Date"))
     location = _WS.sub(" ", concert.get("Location") or "").strip()
-
-    claims: list[SourceClaim] = []
-    claims += [SourceClaim("composed_by", "person", name) for name in composers]
-    claims += [SourceClaim("conducted_by", "person", name) for name in conductors]
-    claims += [SourceClaim("performed_by", "person", name) for name in soloists]
-    if date:
-        claims.append(SourceClaim("performed_on", value=date))
-    if location:
-        claims.append(SourceClaim("performed_in", "place", location))
 
     raw: dict[str, Any] = {
         "programID": program_id,
@@ -72,18 +67,16 @@ def _performance_record(
     }
     if work.get("movement"):
         raw["movement"] = work["movement"]
-    return SourceRecord(
+    return SourceWorkMention(
         external_id=f"perf:{program_id}:{concert_idx}:{work_idx}",
-        name=title,
-        url=None,
+        title=title,
+        composer=composers[0] if composers else None,
         raw=raw,
-        kind="work",
-        claims=tuple(claims),
     )
 
 
-def _performances(programs: Iterable[dict[str, Any]]) -> Iterator[SourceRecord]:
-    """Yield one ``work`` record per titled work at each concert of its program.
+def _performances(programs: Iterable[dict[str, Any]]) -> Iterator[SourceWorkMention]:
+    """Yield one work mention per titled work at each concert of its program.
 
     ``work_idx`` is the work's position in the program's ``works`` list (kept
     stable by counting intervals too); intermission/untitled entries are

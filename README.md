@@ -24,6 +24,15 @@ uv run composer-ingest runs
 # disagreeing facts and decide which to trust
 uv run composer-ingest claims "Beethoven, Ludwig van" --kind person
 uv run composer-ingest claims "Beethoven, Ludwig van" --predicate born_on
+
+# inspect resolved works (by composer or title) and the titles they were seen under
+uv run composer-ingest works "Beethoven"
+
+# work mentions the matcher wasn't confident about, and how to resolve them
+uv run composer-ingest review
+uv run composer-ingest review --accept 42 <work-uuid>   # match a mention to a work
+uv run composer-ingest review --new 42                  # create a new work from a mention
+uv run composer-ingest rematch                          # re-run matching after tuning
 ```
 
 Data lands in `composers.db` (SQLite) by default. To use Postgres instead:
@@ -61,6 +70,31 @@ moves into the golden research index.
   asserting conflicting facts coexist as two claims. IMSLP's people list
   reports nothing beyond names (it mixes composers, performers, editors, and
   ensembles), so it produces no claims; richer sources will.
+
+### Works
+
+Concert programmes name works as free text — "Symphony No. 5 in C minor",
+"Sinfonie Nr. 5 c-moll", "Beethoven's Fifth" are all the same piece. Rather than
+deduplicating on the exact title (which collides across composers and splits the
+same work across spellings), works go through a resolution pipeline
+(`src/composer_ingest/works/`):
+
+- **`raw_work_mentions`** — one row per `(composer, title)` a source reported,
+  with the full performance context kept in `raw`, idempotent on
+  `(source, external_id)`. Each carries the matcher's decision: `match_status`
+  (`auto_matched`/`needs_review`/`created`/`manual_matched`), score and method.
+- **`works`** — canonical compositions. The pipeline extracts catalogue/opus
+  numbers, key, type and number from the title, finds candidate works by the
+  same composer, and scores them (a matching `BWV`/`Op.` number is near-certain
+  identity; otherwise a `difflib` title comparison sharpened by the extracted
+  features). High scores auto-match, middling scores are flagged for `review`,
+  low scores create a new work. Work ids are assigned at creation, not derived
+  from the title.
+- **`work_titles`** — every title a work was seen under (its aliases).
+
+Composers stay `person` entities (deduplicated as above); works reference them
+by id. Performance events, richer work metadata and external ids build on this
+layer next.
 
 ## Adding a source
 

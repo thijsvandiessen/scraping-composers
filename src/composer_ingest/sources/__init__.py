@@ -38,6 +38,20 @@ class SourceRecord:
     claims: tuple[SourceClaim, ...] = ()
 
 
+@dataclass(frozen=True)
+class SourceWorkMention:
+    """A (composer, title) pair as a source reported it — e.g. one work on a
+    concert programme. The ingest resolves it to a canonical work (match, review
+    or create). ``raw`` keeps the full performance context (date, conductor,
+    soloists, venue) so a later pass can build performance events without
+    re-fetching."""
+
+    external_id: str
+    title: str
+    composer: str | None
+    raw: dict[str, Any]
+
+
 class SourceLike(Protocol):
     """What the ingest pipeline needs from a source: the modules in this
     package satisfy it, and tests can substitute fakes."""
@@ -45,7 +59,7 @@ class SourceLike(Protocol):
     NAME: str
     BASE_URL: str
 
-    def fetch_records(self, max_pages: int | None = None) -> Iterator[SourceRecord]: ...
+    def fetch_records(self, max_pages: int | None = None) -> Iterator[SourceRecord | SourceWorkMention]: ...
 
 
 from . import berlinphil, concertgebouw, imslp, nyphil, wikidata  # noqa: E402
