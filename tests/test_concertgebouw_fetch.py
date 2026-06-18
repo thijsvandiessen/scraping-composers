@@ -8,7 +8,12 @@ from typing import Any
 import httpx
 import pytest
 
-from composer_ingest.sources.concertgebouw.fetch import SEARCH_URL, _fetch, _fetch_list_page, _fetch_search_page
+from composer_ingest.sources.concertgebouw.fetch import (
+    SEARCH_URL,
+    _fetch,
+    _fetch_list_page,
+    _fetch_search_page,
+)
 
 
 def _patch_client(
@@ -16,9 +21,8 @@ def _patch_client(
     handler: Callable[[httpx.Request], httpx.Response],
 ) -> None:
     """Replace httpx.Client inside concertgebouw.fetch with one backed by a mock transport."""
-    real_client = httpx.Client
 
-    class _MockedClient(real_client):
+    class _MockedClient(httpx.Client):
         def __init__(self, **kw: Any) -> None:
             kw["transport"] = httpx.MockTransport(handler)
             super().__init__(**kw)

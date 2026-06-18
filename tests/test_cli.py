@@ -245,7 +245,9 @@ def test_main_routes_to_stats_subcommand(tmp_path: Path, monkeypatch: pytest.Mon
     assert exc.value.code == 0
 
 
-def test_main_routes_to_claims_subcommand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_routes_to_claims_subcommand(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     db_url = f"sqlite:///{tmp_path}/test.db"
     factory = init_db(get_engine(db_url))
     with factory() as session:
@@ -258,7 +260,9 @@ def test_main_routes_to_claims_subcommand(tmp_path: Path, monkeypatch: pytest.Mo
     assert "born_on" in capsys.readouterr().out
 
 
-def test_main_routes_to_runs_subcommand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_routes_to_runs_subcommand(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     db_url = f"sqlite:///{tmp_path}/test.db"
     factory = init_db(get_engine(db_url))
     with factory() as session:
