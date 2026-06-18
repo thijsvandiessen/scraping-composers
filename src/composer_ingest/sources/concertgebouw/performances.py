@@ -8,6 +8,11 @@ joined in one cell — multi-soloist works span several rows). Each work links t
 its composer, conductor, soloists, date, and city as claims, so the same person
 can be a composer in one concert and a conductor/soloist in another and still be
 one entity. Counting is left to the golden index; this layer stays verbatim.
+
+Soloists may carry a voice or instrument type in parentheses, e.g.
+"Oehman, Martin (tenor)". The parenthetical is stripped from the name so the
+entity deduplicates correctly with the dropdown-derived record, and a separate
+``person`` record is emitted carrying the ``performs_as`` discipline claim.
 """
 
 from __future__ import annotations
@@ -25,6 +30,8 @@ _ROW = re.compile(r"<tr[^>]*>")
 _CELL = re.compile(r"<td[^>]*>(.*?)</td>", re.DOTALL)
 _TAGS = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
+# "(viool)", "(tenor)", "(mezzosopraan)", ... — same pattern as dropdowns._DISCIPLINE
+_DISCIPLINE = re.compile(r"\(([^()]+)\)$")
 
 
 @dataclass
@@ -37,11 +44,19 @@ class _Perf:
     composer: str
     title: str
     conductor: str
-    soloists: list[str] = field(default_factory=list)
+    soloists: list[tuple[str, str | None]] = field(default_factory=list)  # (name, discipline)
 
 
 def _cell_text(cell: str) -> str:
     return _WS.sub(" ", html.unescape(_TAGS.sub(" ", cell))).strip()
+
+
+def _parse_soloist(raw: str) -> tuple[str, str | None]:
+    """Split 'Name (tenor)' into ('Name', 'tenor'); plain names return (name, None)."""
+    m = _DISCIPLINE.search(raw)
+    if m:
+        return raw[: m.start()].strip(), m.group(1).strip()
+    return raw, None
 
 
 def _list_rows(page: str) -> Iterator[list[str]]:
@@ -62,8 +77,8 @@ def _performance_record(perf: _Perf) -> SourceRecord:
         claims.append(SourceClaim("composed_by", "person", perf.composer))
     if perf.conductor:
         claims.append(SourceClaim("conducted_by", "person", perf.conductor))
-    for soloist in perf.soloists:
-        claims.append(SourceClaim("performed_by", "person", soloist))
+    for name, _ in perf.soloists:
+        claims.append(SourceClaim("performed_by", "person", name))
     if perf.date:
         claims.append(SourceClaim("performed_on", value=perf.date))
     if perf.city:
@@ -79,15 +94,34 @@ def _performance_record(perf: _Perf) -> SourceRecord:
             "composer": perf.composer,
             "title": perf.title,
             "conductor": perf.conductor,
-            "soloists": perf.soloists,
+            "soloists": [name for name, _ in perf.soloists],
         },
         kind="work",
         claims=tuple(claims),
     )
 
 
+def _soloist_discipline_records(perf: _Perf) -> Iterator[SourceRecord]:
+    """Yield a ``person`` record for each soloist that carries a voice/discipline type."""
+    for name, discipline in perf.soloists:
+        if discipline:
+            yield SourceRecord(
+                external_id=f"soloist:{name}:{discipline}",
+                name=name,
+                url=None,
+                raw={"name": name, "discipline": discipline},
+                kind="person",
+                claims=(
+                    SourceClaim("has_profession", "profession", "soloist"),
+                    SourceClaim("performs_as", "discipline", discipline),
+                ),
+            )
+
+
 def _performances(page: str) -> Iterator[SourceRecord]:
-    """Yield one ``work`` record per work-performance in the List view.
+    """Yield one ``work`` record per work-performance in the List view, plus a
+    ``person`` record for each soloist whose name includes a voice or instrument
+    type in parentheses.
 
     A row with a DATE opens a concert (date/city carry forward); a row with a
     TITLE is a new work; a row whose only content is a SOLOIST adds a soloist to
@@ -102,11 +136,13 @@ def _performances(page: str) -> Iterator[SourceRecord]:
         if title:
             if perf is not None:
                 yield _performance_record(perf)
+                yield from _soloist_discipline_records(perf)
             index += 1
             perf = _Perf(index, current_date, current_city, composer, title, conductor)
             if soloist:
-                perf.soloists.append(soloist)
+                perf.soloists.append(_parse_soloist(soloist))
         elif soloist and perf is not None:
-            perf.soloists.append(soloist)
+            perf.soloists.append(_parse_soloist(soloist))
     if perf is not None:
         yield _performance_record(perf)
+        yield from _soloist_discipline_records(perf)

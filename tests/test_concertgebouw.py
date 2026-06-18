@@ -210,3 +210,52 @@ def test_only_work_rows_advance_the_index() -> None:
     records = performances()
     # five works total; the extra-soloist row did not create a sixth
     assert [r.external_id for r in records] == ["perf:0", "perf:1", "perf:2", "perf:3", "perf:4"]
+
+
+# A small page with soloists that carry voice/instrument types in parentheses.
+LIST_PAGE_WITH_VOICE = """\
+<table id="zoekresultaat">
+<tr>
+    <th>DATE</th><th>CITY</th><th>COMPOSER</th><th>TITLE</th>
+    <th>CONDUCTOR</th><th>SOLOIST</th><th></th>
+</tr>
+<tr>
+    <td>05-10-1939</td><td>Amsterdam</td><td>Mahler, Gustav</td>
+    <td>Das Lied von der Erde</td><td>Schuricht, Carl</td><td>Oehman, Martin (tenor)</td>
+    <td></td>
+</tr>
+<tr>
+    <td></td><td></td><td></td><td></td><td></td><td>Thorborg, Kerstin (alt)</td><td></td>
+</tr>
+</table>
+"""
+
+
+def performances_with_voice() -> list[SourceRecord]:
+    return list(_performances(LIST_PAGE_WITH_VOICE))
+
+
+def test_soloist_voice_type_stripped_from_performed_by_claim() -> None:
+    work = next(r for r in performances_with_voice() if r.kind == "work")
+    assert SourceClaim("performed_by", "person", "Oehman, Martin") in work.claims
+    assert SourceClaim("performed_by", "person", "Thorborg, Kerstin") in work.claims
+    # raw soloists list uses clean names too
+    assert work.raw["soloists"] == ["Oehman, Martin", "Thorborg, Kerstin"]
+
+
+def test_soloist_voice_type_becomes_performs_as_claim() -> None:
+    person_records = [r for r in performances_with_voice() if r.kind == "person"]
+    by_name = {r.name: r for r in person_records}
+    assert "Oehman, Martin" in by_name
+    assert SourceClaim("performs_as", "discipline", "tenor") in by_name["Oehman, Martin"].claims
+    assert SourceClaim("has_profession", "profession", "soloist") in by_name["Oehman, Martin"].claims
+    assert by_name["Oehman, Martin"].external_id == "soloist:Oehman, Martin:tenor"
+
+    assert "Thorborg, Kerstin" in by_name
+    assert SourceClaim("performs_as", "discipline", "alt") in by_name["Thorborg, Kerstin"].claims
+
+
+def test_soloist_without_voice_type_emits_no_person_record() -> None:
+    # The original LIST_PAGE has soloists with no parentheticals; no extra person records.
+    person_records = [r for r in _performances(LIST_PAGE) if r.kind == "person"]
+    assert person_records == []
