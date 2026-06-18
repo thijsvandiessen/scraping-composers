@@ -202,7 +202,7 @@ def test_soloist_records_instrument_as_performs_as() -> None:
     assert record.name == "Julia Fischer"
     assert record.claims == (
         SourceClaim("has_profession", "profession", "soloist"),
-        SourceClaim("performs_as", "discipline", "violin"),
+        SourceClaim("performs_as", value="violin"),
     )
 
 

@@ -88,10 +88,10 @@ def test_soloist_discipline_becomes_a_claim() -> None:
     assert first.name == "Aalst, André van"
     assert first.claims == (
         SourceClaim("has_profession", "profession", "soloist"),
-        SourceClaim("performs_as", "discipline", "viool"),
+        SourceClaim("performs_as", value="viool"),
     )
     assert second.name == "Aarden, Mimi"  # double space before parenthetical
-    assert SourceClaim("performs_as", "discipline", "mezzosopraan") in second.claims
+    assert SourceClaim("performs_as", value="mezzosopraan") in second.claims
 
 
 def test_conductor_labels_are_kept_verbatim() -> None:
@@ -247,12 +247,12 @@ def test_soloist_voice_type_becomes_performs_as_claim() -> None:
     person_records = [r for r in performances_with_voice() if r.kind == "person"]
     by_name = {r.name: r for r in person_records}
     assert "Oehman, Martin" in by_name
-    assert SourceClaim("performs_as", "discipline", "tenor") in by_name["Oehman, Martin"].claims
+    assert SourceClaim("performs_as", value="tenor") in by_name["Oehman, Martin"].claims
     assert SourceClaim("has_profession", "profession", "soloist") in by_name["Oehman, Martin"].claims
     assert by_name["Oehman, Martin"].external_id == "soloist:Oehman, Martin:tenor"
 
     assert "Thorborg, Kerstin" in by_name
-    assert SourceClaim("performs_as", "discipline", "alt") in by_name["Thorborg, Kerstin"].claims
+    assert SourceClaim("performs_as", value="alt") in by_name["Thorborg, Kerstin"].claims
 
 
 def test_soloist_without_voice_type_emits_no_person_record() -> None:

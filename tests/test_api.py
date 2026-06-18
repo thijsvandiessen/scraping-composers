@@ -50,7 +50,7 @@ def client() -> Iterator[TestClient]:
             _person(
                 "Doe, Jane",
                 SourceClaim("has_profession", "profession", "soloist"),
-                SourceClaim("performs_as", "discipline", "violin"),
+                SourceClaim("performs_as", value="violin"),
             ),
             _person("Smith, John", SourceClaim("has_profession", "profession", "conductor")),
             _person("Bach, Johann", SourceClaim("has_profession", "profession", "composer")),

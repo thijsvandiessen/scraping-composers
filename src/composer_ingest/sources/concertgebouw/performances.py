@@ -113,7 +113,7 @@ def _soloist_discipline_records(perf: _Perf) -> Iterator[SourceRecord]:
                 kind="person",
                 claims=(
                     SourceClaim("has_profession", "profession", "soloist"),
-                    SourceClaim("performs_as", "discipline", discipline),
+                    SourceClaim("performs_as", value=discipline),
                 ),
             )
 
