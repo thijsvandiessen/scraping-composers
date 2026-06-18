@@ -40,7 +40,8 @@ provenance layer. This repo is the raw staging layer: it records what sources
 say, verbatim; curation and conflict resolution happen downstream when data
 moves into the golden research index.
 
-- **`sources`** — where data comes from (currently `imslp`).
+- **`sources`** — where data comes from (`imslp`, `wikidata`, `concertgebouw`,
+  `nyphil`, `berlinphil`).
 - **`ingest_runs`** — the collection log: one row per ingest, with source,
   timestamps, status, and seen/new counts.
 - **`entity_records`** — raw records per source, unique on
