@@ -1,11 +1,24 @@
-"""Tests for CLI query helpers (claim provenance lookup)."""
+"""Tests for CLI query helpers (claim provenance lookup) and CLI commands."""
 
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import pytest
 from sqlalchemy.orm import Session
 
-from composer_ingest.cli import entity_claims
+from composer_ingest.cli import cmd_claims, cmd_ingest, cmd_runs, cmd_stats, entity_claims, main
+from composer_ingest.db import get_engine, init_db
 from composer_ingest.ingest import run_ingest
 from composer_ingest.sources import SourceClaim
 from test_ingest import FakeSource, person
+
+
+def _ns(**kwargs: object) -> argparse.Namespace:
+    """Build a minimal Namespace with defaults a CLI command expects."""
+    return argparse.Namespace(**{"database_url": None, "verbose": False, **kwargs})
 
 
 def _ingest_two_sources_disagreeing(session: Session) -> None:
@@ -88,3 +101,145 @@ def test_entity_claims_collapses_identical_assertions_from_one_source(session: S
 
 def test_entity_claims_returns_empty_for_unknown_name(session: Session) -> None:
     assert entity_claims(session, "Nobody, At All") == []
+
+
+# ---------------------------------------------------------------------------
+# cmd_stats
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_stats_empty_database(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    rc = cmd_stats(_ns(database_url=db_url))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "entities (deduplicated): 0" in out
+    assert "claims:" in out
+
+
+def test_cmd_stats_shows_entity_and_claim_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        run_ingest(
+            session,
+            FakeSource(
+                records=(
+                    person("Bach, Johann Sebastian", SourceClaim("has_profession", "profession", "composer")),
+                )
+            ),
+        )
+
+    rc = cmd_stats(_ns(database_url=db_url))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "person: 1" in out
+    assert "fake:" in out
+
+
+# ---------------------------------------------------------------------------
+# cmd_ingest
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_ingest_returns_0_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from composer_ingest.sources import REGISTRY
+
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    fake = FakeSource(records=(person("Bach, Johann Sebastian"),), NAME="fake")
+    monkeypatch.setitem(REGISTRY, "fake", fake)
+
+    rc = cmd_ingest(_ns(database_url=db_url, source="fake", max_pages=None))
+    assert rc == 0
+
+
+def test_cmd_ingest_returns_1_on_source_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from composer_ingest.sources import REGISTRY
+
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    fake = FakeSource(records=(person("Mozart"), person("Haydn")), NAME="fake", fail_after=1)
+    monkeypatch.setitem(REGISTRY, "fake", fake)
+
+    rc = cmd_ingest(_ns(database_url=db_url, source="fake", max_pages=None))
+    assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# cmd_claims
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_claims_prints_entity_and_claims(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        run_ingest(
+            session,
+            FakeSource(
+                records=(person("Bach, Johann Sebastian", SourceClaim("born_on", value="1685-03-21")),)
+            ),
+        )
+
+    rc = cmd_claims(_ns(database_url=db_url, name="Bach", kind=None, predicate=None, source=None, limit=10))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Bach, Johann Sebastian" in out
+    assert "born_on" in out
+    assert "1685-03-21" in out
+
+
+def test_cmd_claims_returns_1_for_unknown_name(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    init_db(get_engine(db_url))
+
+    rc = cmd_claims(_ns(database_url=db_url, name="Nobody", kind=None, predicate=None, source=None, limit=10))
+    assert rc == 1
+    assert "no entity" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# cmd_runs
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_runs_empty_database(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    init_db(get_engine(db_url))
+
+    rc = cmd_runs(_ns(database_url=db_url, limit=20))
+    assert rc == 0
+    assert "no ingest runs" in capsys.readouterr().out
+
+
+def test_cmd_runs_shows_run_log(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        run_ingest(session, FakeSource(records=(person("Haydn, Joseph"),), NAME="wikidata"))
+
+    rc = cmd_runs(_ns(database_url=db_url, limit=20))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "wikidata" in out
+    assert "completed" in out
+
+
+# ---------------------------------------------------------------------------
+# main() argument parsing
+# ---------------------------------------------------------------------------
+
+
+def test_main_exits_nonzero_without_subcommand(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["composer-ingest"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code != 0
+
+
+def test_main_routes_to_stats_subcommand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    init_db(get_engine(db_url))
+    monkeypatch.setattr(sys, "argv", ["composer-ingest", "--database-url", db_url, "stats"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0

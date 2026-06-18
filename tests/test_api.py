@@ -174,3 +174,70 @@ def test_person_with_both_roles_appears_in_both_lists(client: TestClient) -> Non
     conductors = {i["label"] for i in client.get("/v1/conductors").json()["items"]}
     assert "Multi, Person" in soloists
     assert "Multi, Person" in conductors
+
+
+# --- /v1/composers ---
+
+
+def test_list_composers_returns_all_persons(client: TestClient) -> None:
+    r = client.get("/v1/composers")
+    assert r.status_code == 200
+    data = r.json()
+    # all 4 ingested persons appear — composers endpoint has no profession filter
+    assert data["total"] == 4
+    labels = {item["label"] for item in data["items"]}
+    assert "Bach, Johann" in labels
+    assert "Doe, Jane" in labels
+    assert "Smith, John" in labels
+
+
+def test_list_composers_profession_entities_excluded(client: TestClient) -> None:
+    r = client.get("/v1/composers")
+    assert r.status_code == 200
+    labels = {item["label"] for item in r.json()["items"]}
+    # kind=profession entities (e.g. "composer", "soloist") must not appear
+    assert "composer" not in labels
+    assert "soloist" not in labels
+
+
+def test_list_composers_search_filter(client: TestClient) -> None:
+    r = client.get("/v1/composers?q=Bach")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 1
+    assert data["items"][0]["label"] == "Bach, Johann"
+
+
+def test_list_composers_pagination(client: TestClient) -> None:
+    r = client.get("/v1/composers?page=1&limit=2")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total"] == 4
+    assert data["limit"] == 2
+    assert len(data["items"]) == 2
+
+
+def test_list_composers_invalid_page_returns_422(client: TestClient) -> None:
+    assert client.get("/v1/composers?page=0").status_code == 422
+
+
+def test_list_composers_invalid_limit_returns_422(client: TestClient) -> None:
+    assert client.get("/v1/composers?limit=0").status_code == 422
+    assert client.get("/v1/composers?limit=101").status_code == 422
+
+
+def test_get_composer_returns_detail_with_claims(client: TestClient) -> None:
+    listing = client.get("/v1/composers").json()
+    bach = next(i for i in listing["items"] if i["label"] == "Bach, Johann")
+    r = client.get(f"/v1/composers/{bach['id']}")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["label"] == "Bach, Johann"
+    assert data["kind"] == "person"
+    predicates = {c["predicate"] for c in data["claims"]}
+    assert "has_profession" in predicates
+
+
+def test_get_composer_not_found(client: TestClient) -> None:
+    r = client.get("/v1/composers/00000000-0000-0000-0000-000000000000")
+    assert r.status_code == 404
