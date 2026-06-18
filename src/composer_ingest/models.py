@@ -21,9 +21,10 @@ Design notes:
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -67,7 +68,7 @@ class Entity(Base):
     __tablename__ = "entities"
     __table_args__ = (UniqueConstraint("kind", "dedup_key", name="uq_entity_kind_key"),)
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(String(50))
     dedup_key: Mapped[str] = mapped_column(String(300))
     label: Mapped[str] = mapped_column(String(300))
@@ -87,7 +88,7 @@ class EntityRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
-    entity_id: Mapped[int | None] = mapped_column(ForeignKey("entities.id"))
+    entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
     external_id: Mapped[str] = mapped_column(String(500))
     name: Mapped[str] = mapped_column(String(300))
     url: Mapped[str | None] = mapped_column(String(500))
@@ -116,9 +117,9 @@ class Claim(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    subject_id: Mapped[int] = mapped_column(ForeignKey("entities.id"))
+    subject_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("entities.id"))
     predicate: Mapped[str] = mapped_column(String(100))
-    object_id: Mapped[int | None] = mapped_column(ForeignKey("entities.id"))
+    object_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
     value: Mapped[str | None] = mapped_column(Text)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
     record_id: Mapped[int | None] = mapped_column(ForeignKey("entity_records.id"))
