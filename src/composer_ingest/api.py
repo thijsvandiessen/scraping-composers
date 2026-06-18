@@ -9,6 +9,7 @@ Install the ``api`` extra first:
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Generator
 from datetime import datetime
 from typing import Annotated
@@ -43,7 +44,7 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 
 class ComposerSummary(BaseModel):
-    id: int
+    id: uuid.UUID
     label: str
     created_at: datetime
 
@@ -59,7 +60,7 @@ class ClaimOut(BaseModel):
 
 
 class ComposerDetail(BaseModel):
-    id: int
+    id: uuid.UUID
     label: str
     kind: str
     created_at: datetime
@@ -96,7 +97,7 @@ def list_composers(
 
 
 @v1.get("/composers/{composer_id}", response_model=ComposerDetail)
-def get_composer(composer_id: int, db: DbSession) -> ComposerDetail:
+def get_composer(composer_id: uuid.UUID, db: DbSession) -> ComposerDetail:
     entity = db.get(Entity, composer_id)
     if entity is None or entity.kind != "person":
         raise HTTPException(status_code=404, detail="composer not found")

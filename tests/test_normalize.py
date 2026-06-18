@@ -1,6 +1,8 @@
+import uuid
+
 import pytest
 
-from composer_ingest.normalize import dedup_key
+from composer_ingest.normalize import dedup_key, entity_uuid
 
 
 @pytest.mark.parametrize(
@@ -19,3 +21,21 @@ def test_dedup_key(name: str, expected: str) -> None:
 
 def test_different_people_keep_different_keys() -> None:
     assert dedup_key("Strauss, Johann") != dedup_key("Strauss, Richard")
+
+
+def test_entity_uuid_is_a_uuid() -> None:
+    result = entity_uuid("person", "ludwig van beethoven")
+    assert isinstance(result, uuid.UUID)
+
+
+def test_entity_uuid_is_stable() -> None:
+    # Same inputs must always produce the same UUID — the whole point of this function.
+    assert entity_uuid("person", "ludwig van beethoven") == entity_uuid("person", "ludwig van beethoven")
+
+
+def test_entity_uuid_differs_by_kind() -> None:
+    assert entity_uuid("person", "composer") != entity_uuid("profession", "composer")
+
+
+def test_entity_uuid_differs_by_key() -> None:
+    assert entity_uuid("person", "ludwig van beethoven") != entity_uuid("person", "wolfgang amadeus mozart")

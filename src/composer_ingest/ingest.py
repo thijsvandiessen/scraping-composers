@@ -14,12 +14,13 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .models import Claim, Entity, EntityRecord, IngestRun, Source, utcnow
-from .normalize import dedup_key
+from .normalize import dedup_key, entity_uuid
 from .sources import SourceLike
 
 log = logging.getLogger(__name__)
@@ -36,14 +37,14 @@ def _get_or_create_source(session: Session, name: str, base_url: str) -> Source:
     return source
 
 
-def _get_or_create_entity(session: Session, cache: dict[tuple[str, str], int], kind: str, label: str) -> int:
+def _get_or_create_entity(
+    session: Session, cache: dict[tuple[str, str], uuid.UUID], kind: str, label: str
+) -> uuid.UUID:
     key = dedup_key(label)
     entity_id = cache.get((kind, key))
     if entity_id is None:
-        entity = Entity(kind=kind, dedup_key=key, label=label)
-        session.add(entity)
-        session.flush()
-        entity_id = entity.id
+        entity_id = entity_uuid(kind, key)
+        session.add(Entity(id=entity_id, kind=kind, dedup_key=key, label=label))
         cache[(kind, key)] = entity_id
     return entity_id
 
@@ -65,11 +66,11 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
         .tuples()
         .all()
     )
-    entities_by_key: dict[tuple[str, str], int] = {
+    entities_by_key: dict[tuple[str, str], uuid.UUID] = {
         (kind, key): entity_id
         for kind, key, entity_id in session.execute(select(Entity.kind, Entity.dedup_key, Entity.id)).tuples()
     }
-    existing_claims: set[tuple[int, str, int | None, str | None]] = set(
+    existing_claims: set[tuple[uuid.UUID, str, uuid.UUID | None, str | None]] = set(
         session.execute(
             select(Claim.subject_id, Claim.predicate, Claim.object_id, Claim.value).where(
                 Claim.source_id == source.id
