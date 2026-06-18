@@ -13,7 +13,7 @@ from collections.abc import Generator
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, aliased, sessionmaker
@@ -22,6 +22,7 @@ from .db import get_engine, init_db
 from .models import Claim, Entity, Source
 
 app = FastAPI(title="Composer API")
+v1 = APIRouter(prefix="/v1")
 
 _session_factory: sessionmaker[Session] | None = None
 
@@ -71,7 +72,7 @@ class ComposerPage(BaseModel):
     limit: int
 
 
-@app.get("/composers", response_model=ComposerPage)
+@v1.get("/composers", response_model=ComposerPage)
 def list_composers(
     db: DbSession,
     q: str | None = None,
@@ -93,7 +94,7 @@ def list_composers(
     )
 
 
-@app.get("/composers/{composer_id}", response_model=ComposerDetail)
+@v1.get("/composers/{composer_id}", response_model=ComposerDetail)
 def get_composer(composer_id: int, db: DbSession) -> ComposerDetail:
     entity = db.get(Entity, composer_id)
     if entity is None or entity.kind != "person":
@@ -118,3 +119,6 @@ def get_composer(composer_id: int, db: DbSession) -> ComposerDetail:
             for pred, val, obj_label, src in rows
         ],
     )
+
+
+app.include_router(v1)
