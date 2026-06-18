@@ -8,7 +8,7 @@ import pytest
 
 from composer_ingest.sources import SourceClaim
 from composer_ingest.sources.wikidata.parse import _format_time, _records_from_rows
-from composer_ingest.sources.wikidata.query import _fetch_metrics, _fetch_page
+from composer_ingest.sources.wikidata.query import _fetch_metrics, _fetch_page, _run_query
 
 
 def row(qid: str, label: str | None = None, **vars: str) -> dict[str, Any]:
@@ -201,3 +201,54 @@ def test_metrics_become_literal_claims_and_land_in_raw() -> None:
 def test_records_without_metrics_get_no_metric_claims() -> None:
     (record,) = _records_from_rows([row("Q9", "Uncounted Composer")], {"Q999": {"sitelinks": "5"}})
     assert record.claims == (SourceClaim("has_profession", "profession", "composer"),)
+
+
+# ---------------------------------------------------------------------------
+# _run_query
+# ---------------------------------------------------------------------------
+
+
+def test_run_query_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("composer_ingest.sources.wikidata.query.time.sleep", lambda _: None)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="Internal Server Error")
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            _run_query(client, "SELECT ?x WHERE {}", "test query")
+
+
+def test_run_query_honors_retry_after_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("composer_ingest.sources.wikidata.query.time.sleep", sleeps.append)
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        if len(attempts) == 1:
+            return httpx.Response(429, headers={"Retry-After": "30"}, text="Rate limited")
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = _run_query(client, "SELECT ?x WHERE {}", "test query")
+
+    assert result == []
+    assert 30 in sleeps  # Retry-After overrides the 2^1=2 exponential backoff
+
+
+def test_run_query_retries_on_malformed_json(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("composer_ingest.sources.wikidata.query.time.sleep", lambda _: None)
+    attempts: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(1)
+        if len(attempts) < 3:
+            return httpx.Response(200, text='{"results": {"bindings": [{"item": {"va')
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        result = _run_query(client, "SELECT ?x WHERE {}", "test query")
+
+    assert len(attempts) == 3
+    assert result == []

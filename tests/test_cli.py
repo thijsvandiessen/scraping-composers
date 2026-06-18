@@ -243,3 +243,36 @@ def test_main_routes_to_stats_subcommand(tmp_path: Path, monkeypatch: pytest.Mon
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 0
+
+
+def test_main_routes_to_claims_subcommand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        run_ingest(session, FakeSource(records=(person("Bach, J.S.", SourceClaim("born_on", value="1685")),)))
+
+    monkeypatch.setattr(sys, "argv", ["composer-ingest", "--database-url", db_url, "claims", "Bach"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    assert "born_on" in capsys.readouterr().out
+
+
+def test_main_routes_to_runs_subcommand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        run_ingest(session, FakeSource(records=(person("Beethoven"),), NAME="wikidata"))
+
+    monkeypatch.setattr(sys, "argv", ["composer-ingest", "--database-url", db_url, "runs"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    assert "wikidata" in capsys.readouterr().out
+
+
+def test_get_engine_reads_database_url_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db_url = f"sqlite:///{tmp_path}/env.db"
+    monkeypatch.setenv("DATABASE_URL", db_url)
+    engine = get_engine()  # no explicit URL — falls back to env var
+    assert str(engine.url) == db_url

@@ -241,3 +241,25 @@ def test_get_composer_returns_detail_with_claims(client: TestClient) -> None:
 def test_get_composer_not_found(client: TestClient) -> None:
     r = client.get("/v1/composers/00000000-0000-0000-0000-000000000000")
     assert r.status_code == 404
+
+
+def test_get_composer_invalid_uuid_path_returns_422(client: TestClient) -> None:
+    assert client.get("/v1/composers/not-a-uuid").status_code == 422
+
+
+def test_list_soloists_invalid_page_returns_422(client: TestClient) -> None:
+    assert client.get("/v1/soloists?page=0").status_code == 422
+
+
+def test_list_soloists_invalid_limit_returns_422(client: TestClient) -> None:
+    assert client.get("/v1/soloists?limit=0").status_code == 422
+    assert client.get("/v1/soloists?limit=101").status_code == 422
+
+
+def test_list_conductors_invalid_page_returns_422(client: TestClient) -> None:
+    assert client.get("/v1/conductors?page=0").status_code == 422
+
+
+def test_list_conductors_invalid_limit_returns_422(client: TestClient) -> None:
+    assert client.get("/v1/conductors?limit=0").status_code == 422
+    assert client.get("/v1/conductors?limit=101").status_code == 422
