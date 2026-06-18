@@ -59,7 +59,7 @@ def _aggregate(programs: Iterable[dict[str, Any]]) -> dict[tuple[str, str], _Per
 def _record(role: str, name: str, person: _Person) -> SourceRecord:
     claims = [SourceClaim("has_profession", "profession", role)]
     for instrument in sorted(person.instruments):
-        claims.append(SourceClaim("performs_as", "discipline", instrument))
+        claims.append(SourceClaim("performs_as", value=instrument))
     # seasons are uniformly "YYYY-YY", so lexical min/max are first and last
     first, last = min(person.seasons), max(person.seasons)
     claims.append(SourceClaim("program_count", value=str(len(person.programs))))

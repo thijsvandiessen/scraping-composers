@@ -120,8 +120,8 @@ def test_soloist_instruments_become_claims() -> None:
     record = records()["soloist:Otto, Antoinette"]
     assert record.claims == (
         SourceClaim("has_profession", "profession", "soloist"),
-        SourceClaim("performs_as", "discipline", "Mezzo-Soprano"),
-        SourceClaim("performs_as", "discipline", "Soprano"),
+        SourceClaim("performs_as", value="Mezzo-Soprano"),
+        SourceClaim("performs_as", value="Soprano"),
         SourceClaim("program_count", value="2"),
         SourceClaim("first_season", value="1842-43"),
         SourceClaim("last_season", value="1844-45"),

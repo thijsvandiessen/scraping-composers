@@ -78,7 +78,7 @@ def _artist_record(info: _Artist) -> SourceRecord:
     claims: list[SourceClaim] = []
     if not info.is_group:
         claims += [SourceClaim("has_profession", "profession", p) for p in sorted(info.professions)]
-        claims += [SourceClaim("performs_as", "discipline", d) for d in sorted(info.disciplines)]
+        claims += [SourceClaim("performs_as", value=d) for d in sorted(info.disciplines)]
     return SourceRecord(
         external_id=f"artist:{info.id}",
         name=info.name,

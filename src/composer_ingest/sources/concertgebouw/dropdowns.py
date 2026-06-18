@@ -58,7 +58,7 @@ def _record(select_id: str, profession: str, value: str, label: str) -> SourceRe
         discipline = _DISCIPLINE.search(label)
         if discipline:
             name = label[: discipline.start()].strip()
-            claims.append(SourceClaim("performs_as", "discipline", discipline.group(1).strip()))
+            claims.append(SourceClaim("performs_as", value=discipline.group(1).strip()))
     if not name:
         return None
     return SourceRecord(
