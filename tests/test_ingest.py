@@ -3,7 +3,7 @@
 from collections.abc import Iterator
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from composer_ingest.ingest import run_ingest
@@ -159,6 +159,47 @@ def test_claim_objects_are_deduplicated_entities(session: Session) -> None:
     assert {claim.subject_id for claim in claims} == {
         entity.id for entity in session.scalars(select(Entity).where(Entity.kind == "person"))
     }
+
+
+def test_mentioned_in_uses_record_url_when_present(session: Session) -> None:
+    source = FakeSource(
+        records=(
+            SourceRecord(
+                external_id="abc",
+                name="Mozart, Wolfgang Amadeus",
+                url="https://example.com/mozart",
+                raw={"id": "abc"},
+                claims=(),
+            ),
+        )
+    )
+    run_ingest(session, source)
+
+    claim = session.scalars(select(Claim).where(Claim.predicate == "mentioned_in")).one()
+    assert claim.value == "https://example.com/mozart"
+
+
+def test_mentioned_in_falls_back_to_source_base_url(session: Session) -> None:
+    source = FakeSource(
+        records=(person("Haydn, Joseph"),),  # person() leaves url=None
+        BASE_URL="https://fake.example/composers",
+    )
+    run_ingest(session, source)
+
+    claim = session.scalars(select(Claim).where(Claim.predicate == "mentioned_in")).one()
+    assert claim.value == "https://fake.example/composers"
+
+
+def test_batch_commit_fires_at_1000_record_boundary(session: Session) -> None:
+    # COMMIT_BATCH=1000: this exercises the mid-run commit path at seen==1000
+    source = FakeSource(records=tuple(person(f"Composer {i}") for i in range(1001)))
+    run = run_ingest(session, source)
+
+    assert run.status == "completed"
+    assert run.records_seen == 1001
+    assert run.records_new == 1001
+    count = session.scalar(select(func.count(Entity.id)).where(Entity.kind == "person"))
+    assert count == 1001
 
 
 def test_failing_source_marks_run_failed(session: Session) -> None:

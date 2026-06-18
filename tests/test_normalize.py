@@ -39,3 +39,17 @@ def test_entity_uuid_differs_by_kind() -> None:
 
 def test_entity_uuid_differs_by_key() -> None:
     assert entity_uuid("person", "ludwig van beethoven") != entity_uuid("person", "wolfgang amadeus mozart")
+
+
+def test_dedup_key_empty_string() -> None:
+    assert dedup_key("") == ""
+
+
+def test_dedup_key_name_with_digits() -> None:
+    # digits are \w and survive the punctuation-stripping step
+    assert dedup_key("Philip II") == "philip ii"
+
+
+def test_dedup_key_multiple_commas() -> None:
+    # only the first comma triggers inversion; the remainder stays in the name
+    assert dedup_key("Elgar, Edward, Sir") == "edward sir elgar"

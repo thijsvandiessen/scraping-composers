@@ -1,8 +1,11 @@
 """Tests for aggregating the NY Phil performance-history JSON into records."""
 
+import pytest
+
 from composer_ingest.sources import SourceClaim, SourceRecord
 from composer_ingest.sources.nyphil.people import ROLES, _aggregate, _record
 from composer_ingest.sources.nyphil.performances import _performances
+from composer_ingest.sources.nyphil.text import _names
 
 # Trimmed copy of the real structure: double-spaced names, ";"-joined
 # conductors, the "Not conducted" sentinel, soloists with and without an
@@ -196,6 +199,28 @@ def test_performance_drops_not_conducted_and_keeps_named_soloists() -> None:
     soloists = [c.object_label for c in record.claims if c.predicate == "performed_by"]
     assert conductors == ["Rudel, Julius"]  # "Not conducted" sentinel dropped
     assert soloists == ["Otto, Antoinette"]  # blank soloist name dropped
+
+
+# ---------------------------------------------------------------------------
+# _names (text.py)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (None, []),
+        ("", []),
+        ("Hill, Ureli Corelli", ["Hill, Ureli Corelli"]),
+        ("Rudel, Julius;  Not conducted", ["Rudel, Julius"]),
+        ("NOT CONDUCTED", []),  # sentinel is case-insensitive
+        ("Timm, Henry C.; Doe, Jane", ["Timm, Henry C.", "Doe, Jane"]),
+        ("Beethoven,  Ludwig  van", ["Beethoven, Ludwig van"]),  # whitespace runs collapsed
+        (";Doe, Jane;", ["Doe, Jane"]),  # leading/trailing empty parts dropped
+    ],
+)
+def test_names(value: str | None, expected: list[str]) -> None:
+    assert list(_names(value)) == expected
 
 
 def test_dict_work_title_is_joined_into_one_string() -> None:
