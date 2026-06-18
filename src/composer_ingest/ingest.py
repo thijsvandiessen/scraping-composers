@@ -8,6 +8,10 @@ ingested later attaches to existing entities instead of creating doubles.
 Claims reported by the source ("has_profession", "born_in", ...) are stored
 as edges with per-claim provenance; entity objects of claims (professions,
 places, ...) are themselves deduplicated entities.
+
+If the source throws mid-run the already-committed batches are preserved;
+only the current uncommitted batch is rolled back. The run is marked
+"failed" with the error message and timestamp so the next run can try again.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from datetime import datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -49,6 +54,19 @@ def _get_or_create_entity(
     return entity_id
 
 
+def _flush_entity_timestamps(
+    session: Session,
+    seen_ids: set[uuid.UUID],
+    edited_ids: set[uuid.UUID],
+    now: datetime,
+) -> None:
+    """Bulk-update last_ingested_at / last_edited_at for entities touched in the current batch."""
+    if seen_ids:
+        session.execute(update(Entity).where(Entity.id.in_(seen_ids)).values(last_ingested_at=now))
+    if edited_ids:
+        session.execute(update(Entity).where(Entity.id.in_(edited_ids)).values(last_edited_at=now))
+
+
 def run_ingest(session: Session, source_module: SourceLike, max_pages: int | None = None) -> IngestRun:
     source = _get_or_create_source(session, source_module.NAME, source_module.BASE_URL)
     run = IngestRun(source_id=source.id)
@@ -57,15 +75,14 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
     log.info("run %d started for source '%s'", run.id, source.name)
 
     # Preload existing keys so the per-record loop needs no queries.
-    # .all() first: dict() would otherwise treat the Result (which has .keys())
-    # as a mapping and subscript it
-    existing_records: dict[str, int] = dict(
-        session.execute(
-            select(EntityRecord.external_id, EntityRecord.id).where(EntityRecord.source_id == source.id)
-        )
-        .tuples()
-        .all()
-    )
+    existing_records: dict[str, tuple[int, uuid.UUID | None]] = {
+        row[0]: (row[1], row[2])
+        for row in session.execute(
+            select(EntityRecord.external_id, EntityRecord.id, EntityRecord.entity_id).where(
+                EntityRecord.source_id == source.id
+            )
+        ).tuples()
+    }
     entities_by_key: dict[tuple[str, str], uuid.UUID] = {
         (kind, key): entity_id
         for kind, key, entity_id in session.execute(select(Entity.kind, Entity.dedup_key, Entity.id)).tuples()
@@ -79,17 +96,23 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
     )
 
     seen = new = 0
+    seen_entity_ids: set[uuid.UUID] = set()
+    edited_entity_ids: set[uuid.UUID] = set()
+
     try:
         for record in source_module.fetch_records(max_pages=max_pages):
             seen += 1
             now = utcnow()
-            existing_id = existing_records.get(record.external_id)
-            if existing_id is not None:
+            existing_entry = existing_records.get(record.external_id)
+            if existing_entry is not None:
+                existing_id, existing_entity_id = existing_entry
                 session.execute(
                     update(EntityRecord)
                     .where(EntityRecord.id == existing_id)
                     .values(last_seen_at=now, last_run_id=run.id)
                 )
+                if existing_entity_id is not None:
+                    seen_entity_ids.add(existing_entity_id)
             else:
                 entity_id = _get_or_create_entity(session, entities_by_key, record.kind, record.name)
                 db_record = EntityRecord(
@@ -104,7 +127,8 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
                 )
                 session.add(db_record)
                 session.flush()
-                existing_records[record.external_id] = db_record.id
+                existing_records[record.external_id] = (db_record.id, entity_id)
+                seen_entity_ids.add(entity_id)
                 new += 1
 
                 # Auto-inject a "mentioned_in" claim so every entity carries
@@ -122,6 +146,7 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
                         )
                     )
                     existing_claims.add(mention_key)
+                    edited_entity_ids.add(entity_id)
 
                 for claim in record.claims:
                     object_id = (
@@ -142,17 +167,31 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
                             )
                         )
                         existing_claims.add(claim_key)
+                        edited_entity_ids.add(entity_id)
 
             if seen % COMMIT_BATCH == 0:
+                _flush_entity_timestamps(session, seen_entity_ids, edited_entity_ids, now)
+                seen_entity_ids.clear()
+                edited_entity_ids.clear()
                 session.commit()
                 log.info("progress: %d seen, %d new", seen, new)
 
         run.status = "completed"
     except Exception as exc:
-        session.rollback()
+        # Preserve whatever was already processed: try to commit partial progress
+        # rather than discarding the entire run. Only the current uncommitted
+        # batch is lost; previously committed batches are already safe.
+        try:
+            _flush_entity_timestamps(session, seen_entity_ids, edited_entity_ids, utcnow())
+            session.commit()
+        except Exception:
+            session.rollback()
         run.status = "failed"
         run.error = f"{type(exc).__name__}: {exc}"
         log.exception("run %d failed after %d records", run.id, seen)
+
+    if run.status == "completed" and (seen_entity_ids or edited_entity_ids):
+        _flush_entity_timestamps(session, seen_entity_ids, edited_entity_ids, utcnow())
 
     run.records_seen = seen
     run.records_new = new

@@ -172,3 +172,45 @@ def test_failing_source_marks_run_failed(session: Session) -> None:
     # the failure is recorded in the run log
     logged = session.scalars(select(IngestRun)).one()
     assert logged.status == "failed"
+
+    # records processed before the error are preserved
+    assert run.records_seen == 1
+    assert run.records_new == 1
+    people = session.scalars(select(Entity).where(Entity.kind == "person")).all()
+    assert len(people) == 1  # Mozart was committed before the error
+
+
+def test_entity_has_ingestion_timestamps(session: Session) -> None:
+    run_ingest(session, FakeSource(records=(MOZART,)))
+    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+
+    assert entity.first_ingested_at is not None
+    assert entity.last_ingested_at is not None
+    assert entity.last_edited_at is not None
+
+
+def test_reingest_updates_last_ingested_at(session: Session) -> None:
+    source = FakeSource(records=(MOZART,))
+    run_ingest(session, source)
+
+    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+    after_first = entity.last_ingested_at
+
+    run_ingest(session, source)
+    session.expire(entity)
+
+    assert entity.last_ingested_at >= after_first
+
+
+def test_last_edited_at_unchanged_on_reingest_with_same_claims(session: Session) -> None:
+    source = FakeSource(records=(MOZART,))
+    run_ingest(session, source)
+
+    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+    edited_after_first = entity.last_edited_at
+
+    run_ingest(session, source)
+    session.expire(entity)
+
+    # no new claims were added, so last_edited_at should not advance
+    assert entity.last_edited_at == edited_after_first
