@@ -25,6 +25,9 @@ Design notes:
   derived from its title. ``WorkTitle`` records every title a work was seen
   under (its aliases). ``RawWorkMention`` is the raw staging row for a
   (composer, title) pair as a source reported it, plus the matcher's decision.
+- ``Entity.canonical_entity_id`` links a duplicate person to its canonical
+  entity (non-destructive); ``PersonMatch`` is the dedupe pass's review queue,
+  recording each proposed (duplicate, canonical) pair and its decision.
 """
 
 from __future__ import annotations
@@ -74,18 +77,26 @@ class Entity(Base):
     """Canonical node, deduplicated across sources within its kind."""
 
     __tablename__ = "entities"
-    __table_args__ = (UniqueConstraint("kind", "dedup_key", name="uq_entity_kind_key"),)
+    __table_args__ = (
+        UniqueConstraint("kind", "dedup_key", name="uq_entity_kind_key"),
+        Index("ix_entities_canonical", "canonical_entity_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(String(50))
     dedup_key: Mapped[str] = mapped_column(String(300))
     label: Mapped[str] = mapped_column(String(300))
+    # set when this entity is a confirmed duplicate of another (the canonical
+    # one), e.g. "Beethoven" -> "Beethoven, Ludwig van". Non-destructive: both
+    # rows stay, queries can resolve to the canonical via this pointer.
+    canonical_entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     first_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_edited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     records: Mapped[list[EntityRecord]] = relationship(back_populates="entity")
+    canonical: Mapped[Entity | None] = relationship(remote_side=[id])
 
 
 class EntityRecord(Base):
@@ -229,3 +240,28 @@ class RawWorkMention(Base):
     work: Mapped[Work | None] = relationship(foreign_keys=[work_id])
     candidate_work: Mapped[Work | None] = relationship(foreign_keys=[candidate_work_id])
     composer: Mapped[Entity | None] = relationship()
+
+
+class PersonMatch(Base):
+    """A proposed (duplicate -> canonical) person pair and the dedupe pass's
+    decision. ``auto_linked`` / ``accepted`` also set ``entity.canonical_entity_id``;
+    ``needs_review`` awaits a human; ``rejected`` is remembered so re-runs don't
+    re-propose. One row per ordered pair."""
+
+    __tablename__ = "person_matches"
+    __table_args__ = (
+        UniqueConstraint("entity_id", "canonical_entity_id", name="uq_person_match"),
+        Index("ix_person_matches_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("entities.id"))
+    canonical_entity_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("entities.id"))
+    score: Mapped[float] = mapped_column(Float)
+    method: Mapped[str | None] = mapped_column(String(50))
+    # auto_linked | needs_review | accepted | rejected
+    status: Mapped[str] = mapped_column(String(20))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    entity: Mapped[Entity] = relationship(foreign_keys=[entity_id])
+    canonical: Mapped[Entity] = relationship(foreign_keys=[canonical_entity_id])

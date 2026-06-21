@@ -33,6 +33,12 @@ uv run composer-ingest review
 uv run composer-ingest review --accept 42 <work-uuid>   # match a mention to a work
 uv run composer-ingest review --new 42                  # create a new work from a mention
 uv run composer-ingest rematch                          # re-run matching after tuning
+
+# link near-duplicate person entities ("Beethoven" vs "Beethoven, Ludwig van")
+uv run composer-ingest dedupe-persons
+uv run composer-ingest person-review                    # pairs the matcher wasn't sure about
+uv run composer-ingest person-review --accept 7         # confirm a duplicate link
+uv run composer-ingest person-review --reject 7         # reject a proposed link
 ```
 
 Data lands in `composers.db` (SQLite) by default. To use Postgres instead:
@@ -95,6 +101,21 @@ same work across spellings), works go through a resolution pipeline
 Composers stay `person` entities (deduplicated as above); works reference them
 by id. Performance events, richer work metadata and external ids build on this
 layer next.
+
+### People deduplication
+
+Exact-key dedup unifies "Beethoven, Ludwig van" ↔ "Ludwig van Beethoven" but
+misses surname-only ("Beethoven"), initials ("Bach, J.S." vs "Bach, Johann
+Sebastian"), and other variants. The `dedupe-persons` pass
+(`src/composer_ingest/persons/`) closes the gap **non-destructively**: it parses
+each person name (surname / given / initials / particles), groups by surname,
+and scores pairs with a few heuristics — given-name compatibility plus
+birth-year corroboration (a conflicting `born_on` year rules a pair out; a
+matching one confirms it). High-confidence pairs set the duplicate's
+`Entity.canonical_entity_id` to the fuller name; ambiguous ones land in
+**`person_matches`** for `person-review`. Nothing is deleted and ids stay
+stable, so the pass is re-runnable as the heuristics grow (phonetic matching,
+nickname maps, external ids, …).
 
 ## Adding a source
 
