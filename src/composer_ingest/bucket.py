@@ -15,10 +15,9 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 
-@runtime_checkable
 class Bucket(Protocol):
     def write_records(self, source: str, run_id: str, records: Iterable[dict[str, Any]]) -> None: ...
     def read_records(self, source: str, run_id: str) -> Iterator[dict[str, Any]]: ...

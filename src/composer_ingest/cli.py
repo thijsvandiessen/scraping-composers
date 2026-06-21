@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 import uuid
+from pathlib import Path
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
@@ -33,8 +34,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 def cmd_fetch(args: argparse.Namespace) -> int:
     source_module = REGISTRY[args.source]
     bucket = LocalBucket(args.bucket_path)
-    run_id = dump_to_bucket(source_module, bucket, max_pages=args.max_pages)
-    print(f"fetched {args.source} → {args.bucket_path}/{args.source}/{run_id}/records.ndjson")
+    try:
+        run_id = dump_to_bucket(source_module, bucket, max_pages=args.max_pages)
+    except Exception as exc:
+        logging.getLogger(__name__).error("fetch failed: %s: %s", type(exc).__name__, exc)
+        return 1
+    ndjson = Path(args.bucket_path) / args.source / run_id / "records.ndjson"
+    print(f"fetched {args.source} → {ndjson}")
     print(f"run_id: {run_id}")
     return 0
 

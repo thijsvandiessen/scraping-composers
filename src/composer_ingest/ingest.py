@@ -170,6 +170,7 @@ def _run_ingest_records(
 
     Returns (records_seen, records_new).
     """
+    # Preload existing keys so the per-record loop needs no queries.
     existing_records: dict[str, tuple[int, uuid.UUID | None]] = {
         row[0]: (row[1], row[2])
         for row in session.execute(
@@ -200,6 +201,8 @@ def _run_ingest_records(
             select(WorkTitle.work_id, WorkTitle.title_key).where(WorkTitle.source_id == source.id)
         ).tuples()
     )
+    # Candidate works keyed by composer, so the matcher only compares within a
+    # composer's catalogue. Refreshed as new works are created during the run.
     work_candidates: dict[uuid.UUID | None, list[Candidate]] = {}
     for work in session.scalars(select(Work)):
         work_candidates.setdefault(work.composer_entity_id, []).append(

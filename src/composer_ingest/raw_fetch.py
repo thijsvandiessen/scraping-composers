@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -30,10 +31,9 @@ def _deserialize(d: dict[str, Any]) -> SourceRecord | SourceWorkMention:
     if kind == "record":
         claims = tuple(SourceClaim(**c) for c in d.pop("claims", []))
         return SourceRecord(**d, claims=claims)
-    raw_str = d.get("raw")
-    if isinstance(raw_str, str):
-        d["raw"] = json.loads(raw_str)
-    return SourceWorkMention(**d)
+    if kind == "work_mention":
+        return SourceWorkMention(**d)
+    raise ValueError(f"unknown _type in bucket record: {kind!r}")
 
 
 def dump_to_bucket(
@@ -46,7 +46,7 @@ def dump_to_bucket(
     Returns the run_id (an ISO-8601 UTC timestamp string) so the caller can
     pass it to ``iter_from_bucket`` or ``process`` CLI command.
     """
-    run_id = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+    run_id = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S") + "-" + uuid.uuid4().hex[:8]
     records = (_serialize(item) for item in source.fetch_records(max_pages=max_pages))
     bucket.write_records(source.NAME, run_id, records)
     return run_id
