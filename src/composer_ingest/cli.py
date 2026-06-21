@@ -13,8 +13,19 @@ from sqlalchemy.orm import Session, aliased
 from .bucket import LocalBucket
 from .db import get_engine, init_db
 from .ingest import new_work, run_ingest, run_ingest_from_bucket
-from .models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, Work, WorkTitle
+from .models import (
+    Claim,
+    Entity,
+    EntityRecord,
+    IngestRun,
+    PersonMatch,
+    RawWorkMention,
+    Source,
+    Work,
+    WorkTitle,
+)
 from .normalize import dedup_key
+from .persons import dedupe_persons
 from .raw_fetch import dump_to_bucket, iter_from_bucket
 from .sources import REGISTRY
 from .works import Candidate, extract_features, normalize_title, resolve
@@ -100,6 +111,13 @@ def cmd_stats(args: argparse.Namespace) -> int:
         ).all()
         for status, count in by_status:
             print(f"  {status}: {count}")
+
+        linked = session.scalar(select(func.count(Entity.id)).where(Entity.canonical_entity_id.is_not(None)))
+        to_review = session.scalar(
+            select(func.count(PersonMatch.id)).where(PersonMatch.status == "needs_review")
+        )
+        print(f"person duplicates linked: {linked}")
+        print(f"person matches to review: {to_review}")
     return 0
 
 
@@ -351,6 +369,53 @@ def cmd_rematch(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dedupe_persons(args: argparse.Namespace) -> int:
+    engine = get_engine(args.database_url)
+    session_factory = init_db(engine)
+    with session_factory() as session:
+        auto, review = dedupe_persons(session)
+    print(f"auto-linked {auto} duplicate(s), {review} pair(s) need review")
+    return 0
+
+
+def cmd_person_review(args: argparse.Namespace) -> int:
+    engine = get_engine(args.database_url)
+    session_factory = init_db(engine)
+    with session_factory() as session:
+        if args.accept is not None or args.reject is not None:
+            match_id = args.accept if args.accept is not None else args.reject
+            match = session.get(PersonMatch, match_id)
+            if match is None or match.status != "needs_review":
+                print("no pending match with that id")
+                return 1
+            if args.accept is not None:
+                match.status = "accepted"
+                match.entity.canonical_entity_id = match.canonical_entity_id
+                print(f"linked {match.entity.label!r} -> {match.canonical.label!r}")
+            else:
+                match.status = "rejected"
+                print(f"rejected match #{match.id}")
+            session.commit()
+            return 0
+
+        rows = session.scalars(
+            select(PersonMatch)
+            .where(PersonMatch.status == "needs_review")
+            .order_by(PersonMatch.score.desc())
+            .limit(args.limit)
+        ).all()
+        if not rows:
+            print("no person matches need review")
+            return 0
+        print("person matches needing review (resolve with --accept ID or --reject ID):")
+        for match in rows:
+            print(
+                f"\n#{match.id} [{match.score:.2f} {match.method}]"
+                f" {match.entity.label!r} -> {match.canonical.label!r}"
+            )
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="composer-ingest", description=__doc__)
     parser.add_argument(
@@ -420,6 +485,19 @@ def main() -> None:
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
     )
     p_process.set_defaults(func=cmd_process)
+
+    p_dedupe = sub.add_parser(
+        "dedupe-persons", help="link near-duplicate person entities (surname/initials/birth-year heuristics)"
+    )
+    p_dedupe.set_defaults(func=cmd_dedupe_persons)
+
+    p_preview = sub.add_parser(
+        "person-review", help="list (or resolve) person duplicate pairs flagged for review"
+    )
+    p_preview.add_argument("--limit", type=int, default=20, help="max pairs to list")
+    p_preview.add_argument("--accept", type=int, metavar="MATCH_ID", help="confirm a duplicate link")
+    p_preview.add_argument("--reject", type=int, metavar="MATCH_ID", help="reject a proposed link")
+    p_preview.set_defaults(func=cmd_person_review)
 
     args = parser.parse_args()
     logging.basicConfig(

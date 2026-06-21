@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 
 from composer_ingest.cli import (
     cmd_claims,
+    cmd_dedupe_persons,
     cmd_ingest,
+    cmd_person_review,
     cmd_rematch,
     cmd_review,
     cmd_runs,
@@ -23,7 +25,7 @@ from composer_ingest.cli import (
 )
 from composer_ingest.db import get_engine, init_db
 from composer_ingest.ingest import run_ingest
-from composer_ingest.models import RawWorkMention, Work
+from composer_ingest.models import Entity, PersonMatch, RawWorkMention, Work
 from composer_ingest.sources import SourceClaim
 from test_ingest import FakeSource, person
 from test_ingest_mentions import mention
@@ -238,6 +240,91 @@ def test_cmd_rematch_processes_pending_mentions(tmp_path: Path, capsys: pytest.C
     )
     assert cmd_rematch(_ns(database_url=db_url)) == 0
     assert "re-matched" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# dedupe-persons / person-review
+# ---------------------------------------------------------------------------
+
+
+def _ingest_varied_people(db_url: str) -> None:
+    _ingest(
+        db_url,
+        person("Bach, J.S."),  # auto-links to the full name (initials)
+        person("Bach, Johann Sebastian"),
+        person("Beethoven"),  # surname-only -> review
+        person("Beethoven, Ludwig van"),
+    )
+
+
+def test_cmd_dedupe_persons_reports_links_and_reviews(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_varied_people(db_url)
+
+    assert cmd_dedupe_persons(_ns(database_url=db_url)) == 0
+    out = capsys.readouterr().out
+    assert "auto-linked 1" in out
+    assert "1 pair(s) need review" in out
+
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        assert (
+            session.scalar(select(func.count(Entity.id)).where(Entity.canonical_entity_id.is_not(None))) == 1
+        )
+
+
+def test_cmd_stats_shows_person_dedup_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_varied_people(db_url)
+    cmd_dedupe_persons(_ns(database_url=db_url))
+    capsys.readouterr()  # drop dedupe output
+
+    assert cmd_stats(_ns(database_url=db_url)) == 0
+    out = capsys.readouterr().out
+    assert "person duplicates linked: 1" in out
+    assert "person matches to review: 1" in out
+
+
+def test_cmd_person_review_lists_and_accepts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_varied_people(db_url)
+    cmd_dedupe_persons(_ns(database_url=db_url))
+
+    assert cmd_person_review(_ns(database_url=db_url, limit=20, accept=None, reject=None)) == 0
+    assert "Beethoven" in capsys.readouterr().out
+
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        match = session.scalars(select(PersonMatch).where(PersonMatch.status == "needs_review")).one()
+        match_id, dup_id = match.id, match.entity_id
+
+    assert cmd_person_review(_ns(database_url=db_url, limit=20, accept=match_id, reject=None)) == 0
+
+    with factory() as session:
+        accepted = session.get(PersonMatch, match_id)
+        assert accepted is not None and accepted.status == "accepted"
+        dup = session.get(Entity, dup_id)
+        assert dup is not None and dup.canonical_entity_id is not None
+
+
+def test_cmd_person_review_reject(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_varied_people(db_url)
+    cmd_dedupe_persons(_ns(database_url=db_url))
+
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        match_id = session.scalar(select(PersonMatch.id).where(PersonMatch.status == "needs_review"))
+
+    assert cmd_person_review(_ns(database_url=db_url, limit=20, accept=None, reject=match_id)) == 0
+    with factory() as session:
+        rejected = session.get(PersonMatch, match_id)
+        assert rejected is not None and rejected.status == "rejected"
+        assert (
+            session.scalar(select(func.count(Entity.id)).where(Entity.canonical_entity_id.is_not(None))) == 1
+        )  # only the auto-linked Bach pair, not the rejected one
 
 
 # ---------------------------------------------------------------------------
