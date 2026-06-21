@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections.abc import Iterator
 from datetime import datetime
 
 from sqlalchemy import select, update
@@ -26,12 +27,22 @@ from sqlalchemy.orm import Session
 
 from .models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, Work, WorkTitle, utcnow
 from .normalize import dedup_key, entity_uuid
-from .sources import SourceLike, SourceWorkMention
+from .sources import SourceLike, SourceRecord, SourceWorkMention
 from .works import Candidate, WorkFeatures, extract_features, resolve
 
 log = logging.getLogger(__name__)
 
 COMMIT_BATCH = 1000
+
+
+class _IngestError(Exception):
+    """Wraps a mid-run exception and carries the partial record counts."""
+
+    def __init__(self, cause: Exception, seen: int, new: int) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.seen = seen
+        self.new = new
 
 
 def _get_or_create_source(session: Session, name: str, base_url: str) -> Source:
@@ -149,14 +160,16 @@ def _ingest_mention(
     return mention_row.id
 
 
-def run_ingest(session: Session, source_module: SourceLike, max_pages: int | None = None) -> IngestRun:
-    source = _get_or_create_source(session, source_module.NAME, source_module.BASE_URL)
-    run = IngestRun(source_id=source.id)
-    session.add(run)
-    session.commit()
-    log.info("run %d started for source '%s'", run.id, source.name)
+def _run_ingest_records(
+    session: Session,
+    source: Source,
+    run: IngestRun,
+    records_iter: Iterator[SourceRecord | SourceWorkMention],
+) -> tuple[int, int]:
+    """Core ingest loop shared by run_ingest and run_ingest_from_bucket.
 
-    # Preload existing keys so the per-record loop needs no queries.
+    Returns (records_seen, records_new).
+    """
     existing_records: dict[str, tuple[int, uuid.UUID | None]] = {
         row[0]: (row[1], row[2])
         for row in session.execute(
@@ -187,8 +200,6 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
             select(WorkTitle.work_id, WorkTitle.title_key).where(WorkTitle.source_id == source.id)
         ).tuples()
     )
-    # Candidate works keyed by composer, so the matcher only compares within a
-    # composer's catalogue. Refreshed as new works are created during the run.
     work_candidates: dict[uuid.UUID | None, list[Candidate]] = {}
     for work in session.scalars(select(Work)):
         work_candidates.setdefault(work.composer_entity_id, []).append(
@@ -200,7 +211,7 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
     edited_entity_ids: set[uuid.UUID] = set()
 
     try:
-        for item in source_module.fetch_records(max_pages=max_pages):
+        for item in records_iter:
             seen += 1
             now = utcnow()
             if isinstance(item, SourceWorkMention):
@@ -260,8 +271,6 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
                 seen_entity_ids.add(entity_id)
                 new += 1
 
-                # Auto-inject a "mentioned_in" claim so every entity carries
-                # a reference back to the source page where it was found.
                 mention_url = record.url or source.base_url
                 mention_key = (entity_id, "mentioned_in", None, mention_url)
                 if mention_key not in existing_claims:
@@ -305,22 +314,74 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
                 session.commit()
                 log.info("progress: %d seen, %d new", seen, new)
 
-        run.status = "completed"
     except Exception as exc:
-        # Preserve whatever was already processed: try to commit partial progress
-        # rather than discarding the entire run. Only the current uncommitted
-        # batch is lost; previously committed batches are already safe.
         try:
             _flush_entity_timestamps(session, seen_entity_ids, edited_entity_ids, utcnow())
             session.commit()
         except Exception:
             session.rollback()
+        raise _IngestError(exc, seen, new) from exc
+
+    if seen_entity_ids or edited_entity_ids:
+        _flush_entity_timestamps(session, seen_entity_ids, edited_entity_ids, utcnow())
+
+    return seen, new
+
+
+def run_ingest_from_bucket(
+    session: Session,
+    source_name: str,
+    base_url: str,
+    records: Iterator[SourceRecord | SourceWorkMention],
+) -> IngestRun:
+    """Ingest pre-fetched records (loaded from a bucket) without network access."""
+    source = _get_or_create_source(session, source_name, base_url)
+    run = IngestRun(source_id=source.id)
+    session.add(run)
+    session.commit()
+    log.info("run %d started for source '%s' (from bucket)", run.id, source.name)
+
+    try:
+        seen, new = _run_ingest_records(session, source, run, records)
+        run.status = "completed"
+    except _IngestError as err:
         run.status = "failed"
-        run.error = f"{type(exc).__name__}: {exc}"
+        run.error = f"{type(err.cause).__name__}: {err.cause}"
+        seen, new = err.seen, err.new
         log.exception("run %d failed after %d records", run.id, seen)
 
-    if run.status == "completed" and (seen_entity_ids or edited_entity_ids):
-        _flush_entity_timestamps(session, seen_entity_ids, edited_entity_ids, utcnow())
+    run.records_seen = seen
+    run.records_new = new
+    run.finished_at = utcnow()
+    session.commit()
+    log.info(
+        "run %d %s: %d records seen, %d new (source '%s')",
+        run.id,
+        run.status,
+        seen,
+        new,
+        source.name,
+    )
+    return run
+
+
+def run_ingest(session: Session, source_module: SourceLike, max_pages: int | None = None) -> IngestRun:
+    source = _get_or_create_source(session, source_module.NAME, source_module.BASE_URL)
+    run = IngestRun(source_id=source.id)
+    session.add(run)
+    session.commit()
+    log.info("run %d started for source '%s'", run.id, source.name)
+
+    try:
+        seen, new = _run_ingest_records(
+            session, source, run, source_module.fetch_records(max_pages=max_pages)
+        )
+        run.status = "completed"
+    except _IngestError as err:
+        run.status = "failed"
+        run.error = f"{type(err.cause).__name__}: {err.cause}"
+        seen, new = err.seen, err.new
+        log.exception("run %d failed after %d records", run.id, seen)
 
     run.records_seen = seen
     run.records_new = new

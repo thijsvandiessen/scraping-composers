@@ -2,18 +2,23 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 import uuid
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
 
+from .bucket import LocalBucket
 from .db import get_engine, init_db
-from .ingest import new_work, run_ingest
+from .ingest import new_work, run_ingest, run_ingest_from_bucket
 from .models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, Work, WorkTitle
 from .normalize import dedup_key
+from .raw_fetch import dump_to_bucket, iter_from_bucket
 from .sources import REGISTRY
 from .works import Candidate, extract_features, normalize_title, resolve
+
+DEFAULT_BUCKET_PATH = os.environ.get("BUCKET_PATH", "./raw-data")
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
@@ -22,6 +27,34 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     session_factory = init_db(engine)
     with session_factory() as session:
         run = run_ingest(session, source_module, max_pages=args.max_pages)
+    return 0 if run.status == "completed" else 1
+
+
+def cmd_fetch(args: argparse.Namespace) -> int:
+    source_module = REGISTRY[args.source]
+    bucket = LocalBucket(args.bucket_path)
+    run_id = dump_to_bucket(source_module, bucket, max_pages=args.max_pages)
+    print(f"fetched {args.source} → {args.bucket_path}/{args.source}/{run_id}/records.ndjson")
+    print(f"run_id: {run_id}")
+    return 0
+
+
+def cmd_process(args: argparse.Namespace) -> int:
+    source_module = REGISTRY[args.source]
+    bucket = LocalBucket(args.bucket_path)
+    run_id = args.run_id
+    if run_id is None:
+        runs = bucket.list_runs(args.source)
+        if not runs:
+            print(f"no runs found for source '{args.source}' in {args.bucket_path}")
+            return 1
+        run_id = runs[-1]
+        print(f"using latest run: {run_id}")
+    engine = get_engine(args.database_url)
+    session_factory = init_db(engine)
+    with session_factory() as session:
+        records = iter_from_bucket(args.source, run_id, bucket)
+        run = run_ingest_from_bucket(session, source_module.NAME, source_module.BASE_URL, records)
     return 0 if run.status == "completed" else 1
 
 
@@ -363,6 +396,24 @@ def main() -> None:
         "rematch", help="re-run matching over unmatched/needs-review mentions (after tuning)"
     )
     p_rematch.set_defaults(func=cmd_rematch)
+
+    p_fetch = sub.add_parser("fetch", help="fetch raw records from a source and store in the bucket")
+    p_fetch.add_argument("source", choices=sorted(REGISTRY))
+    p_fetch.add_argument("--max-pages", type=int, help="stop after N pages (for testing)")
+    p_fetch.add_argument(
+        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
+    )
+    p_fetch.set_defaults(func=cmd_fetch)
+
+    p_process = sub.add_parser(
+        "process", help="ingest previously fetched records from the bucket into the DB"
+    )
+    p_process.add_argument("source", choices=sorted(REGISTRY))
+    p_process.add_argument("--run-id", help="bucket run_id to process (default: latest)")
+    p_process.add_argument(
+        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
+    )
+    p_process.set_defaults(func=cmd_process)
 
     args = parser.parse_args()
     logging.basicConfig(
