@@ -10,21 +10,13 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from composer_ingest.cli import (
-    cmd_claims,
-    cmd_dedupe_persons,
-    cmd_ingest,
-    cmd_person_review,
-    cmd_rematch,
-    cmd_review,
-    cmd_runs,
-    cmd_stats,
-    cmd_works,
-    entity_claims,
-    main,
-)
+from composer_ingest.cli import main
+from composer_ingest.cli.ingest_cmds import cmd_ingest
+from composer_ingest.cli.person_cmds import cmd_dedupe_persons, cmd_person_review
+from composer_ingest.cli.query_cmds import cmd_claims, cmd_runs, cmd_stats, entity_claims
+from composer_ingest.cli.work_cmds import cmd_rematch, cmd_review, cmd_works
 from composer_ingest.db import get_engine, init_db
-from composer_ingest.ingest import run_ingest
+from composer_ingest.ingestion import run_ingest
 from composer_ingest.models import Entity, PersonMatch, RawWorkMention, Work
 from composer_ingest.sources import SourceClaim
 from test_ingest import FakeSource, person

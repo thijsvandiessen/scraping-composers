@@ -3,7 +3,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from composer_ingest.ingest import run_ingest
+from composer_ingest.ingestion import run_ingest
 from composer_ingest.models import Entity, PersonMatch
 from composer_ingest.persons import dedupe_persons
 from composer_ingest.sources import SourceClaim
