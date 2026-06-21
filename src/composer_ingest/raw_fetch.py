@@ -7,7 +7,6 @@ iter_from_bucket — deserialize stored records back to typed objects.
 from __future__ import annotations
 
 import dataclasses
-import json
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
