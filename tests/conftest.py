@@ -3,7 +3,7 @@ from collections.abc import Iterator
 import pytest
 from sqlalchemy.orm import Session
 
-from composer_ingest.db import get_engine, init_db
+from composer_ingest.etl.db import get_engine, init_db
 
 
 @pytest.fixture

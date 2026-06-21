@@ -1,6 +1,6 @@
 """Tests for parsing person-name labels into structured parts."""
 
-from composer_ingest.persons.extract import parse_name
+from composer_ingest.etl.persons.extract import parse_name
 
 
 def test_comma_and_plain_forms_share_surname_and_given() -> None:

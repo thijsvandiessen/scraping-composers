@@ -4,7 +4,7 @@ from collections.abc import Iterator
 from sqlalchemy.orm import Session
 
 from ..models import IngestRun, utcnow
-from ..sources import SourceLike, SourceRecord, SourceWorkMention
+from ...scraper.sources import SourceLike, SourceRecord, SourceWorkMention
 from .core import IngestError, run_ingest_records
 from .entities import get_or_create_source
 

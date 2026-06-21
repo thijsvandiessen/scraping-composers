@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import Depends
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..db import get_engine, init_db
+from ..etl.db import get_engine, init_db
 
 _session_factory: sessionmaker[Session] | None = None
 

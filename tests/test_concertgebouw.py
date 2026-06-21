@@ -1,8 +1,8 @@
 """Tests for parsing the Concertgebouw archive search page dropdowns."""
 
-from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
-from composer_ingest.sources.concertgebouw.dropdowns import _options, _record
-from composer_ingest.sources.concertgebouw.performances import _performances
+from composer_ingest.scraper.sources import SourceClaim, SourceRecord, SourceWorkMention
+from composer_ingest.scraper.sources.concertgebouw.dropdowns import _options, _record
+from composer_ingest.scraper.sources.concertgebouw.performances import _performances
 
 # Trimmed copy of the real page structure: unquoted option values, a quoted
 # "0" placeholder, HTML entities, and the label formats of all three selects.

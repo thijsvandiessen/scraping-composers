@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from ..models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, Work, WorkTitle, utcnow
-from ..sources import SourceRecord, SourceWorkMention
+from ...scraper.sources import SourceRecord, SourceWorkMention
 from ..works import Candidate, extract_features
 from .entities import flush_entity_timestamps, get_or_create_entity
 from .mentions import ingest_mention

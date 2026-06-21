@@ -2,9 +2,9 @@ import argparse
 
 from sqlalchemy import select
 
-from ..db import get_engine, init_db
-from ..models import PersonMatch
-from ..persons import dedupe_persons
+from ..etl.db import get_engine, init_db
+from ..etl.models import PersonMatch
+from ..etl.persons import dedupe_persons
 
 
 def cmd_dedupe_persons(args: argparse.Namespace) -> int:

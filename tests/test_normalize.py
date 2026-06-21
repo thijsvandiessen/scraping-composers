@@ -2,7 +2,7 @@ import uuid
 
 import pytest
 
-from composer_ingest.normalize import dedup_key, entity_uuid
+from composer_ingest.etl.normalize import dedup_key, entity_uuid
 
 
 @pytest.mark.parametrize(

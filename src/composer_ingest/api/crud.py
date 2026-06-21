@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import ColumnElement, exists, func, select
 from sqlalchemy.orm import Session, aliased
 
-from ..models import Claim, Entity, Source
+from ..etl.models import Claim, Entity, Source
 from .schemas import ClaimOut, ComposerDetail, ComposerPage, ComposerSummary
 
 

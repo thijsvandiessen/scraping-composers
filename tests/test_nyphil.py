@@ -2,10 +2,10 @@
 
 import pytest
 
-from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
-from composer_ingest.sources.nyphil.people import ROLES, _aggregate, _record
-from composer_ingest.sources.nyphil.performances import _performances
-from composer_ingest.sources.nyphil.text import _names
+from composer_ingest.scraper.sources import SourceClaim, SourceRecord, SourceWorkMention
+from composer_ingest.scraper.sources.nyphil.people import ROLES, _aggregate, _record
+from composer_ingest.scraper.sources.nyphil.performances import _performances
+from composer_ingest.scraper.sources.nyphil.text import _names
 
 # Trimmed copy of the real structure: double-spaced names, ";"-joined
 # conductors, the "Not conducted" sentinel, soloists with and without an

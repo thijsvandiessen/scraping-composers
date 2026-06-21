@@ -4,7 +4,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from ..models import RawWorkMention, Work, WorkTitle
-from ..sources import SourceWorkMention
+from ...scraper.sources import SourceWorkMention
 from ..works import Candidate, WorkFeatures, extract_features, resolve
 from .entities import get_or_create_entity
 

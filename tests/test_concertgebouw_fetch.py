@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from composer_ingest.sources.concertgebouw.fetch import (
+from composer_ingest.scraper.sources.concertgebouw.fetch import (
     SEARCH_URL,
     _fetch,
     _fetch_list_page,
@@ -27,7 +27,7 @@ def _patch_client(
             kw["transport"] = httpx.MockTransport(handler)
             super().__init__(**kw)
 
-    monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch.httpx.Client", _MockedClient)
+    monkeypatch.setattr("composer_ingest.scraper.sources.concertgebouw.fetch.httpx.Client", _MockedClient)
 
 
 # ---------------------------------------------------------------------------
@@ -44,7 +44,7 @@ def test_fetch_returns_response_text(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_fetch_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.scraper.sources.concertgebouw.fetch.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -61,7 +61,7 @@ def test_fetch_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_fetch_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.scraper.sources.concertgebouw.fetch.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="Always failing")
@@ -83,7 +83,7 @@ def test_fetch_search_page_issues_get_to_search_url(monkeypatch: pytest.MonkeyPa
         calls.append(kwargs)
         return "<html/>"
 
-    monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch._fetch", fake_fetch)
+    monkeypatch.setattr("composer_ingest.scraper.sources.concertgebouw.fetch._fetch", fake_fetch)
     _fetch_search_page()
 
     assert len(calls) == 1
@@ -98,7 +98,7 @@ def test_fetch_list_page_issues_post_with_list_button(monkeypatch: pytest.Monkey
         calls.append(kwargs)
         return "<html/>"
 
-    monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch._fetch", fake_fetch)
+    monkeypatch.setattr("composer_ingest.scraper.sources.concertgebouw.fetch._fetch", fake_fetch)
     _fetch_list_page()
 
     assert len(calls) == 1

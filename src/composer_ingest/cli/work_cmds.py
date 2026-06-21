@@ -4,10 +4,10 @@ import uuid
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from ..db import get_engine, init_db
-from ..ingestion import new_work
-from ..models import Entity, RawWorkMention, Work, WorkTitle
-from ..works import Candidate, extract_features, normalize_title, resolve
+from ..etl.db import get_engine, init_db
+from ..etl.ingestion import new_work
+from ..etl.models import Entity, RawWorkMention, Work, WorkTitle
+from ..etl.works import Candidate, extract_features, normalize_title, resolve
 
 
 def _work_features_line(work: Work) -> str:

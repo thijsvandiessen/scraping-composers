@@ -15,10 +15,10 @@ from composer_ingest.cli.ingest_cmds import cmd_ingest
 from composer_ingest.cli.person_cmds import cmd_dedupe_persons, cmd_person_review
 from composer_ingest.cli.query_cmds import cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_ingest.cli.work_cmds import cmd_rematch, cmd_review, cmd_works
-from composer_ingest.db import get_engine, init_db
-from composer_ingest.ingestion import run_ingest
-from composer_ingest.models import Entity, PersonMatch, RawWorkMention, Work
-from composer_ingest.sources import SourceClaim
+from composer_ingest.etl.db import get_engine, init_db
+from composer_ingest.etl.ingestion import run_ingest
+from composer_ingest.etl.models import Entity, PersonMatch, RawWorkMention, Work
+from composer_ingest.scraper.sources import SourceClaim
 from test_ingest import FakeSource, person
 from test_ingest_mentions import mention
 
@@ -325,7 +325,7 @@ def test_cmd_person_review_reject(tmp_path: Path) -> None:
 
 
 def test_cmd_ingest_returns_0_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from composer_ingest.sources import REGISTRY
+    from composer_ingest.scraper.sources import REGISTRY
 
     db_url = f"sqlite:///{tmp_path}/test.db"
     fake = FakeSource(records=(person("Bach, Johann Sebastian"),), NAME="fake")
@@ -336,7 +336,7 @@ def test_cmd_ingest_returns_0_on_success(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 def test_cmd_ingest_returns_1_on_source_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from composer_ingest.sources import REGISTRY
+    from composer_ingest.scraper.sources import REGISTRY
 
     db_url = f"sqlite:///{tmp_path}/test.db"
     fake = FakeSource(records=(person("Mozart"), person("Haydn")), NAME="fake", fail_after=1)

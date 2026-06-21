@@ -2,8 +2,8 @@
 
 import uuid
 
-from composer_ingest.works.extract import extract_features
-from composer_ingest.works.match import AUTO_THRESHOLD, REVIEW_THRESHOLD, Candidate, resolve, score
+from composer_ingest.etl.works.extract import extract_features
+from composer_ingest.etl.works.match import AUTO_THRESHOLD, REVIEW_THRESHOLD, Candidate, resolve, score
 
 
 def _candidate(title: str) -> Candidate:
