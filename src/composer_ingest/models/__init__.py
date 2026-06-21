@@ -5,9 +5,11 @@ from .core import IngestRun, Source
 from .entities import Claim, Entity, EntityRecord
 from .persons import PersonMatch
 from .works import RawWorkMention, Work, WorkTitle
+from .document import Document
 
 __all__ = [
     "Base",
+    "Document",
     "Claim",
     "Entity",
     "EntityRecord",
