@@ -1,6 +1,6 @@
 """Tests for extracting structured features from raw work titles."""
 
-from composer_ingest.works.extract import extract_features
+from composer_ingest.etl.works.extract import extract_features
 
 
 def test_symphony_with_number_key_and_opus() -> None:

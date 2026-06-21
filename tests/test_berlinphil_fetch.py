@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 
-from composer_ingest.sources.berlinphil.fetch import _concert_ids, _fetch_json, iter_concerts
+from composer_ingest.scraper.sources.berlinphil.fetch import _concert_ids, _fetch_json, iter_concerts
 
 
 def _concerts_payload(ids: list[str]) -> dict[str, Any]:
@@ -30,7 +30,7 @@ def test_fetch_json_returns_parsed_response() -> None:
 
 
 def test_fetch_json_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.scraper.sources.berlinphil.fetch.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -47,7 +47,7 @@ def test_fetch_json_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_fetch_json_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.scraper.sources.berlinphil.fetch.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="Always failing")
@@ -100,14 +100,14 @@ def test_concert_ids_empty_when_concert_key_missing() -> None:
 
 
 def test_iter_concerts_yields_detail_for_each_id(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.scraper.sources.berlinphil.fetch.time.sleep", lambda _: None)
 
     def fake_fetch(client: Any, label: str, path: str) -> Any:
         if path == "concerts":
             return _concerts_payload(["10", "20"])
         return {"id": path.split("/")[-1]}
 
-    monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch._fetch_json", fake_fetch)
+    monkeypatch.setattr("composer_ingest.scraper.sources.berlinphil.fetch._fetch_json", fake_fetch)
     concerts = list(iter_concerts())
 
     assert len(concerts) == 2
@@ -116,7 +116,7 @@ def test_iter_concerts_yields_detail_for_each_id(monkeypatch: pytest.MonkeyPatch
 
 
 def test_iter_concerts_respects_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.scraper.sources.berlinphil.fetch.time.sleep", lambda _: None)
     fetched_paths: list[str] = []
 
     def fake_fetch(client: Any, label: str, path: str) -> Any:
@@ -125,7 +125,7 @@ def test_iter_concerts_respects_max_pages(monkeypatch: pytest.MonkeyPatch) -> No
             return _concerts_payload(["1", "2", "3", "4", "5"])
         return {"id": path.split("/")[-1]}
 
-    monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch._fetch_json", fake_fetch)
+    monkeypatch.setattr("composer_ingest.scraper.sources.berlinphil.fetch._fetch_json", fake_fetch)
     list(iter_concerts(max_pages=2))
 
     detail_fetches = [p for p in fetched_paths if p.startswith("concert/")]

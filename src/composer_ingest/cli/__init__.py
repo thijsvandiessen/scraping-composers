@@ -2,7 +2,7 @@ import argparse
 import logging
 import sys
 
-from ..sources import REGISTRY
+from ..scraper.sources import REGISTRY
 from .ingest_cmds import DEFAULT_BUCKET_PATH, cmd_fetch, cmd_ingest, cmd_process
 from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats

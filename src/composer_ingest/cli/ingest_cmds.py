@@ -3,11 +3,11 @@ import logging
 import os
 from pathlib import Path
 
-from ..bucket import LocalBucket
-from ..db import get_engine, init_db
-from ..ingestion import run_ingest, run_ingest_from_bucket
-from ..raw_fetch import dump_to_bucket, iter_from_bucket
-from ..sources import REGISTRY
+from ..etl.db import get_engine, init_db
+from ..etl.ingestion import run_ingest, run_ingest_from_bucket
+from ..scraper.bucket import LocalBucket
+from ..scraper.raw_fetch import dump_to_bucket, iter_from_bucket
+from ..scraper.sources import REGISTRY
 
 DEFAULT_BUCKET_PATH = os.environ.get("BUCKET_PATH", "./raw-data")
 

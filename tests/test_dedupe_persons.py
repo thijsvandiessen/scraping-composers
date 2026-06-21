@@ -3,10 +3,10 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from composer_ingest.ingestion import run_ingest
-from composer_ingest.models import Entity, PersonMatch
-from composer_ingest.persons import dedupe_persons
-from composer_ingest.sources import SourceClaim
+from composer_ingest.etl.ingestion import run_ingest
+from composer_ingest.etl.models import Entity, PersonMatch
+from composer_ingest.etl.persons import dedupe_persons
+from composer_ingest.scraper.sources import SourceClaim
 from test_ingest import FakeSource, person
 
 

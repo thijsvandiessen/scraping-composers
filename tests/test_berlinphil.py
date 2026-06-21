@@ -1,8 +1,8 @@
 """Tests for parsing Digital Concert Hall concert payloads into records."""
 
-from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
-from composer_ingest.sources.berlinphil.artists import _Artist, _artist_records, _collect, _register
-from composer_ingest.sources.berlinphil.performances import _performances
+from composer_ingest.scraper.sources import SourceClaim, SourceRecord, SourceWorkMention
+from composer_ingest.scraper.sources.berlinphil.artists import _Artist, _artist_records, _collect, _register
+from composer_ingest.scraper.sources.berlinphil.performances import _performances
 
 # Trimmed copies of the real v2/concert/{id} structure: a concert with an
 # orchestra + conductor at concert level, works whose composer and soloists are

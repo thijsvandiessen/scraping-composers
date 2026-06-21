@@ -1,7 +1,7 @@
 """Tests for scoring person-name pairs and classifying the result."""
 
-from composer_ingest.persons.extract import parse_name
-from composer_ingest.persons.match import AUTO_THRESHOLD, REVIEW_THRESHOLD, classify, score
+from composer_ingest.etl.persons.extract import parse_name
+from composer_ingest.etl.persons.match import AUTO_THRESHOLD, REVIEW_THRESHOLD, classify, score
 
 
 def _score(a: str, b: str, ya: int | None = None, yb: int | None = None) -> tuple[float, str]:

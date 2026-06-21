@@ -3,8 +3,8 @@ import argparse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from ..db import get_engine, init_db
-from ..models import (
+from ..etl.db import get_engine, init_db
+from ..etl.models import (
     Claim,
     Entity,
     EntityRecord,
@@ -15,7 +15,7 @@ from ..models import (
     Work,
     WorkTitle,
 )
-from ..normalize import dedup_key
+from ..etl.normalize import dedup_key
 
 
 def cmd_stats(args: argparse.Namespace) -> int:

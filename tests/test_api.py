@@ -9,9 +9,9 @@ from sqlalchemy.pool import StaticPool
 
 import composer_ingest.api.deps as api_module
 from composer_ingest.api import app
-from composer_ingest.db import init_db
-from composer_ingest.ingestion import run_ingest
-from composer_ingest.sources import SourceClaim, SourceRecord
+from composer_ingest.etl.db import init_db
+from composer_ingest.etl.ingestion import run_ingest
+from composer_ingest.scraper.sources import SourceClaim, SourceRecord
 
 
 def _person(name: str, *claims: SourceClaim, external_id: str | None = None) -> SourceRecord:
