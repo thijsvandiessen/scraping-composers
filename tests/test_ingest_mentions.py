@@ -3,7 +3,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from composer_ingest.ingest import run_ingest
+from composer_ingest.ingestion import run_ingest
 from composer_ingest.models import Entity, RawWorkMention, Work, WorkTitle
 from composer_ingest.sources import SourceWorkMention
 from test_ingest import FakeSource, person

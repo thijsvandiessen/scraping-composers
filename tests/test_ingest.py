@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from composer_ingest.ingest import run_ingest
+from composer_ingest.ingestion import run_ingest
 from composer_ingest.models import Claim, Entity, EntityRecord, IngestRun
 from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
 
