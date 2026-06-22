@@ -1,8 +1,9 @@
 """Tests for parsing the Concertgebouw archive search page dropdowns."""
 
-from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
+from composer_ingest.sources import SourceClaim
 from composer_ingest.sources.concertgebouw.dropdowns import _options, _record
 from composer_ingest.sources.concertgebouw.performances import _performances
+from doc_helpers import MentionView, RecordView
 
 # Trimmed copy of the real page structure: unquoted option values, a quoted
 # "0" placeholder, HTML entities, and the label formats of all three selects.
@@ -30,9 +31,9 @@ PAGE = """\
 """
 
 
-def records(select_id: str, profession: str) -> list[SourceRecord]:
+def records(select_id: str, profession: str) -> list[RecordView]:
     parsed = [_record(select_id, profession, value, label) for value, label in _options(PAGE, select_id)]
-    return [record for record in parsed if record is not None]
+    return [RecordView(doc) for doc in parsed if doc is not None]
 
 
 def test_composer_with_life_years() -> None:
@@ -147,8 +148,8 @@ LIST_PAGE = """\
 """
 
 
-def performances() -> list[SourceWorkMention]:
-    return list(_performances(LIST_PAGE))
+def performances() -> list[MentionView]:
+    return [MentionView(doc) for doc in _performances(LIST_PAGE)]
 
 
 def test_concert_start_row_becomes_a_work_mention() -> None:
@@ -223,7 +224,7 @@ LIST_PAGE_WITH_VOICE = """\
 
 
 def test_soloist_voice_type_is_split_into_name_and_discipline() -> None:
-    mention = list(_performances(LIST_PAGE_WITH_VOICE))[0]
+    mention = MentionView(list(_performances(LIST_PAGE_WITH_VOICE))[0])
     # the parenthetical is stripped from the name and kept as the discipline
     assert mention.raw["soloists"] == [
         {"name": "Oehman, Martin", "discipline": "tenor"},
@@ -233,5 +234,5 @@ def test_soloist_voice_type_is_split_into_name_and_discipline() -> None:
 
 def test_soloist_without_voice_type_has_no_discipline() -> None:
     # The original LIST_PAGE has soloists with no parentheticals.
-    mention = list(_performances(LIST_PAGE))[1]
+    mention = MentionView(list(_performances(LIST_PAGE))[1])
     assert mention.raw["soloists"] == [{"name": "Hagedorn, Meta", "discipline": None}]

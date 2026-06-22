@@ -21,7 +21,7 @@ import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-from .. import SourceWorkMention
+from ...document import Document, work_mention_document
 
 # the List-view result table and its rows/cells
 _TABLE = re.compile(r'<table id="zoekresultaat".*?</table>', re.DOTALL)
@@ -70,9 +70,9 @@ def _list_rows(page: str) -> Iterator[list[str]]:
         yield [_cell_text(c) for c in cells]
 
 
-def _performance_record(perf: _Perf) -> SourceWorkMention:
-    return SourceWorkMention(
-        external_id=f"perf:{perf.index}",
+def _performance_record(perf: _Perf) -> Document:
+    return work_mention_document(
+        id=f"perf:{perf.index}",
         title=perf.title,
         composer=perf.composer or None,
         raw={
@@ -87,7 +87,7 @@ def _performance_record(perf: _Perf) -> SourceWorkMention:
     )
 
 
-def _performances(page: str) -> Iterator[SourceWorkMention]:
+def _performances(page: str) -> Iterator[Document]:
     """Yield one work mention per work-performance in the List view.
 
     A row with a DATE opens a concert (date/city carry forward); a row with a

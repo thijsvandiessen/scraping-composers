@@ -4,10 +4,9 @@ LocalBucket writes NDJSON files under a local directory tree:
 
     {root}/{source_name}/{run_id}/records.ndjson
 
-Each line is a JSON object with a ``_type`` field (``"record"`` or
-``"work_mention"``) followed by the fields of ``SourceRecord`` or
-``SourceWorkMention``.  Replacing ``LocalBucket`` with an ``S3Bucket``
-implementation later requires no changes to the callers.
+Each line is a JSON object: the fields of one ``Document`` (id, source_name,
+url, ingested_at, doc_type, content_hash, body).  Replacing ``LocalBucket``
+with an ``S3Bucket`` implementation later requires no changes to the callers.
 """
 
 from __future__ import annotations

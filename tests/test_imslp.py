@@ -7,8 +7,14 @@ from typing import Any
 import httpx
 import pytest
 
-from composer_ingest.sources.imslp import fetch_records
+from composer_ingest.sources.imslp import SCRAPER
 from composer_ingest.sources.imslp.fetch import _fetch_page
+from doc_helpers import RecordView
+
+
+def fetch_records(max_pages: int | None = None) -> list[RecordView]:
+    """Run the imslp scraper and view each document as the old SourceRecord."""
+    return [RecordView(doc) for doc in SCRAPER.fetch_documents(max_pages=max_pages)]
 
 
 def _page(*names: str, more: bool = False) -> dict[str, Any]:
@@ -52,7 +58,7 @@ def test_fetch_page_includes_start_in_url() -> None:
 
 
 def test_fetch_page_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.imslp.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -69,7 +75,7 @@ def test_fetch_page_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_fetch_page_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.imslp.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="always fails")

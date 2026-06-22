@@ -2,10 +2,11 @@
 
 import pytest
 
-from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
+from composer_ingest.sources import SourceClaim
 from composer_ingest.sources.nyphil.people import ROLES, _aggregate, _record
 from composer_ingest.sources.nyphil.performances import _performances
 from composer_ingest.sources.nyphil.text import _names
+from doc_helpers import MentionView, RecordView
 
 # Trimmed copy of the real structure: double-spaced names, ";"-joined
 # conductors, the "Not conducted" sentinel, soloists with and without an
@@ -84,9 +85,12 @@ PROGRAMS = [
 ]
 
 
-def records() -> dict[str, SourceRecord]:
+def records() -> dict[str, RecordView]:
     people = _aggregate(PROGRAMS)
-    return {f"{role}:{name}": _record(role, name, person) for (role, name), person in people.items()}
+    return {
+        f"{role}:{name}": RecordView(_record(role, name, person))
+        for (role, name), person in people.items()
+    }
 
 
 def test_whitespace_runs_collapse_and_programs_count_once() -> None:
@@ -158,8 +162,8 @@ def test_blank_soloist_names_and_intervals_are_skipped() -> None:
     assert set(parsed) == expected
 
 
-def performances() -> dict[str, SourceWorkMention]:
-    return {mention.external_id: mention for mention in _performances(PROGRAMS)}
+def performances() -> dict[str, MentionView]:
+    return {doc.id: MentionView(doc) for doc in _performances(PROGRAMS)}
 
 
 def test_performance_mention_carries_composer_title_and_context() -> None:

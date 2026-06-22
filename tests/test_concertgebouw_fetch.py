@@ -16,18 +16,8 @@ from composer_ingest.sources.concertgebouw.fetch import (
 )
 
 
-def _patch_client(
-    monkeypatch: pytest.MonkeyPatch,
-    handler: Callable[[httpx.Request], httpx.Response],
-) -> None:
-    """Replace httpx.Client inside concertgebouw.fetch with one backed by a mock transport."""
-
-    class _MockedClient(httpx.Client):
-        def __init__(self, **kw: Any) -> None:
-            kw["transport"] = httpx.MockTransport(handler)
-            super().__init__(**kw)
-
-    monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch.httpx.Client", _MockedClient)
+def _client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler))
 
 
 # ---------------------------------------------------------------------------
@@ -35,16 +25,16 @@ def _patch_client(
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_returns_response_text(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_returns_response_text() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="<html>archive</html>")
 
-    _patch_client(monkeypatch, handler)
-    assert _fetch("test", method="GET", url=SEARCH_URL) == "<html>archive</html>"
+    with _client(handler) as client:
+        assert _fetch(client, "test", method="GET", url=SEARCH_URL) == "<html>archive</html>"
 
 
 def test_fetch_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -53,22 +43,22 @@ def test_fetch_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
             return httpx.Response(503, text="Server Error")
         return httpx.Response(200, text="<html>ok</html>")
 
-    _patch_client(monkeypatch, handler)
-    result = _fetch("test", method="GET", url=SEARCH_URL)
+    with _client(handler) as client:
+        result = _fetch(client, "test", method="GET", url=SEARCH_URL)
 
     assert len(attempts) == 3
     assert result == "<html>ok</html>"
 
 
 def test_fetch_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="Always failing")
 
-    _patch_client(monkeypatch, handler)
-    with pytest.raises(httpx.HTTPStatusError):
-        _fetch("test", method="GET", url=SEARCH_URL)
+    with _client(handler) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            _fetch(client, "test", method="GET", url=SEARCH_URL)
 
 
 # ---------------------------------------------------------------------------
@@ -79,12 +69,13 @@ def test_fetch_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatc
 def test_fetch_search_page_issues_get_to_search_url(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_fetch(label: str, **kwargs: Any) -> str:
+    def fake_fetch(client: httpx.Client, label: str, **kwargs: Any) -> str:
         calls.append(kwargs)
         return "<html/>"
 
     monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch._fetch", fake_fetch)
-    _fetch_search_page()
+    with _client(lambda r: httpx.Response(200, text="")) as client:
+        _fetch_search_page(client)
 
     assert len(calls) == 1
     assert calls[0]["method"] == "GET"
@@ -94,12 +85,13 @@ def test_fetch_search_page_issues_get_to_search_url(monkeypatch: pytest.MonkeyPa
 def test_fetch_list_page_issues_post_with_list_button(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_fetch(label: str, **kwargs: Any) -> str:
+    def fake_fetch(client: httpx.Client, label: str, **kwargs: Any) -> str:
         calls.append(kwargs)
         return "<html/>"
 
     monkeypatch.setattr("composer_ingest.sources.concertgebouw.fetch._fetch", fake_fetch)
-    _fetch_list_page()
+    with _client(lambda r: httpx.Response(200, text="")) as client:
+        _fetch_list_page(client)
 
     assert len(calls) == 1
     assert calls[0]["method"] == "POST"

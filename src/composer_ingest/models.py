@@ -115,6 +115,8 @@ class EntityRecord(Base):
     name: Mapped[str] = mapped_column(String(300))
     url: Mapped[str | None] = mapped_column(String(500))
     raw: Mapped[str] = mapped_column(Text)  # original payload as JSON
+    # sha256 of the document body; lets a re-ingest detect changed content
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     first_run_id: Mapped[int] = mapped_column(ForeignKey("ingest_runs.id"))
@@ -231,6 +233,8 @@ class RawWorkMention(Base):
     match_score: Mapped[float | None] = mapped_column(Float)
     match_method: Mapped[str | None] = mapped_column(String(50))
     candidate_work_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("works.id"))
+    # sha256 of the document body; lets a re-ingest detect changed content
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     first_run_id: Mapped[int] = mapped_column(ForeignKey("ingest_runs.id"))

@@ -30,7 +30,7 @@ def test_fetch_json_returns_parsed_response() -> None:
 
 
 def test_fetch_json_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -47,7 +47,7 @@ def test_fetch_json_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_fetch_json_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="Always failing")
@@ -108,7 +108,8 @@ def test_iter_concerts_yields_detail_for_each_id(monkeypatch: pytest.MonkeyPatch
         return {"id": path.split("/")[-1]}
 
     monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch._fetch_json", fake_fetch)
-    concerts = list(iter_concerts())
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))) as client:
+        concerts = list(iter_concerts(client))
 
     assert len(concerts) == 2
     assert concerts[0] == {"id": "10"}
@@ -126,7 +127,8 @@ def test_iter_concerts_respects_max_pages(monkeypatch: pytest.MonkeyPatch) -> No
         return {"id": path.split("/")[-1]}
 
     monkeypatch.setattr("composer_ingest.sources.berlinphil.fetch._fetch_json", fake_fetch)
-    list(iter_concerts(max_pages=2))
+    with httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))) as client:
+        list(iter_concerts(client, max_pages=2))
 
     detail_fetches = [p for p in fetched_paths if p.startswith("concert/")]
     assert len(detail_fetches) == 2

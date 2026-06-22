@@ -13,7 +13,7 @@ import html
 import re
 from collections.abc import Iterator
 
-from .. import SourceClaim, SourceRecord
+from ...document import Document, SourceClaim, entity_document
 
 # select element id -> the profession the source asserts by listing a person
 # in that dropdown
@@ -43,7 +43,7 @@ def _options(page: str, select_id: str) -> Iterator[tuple[str, str]]:
         yield value, html.unescape(label).strip()
 
 
-def _record(select_id: str, profession: str, value: str, label: str) -> SourceRecord | None:
+def _record(select_id: str, profession: str, value: str, label: str) -> Document | None:
     claims = [SourceClaim("has_profession", "profession", profession)]
     name = label
     if select_id == "componistcode":
@@ -61,8 +61,8 @@ def _record(select_id: str, profession: str, value: str, label: str) -> SourceRe
             claims.append(SourceClaim("performs_as", value=discipline.group(1).strip()))
     if not name:
         return None
-    return SourceRecord(
-        external_id=f"{select_id}:{value}",
+    return entity_document(
+        id=f"{select_id}:{value}",
         name=name,
         url=None,
         raw={"select": select_id, "value": value, "label": label},

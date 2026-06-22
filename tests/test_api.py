@@ -10,13 +10,13 @@ from sqlalchemy.pool import StaticPool
 import composer_ingest.api as api_module
 from composer_ingest.api import app
 from composer_ingest.db import init_db
+from composer_ingest.document import Document, SourceClaim, entity_document, stamp
 from composer_ingest.ingest import run_ingest
-from composer_ingest.sources import SourceClaim, SourceRecord
 
 
-def _person(name: str, *claims: SourceClaim, external_id: str | None = None) -> SourceRecord:
-    return SourceRecord(
-        external_id=external_id or f"id:{name}",
+def _person(name: str, *claims: SourceClaim, external_id: str | None = None) -> Document:
+    return entity_document(
+        id=external_id or f"id:{name}",
         name=name,
         url=None,
         raw={"id": name},
@@ -28,11 +28,12 @@ class _FakeSource:
     NAME = "fake"
     BASE_URL = "https://fake.example"
 
-    def __init__(self, records: list[SourceRecord]) -> None:
+    def __init__(self, records: list[Document]) -> None:
         self._records = records
 
-    def fetch_records(self, max_pages: int | None = None) -> Iterator[SourceRecord]:
-        yield from self._records
+    def fetch_documents(self, max_pages: int | None = None) -> Iterator[Document]:
+        for record in self._records:
+            yield stamp(record, self.NAME)
 
 
 @pytest.fixture

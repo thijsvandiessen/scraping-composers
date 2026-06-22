@@ -13,12 +13,11 @@ blocks would exceed URL length limits as GET parameters).
 
 from __future__ import annotations
 
-import logging
-import time
 from typing import Any
 
 import httpx
 
+from ...http import Http
 from .parse import METRICS, _literal
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
@@ -27,8 +26,6 @@ REQUEST_DELAY_S = 1.0
 # 5 attempts back off 2+4+8+16s — long enough to ride out a laptop
 # sleep/wake network blip, not just a WDQS hiccup
 RETRIES = 5
-
-log = logging.getLogger(__name__)
 
 QUERY = """\
 SELECT ?item ?itemLabel ?birth ?birthPrecision ?death ?deathPrecision
@@ -76,28 +73,18 @@ GROUP BY ?item ?sitelinks ?statements ?identifiers
 
 
 def _run_query(client: httpx.Client, query: str, desc: str) -> list[dict[str, Any]]:
-    """Execute a SPARQL query with retries. Queries go via POST: responses to
-    POST bypass the WDQS edge cache (which can serve a body truncated
+    """Execute a SPARQL query with retries (WDQS rate-limits with 429 +
+    Retry-After, which the shared Http honors). Queries go via POST: responses
+    to POST bypass the WDQS edge cache (which can serve a body truncated
     mid-stream as a cached 200 for 300s, defeating retries), and large VALUES
     blocks would exceed URL length limits as GET parameters."""
-    for attempt in range(1, RETRIES + 1):
-        try:
-            resp = client.post(SPARQL_URL, data={"query": query, "format": "json"})
-            resp.raise_for_status()
-            bindings: list[dict[str, Any]] = resp.json()["results"]["bindings"]
-            return bindings
-        except (httpx.HTTPError, ValueError, KeyError) as exc:
-            if attempt == RETRIES:
-                raise
-            wait = 2**attempt
-            # WDQS rate-limits with 429 + Retry-After; honor it when present
-            if isinstance(exc, httpx.HTTPStatusError):
-                retry_after = exc.response.headers.get("Retry-After", "")
-                if retry_after.isdigit():
-                    wait = max(wait, int(retry_after))
-            log.warning("%s failed (%s), retrying in %ds", desc, exc, wait)
-            time.sleep(wait)
-    raise AssertionError("unreachable")
+    bindings: list[dict[str, Any]] = Http(client, retries=RETRIES, honor_retry_after=True).post_json(
+        SPARQL_URL,
+        data={"query": query, "format": "json"},
+        extract=lambda payload: payload["results"]["bindings"],
+        desc=desc,
+    )
+    return bindings
 
 
 def _fetch_page(client: httpx.Client, offset: int) -> list[dict[str, Any]]:

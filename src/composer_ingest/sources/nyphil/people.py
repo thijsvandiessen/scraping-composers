@@ -15,7 +15,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from .. import SourceClaim, SourceRecord
+from ...document import Document, SourceClaim, entity_document
 from .text import _WS, _names
 
 ROLES = ("composer", "conductor", "soloist")
@@ -56,7 +56,7 @@ def _aggregate(programs: Iterable[dict[str, Any]]) -> dict[tuple[str, str], _Per
     return people
 
 
-def _record(role: str, name: str, person: _Person) -> SourceRecord:
+def _record(role: str, name: str, person: _Person) -> Document:
     claims = [SourceClaim("has_profession", "profession", role)]
     for instrument in sorted(person.instruments):
         claims.append(SourceClaim("performs_as", value=instrument))
@@ -74,8 +74,8 @@ def _record(role: str, name: str, person: _Person) -> SourceRecord:
     }
     if person.instruments:
         raw["instruments"] = sorted(person.instruments)
-    return SourceRecord(
-        external_id=f"{role}:{name}",
+    return entity_document(
+        id=f"{role}:{name}",
         name=name,
         url=None,
         raw=raw,

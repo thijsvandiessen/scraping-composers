@@ -3,14 +3,14 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from composer_ingest.document import Document, work_mention_document
 from composer_ingest.ingest import run_ingest
 from composer_ingest.models import Entity, RawWorkMention, Work, WorkTitle
-from composer_ingest.sources import SourceWorkMention
 from test_ingest import FakeSource, person
 
 
-def mention(title: str, composer: str | None, external_id: str = "m1") -> SourceWorkMention:
-    return SourceWorkMention(external_id=external_id, title=title, composer=composer, raw={"title": title})
+def mention(title: str, composer: str | None, external_id: str = "m1") -> Document:
+    return work_mention_document(id=external_id, title=title, composer=composer, raw={"title": title})
 
 
 def test_mention_creates_work_alias_and_mention(session: Session) -> None:

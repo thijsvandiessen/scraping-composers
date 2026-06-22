@@ -6,30 +6,31 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from composer_ingest.document import Document, SourceClaim, entity_document, stamp
 from composer_ingest.ingest import run_ingest
 from composer_ingest.models import Claim, Entity, EntityRecord, IngestRun
-from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
 
 
 @dataclass
 class FakeSource:
-    """In-memory stand-in for a source module (satisfies ``SourceLike``)."""
+    """In-memory stand-in for a source (satisfies ``SourceLike``). Stamps each
+    document the way the real ``Scraper`` does (source name + content hash)."""
 
-    records: tuple[SourceRecord | SourceWorkMention, ...]
+    records: tuple[Document, ...]
     NAME: str = "fake"
     BASE_URL: str = "https://fake.example"
     fail_after: int | None = None
 
-    def fetch_records(self, max_pages: int | None = None) -> Iterator[SourceRecord | SourceWorkMention]:
+    def fetch_documents(self, max_pages: int | None = None) -> Iterator[Document]:
         for i, record in enumerate(self.records):
             if self.fail_after is not None and i >= self.fail_after:
                 raise RuntimeError("source exploded")
-            yield record
+            yield stamp(record, self.NAME)
 
 
-def person(name: str, *claims: SourceClaim, external_id: str | None = None) -> SourceRecord:
-    return SourceRecord(
-        external_id=external_id or f"Category:{name}",
+def person(name: str, *claims: SourceClaim, external_id: str | None = None) -> Document:
+    return entity_document(
+        id=external_id or f"Category:{name}",
         name=name,
         url=None,
         raw={"id": name},
@@ -164,8 +165,8 @@ def test_claim_objects_are_deduplicated_entities(session: Session) -> None:
 def test_mentioned_in_uses_record_url_when_present(session: Session) -> None:
     source = FakeSource(
         records=(
-            SourceRecord(
-                external_id="abc",
+            entity_document(
+                id="abc",
                 name="Mozart, Wolfgang Amadeus",
                 url="https://example.com/mozart",
                 raw={"id": "abc"},
@@ -254,4 +255,45 @@ def test_last_edited_at_unchanged_on_reingest_with_same_claims(session: Session)
     session.expire(entity)
 
     # no new claims were added, so last_edited_at should not advance
+    assert entity.last_edited_at == edited_after_first
+
+
+def test_changed_content_refreshes_record_and_adds_claims(session: Session) -> None:
+    run_ingest(session, FakeSource(records=(entity_document(id="p1", name="Mozart", raw={"v": 1}),)))
+
+    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+    edited_after_first = entity.last_edited_at
+    assert session.scalars(select(EntityRecord)).one().raw == '{"v": 1}'
+
+    # same id, new body content + a new claim -> different content_hash
+    changed = entity_document(
+        id="p1",
+        name="Mozart",
+        raw={"v": 2},
+        claims=(SourceClaim("born_on", value="1756-01-27"),),
+    )
+    run = run_ingest(session, FakeSource(records=(changed,)))
+    assert run.records_new == 0  # the id was already seen, not a new record
+
+    session.expire_all()
+    assert session.scalars(select(EntityRecord)).one().raw == '{"v": 2}'  # fields refreshed
+    born = session.scalars(select(Claim).where(Claim.predicate == "born_on")).one()
+    assert born.value == "1756-01-27"  # the new claim was added
+    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+    assert entity.last_edited_at >= edited_after_first
+
+
+def test_unchanged_content_is_not_re_edited(session: Session) -> None:
+    # re-ingesting the identical document must not touch claims or last_edited
+    doc = entity_document(id="p1", name="Bach", claims=(SourceClaim("born_on", value="1685"),))
+    run_ingest(session, FakeSource(records=(doc,)))
+    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+    edited_after_first = entity.last_edited_at
+    claims_after_first = session.scalar(select(func.count(Claim.id)))
+
+    run_ingest(session, FakeSource(records=(doc,)))
+    session.expire_all()
+
+    assert session.scalar(select(func.count(Claim.id))) == claims_after_first
+    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
     assert entity.last_edited_at == edited_after_first

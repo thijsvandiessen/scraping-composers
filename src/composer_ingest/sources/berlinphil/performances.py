@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from .. import SourceWorkMention
+from ...document import Document, work_mention_document
 from .fetch import BASE_URL
 
 # Berlin local time: a concert's start timestamp is a Unix instant, and the
@@ -60,7 +60,7 @@ def _soloists_with_discipline(work: dict[str, Any]) -> list[dict[str, str | None
 
 def _performance_record(
     concert: dict[str, Any], season: str, work: dict[str, Any]
-) -> SourceWorkMention | None:
+) -> Document | None:
     title = (work.get("title") or "").strip()
     if not title:
         return None
@@ -75,8 +75,8 @@ def _performance_record(
     periods = [e["name"] for e in work.get("_links", {}).get("epoch", []) if e.get("name")]
     date = _concert_date(concert)
 
-    return SourceWorkMention(
-        external_id=f"perf:{work_id}",
+    return work_mention_document(
+        id=f"perf:{work_id}",
         title=title,
         composer=composers[0] if composers else None,
         raw={
@@ -97,7 +97,7 @@ def _performance_record(
     )
 
 
-def _performances(concert: dict[str, Any]) -> Iterator[SourceWorkMention]:
+def _performances(concert: dict[str, Any]) -> Iterator[Document]:
     """Yield one work mention per titled work in the concert's programme."""
     season = next((s.get("label") for s in concert.get("_links", {}).get("season", [])), "")
     for work in concert.get("_embedded", {}).get("work", []):

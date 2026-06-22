@@ -1,8 +1,9 @@
 """Tests for parsing Digital Concert Hall concert payloads into records."""
 
-from composer_ingest.sources import SourceClaim, SourceRecord, SourceWorkMention
+from composer_ingest.sources import SourceClaim
 from composer_ingest.sources.berlinphil.artists import _Artist, _artist_records, _collect, _register
 from composer_ingest.sources.berlinphil.performances import _performances
+from doc_helpers import MentionView, RecordView
 
 # Trimmed copies of the real v2/concert/{id} structure: a concert with an
 # orchestra + conductor at concert level, works whose composer and soloists are
@@ -138,11 +139,11 @@ CONCERTS = [
 ]
 
 
-def performances() -> dict[str, SourceWorkMention]:
-    mentions: dict[str, SourceWorkMention] = {}
+def performances() -> dict[str, MentionView]:
+    mentions: dict[str, MentionView] = {}
     for concert in CONCERTS:
-        for mention in _performances(concert):
-            mentions[mention.external_id] = mention
+        for doc in _performances(concert):
+            mentions[doc.id] = MentionView(doc)
     return mentions
 
 
@@ -183,11 +184,11 @@ def test_untitled_work_yields_no_mention() -> None:
     assert "perf:56465-9" not in performances()
 
 
-def artists() -> dict[str, SourceRecord]:
+def artists() -> dict[str, RecordView]:
     registry: dict[str, _Artist] = {}
     for concert in CONCERTS:
         _collect(concert, registry)
-    return {record.external_id: record for record in _artist_records(registry)}
+    return {doc.id: RecordView(doc) for doc in _artist_records(registry)}
 
 
 def test_orchestra_becomes_a_claimless_ensemble_record() -> None:

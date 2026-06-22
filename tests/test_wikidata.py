@@ -7,8 +7,17 @@ import httpx
 import pytest
 
 from composer_ingest.sources import SourceClaim
-from composer_ingest.sources.wikidata.parse import _format_time, _records_from_rows
+from composer_ingest.sources.wikidata.parse import _format_time
+from composer_ingest.sources.wikidata.parse import _records_from_rows as _rows_to_docs
 from composer_ingest.sources.wikidata.query import _fetch_metrics, _fetch_page, _run_query
+from doc_helpers import RecordView
+
+
+def _records_from_rows(
+    rows: list[dict[str, Any]], metrics: dict[str, dict[str, str]] | None = None
+) -> list[RecordView]:
+    """View each parsed document as the old SourceRecord for the assertions."""
+    return [RecordView(doc) for doc in _rows_to_docs(rows, metrics)]
 
 
 def row(qid: str, label: str | None = None, **vars: str) -> dict[str, Any]:
@@ -141,7 +150,7 @@ def test_truncated_body_is_retried_via_uncached_post(monkeypatch: pytest.MonkeyP
     """A WDQS timeout can truncate the body mid-stream yet still return 200;
     the retry must not hit the edge cache (POST bypasses it) or it would get
     the same broken body back for 300s."""
-    monkeypatch.setattr("composer_ingest.sources.wikidata.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", lambda _: None)
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -209,7 +218,7 @@ def test_records_without_metrics_get_no_metric_claims() -> None:
 
 
 def test_run_query_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.wikidata.query.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="Internal Server Error")
@@ -221,7 +230,7 @@ def test_run_query_raises_after_all_retries_exhausted(monkeypatch: pytest.Monkey
 
 def test_run_query_honors_retry_after_header(monkeypatch: pytest.MonkeyPatch) -> None:
     sleeps: list[float] = []
-    monkeypatch.setattr("composer_ingest.sources.wikidata.query.time.sleep", sleeps.append)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", sleeps.append)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -238,7 +247,7 @@ def test_run_query_honors_retry_after_header(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_run_query_retries_on_malformed_json(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_ingest.sources.wikidata.query.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_ingest.http.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

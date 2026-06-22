@@ -1,7 +1,7 @@
-"""Bridge between source modules and the raw data bucket.
+"""Bridge between sources and the raw data bucket.
 
-dump_to_bucket   — fetch live records from a source, serialize, store.
-iter_from_bucket — deserialize stored records back to typed objects.
+dump_to_bucket   — fetch live documents from a source, serialize, store.
+iter_from_bucket — deserialize stored documents back to ``Document`` objects.
 """
 
 from __future__ import annotations
@@ -13,26 +13,16 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .bucket import Bucket
-from .sources import SourceClaim, SourceLike, SourceRecord, SourceWorkMention
+from .document import Document
+from .sources import SourceLike
 
 
-def _serialize(item: SourceRecord | SourceWorkMention) -> dict[str, Any]:
-    d = dataclasses.asdict(item)
-    if isinstance(item, SourceRecord):
-        d["_type"] = "record"
-    else:
-        d["_type"] = "work_mention"
-    return d
+def _serialize(doc: Document) -> dict[str, Any]:
+    return dataclasses.asdict(doc)
 
 
-def _deserialize(d: dict[str, Any]) -> SourceRecord | SourceWorkMention:
-    kind = d.pop("_type")
-    if kind == "record":
-        claims = tuple(SourceClaim(**c) for c in d.pop("claims", []))
-        return SourceRecord(**d, claims=claims)
-    if kind == "work_mention":
-        return SourceWorkMention(**d)
-    raise ValueError(f"unknown _type in bucket record: {kind!r}")
+def _deserialize(d: dict[str, Any]) -> Document:
+    return Document(**d)
 
 
 def dump_to_bucket(
@@ -40,13 +30,13 @@ def dump_to_bucket(
     bucket: Bucket,
     max_pages: int | None = None,
 ) -> str:
-    """Fetch all records from *source* and write them to *bucket*.
+    """Fetch all documents from *source* and write them to *bucket*.
 
     Returns the run_id (an ISO-8601 UTC timestamp string) so the caller can
-    pass it to ``iter_from_bucket`` or ``process`` CLI command.
+    pass it to ``iter_from_bucket`` or the ``process`` CLI command.
     """
     run_id = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S") + "-" + uuid.uuid4().hex[:8]
-    records = (_serialize(item) for item in source.fetch_records(max_pages=max_pages))
+    records = (_serialize(doc) for doc in source.fetch_documents(max_pages=max_pages))
     bucket.write_records(source.NAME, run_id, records)
     return run_id
 
@@ -55,7 +45,7 @@ def iter_from_bucket(
     source_name: str,
     run_id: str,
     bucket: Bucket,
-) -> Iterator[SourceRecord | SourceWorkMention]:
-    """Yield typed records previously stored by ``dump_to_bucket``."""
+) -> Iterator[Document]:
+    """Yield documents previously stored by ``dump_to_bucket``."""
     for d in bucket.read_records(source_name, run_id):
         yield _deserialize(d)

@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-from .. import SourceWorkMention
+from ...document import Document, work_mention_document
 from .text import _WS, _names
 
 
@@ -41,7 +41,7 @@ def _performance_record(
     work_idx: int,
     concert: dict[str, Any],
     work: dict[str, Any],
-) -> SourceWorkMention:
+) -> Document:
     title = _title(work.get("workTitle"))
     composers = list(_names(work.get("composerName")))
     conductors = list(_names(work.get("conductorName")))
@@ -67,15 +67,15 @@ def _performance_record(
     }
     if work.get("movement"):
         raw["movement"] = work["movement"]
-    return SourceWorkMention(
-        external_id=f"perf:{program_id}:{concert_idx}:{work_idx}",
+    return work_mention_document(
+        id=f"perf:{program_id}:{concert_idx}:{work_idx}",
         title=title,
         composer=composers[0] if composers else None,
         raw=raw,
     )
 
 
-def _performances(programs: Iterable[dict[str, Any]]) -> Iterator[SourceWorkMention]:
+def _performances(programs: Iterable[dict[str, Any]]) -> Iterator[Document]:
     """Yield one work mention per titled work at each concert of its program.
 
     ``work_idx`` is the work's position in the program's ``works`` list (kept

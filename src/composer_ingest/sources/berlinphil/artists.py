@@ -16,7 +16,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
-from .. import SourceClaim, SourceRecord
+from ...document import Document, SourceClaim, entity_document
 from .fetch import BASE_URL
 
 # role.type -> the profession asserted by appearing in that role
@@ -73,27 +73,27 @@ def _collect(concert: dict[str, Any], registry: dict[str, _Artist]) -> None:
             _register(registry, artist)
 
 
-def _artist_record(info: _Artist) -> SourceRecord:
+def _artist_record(info: _Artist) -> Document:
     kind = "ensemble" if info.is_group else "person"
     claims: list[SourceClaim] = []
     if not info.is_group:
         claims += [SourceClaim("has_profession", "profession", p) for p in sorted(info.professions)]
         claims += [SourceClaim("performs_as", value=d) for d in sorted(info.disciplines)]
-    return SourceRecord(
-        external_id=f"artist:{info.id}",
+    return entity_document(
+        id=f"artist:{info.id}",
         name=info.name,
         url=f"{BASE_URL}/en/artist/{info.id}",
+        kind=kind,
+        claims=tuple(claims),
         raw={
             "id": info.id,
             "name": info.name,
             "professions": sorted(info.professions),
             "disciplines": sorted(info.disciplines),
         },
-        kind=kind,
-        claims=tuple(claims),
     )
 
 
-def _artist_records(registry: dict[str, _Artist]) -> Iterator[SourceRecord]:
+def _artist_records(registry: dict[str, _Artist]) -> Iterator[Document]:
     for info in registry.values():
         yield _artist_record(info)

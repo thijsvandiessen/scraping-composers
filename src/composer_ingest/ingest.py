@@ -1,17 +1,22 @@
-"""Ingest pipeline: pull records from a source module and upsert them.
+"""Ingest pipeline: pull documents from a source and upsert them.
 
 Every run is recorded in ``ingest_runs`` (when, which source, how many new
-records). Records are idempotent on (source, external_id): re-ingesting
-refreshes ``last_seen`` instead of duplicating. New records are linked to a
+documents). Documents are idempotent on (source, id): re-ingesting refreshes
+``last_seen`` instead of duplicating. New entity documents are linked to a
 canonical ``Entity`` via (kind, normalized dedup key), so a second source
 ingested later attaches to existing entities instead of creating doubles.
-Claims reported by the source ("has_profession", "born_in", ...) are stored
-as edges with per-claim provenance; entity objects of claims (professions,
-places, ...) are themselves deduplicated entities.
+Claims reported by the source ("has_profession", "born_in", ...) are stored as
+edges with per-claim provenance; entity objects of claims (professions, places,
+...) are themselves deduplicated entities.
 
-If the source throws mid-run the already-committed batches are preserved;
-only the current uncommitted batch is rolled back. The run is marked
-"failed" with the error message and timestamp so the next run can try again.
+Each document carries a ``content_hash`` of its body. On re-ingest an unchanged
+document only refreshes ``last_seen``; a changed one overwrites the stored
+fields, re-derives claims / re-resolves the work, updates the hash, and bumps
+``last_edited``.
+
+If the source throws mid-run the already-committed batches are preserved; only
+the current uncommitted batch is rolled back. The run is marked "failed" with
+the error message and timestamp so the next run can try again.
 """
 
 from __future__ import annotations
@@ -21,13 +26,15 @@ import logging
 import uuid
 from collections.abc import Iterator
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from .document import Document
 from .models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, Work, WorkTitle, utcnow
 from .normalize import dedup_key, entity_uuid
-from .sources import SourceLike, SourceRecord, SourceWorkMention
+from .sources import SourceLike
 from .works import Candidate, WorkFeatures, extract_features, resolve
 
 log = logging.getLogger(__name__)
@@ -36,7 +43,7 @@ COMMIT_BATCH = 1000
 
 
 class _IngestError(Exception):
-    """Wraps a mid-run exception and carries the partial record counts."""
+    """Wraps a mid-run exception and carries the partial document counts."""
 
     def __init__(self, cause: Exception, seen: int, new: int) -> None:
         super().__init__(str(cause))
@@ -97,9 +104,131 @@ def new_work(composer_id: uuid.UUID | None, title: str, features: WorkFeatures) 
     )
 
 
+def _add_entity_claims(
+    session: Session,
+    *,
+    entity_id: uuid.UUID,
+    record_id: int,
+    source_id: int,
+    url: str | None,
+    base_url: str | None,
+    claims_data: list[dict[str, Any]],
+    entities_by_key: dict[tuple[str, str], uuid.UUID],
+    existing_claims: set[tuple[uuid.UUID, str, uuid.UUID | None, str | None]],
+    edited_entity_ids: set[uuid.UUID],
+) -> None:
+    """Add the auto ``mentioned_in`` claim plus the source's claims, skipping any
+    already present (so this is safe to call again when a document changed)."""
+    mention_url = url or base_url
+    mention_key = (entity_id, "mentioned_in", None, mention_url)
+    if mention_key not in existing_claims:
+        session.add(
+            Claim(
+                subject_id=entity_id,
+                predicate="mentioned_in",
+                value=mention_url,
+                source_id=source_id,
+                record_id=record_id,
+            )
+        )
+        existing_claims.add(mention_key)
+        edited_entity_ids.add(entity_id)
+
+    for claim in claims_data:
+        object_kind = claim.get("object_kind")
+        object_label = claim.get("object_label")
+        value = claim.get("value")
+        object_id = (
+            _get_or_create_entity(session, entities_by_key, object_kind, object_label)
+            if object_kind is not None and object_label is not None
+            else None
+        )
+        claim_key = (entity_id, claim["predicate"], object_id, value)
+        if claim_key not in existing_claims:
+            session.add(
+                Claim(
+                    subject_id=entity_id,
+                    predicate=claim["predicate"],
+                    object_id=object_id,
+                    value=value,
+                    source_id=source_id,
+                    record_id=record_id,
+                )
+            )
+            existing_claims.add(claim_key)
+            edited_entity_ids.add(entity_id)
+
+
+def _resolve_mention_columns(
+    session: Session,
+    item: Document,
+    entities_by_key: dict[tuple[str, str], uuid.UUID],
+    seen_entity_ids: set[uuid.UUID],
+    work_candidates: dict[uuid.UUID | None, list[Candidate]],
+) -> tuple[dict[str, Any], uuid.UUID | None, str, WorkFeatures]:
+    """Resolve one work mention to a canonical work (match/review/create) and
+    return the RawWorkMention column values plus the matched work id, title and
+    features (for saving the title alias). Shared by the create and update paths."""
+    composer = item.body.get("composer")
+    title = item.body["title"]
+    raw = item.body.get("raw", {})
+
+    composer_id: uuid.UUID | None = None
+    if composer:
+        composer_id = _get_or_create_entity(session, entities_by_key, "person", composer)
+        seen_entity_ids.add(composer_id)
+
+    features = extract_features(title)
+    result = resolve(features, work_candidates.get(composer_id, []))
+
+    matched_work_id = result.work_id
+    if result.status == "created":
+        work = new_work(composer_id, title, features)
+        session.add(work)
+        matched_work_id = work.id
+        work_candidates.setdefault(composer_id, []).append(Candidate(matched_work_id, features))
+
+    columns: dict[str, Any] = {
+        "raw_composer": composer,
+        "raw_title": title,
+        "raw": json.dumps(raw, ensure_ascii=False),
+        "composer_entity_id": composer_id,
+        "work_id": matched_work_id,
+        "match_status": result.status,
+        "match_score": result.score,
+        "match_method": result.method,
+        "candidate_work_id": result.candidate_work_id,
+        "content_hash": item.content_hash,
+    }
+    return columns, matched_work_id, title, features
+
+
+def _add_work_title(
+    session: Session,
+    matched_work_id: uuid.UUID | None,
+    title: str,
+    features: WorkFeatures,
+    source_id: int,
+    existing_work_titles: set[tuple[uuid.UUID, str]],
+) -> None:
+    if matched_work_id is None:
+        return
+    key = (matched_work_id, features.normalized_title)
+    if key not in existing_work_titles:
+        session.add(
+            WorkTitle(
+                work_id=matched_work_id,
+                title=title,
+                title_key=features.normalized_title,
+                source_id=source_id,
+            )
+        )
+        existing_work_titles.add(key)
+
+
 def _ingest_mention(
     session: Session,
-    mention: SourceWorkMention,
+    item: Document,
     source_id: int,
     run_id: int,
     entities_by_key: dict[tuple[str, str], uuid.UUID],
@@ -107,56 +236,21 @@ def _ingest_mention(
     work_candidates: dict[uuid.UUID | None, list[Candidate]],
     existing_work_titles: set[tuple[uuid.UUID, str]],
 ) -> int:
-    """Resolve one work mention to a canonical work (match/review/create), store
-    the mention with the decision, and save its title as an alias. Returns the
-    new mention's id."""
-    composer_id: uuid.UUID | None = None
-    if mention.composer:
-        composer_id = _get_or_create_entity(session, entities_by_key, "person", mention.composer)
-        seen_entity_ids.add(composer_id)
-
-    features = extract_features(mention.title)
-    result = resolve(features, work_candidates.get(composer_id, []))
-
-    matched_work_id = result.work_id
-    if result.status == "created":
-        work = new_work(composer_id, mention.title, features)
-        session.add(work)
-        matched_work_id = work.id
-        work_candidates.setdefault(composer_id, []).append(Candidate(matched_work_id, features))
-
+    """Resolve a new work mention, store it with the decision and save its title
+    alias. Returns the new mention's id."""
+    columns, matched_work_id, title, features = _resolve_mention_columns(
+        session, item, entities_by_key, seen_entity_ids, work_candidates
+    )
     mention_row = RawWorkMention(
         source_id=source_id,
-        external_id=mention.external_id,
-        raw_composer=mention.composer,
-        raw_title=mention.title,
-        raw=json.dumps(mention.raw, ensure_ascii=False),
-        composer_entity_id=composer_id,
-        work_id=matched_work_id,
-        match_status=result.status,
-        match_score=result.score,
-        match_method=result.method,
-        candidate_work_id=result.candidate_work_id,
+        external_id=item.id,
         first_run_id=run_id,
         last_run_id=run_id,
+        **columns,
     )
     session.add(mention_row)
     session.flush()
-
-    # save the raw title as an alias of the matched/created work
-    if matched_work_id is not None:
-        key = (matched_work_id, features.normalized_title)
-        if key not in existing_work_titles:
-            session.add(
-                WorkTitle(
-                    work_id=matched_work_id,
-                    title=mention.title,
-                    title_key=features.normalized_title,
-                    source_id=source_id,
-                )
-            )
-            existing_work_titles.add(key)
-
+    _add_work_title(session, matched_work_id, title, features, source_id, existing_work_titles)
     return mention_row.id
 
 
@@ -164,19 +258,22 @@ def _run_ingest_records(
     session: Session,
     source: Source,
     run: IngestRun,
-    records_iter: Iterator[SourceRecord | SourceWorkMention],
+    records_iter: Iterator[Document],
 ) -> tuple[int, int]:
     """Core ingest loop shared by run_ingest and run_ingest_from_bucket.
 
     Returns (records_seen, records_new).
     """
-    # Preload existing keys so the per-record loop needs no queries.
-    existing_records: dict[str, tuple[int, uuid.UUID | None]] = {
-        row[0]: (row[1], row[2])
+    # Preload existing keys so the per-document loop needs no queries.
+    existing_records: dict[str, tuple[int, uuid.UUID | None, str]] = {
+        row[0]: (row[1], row[2], row[3])
         for row in session.execute(
-            select(EntityRecord.external_id, EntityRecord.id, EntityRecord.entity_id).where(
-                EntityRecord.source_id == source.id
-            )
+            select(
+                EntityRecord.external_id,
+                EntityRecord.id,
+                EntityRecord.entity_id,
+                EntityRecord.content_hash,
+            ).where(EntityRecord.source_id == source.id)
         ).tuples()
     }
     entities_by_key: dict[tuple[str, str], uuid.UUID] = {
@@ -190,10 +287,12 @@ def _run_ingest_records(
             )
         ).tuples()
     )
-    existing_mentions: dict[str, int] = {
-        ext: mid
-        for ext, mid in session.execute(
-            select(RawWorkMention.external_id, RawWorkMention.id).where(RawWorkMention.source_id == source.id)
+    existing_mentions: dict[str, tuple[int, str]] = {
+        ext: (mid, chash)
+        for ext, mid, chash in session.execute(
+            select(RawWorkMention.external_id, RawWorkMention.id, RawWorkMention.content_hash).where(
+                RawWorkMention.source_id == source.id
+            )
         ).tuples()
     }
     existing_work_titles: set[tuple[uuid.UUID, str]] = set(
@@ -217,24 +316,42 @@ def _run_ingest_records(
         for item in records_iter:
             seen += 1
             now = utcnow()
-            if isinstance(item, SourceWorkMention):
-                existing_mid = existing_mentions.get(item.external_id)
-                if existing_mid is not None:
-                    session.execute(
-                        update(RawWorkMention)
-                        .where(RawWorkMention.id == existing_mid)
-                        .values(last_seen_at=now, last_run_id=run.id)
-                    )
+            if item.doc_type == "work_mention":
+                existing_mention = existing_mentions.get(item.id)
+                if existing_mention is not None:
+                    mention_id, prev_hash = existing_mention
+                    if prev_hash == item.content_hash:
+                        session.execute(
+                            update(RawWorkMention)
+                            .where(RawWorkMention.id == mention_id)
+                            .values(last_seen_at=now, last_run_id=run.id)
+                        )
+                    else:
+                        columns, matched_work_id, title, features = _resolve_mention_columns(
+                            session, item, entities_by_key, seen_entity_ids, work_candidates
+                        )
+                        session.execute(
+                            update(RawWorkMention)
+                            .where(RawWorkMention.id == mention_id)
+                            .values(last_seen_at=now, last_run_id=run.id, **columns)
+                        )
+                        _add_work_title(
+                            session, matched_work_id, title, features, source.id, existing_work_titles
+                        )
+                        existing_mentions[item.id] = (mention_id, item.content_hash)
                 else:
-                    existing_mentions[item.external_id] = _ingest_mention(
-                        session,
-                        item,
-                        source.id,
-                        run.id,
-                        entities_by_key,
-                        seen_entity_ids,
-                        work_candidates,
-                        existing_work_titles,
+                    existing_mentions[item.id] = (
+                        _ingest_mention(
+                            session,
+                            item,
+                            source.id,
+                            run.id,
+                            entities_by_key,
+                            seen_entity_ids,
+                            work_candidates,
+                            existing_work_titles,
+                        ),
+                        item.content_hash,
                     )
                     new += 1
                 if seen % COMMIT_BATCH == 0:
@@ -245,70 +362,83 @@ def _run_ingest_records(
                     log.info("progress: %d seen, %d new", seen, new)
                 continue
 
-            record = item
-            existing_entry = existing_records.get(record.external_id)
+            # entity document
+            name = item.body["name"]
+            kind = item.body["kind"]
+            raw = item.body.get("raw", {})
+            claims_data = item.body.get("claims", [])
+            existing_entry = existing_records.get(item.id)
             if existing_entry is not None:
-                existing_id, existing_entity_id = existing_entry
-                session.execute(
-                    update(EntityRecord)
-                    .where(EntityRecord.id == existing_id)
-                    .values(last_seen_at=now, last_run_id=run.id)
-                )
-                if existing_entity_id is not None:
-                    seen_entity_ids.add(existing_entity_id)
+                record_id, existing_entity_id, prev_hash = existing_entry
+                if prev_hash == item.content_hash:
+                    session.execute(
+                        update(EntityRecord)
+                        .where(EntityRecord.id == record_id)
+                        .values(last_seen_at=now, last_run_id=run.id)
+                    )
+                    if existing_entity_id is not None:
+                        seen_entity_ids.add(existing_entity_id)
+                else:
+                    entity_id = existing_entity_id or _get_or_create_entity(
+                        session, entities_by_key, kind, name
+                    )
+                    session.execute(
+                        update(EntityRecord)
+                        .where(EntityRecord.id == record_id)
+                        .values(
+                            name=name,
+                            url=item.url,
+                            raw=json.dumps(raw, ensure_ascii=False),
+                            content_hash=item.content_hash,
+                            last_seen_at=now,
+                            last_run_id=run.id,
+                        )
+                    )
+                    existing_records[item.id] = (record_id, entity_id, item.content_hash)
+                    seen_entity_ids.add(entity_id)
+                    edited_entity_ids.add(entity_id)
+                    _add_entity_claims(
+                        session,
+                        entity_id=entity_id,
+                        record_id=record_id,
+                        source_id=source.id,
+                        url=item.url,
+                        base_url=source.base_url,
+                        claims_data=claims_data,
+                        entities_by_key=entities_by_key,
+                        existing_claims=existing_claims,
+                        edited_entity_ids=edited_entity_ids,
+                    )
             else:
-                entity_id = _get_or_create_entity(session, entities_by_key, record.kind, record.name)
+                entity_id = _get_or_create_entity(session, entities_by_key, kind, name)
                 db_record = EntityRecord(
                     source_id=source.id,
                     entity_id=entity_id,
-                    external_id=record.external_id,
-                    name=record.name,
-                    url=record.url,
-                    raw=json.dumps(record.raw, ensure_ascii=False),
+                    external_id=item.id,
+                    name=name,
+                    url=item.url,
+                    raw=json.dumps(raw, ensure_ascii=False),
+                    content_hash=item.content_hash,
                     first_run_id=run.id,
                     last_run_id=run.id,
                 )
                 session.add(db_record)
                 session.flush()
-                existing_records[record.external_id] = (db_record.id, entity_id)
+                existing_records[item.id] = (db_record.id, entity_id, item.content_hash)
                 seen_entity_ids.add(entity_id)
                 new += 1
-
-                mention_url = record.url or source.base_url
-                mention_key = (entity_id, "mentioned_in", None, mention_url)
-                if mention_key not in existing_claims:
-                    session.add(
-                        Claim(
-                            subject_id=entity_id,
-                            predicate="mentioned_in",
-                            value=mention_url,
-                            source_id=source.id,
-                            record_id=db_record.id,
-                        )
-                    )
-                    existing_claims.add(mention_key)
-                    edited_entity_ids.add(entity_id)
-
-                for claim in record.claims:
-                    object_id = (
-                        _get_or_create_entity(session, entities_by_key, claim.object_kind, claim.object_label)
-                        if claim.object_kind is not None and claim.object_label is not None
-                        else None
-                    )
-                    claim_key = (entity_id, claim.predicate, object_id, claim.value)
-                    if claim_key not in existing_claims:
-                        session.add(
-                            Claim(
-                                subject_id=entity_id,
-                                predicate=claim.predicate,
-                                object_id=object_id,
-                                value=claim.value,
-                                source_id=source.id,
-                                record_id=db_record.id,
-                            )
-                        )
-                        existing_claims.add(claim_key)
-                        edited_entity_ids.add(entity_id)
+                _add_entity_claims(
+                    session,
+                    entity_id=entity_id,
+                    record_id=db_record.id,
+                    source_id=source.id,
+                    url=item.url,
+                    base_url=source.base_url,
+                    claims_data=claims_data,
+                    entities_by_key=entities_by_key,
+                    existing_claims=existing_claims,
+                    edited_entity_ids=edited_entity_ids,
+                )
 
             if seen % COMMIT_BATCH == 0:
                 _flush_entity_timestamps(session, seen_entity_ids, edited_entity_ids, now)
@@ -335,9 +465,9 @@ def run_ingest_from_bucket(
     session: Session,
     source_name: str,
     base_url: str,
-    records: Iterator[SourceRecord | SourceWorkMention],
+    records: Iterator[Document],
 ) -> IngestRun:
-    """Ingest pre-fetched records (loaded from a bucket) without network access."""
+    """Ingest pre-fetched documents (loaded from a bucket) without network access."""
     source = _get_or_create_source(session, source_name, base_url)
     run = IngestRun(source_id=source.id)
     session.add(run)
@@ -377,7 +507,7 @@ def run_ingest(session: Session, source_module: SourceLike, max_pages: int | Non
 
     try:
         seen, new = _run_ingest_records(
-            session, source, run, source_module.fetch_records(max_pages=max_pages)
+            session, source, run, source_module.fetch_documents(max_pages=max_pages)
         )
         run.status = "completed"
     except _IngestError as err:

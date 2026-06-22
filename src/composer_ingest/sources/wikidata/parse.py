@@ -13,7 +13,7 @@ import logging
 import re
 from typing import Any
 
-from .. import SourceClaim, SourceRecord
+from ...document import Document, SourceClaim, entity_document
 
 BASE_URL = "https://www.wikidata.org"
 
@@ -87,9 +87,9 @@ def _literal(row: dict[str, Any], var: str) -> str | None:
 
 def _records_from_rows(
     rows: list[dict[str, Any]], metrics: dict[str, dict[str, str]] | None = None
-) -> list[SourceRecord]:
+) -> list[Document]:
     """Fold SPARQL result rows (several per composer when properties have
-    multiple values) into one SourceRecord per composer, attaching the
+    multiple values) into one entity document per composer, attaching the
     composer's popularity ``metrics`` (from ``_fetch_metrics``) as claims."""
     items: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -124,16 +124,16 @@ def _records_from_rows(
         for var, predicate in METRICS:
             if var in item_metrics:
                 claims.append(SourceClaim(predicate, value=item_metrics[var]))
-        raw = {"item": f"http://www.wikidata.org/entity/{qid}", "label": name}
+        raw: dict[str, Any] = {"item": f"http://www.wikidata.org/entity/{qid}", "label": name}
         raw.update({var: sorted(values) for var, values in item["values"].items()})
         raw.update(item_metrics)
         records.append(
-            SourceRecord(
-                external_id=qid,
+            entity_document(
+                id=qid,
                 name=name,
                 url=f"{BASE_URL}/wiki/{qid}",
-                raw=raw,
                 claims=tuple(claims),
+                raw=raw,
             )
         )
     return records
