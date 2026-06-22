@@ -1,37 +1,50 @@
 """Ingest pipeline tests against fake in-memory sources (no network)."""
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from composer_ingest.etl.ingestion import run_ingest
 from composer_ingest.etl.models import Claim, Entity, EntityRecord, IngestRun
-from composer_ingest.scraper.sources import SourceClaim, SourceRecord, SourceWorkMention
+from composer_ingest.scraper.sources import EntityDocument, SourceAdapter, SourceClaim, WorkMentionDocument
+
+_INGESTED_AT = datetime(2024, 1, 1, tzinfo=UTC)
 
 
-@dataclass
-class FakeSource:
-    """In-memory stand-in for a source module (satisfies ``SourceLike``)."""
+class FakeSource(SourceAdapter):
+    """In-memory stand-in for a source adapter (satisfies SourceAdapter)."""
 
-    records: tuple[SourceRecord | SourceWorkMention, ...]
-    NAME: str = "fake"
-    BASE_URL: str = "https://fake.example"
-    fail_after: int | None = None
+    name = "fake"
+    base_url = "https://fake.example"
 
-    def fetch_records(self, max_pages: int | None = None) -> Iterator[SourceRecord | SourceWorkMention]:
-        for i, record in enumerate(self.records):
+    def __init__(
+        self,
+        records: tuple[EntityDocument | WorkMentionDocument, ...],
+        name: str = "fake",
+        base_url: str = "https://fake.example",
+        fail_after: int | None = None,
+    ) -> None:
+        self._records = records
+        self.name = name  # type: ignore[misc]
+        self.base_url = base_url  # type: ignore[misc]
+        self.fail_after = fail_after
+
+    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+        for i, record in enumerate(self._records):
             if self.fail_after is not None and i >= self.fail_after:
                 raise RuntimeError("source exploded")
             yield record
 
 
-def person(name: str, *claims: SourceClaim, external_id: str | None = None) -> SourceRecord:
-    return SourceRecord(
-        external_id=external_id or f"Category:{name}",
-        name=name,
+def person(name: str, *claims: SourceClaim, external_id: str | None = None) -> EntityDocument:
+    return EntityDocument(
+        id=external_id or f"Category:{name}",
         url=None,
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        name=name,
         raw={"id": name},
         claims=claims,
     )
@@ -115,7 +128,7 @@ def test_second_source_attaches_to_same_entity(session: Session) -> None:
                 external_id="Category:Beethoven, Ludwig van",
             ),
         ),
-        NAME="source-a",
+        name="source-a",
     )
     wiki_like = FakeSource(
         records=(
@@ -126,7 +139,7 @@ def test_second_source_attaches_to_same_entity(session: Session) -> None:
                 external_id="Q255",
             ),
         ),
-        NAME="source-b",
+        name="source-b",
     )
 
     run_ingest(session, imslp_like)
@@ -164,10 +177,12 @@ def test_claim_objects_are_deduplicated_entities(session: Session) -> None:
 def test_mentioned_in_uses_record_url_when_present(session: Session) -> None:
     source = FakeSource(
         records=(
-            SourceRecord(
-                external_id="abc",
-                name="Mozart, Wolfgang Amadeus",
+            EntityDocument(
+                id="abc",
                 url="https://example.com/mozart",
+                source_name="fake",
+                ingested_at=_INGESTED_AT,
+                name="Mozart, Wolfgang Amadeus",
                 raw={"id": "abc"},
                 claims=(),
             ),
@@ -182,7 +197,7 @@ def test_mentioned_in_uses_record_url_when_present(session: Session) -> None:
 def test_mentioned_in_falls_back_to_source_base_url(session: Session) -> None:
     source = FakeSource(
         records=(person("Haydn, Joseph"),),  # person() leaves url=None
-        BASE_URL="https://fake.example/composers",
+        base_url="https://fake.example/composers",
     )
     run_ingest(session, source)
 

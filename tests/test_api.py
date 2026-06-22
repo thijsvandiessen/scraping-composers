@@ -1,6 +1,7 @@
 """API endpoint tests using an in-memory database."""
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,27 +12,31 @@ import composer_ingest.api.deps as api_module
 from composer_ingest.api import app
 from composer_ingest.etl.db import init_db
 from composer_ingest.etl.ingestion import run_ingest
-from composer_ingest.scraper.sources import SourceClaim, SourceRecord
+from composer_ingest.scraper.sources import EntityDocument, SourceAdapter, SourceClaim
+
+_INGESTED_AT = datetime(2024, 1, 1, tzinfo=UTC)
 
 
-def _person(name: str, *claims: SourceClaim, external_id: str | None = None) -> SourceRecord:
-    return SourceRecord(
-        external_id=external_id or f"id:{name}",
-        name=name,
+def _person(name: str, *claims: SourceClaim, external_id: str | None = None) -> EntityDocument:
+    return EntityDocument(
+        id=external_id or f"id:{name}",
         url=None,
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        name=name,
         raw={"id": name},
         claims=claims,
     )
 
 
-class _FakeSource:
-    NAME = "fake"
-    BASE_URL = "https://fake.example"
+class _FakeSource(SourceAdapter):
+    name = "fake"
+    base_url = "https://fake.example"
 
-    def __init__(self, records: list[SourceRecord]) -> None:
+    def __init__(self, records: list[EntityDocument]) -> None:
         self._records = records
 
-    def fetch_records(self, max_pages: int | None = None) -> Iterator[SourceRecord]:
+    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument]:
         yield from self._records
 
 

@@ -3,7 +3,7 @@ from collections.abc import Iterator
 
 from sqlalchemy.orm import Session
 
-from ...scraper.sources import SourceLike, SourceRecord, SourceWorkMention
+from ...scraper.sources import EntityDocument, SourceAdapter, WorkMentionDocument
 from ..models import IngestRun, utcnow
 from .core import IngestError, run_ingest_records
 from .entities import get_or_create_source
@@ -15,9 +15,9 @@ def run_ingest_from_bucket(
     session: Session,
     source_name: str,
     base_url: str,
-    records: Iterator[SourceRecord | SourceWorkMention],
+    records: Iterator[EntityDocument | WorkMentionDocument],
 ) -> IngestRun:
-    """Ingest pre-fetched records (loaded from a bucket) without network access."""
+    """Ingest pre-fetched documents (loaded from a bucket) without network access."""
     source = get_or_create_source(session, source_name, base_url)
     run = IngestRun(source_id=source.id)
     session.add(run)
@@ -48,15 +48,15 @@ def run_ingest_from_bucket(
     return run
 
 
-def run_ingest(session: Session, source_module: SourceLike, max_pages: int | None = None) -> IngestRun:
-    source = get_or_create_source(session, source_module.NAME, source_module.BASE_URL)
+def run_ingest(session: Session, adapter: SourceAdapter, max_pages: int | None = None) -> IngestRun:
+    source = get_or_create_source(session, adapter.name, adapter.base_url)
     run = IngestRun(source_id=source.id)
     session.add(run)
     session.commit()
     log.info("run %d started for source '%s'", run.id, source.name)
 
     try:
-        seen, new = run_ingest_records(session, source, run, source_module.fetch_records(max_pages=max_pages))
+        seen, new = run_ingest_records(session, source, run, adapter.fetch(max_pages=max_pages))
         run.status = "completed"
     except IngestError as err:
         run.status = "failed"
