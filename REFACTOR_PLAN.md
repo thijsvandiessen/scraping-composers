@@ -35,11 +35,18 @@ class Document:
     url: str | None         # link back to the source
     ingested_at: str        # ISO-8601 UTC, stamped at fetch time
     doc_type: str           # discriminator: "entity" | "work_mention"
+    content_hash: str       # sha256 of the canonical body; change-detection key
     body: dict[str, Any]    # freeform; shape depends on doc_type
 ```
 
 - **Base fields** (`id`, `url`, `ingested_at`, `source_name`) are identical for every document,
   exactly as requested. `body` is "anything".
+- **`content_hash`** — a `sha256` hex digest of the *canonicalized* `body`
+  (`json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))`), computed and
+  stamped centrally by the `Scraper` (same place as `ingested_at`/`source_name`) so it's
+  consistent and parsers can't forget it. It does **not** cover the volatile base fields
+  (`ingested_at` changes every fetch), only the content. This lets us tell "seen again,
+  unchanged" from "seen again, content changed" on re-ingest (see §3).
 - **`doc_type`** is the discriminator the ingest needs to keep entities/claims and work
   resolution working without `isinstance`. Body contracts:
   - `doc_type="entity"` → `body = {"name", "kind", "claims": [ {predicate, object_kind,
@@ -58,8 +65,8 @@ def entity_document(id, name, url, kind="person", claims=(), raw=None) -> Docume
 def work_mention_document(id, title, composer, raw) -> Document
 ```
 
-These leave `source_name=""` / `ingested_at=""`; the `Scraper` fills them. Reuses
-`normalize`/`entity_uuid` nowhere here — identity is unchanged downstream.
+These leave `source_name=""` / `ingested_at=""` / `content_hash=""`; the `Scraper` fills them.
+Reuses `normalize`/`entity_uuid` nowhere here — identity is unchanged downstream.
 
 ---
 
@@ -89,11 +96,16 @@ class Scraper:
         for raw in self.pages(self.http, max_pages):
             for doc in self.parse(raw):
                 yield dataclasses.replace(
-                    doc, source_name=self.config.name, ingested_at=_utc_now_iso()
+                    doc,
+                    source_name=self.config.name,
+                    ingested_at=_utc_now_iso(),
+                    content_hash=_content_hash(doc.body),
                 )
 ```
 
 - The two special cases per source — **how to page** and **how to parse** — are injected.
+- `_content_hash(body)` (a small helper in `document.py`) is the single place the hash is
+  computed, so the bucket and the DB always agree on it.
 - HTTP concerns are hoisted into a shared **`Http`** helper (new `src/composer_ingest/http.py`)
   wrapping `httpx` with the retry/exponential-backoff/polite-delay logic currently duplicated in
   every `fetch.py` (`get_json`, `get_text`, `post`). This is the single biggest dedup win.
@@ -116,6 +128,20 @@ class Scraper:
 - `run_ingest(session, scraper, max_pages)` calls `scraper.fetch_documents(...)`;
   `run_ingest_from_bucket` iterates `Document`s. `_run_ingest_records` is typed
   `Iterator[Document]`.
+
+**Change detection via `content_hash`** (review request): persist the hash next to each staged
+record so re-ingest can distinguish unchanged from updated content.
+
+- `models.py`: add a `content_hash: Mapped[str]` column to `EntityRecord` and `RawWorkMention`
+  (the two staging tables keyed on `(source_id, external_id)`).
+- On re-seeing an existing `(source, id)`: today we only bump `last_seen_at`/`last_run_id`. With
+  the hash we compare `document.content_hash` to the stored value:
+  - **same** → bump `last_seen_at` only (content unchanged), as now.
+  - **different** → also overwrite `name`/`url`/`raw` (and re-run claim/work resolution for that
+    record), update `content_hash`, and bump the entity's `last_edited_at`.
+- This is a behavior *improvement* gated by the new column — preload the existing hashes in the
+  same query that already preloads `(external_id, id, entity_id)` so the per-record loop stays
+  query-free.
 
 This keeps the "special behavior injected" theme: doc_type → handler mapping is the seam where a
 future doc_type plugs in.
@@ -165,8 +191,12 @@ The existing parser modules (`performances.py`, `dropdowns.py`, `artists.py`, `p
   `pages`/`parse`, or a tiny stub exposing `fetch_documents`. Update `conftest` if needed.
 - Per-source tests assert emitted `Document`s have the right `doc_type` and `body` keys instead
   of the old dataclasses.
-- New tests: `test_document.py` (factories + bucket round-trip), `test_scraper.py` (stamps
-  `source_name`/`ingested_at`, threads `max_pages`), `test_http.py` (retry/backoff).
+- New tests: `test_document.py` (factories + bucket round-trip + stable `content_hash` for equal
+  bodies, different hash for changed bodies), `test_scraper.py` (stamps
+  `source_name`/`ingested_at`/`content_hash`, threads `max_pages`), `test_http.py` (retry/backoff).
+- Change-detection test: re-ingesting the same `(source, id)` with an unchanged body only bumps
+  `last_seen_at`; with a changed body it updates the stored fields, `content_hash`, and
+  `last_edited_at`.
 - A golden test: a known input produces the same Entity/Claim/Work rows as before the refactor.
 
 ---
@@ -186,8 +216,9 @@ The existing parser modules (`performances.py`, `dropdowns.py`, `artists.py`, `p
 
 - **Create:** `sources/document.py`, `scraper.py`, `http.py`,
   `tests/test_document.py`, `tests/test_scraper.py`, `tests/test_http.py`.
-- **Modify:** `sources/__init__.py`, `raw_fetch.py`, `bucket.py`, `ingest.py`, `cli.py`,
-  each `sources/<name>/` package, and the existing source/ingest tests.
+- **Modify:** `sources/__init__.py`, `raw_fetch.py`, `bucket.py`, `ingest.py`, `models.py`
+  (add `content_hash` columns), `cli.py`, each `sources/<name>/` package, and the existing
+  source/ingest tests.
 
 ## Verification
 
