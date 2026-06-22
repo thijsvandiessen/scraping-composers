@@ -15,6 +15,7 @@ source is just config + two small functions registered in ``sources.REGISTRY``.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from typing import Generic, TypeVar
@@ -23,7 +24,9 @@ import httpx
 
 from .document import Document, stamp
 
-DEFAULT_USER_AGENT = "composer-ingest/0.1 (research; thijsvandiessen@gmail.com)"
+_contact = os.environ.get("INGEST_CONTACT_EMAIL", "")
+_contact_str = f"; {_contact}" if _contact else ""
+DEFAULT_USER_AGENT = f"composer-ingest/0.1 (research{_contact_str})"
 
 # the raw payload a source's pages yield and its parse consumes
 RawT = TypeVar("RawT")

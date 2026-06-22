@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Iterator
 from typing import Any
 
@@ -77,3 +78,24 @@ def test_scraper_sets_user_agent_and_extra_headers(monkeypatch: pytest.MonkeyPat
 
     assert captured["user-agent"] == "ua/1.0"
     assert captured["accept-language"] == "en"
+
+
+def test_default_user_agent_includes_contact_email_from_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INGEST_CONTACT_EMAIL", "test@example.com")
+    import composer_ingest.scraper as scraper_mod
+    importlib.reload(scraper_mod)
+    assert "test@example.com" in scraper_mod.DEFAULT_USER_AGENT
+    # restore module to its original state
+    importlib.reload(scraper_mod)
+
+
+def test_default_user_agent_omits_contact_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("INGEST_CONTACT_EMAIL", raising=False)
+    import composer_ingest.scraper as scraper_mod
+    importlib.reload(scraper_mod)
+    assert "@" not in scraper_mod.DEFAULT_USER_AGENT
+    importlib.reload(scraper_mod)
