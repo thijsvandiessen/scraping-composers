@@ -1,8 +1,9 @@
 # composer-ingest
 
-Ingests classical composer data from IMSLP (and future sources) into a
-database, with full provenance: every record knows which source it came from,
-when it was first and last seen, and which ingest run produced it.
+Ingests classical composer data from IMSLP, Wikidata, Concertgebouw,
+NY Phil, and Berlin Phil into a database, with full provenance: every record
+knows which source it came from, when it was first and last seen, and which
+ingest run produced it.
 
 ## Usage
 
@@ -83,7 +84,7 @@ Concert programmes name works as free text — "Symphony No. 5 in C minor",
 "Sinfonie Nr. 5 c-moll", "Beethoven's Fifth" are all the same piece. Rather than
 deduplicating on the exact title (which collides across composers and splits the
 same work across spellings), works go through a resolution pipeline
-(`src/composer_ingest/works/`):
+(`src/composer_ingest/etl/works/`):
 
 - **`raw_work_mentions`** — one row per `(composer, title)` a source reported,
   with the full performance context kept in `raw`, idempotent on
@@ -107,7 +108,7 @@ layer next.
 Exact-key dedup unifies "Beethoven, Ludwig van" ↔ "Ludwig van Beethoven" but
 misses surname-only ("Beethoven"), initials ("Bach, J.S." vs "Bach, Johann
 Sebastian"), and other variants. The `dedupe-persons` pass
-(`src/composer_ingest/persons/`) closes the gap **non-destructively**: it parses
+(`src/composer_ingest/etl/persons/`) closes the gap **non-destructively**: it parses
 each person name (surname / given / initials / particles), groups by surname,
 and scores pairs with a few heuristics — given-name compatibility plus
 birth-year corroboration (a conflicting `born_on` year rules a pair out; a
@@ -119,13 +120,42 @@ nickname maps, external ids, …).
 
 ## Adding a source
 
-Create a package `src/composer_ingest/sources/<name>/` whose `__init__.py`
-exposes `NAME`, `BASE_URL`, and `fetch_records(max_pages=None)` yielding
-`SourceRecord`s (with optional `SourceClaim`s for what the source asserts about
-each entity), then add it to `REGISTRY` in `sources/__init__.py`. Each source is
-a package split by responsibility — e.g. `fetch.py`/`query.py` for the HTTP or
-API access and one module per view/parser (see `concertgebouw/` and `nyphil/`);
-keep the public `fetch_records` orchestration in `__init__.py`.
+Create a package `src/composer_ingest/scraper/sources/<name>/` and subclass
+`SourceAdapter` from `composer_ingest.scraper.sources`:
+
+```python
+from datetime import UTC, datetime
+from collections.abc import Iterator
+from composer_ingest.scraper.sources import (
+    EntityDocument, SourceAdapter, SourceClaim, WorkMentionDocument,
+)
+
+class MyAdapter(SourceAdapter):
+    name = "mysource"
+    base_url = "https://example.com"
+
+    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+        ingested_at = datetime.now(UTC)
+        for row in _fetch_data(max_pages):
+            yield EntityDocument(
+                id=row["id"],
+                url=row.get("url"),
+                source_name=self.name,
+                ingested_at=ingested_at,
+                name=row["name"],
+                claims=(SourceClaim("has_profession", "profession", row["role"]),),
+            )
+```
+
+Every document inherits the `ScrapedDocument` base: `id` (source-local identifier),
+`url`, `source_name`, and `ingested_at` (UTC timestamp set at fetch time). Use
+`EntityDocument` for named entities (people, places, …) and `WorkMentionDocument`
+for concert-programme entries (a `(composer, title)` pair). Attach typed assertions
+to an entity as `SourceClaim`s in `EntityDocument.claims`.
+
+Keep HTTP/API access in `fetch.py` and parsing in one module per view; put the
+public `fetch()` orchestration in `__init__.py`. Then add an instance to `REGISTRY`
+in `scraper/sources/__init__.py`.
 
 ## Development
 
