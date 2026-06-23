@@ -20,7 +20,7 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, SourceAdapter, WorkMentionDocument
+from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
 from .artists import _Artist, _artist_record, _collect
 from .fetch import BASE_URL, iter_concerts
 from .performances import _performances
@@ -33,6 +33,7 @@ __all__ = ["BASE_URL", "BerlinPhilAdapter"]
 class BerlinPhilAdapter(SourceAdapter):
     name = "berlinphil"
     base_url = BASE_URL
+    cadence = RefreshCadence.MONTHLY
 
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield every work-performance in the archive (one work mention each),

@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 
 import httpx
 
-from .. import EntityDocument, SourceAdapter
+from .. import EntityDocument, RefreshCadence, SourceAdapter
 from .fetch import BASE_URL, PAGE_SIZE, REQUEST_DELAY_S, _fetch_page
 
 log = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ __all__ = ["BASE_URL", "ImslpAdapter"]
 class ImslpAdapter(SourceAdapter):
     name = "imslp"
     base_url = BASE_URL
+    cadence = RefreshCadence.YEARLY
 
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument]:
         """Yield every person listed on IMSLP, paging until the API is exhausted."""

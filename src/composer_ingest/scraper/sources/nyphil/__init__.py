@@ -17,7 +17,7 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, SourceAdapter, WorkMentionDocument
+from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
 from .data import BASE_URL, _load_programs
 from .people import ROLES, _aggregate, _record
 from .performances import _performances
@@ -30,6 +30,7 @@ __all__ = ["BASE_URL", "NyPhilAdapter", "ROLES"]
 class NyPhilAdapter(SourceAdapter):
     name = "nyphil"
     base_url = BASE_URL
+    cadence = RefreshCadence.STATIC
 
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield every composer/conductor/soloist in the performance history (one

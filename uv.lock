@@ -207,6 +207,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+admin = [
+    { name = "fastapi" },
+    { name = "uvicorn", extra = ["standard"] },
+]
 api = [
     { name = "fastapi" },
     { name = "uvicorn", extra = ["standard"] },
@@ -225,14 +229,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", marker = "extra == 'admin'", specifier = ">=0.111" },
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.111" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "kagglehub", specifier = ">=0.3" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "sqlalchemy", specifier = ">=2.0" },
+    { name = "uvicorn", extras = ["standard"], marker = "extra == 'admin'", specifier = ">=0.30" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.30" },
 ]
-provides-extras = ["postgres", "api"]
+provides-extras = ["postgres", "api", "admin"]
 
 [package.metadata.requires-dev]
 dev = [
