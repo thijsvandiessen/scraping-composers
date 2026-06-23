@@ -38,9 +38,7 @@ def list_runs(session: Session, limit: int) -> list[RunOut]:
 
 
 def get_run(session: Session, run_id: int) -> RunOut | None:
-    row = session.execute(
-        select(IngestRun, Source.name).join(Source).where(IngestRun.id == run_id)
-    ).first()
+    row = session.execute(select(IngestRun, Source.name).join(Source).where(IngestRun.id == run_id)).first()
     if row is None:
         return None
     return _to_run_out(row[0], row[1])
