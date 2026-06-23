@@ -110,6 +110,7 @@ class SourceAdapter(ABC):
 
 
 from .berlinphil import BerlinPhilAdapter  # noqa: E402
+from .classicalcomposersposter import ClassicalComposersPosterAdapter  # noqa: E402
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
 from .imslp import ImslpAdapter  # noqa: E402
 from .nyphil import NyPhilAdapter  # noqa: E402
@@ -121,4 +122,5 @@ REGISTRY: dict[str, SourceAdapter] = {
     "concertgebouw": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),
     "berlinphil": BerlinPhilAdapter(),
+    "classicalcomposersposter": ClassicalComposersPosterAdapter(),
 }

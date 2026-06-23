@@ -7,6 +7,7 @@ requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
     "kagglehub>=0.3",
+    "pdfplumber>=0.11",
     "sqlalchemy>=2.0",
 ]
 
@@ -35,6 +36,10 @@ files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
 module = "kagglehub.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pdfplumber.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
