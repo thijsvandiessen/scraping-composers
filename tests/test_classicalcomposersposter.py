@@ -7,78 +7,40 @@ from typing import Any
 import httpx
 import pytest
 
+from composer_ingest.scraper.sources._pdf import PdfSourceAdapter, _fetch_pdf_bytes
 from composer_ingest.scraper.sources.classicalcomposersposter import ClassicalComposersPosterAdapter
-from composer_ingest.scraper.sources.classicalcomposersposter.fetch import _fetch_pdf
 from composer_ingest.scraper.sources.classicalcomposersposter.parse import _parse_rows
 
 # ---------------------------------------------------------------------------
-# Minimal real PDF bytes for _parse_rows tests (generated with reportlab-free
-# approach: a hand-crafted minimal valid PDF containing a simple text table).
-# We keep it small; pdfplumber's text extraction is exercised, not full layout.
-# ---------------------------------------------------------------------------
-
-_MINIMAL_PDF = b"""%PDF-1.4
-1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
-2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
-3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj
-4 0 obj<</Length 120>>
-stream
-BT /F1 12 Tf 50 750 Td (Name                Born  Died) Tj
-0 -20 Td (Bach, Johann Sebastian  1685  1750) Tj
-0 -20 Td (Mozart, Wolfgang Amadeus  1756  1791) Tj ET
-endstream
-endobj
-5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj
-xref
-0 6
-0000000000 65535 f
-0000000009 00000 n
-0000000058 00000 n
-0000000115 00000 n
-0000000266 00000 n
-0000000438 00000 n
-trailer<</Size 6/Root 1 0 R>>
-startxref
-521
-%%EOF"""
-
-
-# ---------------------------------------------------------------------------
-# _fetch_pdf unit tests
+# _fetch_pdf_bytes unit tests (shared PDF fetch utility)
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_pdf_returns_bytes_on_200() -> None:
+def test_fetch_pdf_bytes_returns_content_on_200() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=b"%PDF-fake")
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        result = _fetch_pdf(client)
+        result = _fetch_pdf_bytes(client, "http://example.com/sheet.pdf")
 
     assert result == b"%PDF-fake"
 
 
-def test_fetch_pdf_sends_browser_headers() -> None:
-    seen: list[dict[str, str]] = []
+def test_fetch_pdf_bytes_uses_provided_url() -> None:
+    seen_urls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(dict(request.headers))
+        seen_urls.append(str(request.url))
         return httpx.Response(200, content=b"%PDF")
 
-    with httpx.Client(
-        transport=httpx.MockTransport(handler),
-        headers={"User-Agent": "test-agent", "Referer": "http://example.com"},
-    ) as client:
-        _fetch_pdf(client)
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        _fetch_pdf_bytes(client, "http://example.com/my.pdf")
 
-    assert seen[0]["user-agent"] == "test-agent"
+    assert "my.pdf" in seen_urls[0]
 
 
-def test_fetch_pdf_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "composer_ingest.scraper.sources.classicalcomposersposter.fetch.time.sleep",
-        lambda _: None,
-    )
+def test_fetch_pdf_bytes_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("composer_ingest.scraper.sources._pdf.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -88,24 +50,30 @@ def test_fetch_pdf_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> Non
         return httpx.Response(200, content=b"%PDF")
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        result = _fetch_pdf(client)
+        result = _fetch_pdf_bytes(client, "http://example.com/sheet.pdf")
 
     assert len(attempts) == 3
     assert result == b"%PDF"
 
 
-def test_fetch_pdf_raises_after_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "composer_ingest.scraper.sources.classicalcomposersposter.fetch.time.sleep",
-        lambda _: None,
-    )
+def test_fetch_pdf_bytes_raises_after_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("composer_ingest.scraper.sources._pdf.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="always fails")
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(httpx.HTTPStatusError):
-            _fetch_pdf(client)
+            _fetch_pdf_bytes(client, "http://example.com/sheet.pdf")
+
+
+# ---------------------------------------------------------------------------
+# PdfSourceAdapter base class
+# ---------------------------------------------------------------------------
+
+
+def test_classicalcomposersposter_is_pdf_source_adapter() -> None:
+    assert issubclass(ClassicalComposersPosterAdapter, PdfSourceAdapter)
 
 
 # ---------------------------------------------------------------------------
@@ -214,8 +182,8 @@ def test_parse_rows_uses_table_when_available(monkeypatch: pytest.MonkeyPatch) -
 
 def test_fetch_yields_entity_documents(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "composer_ingest.scraper.sources.classicalcomposersposter._fetch_pdf",
-        lambda client: b"fake",
+        "composer_ingest.scraper.sources.classicalcomposersposter.ClassicalComposersPosterAdapter._download_pdf",
+        lambda self: b"fake",
     )
     monkeypatch.setattr(
         "composer_ingest.scraper.sources.classicalcomposersposter._parse_rows",
@@ -235,8 +203,8 @@ def test_fetch_yields_entity_documents(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_fetch_attaches_born_and_died_claims(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "composer_ingest.scraper.sources.classicalcomposersposter._fetch_pdf",
-        lambda client: b"fake",
+        "composer_ingest.scraper.sources.classicalcomposersposter.ClassicalComposersPosterAdapter._download_pdf",
+        lambda self: b"fake",
     )
     monkeypatch.setattr(
         "composer_ingest.scraper.sources.classicalcomposersposter._parse_rows",
@@ -253,8 +221,8 @@ def test_fetch_attaches_born_and_died_claims(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_fetch_omits_claims_when_dates_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "composer_ingest.scraper.sources.classicalcomposersposter._fetch_pdf",
-        lambda client: b"fake",
+        "composer_ingest.scraper.sources.classicalcomposersposter.ClassicalComposersPosterAdapter._download_pdf",
+        lambda self: b"fake",
     )
     monkeypatch.setattr(
         "composer_ingest.scraper.sources.classicalcomposersposter._parse_rows",
@@ -269,8 +237,8 @@ def test_fetch_omits_claims_when_dates_absent(monkeypatch: pytest.MonkeyPatch) -
 
 def test_fetch_passes_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "composer_ingest.scraper.sources.classicalcomposersposter._fetch_pdf",
-        lambda client: b"fake",
+        "composer_ingest.scraper.sources.classicalcomposersposter.ClassicalComposersPosterAdapter._download_pdf",
+        lambda self: b"fake",
     )
     captured: list[int | None] = []
 
@@ -289,8 +257,8 @@ def test_fetch_passes_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_fetch_skips_empty_names(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "composer_ingest.scraper.sources.classicalcomposersposter._fetch_pdf",
-        lambda client: b"fake",
+        "composer_ingest.scraper.sources.classicalcomposersposter.ClassicalComposersPosterAdapter._download_pdf",
+        lambda self: b"fake",
     )
     monkeypatch.setattr(
         "composer_ingest.scraper.sources.classicalcomposersposter._parse_rows",

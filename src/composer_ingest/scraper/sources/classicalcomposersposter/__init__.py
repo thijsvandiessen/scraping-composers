@@ -12,10 +12,9 @@ import re
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-import httpx
-
-from .. import EntityDocument, SourceAdapter, SourceClaim
-from .fetch import BASE_URL, _fetch_pdf
+from .. import EntityDocument, SourceClaim
+from .._pdf import PdfSourceAdapter
+from .fetch import BASE_URL, PDF_URL
 from .parse import _parse_rows
 
 log = logging.getLogger(__name__)
@@ -29,20 +28,14 @@ def _slugify(name: str) -> str:
     return _SLUG_RE.sub("-", name.lower()).strip("-")
 
 
-class ClassicalComposersPosterAdapter(SourceAdapter):
+class ClassicalComposersPosterAdapter(PdfSourceAdapter):
     name = "classicalcomposersposter"
     base_url = BASE_URL
+    pdf_url = PDF_URL
 
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument]:
         """Yield every composer listed in the insert-sheet PDF."""
-        _ua = "Mozilla/5.0 (compatible; composer-ingest/0.1; research; thijsvandiessen@gmail.com)"
-        with httpx.Client(
-            headers={"User-Agent": _ua, "Referer": BASE_URL},
-            timeout=60,
-            follow_redirects=True,
-        ) as client:
-            pdf_bytes = _fetch_pdf(client)
-
+        pdf_bytes = self._download_pdf()
         rows = _parse_rows(pdf_bytes, max_pages=max_pages)
         log.info("classicalcomposersposter: parsed %d rows", len(rows))
 

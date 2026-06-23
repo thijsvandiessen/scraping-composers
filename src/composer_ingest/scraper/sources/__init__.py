@@ -109,6 +109,7 @@ class SourceAdapter(ABC):
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]: ...
 
 
+from ._pdf import PdfSourceAdapter as PdfSourceAdapter  # noqa: E402
 from .berlinphil import BerlinPhilAdapter  # noqa: E402
 from .classicalcomposersposter import ClassicalComposersPosterAdapter  # noqa: E402
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
