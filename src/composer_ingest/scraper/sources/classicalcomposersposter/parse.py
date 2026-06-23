@@ -99,19 +99,15 @@ def _parse_rows(pdf_bytes: bytes, max_pages: int | None = None) -> list[dict[str
         pages = pdf.pages if max_pages is None else pdf.pages[:max_pages]
         for page in pages:
             table = page.extract_table()
-            if table:
-                if not header_detected and table[0]:
-                    if _looks_like_header(table[0]):
-                        name_col, born_col, died_col = _detect_columns(table[0])
-                        header_detected = True
-                        data_rows = table[1:]
-                    else:
-                        data_rows = table
-                else:
-                    data_rows = table
-                results.extend(_rows_from_table(data_rows, name_col, born_col, died_col))
+            if not table:
+                results.extend(_parse_text_lines(page.extract_text() or ""))
+                continue
+            if not header_detected and table[0] and _looks_like_header(table[0]):
+                name_col, born_col, died_col = _detect_columns(table[0])
+                header_detected = True
+                data_rows = table[1:]
             else:
-                text = page.extract_text() or ""
-                results.extend(_parse_text_lines(text))
+                data_rows = table
+            results.extend(_rows_from_table(data_rows, name_col, born_col, died_col))
 
     return results
