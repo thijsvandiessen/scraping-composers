@@ -49,6 +49,31 @@ uv sync --extra postgres
 export DATABASE_URL="postgresql+psycopg://user:pass@host:5432/composers"
 ```
 
+## Admin API (manage & run scrapers)
+
+A small FastAPI app for triggering scrapes from a browser instead of the CLI.
+It is **separate from the read-only consumer API** so it can be deployed in its
+own, locked-down environment.
+
+```sh
+uv sync --extra admin
+uv run uvicorn composer_ingest.admin:admin_app --port 8001
+# open http://localhost:8001/docs and click "Try it out"
+```
+
+Each scraper carries a **refresh cadence** (`monthly`, `yearly`, or `static`)
+declared on its `SourceAdapter`. The API surfaces which scrapers are *due* so
+you can refresh by staleness rather than by data type:
+
+- `GET  /admin/v1/scrapers` — every scraper with its cadence, last run, and `due` flag
+- `POST /admin/v1/scrapers/{name}/run` — start one scraper (runs in the background, returns a `run_id`)
+- `POST /admin/v1/scrapers/run-due` — start every scraper whose data is stale
+- `GET  /admin/v1/runs` / `GET /admin/v1/runs/{run_id}` — run history and status
+
+Runs execute in the background and are recorded in `ingest_runs` (the same log
+the CLI `runs` command shows). Set `ADMIN_API_KEY` to require an `X-Admin-Key`
+header on every admin request (unset = open, for local use).
+
 ## Data model
 
 Entities connected by claims (the Wikidata pattern), on top of a raw

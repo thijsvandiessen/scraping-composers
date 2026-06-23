@@ -48,13 +48,26 @@ def run_ingest_from_bucket(
     return run
 
 
-def run_ingest(session: Session, adapter: SourceAdapter, max_pages: int | None = None) -> IngestRun:
+def create_run(session: Session, adapter: SourceAdapter) -> IngestRun:
+    """Register a source and open a ``running`` IngestRun, returning it committed.
+
+    Split out from :func:`run_ingest` so a caller (e.g. the admin API) can record
+    the run and learn its id up front, then drive :func:`execute_run` in the
+    background on its own session.
+    """
     source = get_or_create_source(session, adapter.name, adapter.base_url)
     run = IngestRun(source_id=source.id)
     session.add(run)
     session.commit()
     log.info("run %d started for source '%s'", run.id, source.name)
+    return run
 
+
+def execute_run(
+    session: Session, adapter: SourceAdapter, run: IngestRun, max_pages: int | None = None
+) -> IngestRun:
+    """Fetch from ``adapter`` and ingest into the already-created ``run``."""
+    source = run.source
     try:
         seen, new = run_ingest_records(session, source, run, adapter.fetch(max_pages=max_pages))
         run.status = "completed"
@@ -77,3 +90,8 @@ def run_ingest(session: Session, adapter: SourceAdapter, max_pages: int | None =
         source.name,
     )
     return run
+
+
+def run_ingest(session: Session, adapter: SourceAdapter, max_pages: int | None = None) -> IngestRun:
+    run = create_run(session, adapter)
+    return execute_run(session, adapter, run, max_pages=max_pages)

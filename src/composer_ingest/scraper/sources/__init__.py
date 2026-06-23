@@ -7,7 +7,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+from enum import StrEnum
 from typing import Any, ClassVar
 
 
@@ -90,6 +91,47 @@ class WorkMentionDocument(ScrapedDocument):
 
 
 # ---------------------------------------------------------------------------
+# Refresh cadence — how often a source's data is worth re-scraping. Drives the
+# admin interface's "what's due" view so scrapes can be triggered by staleness.
+# ---------------------------------------------------------------------------
+
+
+class RefreshCadence(StrEnum):
+    MONTHLY = "monthly"
+    YEARLY = "yearly"
+    STATIC = "static"  # rarely/never changes; only run on demand, never auto-due
+
+    @property
+    def interval(self) -> timedelta | None:
+        """How long fetched data stays fresh, or ``None`` if it never goes stale."""
+        return {
+            RefreshCadence.MONTHLY: timedelta(days=30),
+            RefreshCadence.YEARLY: timedelta(days=365),
+            RefreshCadence.STATIC: None,
+        }[self]
+
+
+def is_due(cadence: RefreshCadence, last_started_at: datetime | None, now: datetime) -> bool:
+    """Whether a source is due for a refresh given its cadence and last run.
+
+    STATIC sources are never automatically due; a source that has never run is
+    always due; otherwise it is due once its cadence interval has elapsed.
+    """
+    interval = cadence.interval
+    if interval is None:
+        return False
+    if last_started_at is None:
+        return True
+    # SQLite returns stored UTC timestamps as naive; treat them as UTC so the
+    # comparison works regardless of backend.
+    if last_started_at.tzinfo is None:
+        last_started_at = last_started_at.replace(tzinfo=UTC)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=UTC)
+    return now - last_started_at >= interval
+
+
+# ---------------------------------------------------------------------------
 # Adapter protocol
 # ---------------------------------------------------------------------------
 
@@ -99,11 +141,13 @@ class SourceAdapter(ABC):
 
     Subclasses define ``name`` and ``base_url`` as class-level constants and
     implement ``fetch``. The generic :class:`~composer_ingest.scraper.Scraper`
-    drives the adapter and writes results to a bucket.
+    drives the adapter and writes results to a bucket. ``cadence`` declares how
+    often the source is worth re-scraping (see :class:`RefreshCadence`).
     """
 
     name: ClassVar[str]
     base_url: ClassVar[str]
+    cadence: ClassVar[RefreshCadence] = RefreshCadence.MONTHLY
 
     @abstractmethod
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]: ...

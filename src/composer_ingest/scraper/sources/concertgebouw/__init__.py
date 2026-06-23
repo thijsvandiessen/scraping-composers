@@ -16,7 +16,7 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, SourceAdapter, WorkMentionDocument
+from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
 from .dropdowns import SELECTS, _options, _record
 from .fetch import BASE_URL, _fetch_list_page, _fetch_search_page
 from .performances import _performances
@@ -29,6 +29,7 @@ __all__ = ["BASE_URL", "ConcertgebouwAdapter"]
 class ConcertgebouwAdapter(SourceAdapter):
     name = "concertgebouw"
     base_url = BASE_URL
+    cadence = RefreshCadence.MONTHLY
 
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield every composer/conductor/soloist in the archive's search filters

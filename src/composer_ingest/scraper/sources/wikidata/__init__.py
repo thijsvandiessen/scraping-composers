@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 import httpx
 
-from .. import EntityDocument, SourceAdapter
+from .. import EntityDocument, RefreshCadence, SourceAdapter
 from .parse import BASE_URL, _records_from_rows
 from .query import PAGE_SIZE, REQUEST_DELAY_S, _fetch_metrics, _fetch_page
 
@@ -27,6 +27,7 @@ __all__ = ["BASE_URL", "WikidataAdapter"]
 class WikidataAdapter(SourceAdapter):
     name = "wikidata"
     base_url = BASE_URL
+    cadence = RefreshCadence.MONTHLY
 
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument]:
         """Yield every composer on Wikidata, paging until the query is exhausted."""
