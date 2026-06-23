@@ -6,26 +6,26 @@ from pathlib import Path
 from ..etl.db import get_engine, init_db
 from ..etl.ingestion import run_ingest, run_ingest_from_bucket
 from ..scraper.bucket import LocalBucket
-from ..scraper.raw_fetch import dump_to_bucket, iter_from_bucket
+from ..scraper.scraper import Scraper, iter_from_bucket
 from ..scraper.sources import REGISTRY
 
 DEFAULT_BUCKET_PATH = os.environ.get("BUCKET_PATH", "./raw-data")
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    source_module = REGISTRY[args.source]
+    adapter = REGISTRY[args.source]
     engine = get_engine(args.database_url)
     session_factory = init_db(engine)
     with session_factory() as session:
-        run = run_ingest(session, source_module, max_pages=args.max_pages)
+        run = run_ingest(session, adapter, max_pages=args.max_pages)
     return 0 if run.status == "completed" else 1
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
-    source_module = REGISTRY[args.source]
+    adapter = REGISTRY[args.source]
     bucket = LocalBucket(args.bucket_path)
     try:
-        run_id = dump_to_bucket(source_module, bucket, max_pages=args.max_pages)
+        run_id = Scraper(adapter).fetch_to_bucket(bucket, max_pages=args.max_pages)
     except Exception as exc:
         logging.getLogger(__name__).error("fetch failed: %s: %s", type(exc).__name__, exc)
         return 1
@@ -36,7 +36,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
 
 
 def cmd_process(args: argparse.Namespace) -> int:
-    source_module = REGISTRY[args.source]
+    adapter = REGISTRY[args.source]
     bucket = LocalBucket(args.bucket_path)
     run_id = args.run_id
     if run_id is None:
@@ -50,5 +50,5 @@ def cmd_process(args: argparse.Namespace) -> int:
     session_factory = init_db(engine)
     with session_factory() as session:
         records = iter_from_bucket(args.source, run_id, bucket)
-        run = run_ingest_from_bucket(session, source_module.NAME, source_module.BASE_URL, records)
+        run = run_ingest_from_bucket(session, adapter.name, adapter.base_url, records)
     return 0 if run.status == "completed" else 1

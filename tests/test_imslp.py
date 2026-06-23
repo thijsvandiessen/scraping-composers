@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 
-from composer_ingest.scraper.sources.imslp import fetch_records
+from composer_ingest.scraper.sources.imslp import ImslpAdapter
 from composer_ingest.scraper.sources.imslp.fetch import _fetch_page
 
 
@@ -80,7 +80,7 @@ def test_fetch_page_raises_after_all_retries_exhausted(monkeypatch: pytest.Monke
 
 
 # ---------------------------------------------------------------------------
-# fetch_records integration tests (network fully mocked via _fetch_page)
+# ImslpAdapter.fetch integration tests (network fully mocked via _fetch_page)
 # ---------------------------------------------------------------------------
 
 
@@ -90,10 +90,11 @@ def test_fetch_records_yields_source_records(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr("composer_ingest.scraper.sources.imslp._fetch_page", lambda client, start: dict(page))
 
-    records = list(fetch_records())
+    records = list(ImslpAdapter().fetch())
     assert len(records) == 2
     assert records[0].name == "Bach, Johann Sebastian"
-    assert records[0].external_id == "Category:Bach, Johann Sebastian"
+    assert records[0].id == "Category:Bach, Johann Sebastian"
+    assert records[0].source_name == "imslp"
     assert records[1].name == "Beethoven, Ludwig van"
 
 
@@ -103,7 +104,7 @@ def test_fetch_records_sets_url_from_permlink(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr("composer_ingest.scraper.sources.imslp._fetch_page", lambda client, start: dict(page))
 
-    (record,) = list(fetch_records())
+    (record,) = list(ImslpAdapter().fetch())
     assert record.url == "https://imslp.org/Bach, Johann Sebastian"
 
 
@@ -117,7 +118,7 @@ def test_fetch_records_stops_when_no_more_results(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr("composer_ingest.scraper.sources.imslp._fetch_page", fake_fetch)
 
-    list(fetch_records())
+    list(ImslpAdapter().fetch())
     assert len(calls) == 1
 
 
@@ -132,7 +133,7 @@ def test_fetch_records_pages_until_exhausted(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr("composer_ingest.scraper.sources.imslp._fetch_page", fake_fetch)
 
-    list(fetch_records())
+    list(ImslpAdapter().fetch())
     assert len(calls) == 3
 
 
@@ -146,7 +147,7 @@ def test_fetch_records_stops_at_max_pages(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr("composer_ingest.scraper.sources.imslp._fetch_page", fake_fetch)
 
-    list(fetch_records(max_pages=2))
+    list(ImslpAdapter().fetch(max_pages=2))
     assert len(calls) == 2
 
 
@@ -161,6 +162,6 @@ def test_fetch_records_skips_rows_with_empty_name(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr("composer_ingest.scraper.sources.imslp._fetch_page", lambda client, start: dict(page))
 
-    records = list(fetch_records())
+    records = list(ImslpAdapter().fetch())
     assert len(records) == 1
     assert records[0].name == "Valid Name"

@@ -1,16 +1,28 @@
 """Ingest tests for work mentions: resolution, dedup, idempotency."""
 
+from datetime import UTC, datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from composer_ingest.etl.ingestion import run_ingest
 from composer_ingest.etl.models import Entity, RawWorkMention, Work, WorkTitle
-from composer_ingest.scraper.sources import SourceWorkMention
+from composer_ingest.scraper.sources import WorkMentionDocument
 from test_ingest import FakeSource, person
 
+_INGESTED_AT = datetime(2024, 1, 1, tzinfo=UTC)
 
-def mention(title: str, composer: str | None, external_id: str = "m1") -> SourceWorkMention:
-    return SourceWorkMention(external_id=external_id, title=title, composer=composer, raw={"title": title})
+
+def mention(title: str, composer: str | None, external_id: str = "m1") -> WorkMentionDocument:
+    return WorkMentionDocument(
+        id=external_id,
+        url=None,
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        title=title,
+        composer=composer,
+        raw={"title": title},
+    )
 
 
 def test_mention_creates_work_alias_and_mention(session: Session) -> None:

@@ -39,7 +39,7 @@ def _ingest_two_sources_disagreeing(session: Session) -> None:
                 external_id="cg:990",
             ),
         ),
-        NAME="concertgebouw",
+        name="concertgebouw",
     )
     b = FakeSource(
         records=(
@@ -50,7 +50,7 @@ def _ingest_two_sources_disagreeing(session: Session) -> None:
                 external_id="Q123",
             ),
         ),
-        NAME="wikidata",
+        name="wikidata",
     )
     run_ingest(session, a)
     run_ingest(session, b)
@@ -96,7 +96,7 @@ def test_entity_claims_collapses_identical_assertions_from_one_source(session: S
                 external_id="b",
             ),
         ),
-        NAME="wikidata",
+        name="wikidata",
     )
     run_ingest(session, source)
 
@@ -328,7 +328,7 @@ def test_cmd_ingest_returns_0_on_success(tmp_path: Path, monkeypatch: pytest.Mon
     from composer_ingest.scraper.sources import REGISTRY
 
     db_url = f"sqlite:///{tmp_path}/test.db"
-    fake = FakeSource(records=(person("Bach, Johann Sebastian"),), NAME="fake")
+    fake = FakeSource(records=(person("Bach, Johann Sebastian"),), name="fake")
     monkeypatch.setitem(REGISTRY, "fake", fake)
 
     rc = cmd_ingest(_ns(database_url=db_url, source="fake", max_pages=None))
@@ -339,7 +339,7 @@ def test_cmd_ingest_returns_1_on_source_failure(tmp_path: Path, monkeypatch: pyt
     from composer_ingest.scraper.sources import REGISTRY
 
     db_url = f"sqlite:///{tmp_path}/test.db"
-    fake = FakeSource(records=(person("Mozart"), person("Haydn")), NAME="fake", fail_after=1)
+    fake = FakeSource(records=(person("Mozart"), person("Haydn")), name="fake", fail_after=1)
     monkeypatch.setitem(REGISTRY, "fake", fake)
 
     rc = cmd_ingest(_ns(database_url=db_url, source="fake", max_pages=None))
@@ -397,7 +397,7 @@ def test_cmd_runs_shows_run_log(tmp_path: Path, capsys: pytest.CaptureFixture[st
     db_url = f"sqlite:///{tmp_path}/test.db"
     factory = init_db(get_engine(db_url))
     with factory() as session:
-        run_ingest(session, FakeSource(records=(person("Haydn, Joseph"),), NAME="wikidata"))
+        run_ingest(session, FakeSource(records=(person("Haydn, Joseph"),), name="wikidata"))
 
     rc = cmd_runs(_ns(database_url=db_url, limit=20))
     assert rc == 0
@@ -448,7 +448,7 @@ def test_main_routes_to_runs_subcommand(
     db_url = f"sqlite:///{tmp_path}/test.db"
     factory = init_db(get_engine(db_url))
     with factory() as session:
-        run_ingest(session, FakeSource(records=(person("Beethoven"),), NAME="wikidata"))
+        run_ingest(session, FakeSource(records=(person("Beethoven"),), name="wikidata"))
 
     monkeypatch.setattr(sys, "argv", ["composer-ingest", "--database-url", db_url, "runs"])
     with pytest.raises(SystemExit) as exc:

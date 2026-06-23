@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from ...scraper.sources import SourceRecord, SourceWorkMention
+from ...scraper.sources import EntityDocument, WorkMentionDocument
 from ..models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, Work, WorkTitle, utcnow
 from ..works import Candidate, extract_features
 from .entities import flush_entity_timestamps, get_or_create_entity
@@ -31,7 +31,7 @@ def run_ingest_records(
     session: Session,
     source: Source,
     run: IngestRun,
-    records_iter: Iterator[SourceRecord | SourceWorkMention],
+    records_iter: Iterator[EntityDocument | WorkMentionDocument],
 ) -> tuple[int, int]:
     """Core ingest loop shared by run_ingest and run_ingest_from_bucket.
 
@@ -84,8 +84,8 @@ def run_ingest_records(
         for item in records_iter:
             seen += 1
             now = utcnow()
-            if isinstance(item, SourceWorkMention):
-                existing_mid = existing_mentions.get(item.external_id)
+            if isinstance(item, WorkMentionDocument):
+                existing_mid = existing_mentions.get(item.id)
                 if existing_mid is not None:
                     session.execute(
                         update(RawWorkMention)
@@ -93,7 +93,7 @@ def run_ingest_records(
                         .values(last_seen_at=now, last_run_id=run.id)
                     )
                 else:
-                    existing_mentions[item.external_id] = ingest_mention(
+                    existing_mentions[item.id] = ingest_mention(
                         session,
                         item,
                         source.id,
@@ -113,7 +113,7 @@ def run_ingest_records(
                 continue
 
             record = item
-            existing_entry = existing_records.get(record.external_id)
+            existing_entry = existing_records.get(record.id)
             if existing_entry is not None:
                 existing_id, existing_entity_id = existing_entry
                 session.execute(
@@ -128,7 +128,7 @@ def run_ingest_records(
                 db_record = EntityRecord(
                     source_id=source.id,
                     entity_id=entity_id,
-                    external_id=record.external_id,
+                    external_id=record.id,
                     name=record.name,
                     url=record.url,
                     raw=json.dumps(record.raw, ensure_ascii=False),
@@ -137,7 +137,7 @@ def run_ingest_records(
                 )
                 session.add(db_record)
                 session.flush()
-                existing_records[record.external_id] = (db_record.id, entity_id)
+                existing_records[record.id] = (db_record.id, entity_id)
                 seen_entity_ids.add(entity_id)
                 new += 1
 

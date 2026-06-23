@@ -18,29 +18,52 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
-from .. import SourceRecord, SourceWorkMention
-from .artists import _Artist, _artist_records, _collect
+from .. import EntityDocument, SourceAdapter, WorkMentionDocument
+from .artists import _Artist, _artist_record, _collect
 from .fetch import BASE_URL, iter_concerts
 from .performances import _performances
 
-NAME = "berlinphil"
-
 log = logging.getLogger(__name__)
 
-__all__ = ["BASE_URL", "NAME", "fetch_records"]
+__all__ = ["BASE_URL", "BerlinPhilAdapter"]
 
 
-def fetch_records(max_pages: int | None = None) -> Iterator[SourceRecord | SourceWorkMention]:
-    """Yield every work-performance in the archive (one work mention each),
-    then one ``person``/``ensemble`` record per distinct artist seen along the
-    way. ``max_pages`` caps the number of concerts fetched, for test runs."""
-    registry: dict[str, _Artist] = {}
-    works = 0
-    for concert in iter_concerts(max_pages=max_pages):
-        _collect(concert, registry)
-        for record in _performances(concert):
-            works += 1
-            yield record
-    log.info("berlinphil: %d work-performances, %d artists", works, len(registry))
-    yield from _artist_records(registry)
+class BerlinPhilAdapter(SourceAdapter):
+    name = "berlinphil"
+    base_url = BASE_URL
+
+    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+        """Yield every work-performance in the archive (one work mention each),
+        then one ``person``/``ensemble`` record per distinct artist seen along the
+        way. ``max_pages`` caps the number of concerts fetched, for test runs."""
+        ingested_at = datetime.now(UTC)
+        registry: dict[str, _Artist] = {}
+        works = 0
+        for concert in iter_concerts(max_pages=max_pages):
+            _collect(concert, registry)
+            for mention in _performances(concert):
+                works += 1
+                yield WorkMentionDocument(
+                    id=mention.external_id,
+                    url=mention.raw.get("url"),
+                    source_name=self.name,
+                    ingested_at=ingested_at,
+                    title=mention.title,
+                    composer=mention.composer,
+                    raw=mention.raw,
+                )
+        log.info("berlinphil: %d work-performances, %d artists", works, len(registry))
+        for info in registry.values():
+            record = _artist_record(info)
+            yield EntityDocument(
+                id=record.external_id,
+                url=record.url,
+                source_name=self.name,
+                ingested_at=ingested_at,
+                name=record.name,
+                kind=record.kind,
+                raw=record.raw,
+                claims=record.claims,
+            )

@@ -3,7 +3,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from ...scraper.sources import SourceWorkMention
+from ...scraper.sources import WorkMentionDocument
 from ..models import RawWorkMention, Work, WorkTitle
 from ..works import Candidate, WorkFeatures, extract_features, resolve
 from .entities import get_or_create_entity
@@ -29,7 +29,7 @@ def new_work(composer_id: uuid.UUID | None, title: str, features: WorkFeatures) 
 
 def ingest_mention(
     session: Session,
-    mention: SourceWorkMention,
+    mention: WorkMentionDocument,
     source_id: int,
     run_id: int,
     entities_by_key: dict[tuple[str, str], uuid.UUID],
@@ -57,7 +57,7 @@ def ingest_mention(
 
     mention_row = RawWorkMention(
         source_id=source_id,
-        external_id=mention.external_id,
+        external_id=mention.id,
         raw_composer=mention.composer,
         raw_title=mention.title,
         raw=json.dumps(mention.raw, ensure_ascii=False),

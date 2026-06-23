@@ -15,35 +15,57 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
-from .. import SourceRecord, SourceWorkMention
+from .. import EntityDocument, SourceAdapter, WorkMentionDocument
 from .data import BASE_URL, _load_programs
 from .people import ROLES, _aggregate, _record
 from .performances import _performances
 
-NAME = "nyphil"
-
 log = logging.getLogger(__name__)
 
-__all__ = ["BASE_URL", "NAME", "ROLES", "fetch_records"]
+__all__ = ["BASE_URL", "NyPhilAdapter", "ROLES"]
 
 
-def fetch_records(max_pages: int | None = None) -> Iterator[SourceRecord | SourceWorkMention]:
-    """Yield every composer/conductor/soloist in the performance history (one
-    aggregated ``person`` record each) followed by every work-performance (one
-    work mention each). The whole source is one (kagglehub-cached) download;
-    ``max_pages`` is accepted for interface compatibility and ignored."""
-    programs = _load_programs()
-    log.info("nyphil: %d programs", len(programs))
-    people = _aggregate(programs)
-    for role in ROLES:
-        names = sorted(name for r, name in people if r == role)
-        log.info("nyphil %s: %d records", role, len(names))
-        for name in names:
-            yield _record(role, name, people[(role, name)])
+class NyPhilAdapter(SourceAdapter):
+    name = "nyphil"
+    base_url = BASE_URL
 
-    count = 0
-    for record in _performances(programs):
-        count += 1
-        yield record
-    log.info("nyphil performances: %d records", count)
+    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+        """Yield every composer/conductor/soloist in the performance history (one
+        aggregated ``person`` record each) followed by every work-performance (one
+        work mention each). The whole source is one (kagglehub-cached) download;
+        ``max_pages`` is accepted for interface compatibility and ignored."""
+        ingested_at = datetime.now(UTC)
+        programs = _load_programs()
+        log.info("nyphil: %d programs", len(programs))
+        people = _aggregate(programs)
+        for role in ROLES:
+            names = sorted(name for r, name in people if r == role)
+            log.info("nyphil %s: %d records", role, len(names))
+            for name in names:
+                record = _record(role, name, people[(role, name)])
+                yield EntityDocument(
+                    id=record.external_id,
+                    url=record.url,
+                    source_name=self.name,
+                    ingested_at=ingested_at,
+                    name=record.name,
+                    kind=record.kind,
+                    raw=record.raw,
+                    claims=record.claims,
+                )
+
+        count = 0
+        for mention in _performances(programs):
+            count += 1
+            yield WorkMentionDocument(
+                id=mention.external_id,
+                url=None,
+                source_name=self.name,
+                ingested_at=ingested_at,
+                title=mention.title,
+                composer=mention.composer,
+                raw=mention.raw,
+            )
+        log.info("nyphil performances: %d records", count)
