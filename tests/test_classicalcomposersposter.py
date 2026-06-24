@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import httpx
+import pandas as pd
 import pytest
 
 from composer_ingest.scraper.sources._pdf import PdfSourceAdapter, _fetch_pdf_bytes
 from composer_ingest.scraper.sources.classicalcomposersposter import ClassicalComposersPosterAdapter
 from composer_ingest.scraper.sources.classicalcomposersposter.parse import _parse_rows
+
+_DC_PATH = "composer_ingest.scraper.sources.classicalcomposersposter.parse.DocumentConverter"
 
 # ---------------------------------------------------------------------------
 # _fetch_pdf_bytes unit tests (shared PDF fetch utility)
@@ -77,102 +81,106 @@ def test_classicalcomposersposter_is_pdf_source_adapter() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _parse_rows unit tests
+# _parse_rows unit tests (Docling mocked)
 # ---------------------------------------------------------------------------
 
 
-_CCP_PARSE_PATH = "composer_ingest.scraper.sources.classicalcomposersposter.parse.pdfplumber.open"
+def _make_converter_mock(tables: list[pd.DataFrame] | None = None, markdown: str = "") -> MagicMock:
+    """Build a mock DocumentConverter whose convert() returns a fake result."""
+    mock_table_objs = []
+    for df in (tables or []):
+        t = MagicMock()
+        t.export_to_dataframe.return_value = df
+        mock_table_objs.append(t)
+
+    doc = MagicMock()
+    doc.tables = mock_table_objs
+    doc.export_to_markdown.return_value = markdown
+
+    result = MagicMock()
+    result.document = doc
+
+    converter = MagicMock()
+    converter.convert.return_value = result
+    return converter
 
 
-def test_parse_rows_returns_rows_from_text(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_open(source: Any) -> Any:
-        class FakePage:
-            def extract_table(self) -> None:
-                return None
+def test_parse_rows_extracts_from_table_with_header() -> None:
+    df = pd.DataFrame([
+        ["Name", "Born", "Died"],
+        ["Bach, Johann Sebastian", "1685", "1750"],
+        ["Mozart, Wolfgang Amadeus", "1756", "1791"],
+    ])
+    mock_converter = _make_converter_mock(tables=[df])
 
-            def extract_text(self) -> str:
-                return "Bach, Johann Sebastian 1685 1750\nMozart, Wolfgang Amadeus 1756 1791"
+    with patch(_DC_PATH, return_value=mock_converter):
+        rows = _parse_rows(b"fake")
 
-        class FakePDF:
-            pages = [FakePage()]
-
-            def __enter__(self) -> FakePDF:
-                return self
-
-            def __exit__(self, *args: Any) -> None:
-                pass
-
-        return FakePDF()
-
-    monkeypatch.setattr(_CCP_PARSE_PATH, fake_open)
-    rows = _parse_rows(b"fake")
     assert len(rows) == 2
     assert rows[0]["name"] == "Bach, Johann Sebastian"
     assert rows[0]["born"] == "1685"
     assert rows[0]["died"] == "1750"
+    assert rows[1]["name"] == "Mozart, Wolfgang Amadeus"
 
 
-def test_parse_rows_respects_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    pages_visited: list[int] = []
+def test_parse_rows_falls_back_to_markdown_when_no_tables() -> None:
+    markdown = "Bach, Johann Sebastian 1685 1750\nMozart, Wolfgang Amadeus 1756 1791"
+    mock_converter = _make_converter_mock(tables=[], markdown=markdown)
 
-    def fake_open(source: Any) -> Any:
-        class FakePage:
-            def __init__(self, n: int) -> None:
-                self.n = n
+    with patch(_DC_PATH, return_value=mock_converter):
+        rows = _parse_rows(b"fake")
 
-            def extract_table(self) -> None:
-                return None
-
-            def extract_text(self) -> str:
-                pages_visited.append(self.n)
-                return f"Composer {self.n} 1800 1870"
-
-        class FakePDF:
-            pages = [FakePage(i) for i in range(5)]
-
-            def __enter__(self) -> FakePDF:
-                return self
-
-            def __exit__(self, *args: Any) -> None:
-                pass
-
-        return FakePDF()
-
-    monkeypatch.setattr(_CCP_PARSE_PATH, fake_open)
-    _parse_rows(b"fake", max_pages=2)
-    assert len(pages_visited) == 2
-
-
-def test_parse_rows_uses_table_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_open(source: Any) -> Any:
-        class FakePage:
-            def extract_table(self) -> list[list[str]]:
-                return [
-                    ["Name", "Born", "Died"],
-                    ["Beethoven, Ludwig van", "1770", "1827"],
-                    ["Chopin, Frédéric", "1810", "1849"],
-                ]
-
-            def extract_text(self) -> str:
-                return ""
-
-        class FakePDF:
-            pages = [FakePage()]
-
-            def __enter__(self) -> FakePDF:
-                return self
-
-            def __exit__(self, *args: Any) -> None:
-                pass
-
-        return FakePDF()
-
-    monkeypatch.setattr(_CCP_PARSE_PATH, fake_open)
-    rows = _parse_rows(b"fake")
     assert len(rows) == 2
-    assert rows[0]["name"] == "Beethoven, Ludwig van"
-    assert rows[0]["born"] == "1770"
-    assert rows[0]["died"] == "1827"
+    assert rows[0]["name"] == "Bach, Johann Sebastian"
+    assert rows[0]["born"] == "1685"
+
+
+def test_parse_rows_passes_max_pages_to_converter() -> None:
+    mock_converter = _make_converter_mock(tables=[], markdown="")
+
+    with patch(_DC_PATH, return_value=mock_converter):
+        _parse_rows(b"fake", max_pages=3)
+
+    mock_converter.convert.assert_called_once()
+    _, kwargs = mock_converter.convert.call_args
+    assert kwargs.get("max_num_pages") == 3
+
+
+def test_parse_rows_omits_max_pages_when_none() -> None:
+    mock_converter = _make_converter_mock(tables=[], markdown="")
+
+    with patch(_DC_PATH, return_value=mock_converter):
+        _parse_rows(b"fake", max_pages=None)
+
+    _, kwargs = mock_converter.convert.call_args
+    assert "max_num_pages" not in kwargs
+
+
+def test_parse_rows_skips_empty_tables() -> None:
+    empty_df = pd.DataFrame()
+    markdown = "Chopin, Frédéric 1810 1849"
+    mock_converter = _make_converter_mock(tables=[empty_df], markdown=markdown)
+
+    with patch(_DC_PATH, return_value=mock_converter):
+        rows = _parse_rows(b"fake")
+
+    assert len(rows) == 1
+    assert rows[0]["name"] == "Chopin, Frédéric"
+
+
+def test_parse_rows_omits_born_and_died_when_absent() -> None:
+    df = pd.DataFrame([
+        ["Name", "Born", "Died"],
+        ["Anonymous", "", ""],
+    ])
+    mock_converter = _make_converter_mock(tables=[df])
+
+    with patch(_DC_PATH, return_value=mock_converter):
+        rows = _parse_rows(b"fake")
+
+    assert len(rows) == 1
+    assert rows[0]["born"] is None
+    assert rows[0]["died"] is None
 
 
 # ---------------------------------------------------------------------------
