@@ -1,9 +1,12 @@
 """SPARQL access to the Wikidata Query Service.
 
-Pagination uses an inner subquery over just the item ids (ORDER BY ?item
-LIMIT/OFFSET) so each page covers a fixed set of composers; the OPTIONAL
-property joins then expand each composer into one row per property-value
-combination, and all rows for a composer land in the same page.
+Pagination uses an inner subquery over just the item ids (ORDER BY ?item with a
+keyset FILTER(?item > wd:<last>) LIMIT) so each page covers a fixed set of
+composers; the OPTIONAL property joins then expand each composer into one row
+per property-value combination, and all rows for a composer land in the same
+page. Keyset (seek) paging rather than LIMIT/OFFSET: deep OFFSET makes WDQS sort
+and discard every prior row on every page and 504s past ~30k in, whereas the
+FILTER range scan keeps per-page cost flat regardless of depth.
 
 Each page is followed by a second, cheap VALUES query for per-item popularity
 metrics (sitelink/statement/identifier counts and the P86 backlink count). All
@@ -34,7 +37,7 @@ QUERY = """\
 SELECT ?item ?itemLabel ?birth ?birthPrecision ?death ?deathPrecision
        ?birthPlaceLabel ?deathPlaceLabel ?countryLabel ?genreLabel ?movementLabel
 WHERE {{
-  {{ SELECT ?item WHERE {{ ?item wdt:P106 wd:Q36834 . }} ORDER BY ?item LIMIT {page_size} OFFSET {offset} }}
+  {{ SELECT ?item WHERE {{ ?item wdt:P106 wd:Q36834 . {after_filter} }} ORDER BY ?item LIMIT {page_size} }}
   # Take the truthy (best-rank) date via wdt:, then join the statement value
   # node carrying that same value to read its precision. Wikidata pads unknown
   # components to 01, so without timePrecision a year-only birth is
@@ -100,9 +103,18 @@ def _run_query(client: httpx.Client, query: str, desc: str) -> list[dict[str, An
     raise AssertionError("unreachable")
 
 
-def _fetch_page(client: httpx.Client, offset: int) -> list[dict[str, Any]]:
-    query = QUERY.format(page_size=PAGE_SIZE, offset=offset)
-    return _run_query(client, query, f"page offset={offset}")
+def _fetch_page(client: httpx.Client, after: str | None) -> list[dict[str, Any]]:
+    """Fetch one page of composers whose QID sorts strictly after ``after`` (or
+    from the start when None). Keyset paging: the inner ORDER BY ?item plus
+    FILTER(?item > wd:<after>) is an indexed range scan, so page cost stays flat
+    with depth where LIMIT/OFFSET does not (see module docstring)."""
+    # STR(?item): SPARQL's relational operators are undefined for IRIs (a bare
+    # ?item > wd:X errors, and FILTER drops every erroring row -> an empty page
+    # that looks like the end). Comparing the IRI strings is well-defined and,
+    # since ORDER BY ?item also sorts by IRI string, stays consistent with it.
+    after_filter = f"FILTER(STR(?item) > STR(wd:{after}))" if after else ""
+    query = QUERY.format(page_size=PAGE_SIZE, after_filter=after_filter)
+    return _run_query(client, query, f"page after={after or 'START'}")
 
 
 def _fetch_metrics(client: httpx.Client, qids: list[str]) -> dict[str, dict[str, str]]:

@@ -31,20 +31,20 @@ class WikidataAdapter(SourceAdapter):
 
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument]:
         """Yield every composer on Wikidata, paging until the query is exhausted."""
-        offset = 0
+        after: str | None = None
         pages = 0
         with httpx.Client(
             headers={"User-Agent": "composer-ingest/0.1 (research; thijsvandiessen@gmail.com)"},
             timeout=90,
         ) as client:
             while True:
-                rows = _fetch_page(client, offset)
+                rows = _fetch_page(client, after)
                 page_qids = sorted({row["item"]["value"].rsplit("/", 1)[-1] for row in rows})
                 metrics = _fetch_metrics(client, page_qids) if page_qids else {}
                 records = _records_from_rows(rows, metrics)
                 ingested_at = datetime.now(UTC)
                 pages += 1
-                log.info("wikidata page %d: %d composers (offset=%d)", pages, len(records), offset)
+                log.info("wikidata page %d: %d composers (after=%s)", pages, len(records), after or "START")
                 for record in records:
                     yield EntityDocument(
                         id=record.external_id,
@@ -62,5 +62,7 @@ class WikidataAdapter(SourceAdapter):
                 if max_pages is not None and pages >= max_pages:
                     log.info("stopping after max_pages=%d", max_pages)
                     break
-                offset += PAGE_SIZE
+                # seek from the last (max) QID on this page — page_qids is sorted,
+                # so page_qids[-1] is the keyset cursor for the next range scan
+                after = page_qids[-1]
                 time.sleep(REQUEST_DELAY_S)

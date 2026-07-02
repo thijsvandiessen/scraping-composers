@@ -152,10 +152,30 @@ def test_truncated_body_is_retried_via_uncached_post(monkeypatch: pytest.MonkeyP
         return httpx.Response(200, json={"results": {"bindings": []}})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        assert _fetch_page(client, offset=0) == []
+        assert _fetch_page(client, after=None) == []
 
     assert len(requests) == 2
     assert all(r.method == "POST" for r in requests)  # POSTs are never edge-cached
+
+
+def test_fetch_page_seeks_from_the_given_qid() -> None:
+    """Keyset paging: a non-None ``after`` must emit FILTER(?item > wd:<after>)
+    so WDQS range-scans instead of doing a deep OFFSET that 504s."""
+    captured: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(urllib.parse.parse_qs(request.read().decode())["query"][0])
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        _fetch_page(client, after="Q6600")
+        _fetch_page(client, after=None)
+
+    # compare IRI strings, not the IRIs themselves: ?item > wd:X is a type error
+    # in SPARQL and would silently drop every row
+    assert "FILTER(STR(?item) > STR(wd:Q6600))" in captured[0]
+    assert "OFFSET" not in captured[0]
+    assert "FILTER" not in captured[1]  # the first page starts unfiltered
 
 
 def metrics_row(qid: str, **vars: str) -> dict[str, Any]:
