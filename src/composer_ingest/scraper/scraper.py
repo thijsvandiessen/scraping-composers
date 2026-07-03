@@ -13,8 +13,13 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-from .bucket import Bucket
+from .bucket import Bucket, SnapshotManifest
 from .sources import EntityDocument, SourceAdapter, SourceClaim, WorkMentionDocument
+
+
+def new_snapshot_id() -> str:
+    """A sortable snapshot id: ISO-8601 UTC timestamp plus a short random suffix."""
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S") + "-" + uuid.uuid4().hex[:8]
 
 
 def _serialize(doc: EntityDocument | WorkMentionDocument) -> dict[str, Any]:
@@ -47,15 +52,34 @@ class Scraper:
         """Yield documents directly from the adapter."""
         yield from self.adapter.fetch(max_pages)
 
-    def fetch_to_bucket(self, bucket: Bucket, max_pages: int | None = None) -> str:
+    def fetch_to_bucket(self, bucket: Bucket, max_pages: int | None = None, run_id: str | None = None) -> str:
         """Fetch all records from the adapter and write them to *bucket*.
 
-        Returns the run_id (an ISO-8601 UTC timestamp string) so the caller can
-        pass it to :func:`iter_from_bucket` or the ``process`` CLI command.
+        Writes a manifest alongside the records: ``running`` while the fetch
+        streams, finalized to ``completed`` with the record count, or
+        ``failed`` with the error (the exception is re-raised). Returns the
+        run_id so the caller can pass it to :func:`iter_from_bucket` or the
+        ``process`` CLI command; pass ``run_id`` explicitly to know it up
+        front (e.g. to report it before a background fetch finishes).
         """
-        run_id = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S") + "-" + uuid.uuid4().hex[:8]
-        records = (_serialize(doc) for doc in self.adapter.fetch(max_pages))
-        bucket.write_records(self.adapter.name, run_id, records)
+        if run_id is None:
+            run_id = new_snapshot_id()
+        manifest = SnapshotManifest.start(self.adapter.name, run_id)
+        bucket.write_manifest(manifest)
+        count = 0
+
+        def counted() -> Iterator[dict[str, Any]]:
+            nonlocal count
+            for doc in self.adapter.fetch(max_pages):
+                yield _serialize(doc)
+                count += 1
+
+        try:
+            bucket.write_records(self.adapter.name, run_id, counted())
+        except Exception as exc:
+            bucket.write_manifest(manifest.failed(f"{type(exc).__name__}: {exc}", record_count=count))
+            raise
+        bucket.write_manifest(manifest.completed(record_count=count))
         return run_id
 
 

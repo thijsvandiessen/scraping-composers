@@ -1,0 +1,56 @@
+from django.contrib import admin
+from django.urls import path
+from django.views.generic import RedirectView
+
+from scrapers import views
+
+urlpatterns = [
+    # Registered before admin.site.urls so these win the /admin/... match;
+    # admin_view() enforces the admin login on each of them.
+    path("admin/scrapers/", admin.site.admin_view(views.index), name="scrapers_index"),
+    path("admin/scrapers/fetch-due", admin.site.admin_view(views.fetch_due), name="fetch_due"),
+    path("admin/scrapers/<str:name>/fetch", admin.site.admin_view(views.start_fetch), name="start_fetch"),
+    path("admin/load/", admin.site.admin_view(views.load_index), name="load_index"),
+    path("admin/promote/", admin.site.admin_view(views.promote_page), name="promote"),
+    path("admin/promote/start", admin.site.admin_view(views.start_promote), name="start_promote"),
+    path(
+        "admin/load/<str:source>/<str:snapshot_id>/process",
+        admin.site.admin_view(views.process_snapshot),
+        name="process_snapshot",
+    ),
+    path("admin/data/", admin.site.admin_view(views.data_overview), name="data_overview"),
+    path("admin/data/entities/", admin.site.admin_view(views.entities), name="entities"),
+    path(
+        "admin/data/entities/<uuid:entity_id>/",
+        admin.site.admin_view(views.entity_detail),
+        name="entity_detail",
+    ),
+    # after the uuid route so non-uuid segments ("person", "place") match as kinds
+    path(
+        "admin/data/entities/<str:kind>/",
+        admin.site.admin_view(views.entities),
+        name="entities_by_kind",
+    ),
+    path("admin/data/works/", admin.site.admin_view(views.works), name="works"),
+    path("admin/data/review/", admin.site.admin_view(views.review), name="review"),
+    path("admin/data/concerts/", admin.site.admin_view(views.concerts_list), name="concerts_list"),
+    path(
+        "admin/data/concerts/<int:concert_id>/",
+        admin.site.admin_view(views.concert_detail),
+        name="concert_detail",
+    ),
+    path("admin/data/people/<str:role>/", admin.site.admin_view(views.people), name="people"),
+    path(
+        "admin/data/people/<str:role>/<uuid:person_id>/concerts",
+        admin.site.admin_view(views.person_concerts),
+        name="person_concerts",
+    ),
+    # role-less variant, linked from entity detail pages
+    path(
+        "admin/data/people/<uuid:person_id>/concerts",
+        admin.site.admin_view(views.person_concerts),
+        name="person_concerts_any",
+    ),
+    path("admin/", admin.site.urls),
+    path("", RedirectView.as_view(url="/admin/scrapers/", permanent=False)),
+]

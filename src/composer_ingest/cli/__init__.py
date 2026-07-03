@@ -2,8 +2,10 @@ import argparse
 import logging
 import sys
 
+from ..etl.gold import DEFAULT_GOLD_DB_PATH
+from ..scraper.bucket import DEFAULT_BUCKET_PATH
 from ..scraper.sources import REGISTRY
-from .ingest_cmds import DEFAULT_BUCKET_PATH, cmd_fetch, cmd_ingest, cmd_process
+from .ingest_cmds import cmd_fetch, cmd_process, cmd_promote
 from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
@@ -17,11 +19,6 @@ def main() -> None:
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
-
-    p_ingest = sub.add_parser("ingest", help="fetch a source and store its records")
-    p_ingest.add_argument("source", choices=sorted(REGISTRY))
-    p_ingest.add_argument("--max-pages", type=int, help="stop after N pages (for testing)")
-    p_ingest.set_defaults(func=cmd_ingest)
 
     p_stats = sub.add_parser("stats", help="show dataset counts")
     p_stats.set_defaults(func=cmd_stats)
@@ -78,6 +75,12 @@ def main() -> None:
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
     )
     p_process.set_defaults(func=cmd_process)
+
+    p_promote = sub.add_parser(
+        "promote", help="rebuild the curated gold database from the bronze (raw) database"
+    )
+    p_promote.add_argument("--gold-path", default=DEFAULT_GOLD_DB_PATH, help="path of the gold SQLite file")
+    p_promote.set_defaults(func=cmd_promote)
 
     p_dedupe = sub.add_parser(
         "dedupe-persons", help="link near-duplicate person entities (surname/initials/birth-year heuristics)"

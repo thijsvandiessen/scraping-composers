@@ -18,18 +18,6 @@ def _to_run_out(run: IngestRun, source_name: str) -> RunOut:
     )
 
 
-def last_run_per_source(session: Session) -> dict[str, RunOut]:
-    """The most recent run for each source, keyed by source name."""
-    rows = session.execute(
-        select(IngestRun, Source.name).join(Source).order_by(IngestRun.started_at.desc())
-    ).all()
-    latest: dict[str, RunOut] = {}
-    for run, name in rows:
-        if name not in latest:  # rows are newest-first, so the first wins
-            latest[name] = _to_run_out(run, name)
-    return latest
-
-
 def list_runs(session: Session, limit: int) -> list[RunOut]:
     rows = session.execute(
         select(IngestRun, Source.name).join(Source).order_by(IngestRun.started_at.desc()).limit(limit)

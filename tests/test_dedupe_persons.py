@@ -3,15 +3,15 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from composer_ingest.etl.ingestion import run_ingest
 from composer_ingest.etl.models import Entity, PersonMatch
 from composer_ingest.etl.persons import dedupe_persons
 from composer_ingest.scraper.sources import SourceClaim
+from conftest import ingest_source
 from test_ingest import FakeSource, person
 
 
 def _ingest(session: Session, *people: object) -> None:
-    run_ingest(session, FakeSource(records=people))  # type: ignore[arg-type]
+    ingest_source(session, FakeSource(records=people))  # type: ignore[arg-type]
 
 
 def _by_label(session: Session) -> dict[str, Entity]:

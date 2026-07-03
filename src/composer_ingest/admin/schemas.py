@@ -14,15 +14,41 @@ class RunOut(BaseModel):
     error: str | None
 
 
+class SnapshotOut(BaseModel):
+    source: str
+    id: str  # bucket run_id, e.g. "2026-07-02T09:52:30-3086f07d"
+    status: str  # running | completed | failed | unknown (pre-manifest snapshot)
+    started_at: str
+    finished_at: str | None
+    record_count: int | None
+    size_bytes: int
+    error: str | None
+
+
 class ScraperOut(BaseModel):
     name: str
     base_url: str | None
     cadence: str  # monthly | yearly | static
-    due: bool  # stale enough to be worth re-scraping now
-    last_run: RunOut | None
+    due: bool  # raw data stale enough to be worth re-fetching now
+    last_snapshot: SnapshotOut | None
+
+
+class FetchStarted(BaseModel):
+    source: str
+    snapshot_id: str
+    status: str
 
 
 class RunStarted(BaseModel):
     run_id: int
     source: str
     status: str
+
+
+class GoldStatus(BaseModel):
+    exists: bool  # whether the gold database file is present
+    status: str | None  # running | completed | failed | None (never promoted)
+    started_at: str | None
+    finished_at: str | None
+    error: str | None
+    stats: dict[str, int]

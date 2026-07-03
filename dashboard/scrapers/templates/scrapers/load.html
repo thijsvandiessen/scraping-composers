@@ -1,0 +1,69 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% if refreshing %}<meta http-equiv="refresh" content="5">{% endif %}
+{% include "scrapers/style.html" %}
+
+{% for message in messages %}
+  <div class="sc-banner {{ message.tags }}">{{ message }}</div>
+{% endfor %}
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<div class="sc-toolbar">
+  <span class="sc-muted">raw snapshots in the bucket — loading is idempotent, re-loading a
+    snapshot only refreshes timestamps</span>
+  {% if refreshing %}<span class="sc-muted">work in progress — refreshing every 5 s…</span>{% endif %}
+</div>
+
+<table class="sc-table">
+  <tr>
+    <th>source</th><th>snapshot</th><th>status</th>
+    <th class="sc-num">records</th><th class="sc-num">size</th><th></th>
+  </tr>
+  {% for snapshot in snapshots %}
+  <tr>
+    <td><strong>{{ snapshot.source }}</strong></td>
+    <td>{{ snapshot.id }}</td>
+    <td>
+      <span class="sc-badge sc-{{ snapshot.status }}">{{ snapshot.status }}</span>
+      {% if snapshot.error %}<div class="sc-error-text">{{ snapshot.error }}</div>{% endif %}
+    </td>
+    <td class="sc-num">{{ snapshot.record_count|default_if_none:"—" }}</td>
+    <td class="sc-num">{{ snapshot.size_bytes|filesizeformat }}</td>
+    <td>
+      {% if snapshot.status == "completed" or snapshot.status == "unknown" %}
+      <form method="post" action="{% url 'process_snapshot' snapshot.source snapshot.id %}">
+        {% csrf_token %}
+        <button type="submit" class="sc-btn">Load into DB</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="sc-muted">no snapshots in the bucket — fetch a scraper first</td></tr>
+  {% endfor %}
+</table>
+
+<h2 class="sc-heading">Recent loads</h2>
+<table class="sc-table">
+  <tr>
+    <th>id</th><th>source</th><th>status</th><th>started (UTC)</th>
+    <th class="sc-num">seen</th><th class="sc-num">new</th>
+  </tr>
+  {% for run in runs %}
+  <tr>
+    <td>{{ run.id }}</td>
+    <td>{{ run.source }}</td>
+    <td>
+      <span class="sc-badge sc-{{ run.status }}">{{ run.status }}</span>
+      {% if run.error %}<div class="sc-error-text">{{ run.error }}</div>{% endif %}
+    </td>
+    <td>{{ run.started_at|slice:":16" }}</td>
+    <td class="sc-num">{{ run.records_seen }}</td>
+    <td class="sc-num">{{ run.records_new }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="sc-muted">nothing loaded yet</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

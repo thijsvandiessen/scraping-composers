@@ -5,9 +5,9 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from composer_ingest.etl.ingestion import run_ingest
 from composer_ingest.etl.models import Entity, RawWorkMention, Work, WorkTitle
 from composer_ingest.scraper.sources import WorkMentionDocument
+from conftest import ingest_source
 from test_ingest import FakeSource, person
 
 _INGESTED_AT = datetime(2024, 1, 1, tzinfo=UTC)
@@ -26,7 +26,7 @@ def mention(title: str, composer: str | None, external_id: str = "m1") -> WorkMe
 
 
 def test_mention_creates_work_alias_and_mention(session: Session) -> None:
-    run = run_ingest(
+    run = ingest_source(
         session,
         FakeSource(records=(mention("Symphony No. 5 in C minor, Op. 67", "Beethoven, Ludwig van"),)),
     )
@@ -49,7 +49,7 @@ def test_mention_creates_work_alias_and_mention(session: Session) -> None:
 
 def test_same_composer_and_work_matches_existing(session: Session) -> None:
     # different formatting of the same composer + same opus -> one work
-    run_ingest(
+    ingest_source(
         session,
         FakeSource(
             records=(
@@ -70,7 +70,7 @@ def test_same_composer_and_work_matches_existing(session: Session) -> None:
 
 
 def test_same_title_different_composer_creates_two_works(session: Session) -> None:
-    run_ingest(
+    ingest_source(
         session,
         FakeSource(
             records=(
@@ -83,7 +83,7 @@ def test_same_title_different_composer_creates_two_works(session: Session) -> No
 
 
 def test_composer_resolves_to_person_entity_shared_with_people_source(session: Session) -> None:
-    run_ingest(
+    ingest_source(
         session,
         FakeSource(
             records=(
@@ -100,8 +100,8 @@ def test_composer_resolves_to_person_entity_shared_with_people_source(session: S
 
 def test_reingest_is_idempotent(session: Session) -> None:
     source = FakeSource(records=(mention("Symphony No. 5, Op. 67", "Beethoven, Ludwig van"),))
-    first = run_ingest(session, source)
-    second = run_ingest(session, source)
+    first = ingest_source(session, source)
+    second = ingest_source(session, source)
 
     assert (first.records_new, second.records_new) == (1, 0)
     assert session.scalar(select(func.count(Work.id))) == 1
@@ -117,7 +117,7 @@ def test_batch_commit_with_mentions(session: Session) -> None:
     # COMMIT_BATCH=1000: distinct numbers -> distinct works, exercising the
     # mid-run commit path while resolving mentions.
     records = tuple(mention(f"Etude No. {i}", "Chopin, Frederic", f"m{i}") for i in range(1001))
-    run = run_ingest(session, FakeSource(records=records))
+    run = ingest_source(session, FakeSource(records=records))
 
     assert run.status == "completed"
     assert run.records_seen == 1001
@@ -132,7 +132,7 @@ def test_failing_source_preserves_committed_mentions(session: Session) -> None:
         ),
         fail_after=1,
     )
-    run = run_ingest(session, source)
+    run = ingest_source(session, source)
 
     assert run.status == "failed"
     # the mention processed before the error is preserved
