@@ -1,0 +1,47 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<div class="sc-toolbar">
+  {% if role %}
+  <a class="sc-btn" href="{% url 'people' role %}">← {{ role }}</a>
+  {% else %}
+  <a class="sc-btn" href="{% url 'entity_detail' person_id %}">← entity</a>
+  {% endif %}
+  {% if person_label %}
+  <span><strong>{{ person_label }}</strong> —
+    <a href="{% url 'entity_detail' person_id %}">entity</a></span>
+  {% endif %}
+  <span class="sc-muted">{{ total }} concert{{ total|pluralize }} — page {{ page }} of {{ pages }}</span>
+</div>
+
+<table class="sc-table">
+  <tr><th>date</th><th>venue</th><th>season</th><th>role</th><th>works performed</th><th>source</th></tr>
+  {% for concert in items %}
+  <tr>
+    <td style="white-space: nowrap;">
+      <a href="{% url 'concert_detail' concert.id %}"><strong>{{ concert.date|default:"undated" }}</strong></a>
+    </td>
+    <td>{{ concert.venue|default:"—" }}</td>
+    <td>{{ concert.season|default:"—" }}</td>
+    <td>{{ concert.role }}</td>
+    <td>
+      {% for title in concert.works %}
+      <div style="font-size: 0.85rem;">{{ title }}</div>
+      {% endfor %}
+    </td>
+    <td>
+      {% if concert.url %}<a href="{{ concert.url }}">{{ concert.source }}</a>
+      {% else %}{{ concert.source }}{% endif %}
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="sc-muted">no concerts recorded for this person</td></tr>
+  {% endfor %}
+</table>
+
+{% include "scrapers/pagination.html" %}
+{% endblock %}

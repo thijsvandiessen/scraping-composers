@@ -1,0 +1,50 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+{% if concert %}
+<div class="sc-toolbar">
+  <a class="sc-btn" href="{% url 'concerts_list' %}">← concerts</a>
+  <span><strong>{{ concert.date|default:"undated" }}</strong>
+    {% if concert.venue %} — {{ concert.venue }}{% endif %}</span>
+  {% if concert.season %}<span class="sc-badge sc-unknown">{{ concert.season }}</span>{% endif %}
+  {% if concert.event_type %}<span class="sc-badge sc-unknown">{{ concert.event_type }}</span>{% endif %}
+  {% if concert.url %}<a class="sc-btn" href="{{ concert.url }}">view at {{ concert.source }}</a>
+  {% else %}<span class="sc-muted">source: {{ concert.source }}</span>{% endif %}
+</div>
+
+<h2 class="sc-heading">Musicians</h2>
+<table class="sc-table" style="max-width: 46rem;">
+  <tr><th>role</th><th>name</th><th>discipline</th></tr>
+  {% for p in concert.participants %}
+  <tr>
+    <td>{{ p.role }}</td>
+    <td>
+      {% if p.entity_id %}
+      <a href="{% url 'entity_detail' p.entity_id %}"><strong>{{ p.name }}</strong></a>
+      {% else %}{{ p.name }}{% endif %}
+    </td>
+    <td>{{ p.discipline|default:"—" }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="3" class="sc-muted">no musicians recorded</td></tr>
+  {% endfor %}
+</table>
+
+<h2 class="sc-heading">Programme</h2>
+<table class="sc-table" style="max-width: 46rem;">
+  <tr><th>work</th><th>composer</th></tr>
+  {% for work in concert.works %}
+  <tr>
+    <td>{{ work.title }}</td>
+    <td>{{ work.composer|default:"—" }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="2" class="sc-muted">no works recorded</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

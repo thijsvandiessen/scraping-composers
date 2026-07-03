@@ -1,24 +1,14 @@
 import argparse
 import logging
-import os
+from dataclasses import asdict
 from pathlib import Path
 
 from ..etl.db import get_engine, init_db
-from ..etl.ingestion import run_ingest, run_ingest_from_bucket
-from ..scraper.bucket import LocalBucket
+from ..etl.gold import promote
+from ..etl.ingestion import ingest_documents
+from ..scraper.bucket import LOADABLE_STATUSES, LocalBucket
 from ..scraper.scraper import Scraper, iter_from_bucket
 from ..scraper.sources import REGISTRY
-
-DEFAULT_BUCKET_PATH = os.environ.get("BUCKET_PATH", "./raw-data")
-
-
-def cmd_ingest(args: argparse.Namespace) -> int:
-    adapter = REGISTRY[args.source]
-    engine = get_engine(args.database_url)
-    session_factory = init_db(engine)
-    with session_factory() as session:
-        run = run_ingest(session, adapter, max_pages=args.max_pages)
-    return 0 if run.status == "completed" else 1
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
@@ -35,20 +25,40 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_promote(args: argparse.Namespace) -> int:
+    engine = get_engine(args.database_url)
+    session_factory = init_db(engine)
+    with session_factory() as session:
+        try:
+            stats = promote(session, args.gold_path)
+        except Exception as exc:
+            logging.getLogger(__name__).error("promote failed: %s: %s", type(exc).__name__, exc)
+            return 1
+    print(f"gold rebuilt at {args.gold_path}")
+    for key, value in asdict(stats).items():
+        print(f"  {key.replace('_', ' '):<22} {value}")
+    return 0
+
+
 def cmd_process(args: argparse.Namespace) -> int:
     adapter = REGISTRY[args.source]
     bucket = LocalBucket(args.bucket_path)
     run_id = args.run_id
     if run_id is None:
-        runs = bucket.list_runs(args.source)
-        if not runs:
-            print(f"no runs found for source '{args.source}' in {args.bucket_path}")
+        # Latest loadable snapshot: skip fetches that are still running or crashed.
+        loadable = [
+            s.manifest.run_id
+            for s in bucket.list_snapshots(args.source)
+            if s.manifest.status in LOADABLE_STATUSES
+        ]
+        if not loadable:
+            print(f"no complete snapshots found for source '{args.source}' in {args.bucket_path}")
             return 1
-        run_id = runs[-1]
+        run_id = loadable[-1]
         print(f"using latest run: {run_id}")
     engine = get_engine(args.database_url)
     session_factory = init_db(engine)
     with session_factory() as session:
         records = iter_from_bucket(args.source, run_id, bucket)
-        run = run_ingest_from_bucket(session, adapter.name, adapter.base_url, records)
+        run = ingest_documents(session, adapter.name, adapter.base_url, records)
     return 0 if run.status == "completed" else 1

@@ -33,7 +33,7 @@ def run_ingest_records(
     run: IngestRun,
     records_iter: Iterator[EntityDocument | WorkMentionDocument],
 ) -> tuple[int, int]:
-    """Core ingest loop shared by run_ingest and run_ingest_from_bucket.
+    """Core ingest loop driven by execute_run / ingest_documents.
 
     Returns (records_seen, records_new).
     """

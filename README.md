@@ -10,11 +10,13 @@ ingest run produced it.
 ```sh
 uv sync
 
-# fetch everything from IMSLP (~55k people, ~55 pages, a few minutes)
-uv run composer-ingest ingest imslp
+# fetch everything from IMSLP (~55k people, ~55 pages, a few minutes) to the
+# bucket, then load the snapshot into the database (no network)
+uv run composer-ingest fetch imslp
+uv run composer-ingest process imslp
 
 # quick test run
-uv run composer-ingest ingest imslp --max-pages 1
+uv run composer-ingest fetch imslp --max-pages 1
 
 # inspect the dataset and the collection log
 uv run composer-ingest stats
@@ -49,6 +51,57 @@ uv sync --extra postgres
 export DATABASE_URL="postgresql+psycopg://user:pass@host:5432/composers"
 ```
 
+## Bronze & gold
+
+Data lives in two tiers. **Bronze** (`composers.db`) is the raw staging layer:
+everything every source said, verbatim, with provenance — ingest only ever
+writes here. **Gold** (`gold.db`) is the curated copy rebuilt from bronze by
+the promote step:
+
+```sh
+uv run composer-ingest promote        # bronze → gold (full rebuild, atomic swap)
+```
+
+Promotion applies the curation rules: people with no concerts, recordings, or
+works mentioned are dropped (kept only if they composed a mentioned work or a
+performance archive reported them); duplicate person entities (linked by
+`dedupe-persons`) are collapsed into their canonical row with claims, works,
+and mentions re-pointed; entities left unreferenced are pruned. Bronze is
+never modified, so promotion is repeatable at any time; status and stats land
+in `gold.db.manifest.json`.
+
+Promotion also **derives concerts** from the mentions' raw performance
+context: mentions are grouped into concerts per source (berlinphil by its
+concert id, nyphil by program + date, concertgebouw by date + city, dates
+normalized to ISO) with season and event type; conductors *and soloists*
+(with their instrument/voice) are resolved to person entities by normalized
+name; and each concert keeps its programme. That powers the concert browser,
+per-person concert lists, and concert-count sorting in gold.
+
+## Consumer API (read the dataset)
+
+Two read-only FastAPI apps with identical routes — gold is the product API,
+bronze serves the raw staging data for inspection:
+
+```sh
+uv sync --extra api
+uv run uvicorn composer_ingest.api:gold_app --port 8000     # curated (default)
+uv run uvicorn composer_ingest.api:bronze_app --port 8003   # raw staging
+# open http://localhost:8000/docs
+```
+
+- `GET /v1/composers` / `/v1/soloists` / `/v1/conductors` (+ `/{id}`) — searchable, paginated people;
+  `?sort=concerts` orders by concert count (each item carries `concert_count`)
+- `GET /v1/people/{id}/concerts` — the concerts a person took part in, with dates, venues, and works
+- `GET /v1/concerts?q=&source=` / `GET /v1/concerts/{id}` — browse concerts (search by venue or
+  participant); the detail carries all musicians (role, discipline, entity link) and the programme
+- `GET /v1/stats` — dataset counts: entities per kind, records per source, works, mention statuses
+- `GET /v1/entities?q=&kind=` / `GET /v1/entities/{id}` — search every entity kind; the detail shows
+  each claim with its source plus the (capped) list of claims pointing at the entity
+- `GET /v1/works?q=` — resolved works by title or composer, with aliases and mention counts
+- `GET /v1/mentions?status=` — work mentions with the matcher's decision;
+  `status=needs_review` is the review queue, each entry with its best candidate work
+
 ## Admin API (manage & run scrapers)
 
 A small FastAPI app for triggering scrapes from a browser instead of the CLI.
@@ -65,14 +118,115 @@ Each scraper carries a **refresh cadence** (`monthly`, `yearly`, or `static`)
 declared on its `SourceAdapter`. The API surfaces which scrapers are *due* so
 you can refresh by staleness rather than by data type:
 
-- `GET  /admin/v1/scrapers` — every scraper with its cadence, last run, and `due` flag
-- `POST /admin/v1/scrapers/{name}/run` — start one scraper (runs in the background, returns a `run_id`)
-- `POST /admin/v1/scrapers/run-due` — start every scraper whose data is stale
-- `GET  /admin/v1/runs` / `GET /admin/v1/runs/{run_id}` — run history and status
+The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
+`process`:
 
-Runs execute in the background and are recorded in `ingest_runs` (the same log
-the CLI `runs` command shows). Set `ADMIN_API_KEY` to require an `X-Admin-Key`
-header on every admin request (unset = open, for local use).
+- `GET  /admin/v1/scrapers` — every scraper with its cadence, last snapshot, and `due` flag
+- `POST /admin/v1/scrapers/{name}/fetch` — fetch one source to the bucket (background, returns the `snapshot_id`)
+- `POST /admin/v1/scrapers/fetch-due` — fetch every scraper whose raw data is stale
+- `GET  /admin/v1/snapshots` — every raw snapshot in the bucket with its status, record count, and size
+- `POST /admin/v1/snapshots/{source}/{snapshot_id}/process` — load a snapshot into the database (background, returns a `run_id`)
+- `GET  /admin/v1/runs` / `GET /admin/v1/runs/{run_id}` — load history and status
+
+Fetch status lives in the snapshot's manifest on disk; loads are recorded in
+`ingest_runs` (the same log the CLI `runs` command shows). Set `ADMIN_API_KEY`
+to require an `X-Admin-Key` header on every admin request (unset = open, for
+local use).
+
+### Dashboard (Django + Unfold)
+
+A web UI (`dashboard/`) on top of the admin API, styled with
+[Unfold](https://unfoldadmin.com/) and living behind the Django admin login,
+with one page per ingest phase:
+
+- **Scrapers** — every scraper with its cadence, due/fresh state, and last
+  snapshot; a **Fetch** button each and a **Fetch all due** button. Fetching
+  only writes raw data to the bucket.
+- **Load** — every raw snapshot in the bucket (status, record count, size)
+  with a **Load into DB** button on complete ones, plus the recent-loads log.
+- **Promote** — gold status (last rebuild, curation stats) and the button to
+  rebuild gold from bronze.
+- **Data (bronze)** (Overview / Entities / Works / Review) — inspect the raw
+  staging data: dataset counts, a searchable entity browser (per-kind pages,
+  random sampling, claims with per-source provenance, cross-linked entities),
+  a searchable works browser, and the work-mention review queue (resolving
+  stays on the CLI: `review --accept` / `--new`).
+- **Musicians (gold)** (Composers / Soloists / Conductors / Concerts) —
+  role-based people pages over the curated gold database with per-person
+  concert counts (sortable), and a concert browser whose detail pages show
+  each concert's musicians and programme.
+
+Scrapers/Load/Promote pages auto-refresh every 5 seconds while work is in
+progress.
+
+```sh
+uv sync --extra admin --extra api --extra dashboard
+uv run python dashboard/manage.py migrate            # once: Django's own tables
+uv run python dashboard/manage.py createsuperuser    # once: your login
+uv run uvicorn composer_ingest.api:gold_app --port 8000      # gold API (Musicians pages)
+uv run uvicorn composer_ingest.admin:admin_app --port 8001   # admin API (scrape/load/promote)
+uv run uvicorn composer_ingest.api:bronze_app --port 8003    # bronze API (Data pages)
+uv run python dashboard/manage.py runserver 8002             # the dashboard
+# open http://localhost:8002 and log in
+```
+
+The dashboard never touches any composer database — scrape/load/promote
+actions go through the admin API (`ADMIN_API_URL`, default
+`http://localhost:8001`; `ADMIN_API_KEY` forwarded as `X-Admin-Key` when set)
+and data inspection goes through the consumer APIs (`GOLD_API_URL`, default
+`http://localhost:8000`; `BRONZE_API_URL`, default `http://localhost:8003`).
+Django's own SQLite (`dashboard/dashboard.sqlite3`, gitignored) stores only
+admin login users and sessions; the `scrapers` app defines no models, so
+scraper data cannot land in it. That keeps the APIs the only data paths, so
+the dashboard can be deployed anywhere they are reachable.
+
+## Ingest flow
+
+Every source moves through the same pipeline; only the adapter knows the
+source's protocol.
+
+1. **Fetch** — the source's `SourceAdapter`
+   (`src/composer_ingest/scraper/sources/<name>/`) talks to the source's API or
+   pages and yields a stream of typed documents: `EntityDocument` for named
+   entities (with `SourceClaim`s attached) and `WorkMentionDocument` for
+   concert-programme `(composer, title)` entries.
+2. **Load** — the ingest loop (`src/composer_ingest/etl/ingestion/`) opens an
+   `IngestRun` and consumes the stream:
+   - A document already known for this source — matched on
+     `(source, external_id)` — only gets its `last_seen` timestamp and run id
+     touched, which is what makes re-ingesting idempotent.
+   - A new `EntityDocument` is attached to a canonical `Entity` via its
+     normalized `(kind, dedup_key)` (created if the label is new) and stored
+     verbatim as an `entity_records` row; its `SourceClaim`s, plus a
+     `mentioned_in` claim recording where it was found, become `claims` rows.
+   - A new `WorkMentionDocument` lands in `raw_work_mentions` and immediately
+     runs through the work-matching pipeline described under
+     [Works](#works) (auto-match / flag for review / create a new work).
+
+   Existing keys are preloaded up front and commits happen in 1000-record
+   batches, so the per-record loop needs no queries. A mid-run failure commits
+   what was ingested so far and marks the run `failed` with partial counts.
+3. **Record** — the finished run's status, seen/new counts, and timestamps land
+   in `ingest_runs` (shown by `composer-ingest runs` and the admin API).
+
+The two phases are deliberately separate commands — source requests are slow,
+so scraping never blocks on (or fails with) the database load:
+
+```sh
+uv run composer-ingest fetch imslp    # network → ./raw-data/imslp/<run_id>/records.ndjson
+uv run composer-ingest process imslp  # disk → DB; latest run by default, --run-id to pick one
+```
+
+The bucket (`scraper/bucket.py`; NDJSON per run under `BUCKET_PATH`, default
+`./raw-data`) is the only way data enters the database: after an ETL change you
+can re-process a snapshot without hitting the source again, and `LocalBucket`
+can be swapped for an S3 implementation without touching callers.
+
+Each snapshot carries a `manifest.json` recording the fetch's status
+(`running`/`completed`/`failed`), record count, and timestamps, so a crashed
+fetch can never be mistaken for a complete snapshot: `process` (and the admin
+API) only load complete snapshots when picking "latest" — pass `--run-id`
+explicitly to override.
 
 ## Data model
 

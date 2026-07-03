@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -11,14 +12,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from composer_ingest.cli import main
-from composer_ingest.cli.ingest_cmds import cmd_ingest
+from composer_ingest.cli.ingest_cmds import cmd_fetch, cmd_process
 from composer_ingest.cli.person_cmds import cmd_dedupe_persons, cmd_person_review
 from composer_ingest.cli.query_cmds import cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_ingest.cli.work_cmds import cmd_rematch, cmd_review, cmd_works
 from composer_ingest.etl.db import get_engine, init_db
-from composer_ingest.etl.ingestion import run_ingest
 from composer_ingest.etl.models import Entity, PersonMatch, RawWorkMention, Work
 from composer_ingest.scraper.sources import SourceClaim
+from conftest import ingest_source
 from test_ingest import FakeSource, person
 from test_ingest_mentions import mention
 
@@ -52,8 +53,8 @@ def _ingest_two_sources_disagreeing(session: Session) -> None:
         ),
         name="wikidata",
     )
-    run_ingest(session, a)
-    run_ingest(session, b)
+    ingest_source(session, a)
+    ingest_source(session, b)
 
 
 def test_entity_claims_attributes_each_value_to_its_source(session: Session) -> None:
@@ -98,7 +99,7 @@ def test_entity_claims_collapses_identical_assertions_from_one_source(session: S
         ),
         name="wikidata",
     )
-    run_ingest(session, source)
+    ingest_source(session, source)
 
     ((_, rows),) = entity_claims(session, "Bach, Johann Sebastian", predicate="has_profession")
     assert len(rows) == 1
@@ -128,7 +129,7 @@ def test_cmd_stats_shows_entity_and_claim_counts(tmp_path: Path, capsys: pytest.
     db_url = f"sqlite:///{tmp_path}/test.db"
     factory = init_db(get_engine(db_url))
     with factory() as session:
-        run_ingest(
+        ingest_source(
             session,
             FakeSource(
                 records=(
@@ -152,7 +153,7 @@ def test_cmd_stats_shows_entity_and_claim_counts(tmp_path: Path, capsys: pytest.
 def _ingest(db_url: str, *records: object) -> None:
     factory = init_db(get_engine(db_url))
     with factory() as session:
-        run_ingest(session, FakeSource(records=records))  # type: ignore[arg-type]
+        ingest_source(session, FakeSource(records=records))  # type: ignore[arg-type]
 
 
 def test_cmd_stats_shows_work_and_mention_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -320,29 +321,87 @@ def test_cmd_person_review_reject(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# cmd_ingest
+# cmd_fetch / cmd_process
 # ---------------------------------------------------------------------------
 
 
-def test_cmd_ingest_returns_0_on_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_fetch_then_process_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from composer_ingest.scraper.sources import REGISTRY
 
     db_url = f"sqlite:///{tmp_path}/test.db"
+    bucket_path = str(tmp_path / "bucket")
     fake = FakeSource(records=(person("Bach, Johann Sebastian"),), name="fake")
     monkeypatch.setitem(REGISTRY, "fake", fake)
 
-    rc = cmd_ingest(_ns(database_url=db_url, source="fake", max_pages=None))
+    rc = cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path))
     assert rc == 0
+    ndjson_files = list((tmp_path / "bucket" / "fake").glob("*/records.ndjson"))
+    assert len(ndjson_files) == 1  # raw snapshot on disk before anything touches the DB
+    manifest = json.loads((ndjson_files[0].parent / "manifest.json").read_text())
+    assert manifest["status"] == "completed"
+    assert manifest["record_count"] == 1
+
+    rc = cmd_process(_ns(database_url=db_url, source="fake", run_id=None, bucket_path=bucket_path))
+    assert rc == 0
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+        assert entity.label == "Bach, Johann Sebastian"
 
 
-def test_cmd_ingest_returns_1_on_source_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cmd_fetch_returns_1_on_source_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from composer_ingest.scraper.sources import REGISTRY
 
-    db_url = f"sqlite:///{tmp_path}/test.db"
     fake = FakeSource(records=(person("Mozart"), person("Haydn")), name="fake", fail_after=1)
     monkeypatch.setitem(REGISTRY, "fake", fake)
 
-    rc = cmd_ingest(_ns(database_url=db_url, source="fake", max_pages=None))
+    rc = cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=str(tmp_path / "bucket")))
+    assert rc == 1
+    # the crash is recorded on disk, so the snapshot can never be mistaken for complete
+    manifests = list((tmp_path / "bucket" / "fake").glob("*/manifest.json"))
+    assert len(manifests) == 1
+    manifest = json.loads(manifests[0].read_text())
+    assert manifest["status"] == "failed"
+    assert "source exploded" in manifest["error"]
+
+
+def test_cmd_process_default_skips_incomplete_snapshots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from composer_ingest.scraper.sources import REGISTRY
+
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    bucket_path = str(tmp_path / "bucket")
+    good = FakeSource(records=(person("Bach, Johann Sebastian"),), name="fake")
+    monkeypatch.setitem(REGISTRY, "fake", good)
+    assert cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path)) == 0
+
+    # a later fetch crashes -> failed manifest; default process must skip it
+    bad = FakeSource(records=(person("Mozart"),), name="fake", fail_after=0)
+    monkeypatch.setitem(REGISTRY, "fake", bad)
+    assert cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path)) == 1
+    monkeypatch.setitem(REGISTRY, "fake", good)
+
+    rc = cmd_process(_ns(database_url=db_url, source="fake", run_id=None, bucket_path=bucket_path))
+    assert rc == 0
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        labels = session.scalars(select(Entity.label).where(Entity.kind == "person")).all()
+        assert labels == ["Bach, Johann Sebastian"]  # the completed snapshot, not the crashed one
+
+
+def test_cmd_process_returns_1_without_fetched_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from composer_ingest.scraper.sources import REGISTRY
+
+    monkeypatch.setitem(REGISTRY, "fake", FakeSource(records=(), name="fake"))
+    rc = cmd_process(
+        _ns(
+            database_url=f"sqlite:///{tmp_path}/test.db",
+            source="fake",
+            run_id=None,
+            bucket_path=str(tmp_path / "bucket"),
+        )
+    )
     assert rc == 1
 
 
@@ -355,7 +414,7 @@ def test_cmd_claims_prints_entity_and_claims(tmp_path: Path, capsys: pytest.Capt
     db_url = f"sqlite:///{tmp_path}/test.db"
     factory = init_db(get_engine(db_url))
     with factory() as session:
-        run_ingest(
+        ingest_source(
             session,
             FakeSource(
                 records=(person("Bach, Johann Sebastian", SourceClaim("born_on", value="1685-03-21")),)
@@ -397,7 +456,7 @@ def test_cmd_runs_shows_run_log(tmp_path: Path, capsys: pytest.CaptureFixture[st
     db_url = f"sqlite:///{tmp_path}/test.db"
     factory = init_db(get_engine(db_url))
     with factory() as session:
-        run_ingest(session, FakeSource(records=(person("Haydn, Joseph"),), name="wikidata"))
+        ingest_source(session, FakeSource(records=(person("Haydn, Joseph"),), name="wikidata"))
 
     rc = cmd_runs(_ns(database_url=db_url, limit=20))
     assert rc == 0
@@ -433,7 +492,8 @@ def test_main_routes_to_claims_subcommand(
     db_url = f"sqlite:///{tmp_path}/test.db"
     factory = init_db(get_engine(db_url))
     with factory() as session:
-        run_ingest(session, FakeSource(records=(person("Bach, J.S.", SourceClaim("born_on", value="1685")),)))
+        bach = person("Bach, J.S.", SourceClaim("born_on", value="1685"))
+        ingest_source(session, FakeSource(records=(bach,)))
 
     monkeypatch.setattr(sys, "argv", ["composer-ingest", "--database-url", db_url, "claims", "Bach"])
     with pytest.raises(SystemExit) as exc:
@@ -448,7 +508,7 @@ def test_main_routes_to_runs_subcommand(
     db_url = f"sqlite:///{tmp_path}/test.db"
     factory = init_db(get_engine(db_url))
     with factory() as session:
-        run_ingest(session, FakeSource(records=(person("Beethoven"),), name="wikidata"))
+        ingest_source(session, FakeSource(records=(person("Beethoven"),), name="wikidata"))
 
     monkeypatch.setattr(sys, "argv", ["composer-ingest", "--database-url", db_url, "runs"])
     with pytest.raises(SystemExit) as exc:

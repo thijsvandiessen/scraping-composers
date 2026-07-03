@@ -14,6 +14,7 @@ dependencies = [
 postgres = ["psycopg[binary]>=3.1"]
 api = ["fastapi>=0.111", "uvicorn[standard]>=0.30"]
 admin = ["fastapi>=0.111", "uvicorn[standard]>=0.30"]
+dashboard = ["django>=5.1", "django-unfold>=0.40"]
 
 [dependency-groups]
 dev = [
@@ -21,25 +22,35 @@ dev = [
     "mypy>=1.10",
     "ruff>=0.4",
     "fastapi>=0.111",
+    "django>=5.1",
+    "django-unfold>=0.40",
+    "pytest-django>=4.8",
 ]
 
 [tool.ruff]
 line-length = 110
-src = ["src", "tests"]
+src = ["src", "tests", "dashboard"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.mypy]
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "dashboard"]
+mypy_path = ["dashboard"]
 
 [[tool.mypy.overrides]]
 module = "kagglehub.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = "django.*"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["dashboard"]
+DJANGO_SETTINGS_MODULE = "config.settings"
 
 [project.scripts]
 composer-ingest = "composer_ingest.cli:main"

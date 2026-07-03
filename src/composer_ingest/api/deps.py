@@ -2,23 +2,14 @@ from collections.abc import Generator
 from typing import Annotated
 
 from fastapi import Depends
-from sqlalchemy.orm import Session, sessionmaker
-
-from ..etl.db import get_engine, init_db
-
-_session_factory: sessionmaker[Session] | None = None
-
-
-def _get_session_factory() -> sessionmaker[Session]:
-    global _session_factory
-    if _session_factory is None:
-        _session_factory = init_db(get_engine())
-    return _session_factory
+from sqlalchemy.orm import Session
 
 
 def get_db() -> Generator[Session, None, None]:
-    with _get_session_factory()() as session:
-        yield session
+    """Placeholder dependency; every app binds its own database via
+    ``create_app`` (see ``main.py``), which overrides this."""
+    raise RuntimeError("get_db must be overridden by the app; build apps via create_app")
+    yield  # pragma: no cover  # makes this a generator, matching the override's shape
 
 
 DbSession = Annotated[Session, Depends(get_db)]

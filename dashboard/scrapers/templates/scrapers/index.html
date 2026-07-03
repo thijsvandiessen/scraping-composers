@@ -1,0 +1,58 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% if refreshing %}<meta http-equiv="refresh" content="5">{% endif %}
+{% include "scrapers/style.html" %}
+
+{% for message in messages %}
+  <div class="sc-banner {{ message.tags }}">{{ message }}</div>
+{% endfor %}
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<div class="sc-toolbar">
+  <form method="post" action="{% url 'fetch_due' %}">
+    {% csrf_token %}
+    <button type="submit" class="sc-btn sc-btn-primary">Fetch all due scrapers</button>
+  </form>
+  <span class="sc-muted">fetches raw data to the bucket — load it into the database on the
+    <a href="{% url 'load_index' %}">Load</a> page</span>
+  {% if refreshing %}<span class="sc-muted">a fetch is in progress — refreshing every 5 s…</span>{% endif %}
+</div>
+
+<table class="sc-table">
+  <tr>
+    <th>source</th><th>cadence</th><th>freshness</th>
+    <th>last fetch</th><th class="sc-num">records</th><th></th>
+  </tr>
+  {% for scraper in scrapers %}
+  <tr>
+    <td><strong>{{ scraper.name }}</strong></td>
+    <td>{{ scraper.cadence }}</td>
+    <td>
+      {% if scraper.due %}<span class="sc-badge sc-due">due</span>
+      {% else %}<span class="sc-badge sc-fresh">fresh</span>{% endif %}
+    </td>
+    {% with snapshot=scraper.last_snapshot %}
+    {% if snapshot %}
+    <td>
+      <span class="sc-badge sc-{{ snapshot.status }}">{{ snapshot.status }}</span>
+      {{ snapshot.started_at|slice:":16" }}
+      {% if snapshot.error %}<div class="sc-error-text">{{ snapshot.error }}</div>{% endif %}
+    </td>
+    <td class="sc-num">{{ snapshot.record_count|default_if_none:"—" }}</td>
+    {% else %}
+    <td class="sc-muted">never fetched</td><td class="sc-num">—</td>
+    {% endif %}
+    {% endwith %}
+    <td>
+      <form method="post" action="{% url 'start_fetch' scraper.name %}">
+        {% csrf_token %}
+        <button type="submit" class="sc-btn">Fetch</button>
+      </form>
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="sc-muted">no scrapers reported by the admin API</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

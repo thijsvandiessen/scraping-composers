@@ -6,9 +6,9 @@ from datetime import UTC, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from composer_ingest.etl.ingestion import run_ingest
 from composer_ingest.etl.models import Claim, Entity, EntityRecord, IngestRun
 from composer_ingest.scraper.sources import EntityDocument, SourceAdapter, SourceClaim, WorkMentionDocument
+from conftest import ingest_source
 
 _INGESTED_AT = datetime(2024, 1, 1, tzinfo=UTC)
 
@@ -69,7 +69,7 @@ def entities_by_kind(session: Session) -> dict[str, list[str]]:
 
 
 def test_ingest_creates_entities_records_and_claims(session: Session) -> None:
-    run = run_ingest(session, FakeSource(records=(MOZART,)))
+    run = ingest_source(session, FakeSource(records=(MOZART,)))
 
     assert run.status == "completed"
     assert run.records_seen == 1
@@ -103,8 +103,8 @@ def test_ingest_creates_entities_records_and_claims(session: Session) -> None:
 
 def test_reingest_is_idempotent(session: Session) -> None:
     source = FakeSource(records=(MOZART, person("Haydn, Joseph")))
-    first = run_ingest(session, source)
-    second = run_ingest(session, source)
+    first = ingest_source(session, source)
+    second = ingest_source(session, source)
 
     assert (first.records_seen, first.records_new) == (2, 2)
     assert (second.records_seen, second.records_new) == (2, 0)
@@ -142,8 +142,8 @@ def test_second_source_attaches_to_same_entity(session: Session) -> None:
         name="source-b",
     )
 
-    run_ingest(session, imslp_like)
-    run_ingest(session, wiki_like)
+    ingest_source(session, imslp_like)
+    ingest_source(session, wiki_like)
 
     people = session.scalars(select(Entity).where(Entity.kind == "person")).all()
     assert len(people) == 1  # deduplicated across sources
@@ -164,7 +164,7 @@ def test_claim_objects_are_deduplicated_entities(session: Session) -> None:
             person("Haydn, Joseph", SourceClaim("has_profession", "profession", "Composer")),
         ),
     )
-    run_ingest(session, source)
+    ingest_source(session, source)
 
     professions = session.scalars(select(Entity).where(Entity.kind == "profession")).all()
     assert len(professions) == 1  # "composer" and "Composer" normalize to one entity
@@ -188,7 +188,7 @@ def test_mentioned_in_uses_record_url_when_present(session: Session) -> None:
             ),
         )
     )
-    run_ingest(session, source)
+    ingest_source(session, source)
 
     claim = session.scalars(select(Claim).where(Claim.predicate == "mentioned_in")).one()
     assert claim.value == "https://example.com/mozart"
@@ -199,7 +199,7 @@ def test_mentioned_in_falls_back_to_source_base_url(session: Session) -> None:
         records=(person("Haydn, Joseph"),),  # person() leaves url=None
         base_url="https://fake.example/composers",
     )
-    run_ingest(session, source)
+    ingest_source(session, source)
 
     claim = session.scalars(select(Claim).where(Claim.predicate == "mentioned_in")).one()
     assert claim.value == "https://fake.example/composers"
@@ -208,7 +208,7 @@ def test_mentioned_in_falls_back_to_source_base_url(session: Session) -> None:
 def test_batch_commit_fires_at_1000_record_boundary(session: Session) -> None:
     # COMMIT_BATCH=1000: this exercises the mid-run commit path at seen==1000
     source = FakeSource(records=tuple(person(f"Composer {i}") for i in range(1001)))
-    run = run_ingest(session, source)
+    run = ingest_source(session, source)
 
     assert run.status == "completed"
     assert run.records_seen == 1001
@@ -219,7 +219,7 @@ def test_batch_commit_fires_at_1000_record_boundary(session: Session) -> None:
 
 def test_failing_source_marks_run_failed(session: Session) -> None:
     source = FakeSource(records=(MOZART, person("Haydn, Joseph")), fail_after=1)
-    run = run_ingest(session, source)
+    run = ingest_source(session, source)
 
     assert run.status == "failed"
     assert run.error is not None and "source exploded" in run.error
@@ -237,7 +237,7 @@ def test_failing_source_marks_run_failed(session: Session) -> None:
 
 
 def test_entity_has_ingestion_timestamps(session: Session) -> None:
-    run_ingest(session, FakeSource(records=(MOZART,)))
+    ingest_source(session, FakeSource(records=(MOZART,)))
     entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
 
     assert entity.first_ingested_at is not None
@@ -247,12 +247,12 @@ def test_entity_has_ingestion_timestamps(session: Session) -> None:
 
 def test_reingest_updates_last_ingested_at(session: Session) -> None:
     source = FakeSource(records=(MOZART,))
-    run_ingest(session, source)
+    ingest_source(session, source)
 
     entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
     after_first = entity.last_ingested_at
 
-    run_ingest(session, source)
+    ingest_source(session, source)
     session.expire(entity)
 
     assert entity.last_ingested_at >= after_first
@@ -260,12 +260,12 @@ def test_reingest_updates_last_ingested_at(session: Session) -> None:
 
 def test_last_edited_at_unchanged_on_reingest_with_same_claims(session: Session) -> None:
     source = FakeSource(records=(MOZART,))
-    run_ingest(session, source)
+    ingest_source(session, source)
 
     entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
     edited_after_first = entity.last_edited_at
 
-    run_ingest(session, source)
+    ingest_source(session, source)
     session.expire(entity)
 
     # no new claims were added, so last_edited_at should not advance

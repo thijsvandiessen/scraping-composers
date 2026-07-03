@@ -1,0 +1,15 @@
+<div class="sc-toolbar">
+  {% if prev_url %}<a class="sc-btn" id="sc-prev" href="{{ prev_url }}">← previous</a>{% endif %}
+  {% if next_url %}<a class="sc-btn" id="sc-next" href="{{ next_url }}">next →</a>{% endif %}
+  {% if prev_url or next_url %}<span class="sc-muted">tip: ← / → keys turn the page</span>{% endif %}
+</div>
+<script>
+  document.addEventListener("keydown", function (event) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.target.matches("input, select, textarea")) return;
+    var link = event.key === "ArrowRight" ? document.getElementById("sc-next")
+             : event.key === "ArrowLeft" ? document.getElementById("sc-prev")
+             : null;
+    if (link) link.click();
+  });
+</script>
