@@ -1,0 +1,47 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<form method="get" class="sc-toolbar">
+  <input type="text" name="q" value="{{ q }}" placeholder="search by title or composer…" class="sc-btn" style="cursor: text; min-width: 22rem;">
+  <button type="submit" class="sc-btn sc-btn-primary">Search</button>
+  <span class="sc-muted">{{ total }} works — page {{ page }} of {{ pages }}</span>
+</form>
+
+<table class="sc-table">
+  <tr>
+    <th>title</th><th>composer</th><th>features</th>
+    <th class="sc-num">mentions</th>
+  </tr>
+  {% for work in items %}
+  <tr>
+    <td>
+      <strong>{{ work.canonical_title }}</strong>
+      {% for alias in work.aliases %}
+      <div class="sc-muted" style="font-size: 0.8rem;">alias: {{ alias }}</div>
+      {% endfor %}
+    </td>
+    <td>
+      {% if work.composer_id %}
+      <a href="{% url 'entity_detail' work.composer_id %}">{{ work.composer_label }}</a>
+      {% else %}<span class="sc-muted">unknown</span>{% endif %}
+    </td>
+    <td class="sc-muted">
+      {% if work.work_type %}type={{ work.work_type }} {% endif %}
+      {% if work.opus_number %}opus={{ work.opus_number }} {% endif %}
+      {% if work.catalogue %}cat={{ work.catalogue }} {% endif %}
+      {% if work.musical_key %}key={{ work.musical_key }} {% endif %}
+      {% if work.number is not None %}no={{ work.number }}{% endif %}
+    </td>
+    <td class="sc-num">{{ work.mention_count }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="4" class="sc-muted">no works match</td></tr>
+  {% endfor %}
+</table>
+
+{% include "scrapers/pagination.html" %}
+{% endblock %}

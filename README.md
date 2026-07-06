@@ -10,11 +10,13 @@ ingest run produced it.
 ```sh
 uv sync
 
-# fetch everything from IMSLP (~55k people, ~55 pages, a few minutes)
-uv run composer-ingest ingest imslp
+# fetch everything from IMSLP (~55k people, ~55 pages, a few minutes) to the
+# bucket, then load the snapshot into the database (no network)
+uv run composer-ingest fetch imslp
+uv run composer-ingest process imslp
 
 # quick test run
-uv run composer-ingest ingest imslp --max-pages 1
+uv run composer-ingest fetch imslp --max-pages 1
 
 # inspect the dataset and the collection log
 uv run composer-ingest stats
@@ -48,6 +50,183 @@ Data lands in `composers.db` (SQLite) by default. To use Postgres instead:
 uv sync --extra postgres
 export DATABASE_URL="postgresql+psycopg://user:pass@host:5432/composers"
 ```
+
+## Bronze & gold
+
+Data lives in two tiers. **Bronze** (`composers.db`) is the raw staging layer:
+everything every source said, verbatim, with provenance — ingest only ever
+writes here. **Gold** (`gold.db`) is the curated copy rebuilt from bronze by
+the promote step:
+
+```sh
+uv run composer-ingest promote        # bronze → gold (full rebuild, atomic swap)
+```
+
+Promotion applies the curation rules: people with no concerts, recordings, or
+works mentioned are dropped (kept only if they composed a mentioned work or a
+performance archive reported them); duplicate person entities (linked by
+`dedupe-persons`) are collapsed into their canonical row with claims, works,
+and mentions re-pointed; entities left unreferenced are pruned. Bronze is
+never modified, so promotion is repeatable at any time; status and stats land
+in `gold.db.manifest.json`.
+
+Promotion also **derives concerts** from the mentions' raw performance
+context: mentions are grouped into concerts per source (berlinphil by its
+concert id, nyphil by program + date, concertgebouw by date + city, dates
+normalized to ISO) with season and event type; conductors *and soloists*
+(with their instrument/voice) are resolved to person entities by normalized
+name; and each concert keeps its programme. That powers the concert browser,
+per-person concert lists, and concert-count sorting in gold.
+
+## Consumer API (read the dataset)
+
+Two read-only FastAPI apps with identical routes — gold is the product API,
+bronze serves the raw staging data for inspection:
+
+```sh
+uv sync
+uv run uvicorn composer_api:gold_app --port 8000     # curated (default)
+uv run uvicorn composer_api:bronze_app --port 8003   # raw staging
+# open http://localhost:8000/docs
+```
+
+- `GET /v1/composers` / `/v1/soloists` / `/v1/conductors` (+ `/{id}`) — searchable, paginated people;
+  `?sort=concerts` orders by concert count (each item carries `concert_count`)
+- `GET /v1/people/{id}/concerts` — the concerts a person took part in, with dates, venues, and works
+- `GET /v1/concerts?q=&source=` / `GET /v1/concerts/{id}` — browse concerts (search by venue or
+  participant); the detail carries all musicians (role, discipline, entity link) and the programme
+- `GET /v1/stats` — dataset counts: entities per kind, records per source, works, mention statuses
+- `GET /v1/entities?q=&kind=` / `GET /v1/entities/{id}` — search every entity kind; the detail shows
+  each claim with its source plus the (capped) list of claims pointing at the entity
+- `GET /v1/works?q=` — resolved works by title or composer, with aliases and mention counts
+- `GET /v1/mentions?status=` — work mentions with the matcher's decision;
+  `status=needs_review` is the review queue, each entry with its best candidate work
+
+## Admin API (manage & run scrapers)
+
+A small FastAPI app for triggering scrapes from a browser instead of the CLI.
+It is **separate from the read-only consumer API** so it can be deployed in its
+own, locked-down environment.
+
+```sh
+uv sync
+uv run uvicorn composer_admin:admin_app --port 8001
+# open http://localhost:8001/docs and click "Try it out"
+```
+
+Each scraper carries a **refresh cadence** (`monthly`, `yearly`, or `static`)
+declared on its `SourceAdapter`. The API surfaces which scrapers are *due* so
+you can refresh by staleness rather than by data type:
+
+The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
+`process`:
+
+- `GET  /admin/v1/scrapers` — every scraper with its cadence, last snapshot, and `due` flag
+- `POST /admin/v1/scrapers/{name}/fetch` — fetch one source to the bucket (background, returns the `snapshot_id`)
+- `POST /admin/v1/scrapers/fetch-due` — fetch every scraper whose raw data is stale
+- `GET  /admin/v1/snapshots` — every raw snapshot in the bucket with its status, record count, and size
+- `POST /admin/v1/snapshots/{source}/{snapshot_id}/process` — load a snapshot into the database (background, returns a `run_id`)
+- `GET  /admin/v1/runs` / `GET /admin/v1/runs/{run_id}` — load history and status
+
+Fetch status lives in the snapshot's manifest on disk; loads are recorded in
+`ingest_runs` (the same log the CLI `runs` command shows). Set `ADMIN_API_KEY`
+to require an `X-Admin-Key` header on every admin request (unset = open, for
+local use).
+
+### Dashboard (Django + Unfold)
+
+A web UI (`apps/dashboard/`) on top of the admin API, styled with
+[Unfold](https://unfoldadmin.com/) and living behind the Django admin login,
+with one page per ingest phase:
+
+- **Scrapers** — every scraper with its cadence, due/fresh state, and last
+  snapshot; a **Fetch** button each and a **Fetch all due** button. Fetching
+  only writes raw data to the bucket.
+- **Load** — every raw snapshot in the bucket (status, record count, size)
+  with a **Load into DB** button on complete ones, plus the recent-loads log.
+- **Promote** — gold status (last rebuild, curation stats) and the button to
+  rebuild gold from bronze.
+- **Data (bronze)** (Overview / Entities / Works / Review) — inspect the raw
+  staging data: dataset counts, a searchable entity browser (per-kind pages,
+  random sampling, claims with per-source provenance, cross-linked entities),
+  a searchable works browser, and the work-mention review queue (resolving
+  stays on the CLI: `review --accept` / `--new`).
+- **Musicians (gold)** (Composers / Soloists / Conductors / Concerts) —
+  role-based people pages over the curated gold database with per-person
+  concert counts (sortable), and a concert browser whose detail pages show
+  each concert's musicians and programme.
+
+Scrapers/Load/Promote pages auto-refresh every 5 seconds while work is in
+progress.
+
+```sh
+uv sync
+uv run python apps/dashboard/manage.py migrate            # once: Django's own tables
+uv run python apps/dashboard/manage.py createsuperuser    # once: your login
+uv run uvicorn composer_api:gold_app --port 8000      # gold API (Musicians pages)
+uv run uvicorn composer_admin:admin_app --port 8001   # admin API (scrape/load/promote)
+uv run uvicorn composer_api:bronze_app --port 8003    # bronze API (Data pages)
+uv run python apps/dashboard/manage.py runserver 8002             # the dashboard
+# open http://localhost:8002 and log in
+```
+
+The dashboard never touches any composer database — scrape/load/promote
+actions go through the admin API (`ADMIN_API_URL`, default
+`http://localhost:8001`; `ADMIN_API_KEY` forwarded as `X-Admin-Key` when set)
+and data inspection goes through the consumer APIs (`GOLD_API_URL`, default
+`http://localhost:8000`; `BRONZE_API_URL`, default `http://localhost:8003`).
+Django's own SQLite (`apps/dashboard/dashboard.sqlite3`, gitignored) stores only
+admin login users and sessions; the `scrapers` app defines no models, so
+scraper data cannot land in it. That keeps the APIs the only data paths, so
+the dashboard can be deployed anywhere they are reachable.
+
+## Ingest flow
+
+Every source moves through the same pipeline; only the adapter knows the
+source's protocol.
+
+1. **Fetch** — the source's `SourceAdapter`
+   (`packages/composer-ingest/src/composer_ingest/scraper/sources/<name>/`) talks to the source's API or
+   pages and yields a stream of typed documents: `EntityDocument` for named
+   entities (with `SourceClaim`s attached) and `WorkMentionDocument` for
+   concert-programme `(composer, title)` entries.
+2. **Load** — the ingest loop (`packages/composer-ingest/src/composer_ingest/etl/ingestion/`) opens an
+   `IngestRun` and consumes the stream:
+   - A document already known for this source — matched on
+     `(source, external_id)` — only gets its `last_seen` timestamp and run id
+     touched, which is what makes re-ingesting idempotent.
+   - A new `EntityDocument` is attached to a canonical `Entity` via its
+     normalized `(kind, dedup_key)` (created if the label is new) and stored
+     verbatim as an `entity_records` row; its `SourceClaim`s, plus a
+     `mentioned_in` claim recording where it was found, become `claims` rows.
+   - A new `WorkMentionDocument` lands in `raw_work_mentions` and immediately
+     runs through the work-matching pipeline described under
+     [Works](#works) (auto-match / flag for review / create a new work).
+
+   Existing keys are preloaded up front and commits happen in 1000-record
+   batches, so the per-record loop needs no queries. A mid-run failure commits
+   what was ingested so far and marks the run `failed` with partial counts.
+3. **Record** — the finished run's status, seen/new counts, and timestamps land
+   in `ingest_runs` (shown by `composer-ingest runs` and the admin API).
+
+The two phases are deliberately separate commands — source requests are slow,
+so scraping never blocks on (or fails with) the database load:
+
+```sh
+uv run composer-ingest fetch imslp    # network → ./raw-data/imslp/<run_id>/records.ndjson
+uv run composer-ingest process imslp  # disk → DB; latest run by default, --run-id to pick one
+```
+
+The bucket (`scraper/bucket.py`; NDJSON per run under `BUCKET_PATH`, default
+`./raw-data`) is the only way data enters the database: after an ETL change you
+can re-process a snapshot without hitting the source again, and `LocalBucket`
+can be swapped for an S3 implementation without touching callers.
+
+Each snapshot carries a `manifest.json` recording the fetch's status
+(`running`/`completed`/`failed`), record count, and timestamps, so a crashed
+fetch can never be mistaken for a complete snapshot: `process` (and the admin
+API) only load complete snapshots when picking "latest" — pass `--run-id`
+explicitly to override.
 
 ## Data model
 
@@ -84,7 +263,7 @@ Concert programmes name works as free text — "Symphony No. 5 in C minor",
 "Sinfonie Nr. 5 c-moll", "Beethoven's Fifth" are all the same piece. Rather than
 deduplicating on the exact title (which collides across composers and splits the
 same work across spellings), works go through a resolution pipeline
-(`src/composer_ingest/etl/works/`):
+(`packages/composer-ingest/src/composer_ingest/etl/works/`):
 
 - **`raw_work_mentions`** — one row per `(composer, title)` a source reported,
   with the full performance context kept in `raw`, idempotent on
@@ -108,7 +287,7 @@ layer next.
 Exact-key dedup unifies "Beethoven, Ludwig van" ↔ "Ludwig van Beethoven" but
 misses surname-only ("Beethoven"), initials ("Bach, J.S." vs "Bach, Johann
 Sebastian"), and other variants. The `dedupe-persons` pass
-(`src/composer_ingest/etl/persons/`) closes the gap **non-destructively**: it parses
+(`packages/composer-ingest/src/composer_ingest/etl/persons/`) closes the gap **non-destructively**: it parses
 each person name (surname / given / initials / particles), groups by surname,
 and scores pairs with a few heuristics — given-name compatibility plus
 birth-year corroboration (a conflicting `born_on` year rules a pair out; a
@@ -120,7 +299,7 @@ nickname maps, external ids, …).
 
 ## Adding a source
 
-Create a package `src/composer_ingest/scraper/sources/<name>/` and subclass
+Create a package `packages/composer-ingest/src/composer_ingest/scraper/sources/<name>/` and subclass
 `SourceAdapter` from `composer_ingest.scraper.sources`:
 
 ```python
@@ -159,12 +338,26 @@ in `scraper/sources/__init__.py`.
 
 ## Development
 
+This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/):
+a `composer-ingest` core library under `packages/`, and three apps under `apps/`
+(`api` — the FastAPI product + admin services, `cli`, and the Django `dashboard`),
+sharing one lockfile. `uv sync` installs the whole workspace.
+
 ```sh
-uv run pytest              # tests (mock sources, in-memory SQLite — no network)
-uv run mypy                # strict type checking
+# tests run per member (each owns its pytest config; the Django settings stay
+# scoped to the dashboard) — mock sources, in-memory SQLite, no network:
+uv run --directory packages/composer-ingest pytest
+uv run --directory apps/api pytest
+uv run --directory apps/cli pytest
+uv run --directory apps/dashboard pytest
+
+uv run mypy                # strict type checking (whole workspace)
 uv run ruff check          # lint
 uv run ruff format --check # formatting
 ```
+
+Shared test fixtures and fake-source factories live in `composer_ingest.testing`;
+each member's `tests/conftest.py` loads it via `pytest_plugins`.
 
 CI (`.github/workflows/ci.yml`) runs all four on every pull request to `main`
 and again on the merge commit. Commit messages and PR titles must follow

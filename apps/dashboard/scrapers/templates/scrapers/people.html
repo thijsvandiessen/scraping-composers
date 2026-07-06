@@ -1,0 +1,46 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<div class="sc-tabs">
+  {% for r in roles %}
+  <a class="sc-tab {% if r == role %}sc-tab-active{% endif %}" href="{% url 'people' r %}">{{ r }}</a>
+  {% endfor %}
+</div>
+
+<form method="get" action="" class="sc-toolbar">
+  <input type="text" name="q" value="{{ q }}" placeholder="search {{ role }} by name…" class="sc-btn" style="cursor: text; min-width: 18rem;">
+  {% if sort == "concerts" %}<input type="hidden" name="sort" value="concerts">{% endif %}
+  <button type="submit" class="sc-btn sc-btn-primary">Search</button>
+  {% if sort == "concerts" %}
+  <a class="sc-btn" href="?q={{ q|urlencode }}">sort by name</a>
+  {% else %}
+  <a class="sc-btn" href="?q={{ q|urlencode }}&sort=concerts">sort by concerts</a>
+  {% endif %}
+  <span class="sc-muted">{{ total }} {{ role }} — page {{ page }} of {{ pages }} —
+    curated gold data (people with concerts/recordings/works; rebuild via
+    <a href="{% url 'promote' %}">Promote</a>)</span>
+</form>
+
+<table class="sc-table">
+  <tr><th>name</th><th class="sc-num">concerts</th><th>first seen</th></tr>
+  {% for person in items %}
+  <tr>
+    <td><a href="{% url 'entity_detail' person.id %}"><strong>{{ person.label }}</strong></a></td>
+    <td class="sc-num">
+      {% if person.concert_count %}
+      <a href="{% url 'person_concerts' role person.id %}">{{ person.concert_count }}</a>
+      {% else %}<span class="sc-muted">0</span>{% endif %}
+    </td>
+    <td>{{ person.created_at|slice:":10" }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="3" class="sc-muted">no {{ role }} match</td></tr>
+  {% endfor %}
+</table>
+
+{% include "scrapers/pagination.html" %}
+{% endblock %}

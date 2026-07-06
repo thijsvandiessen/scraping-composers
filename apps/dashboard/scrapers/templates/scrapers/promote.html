@@ -1,0 +1,53 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% if refreshing %}<meta http-equiv="refresh" content="5">{% endif %}
+{% include "scrapers/style.html" %}
+
+{% for message in messages %}
+  <div class="sc-banner {{ message.tags }}">{{ message }}</div>
+{% endfor %}
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+{% if gold %}
+<div class="sc-toolbar">
+  <form method="post" action="{% url 'start_promote' %}">
+    {% csrf_token %}
+    <button type="submit" class="sc-btn sc-btn-primary" {% if gold.status == "running" %}disabled{% endif %}>
+      Promote bronze → gold
+    </button>
+  </form>
+  <span class="sc-muted">full rebuild of the curated gold database from the raw bronze database</span>
+  {% if refreshing %}<span class="sc-muted">promoting — refreshing every 5 s…</span>{% endif %}
+</div>
+
+<table class="sc-table" style="max-width: 34rem;">
+  <tr>
+    <td>gold database</td>
+    <td>
+      {% if gold.exists %}<span class="sc-badge sc-completed">present</span>
+      {% else %}<span class="sc-badge sc-unknown">not built yet</span>{% endif %}
+    </td>
+  </tr>
+  <tr>
+    <td>last promote</td>
+    <td>
+      {% if gold.status %}
+      <span class="sc-badge sc-{{ gold.status }}">{{ gold.status }}</span>
+      {{ gold.started_at|slice:":16" }}
+      {% if gold.error %}<div class="sc-error-text">{{ gold.error }}</div>{% endif %}
+      {% else %}<span class="sc-muted">never promoted</span>{% endif %}
+    </td>
+  </tr>
+  {% for key, value in gold.stats.items %}
+  <tr><td class="sc-muted">{{ key }}</td><td class="sc-num">{{ value }}</td></tr>
+  {% endfor %}
+</table>
+
+<p class="sc-muted" style="max-width: 44rem; font-size: 0.875rem;">
+  Promotion applies the curation rules: people without any concerts, recordings, or
+  works mentioned are dropped; duplicate person entities are collapsed into their
+  canonical row; entities left unreferenced are pruned. Bronze is never modified.
+</p>
+{% endif %}
+{% endblock %}

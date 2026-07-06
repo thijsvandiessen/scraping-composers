@@ -1,0 +1,52 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<form method="get" class="sc-toolbar">
+  <select name="status" class="sc-btn">
+    {% for s in statuses %}
+    <option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit" class="sc-btn sc-btn-primary">Filter</button>
+  <span class="sc-muted">{{ total }} mention{{ total|pluralize }} — page {{ page }} of {{ pages }}</span>
+</form>
+
+{% if status == "needs_review" %}
+<div class="sc-banner info">
+  Mentions the matcher wasn't confident about. Resolve them with the CLI:
+  <code>composer-ingest review --accept MENTION_ID WORK_ID</code> to match a mention to its
+  candidate, or <code>composer-ingest review --new MENTION_ID</code> to create a new work.
+</div>
+{% endif %}
+
+<table class="sc-table">
+  <tr>
+    <th>id</th><th class="sc-num">score</th><th>composer</th><th>mention title</th>
+    <th>best candidate</th><th>source</th>
+  </tr>
+  {% for mention in items %}
+  <tr>
+    <td>{{ mention.id }}</td>
+    <td class="sc-num">{{ mention.score|floatformat:2|default:"—" }}</td>
+    <td>{{ mention.composer|default:"?" }}</td>
+    <td><strong>{{ mention.title }}</strong></td>
+    <td>
+      {% if mention.work_title %}
+      {{ mention.work_title }} <span class="sc-muted">(resolved · {{ mention.work_id }})</span>
+      {% elif mention.candidate_title %}
+      {{ mention.candidate_title }} <span class="sc-muted">({{ mention.candidate_work_id }})</span>
+      {% else %}<span class="sc-muted">no candidate</span>{% endif %}
+    </td>
+    <td>{{ mention.source }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="sc-muted">no mentions with status "{{ status }}"</td></tr>
+  {% endfor %}
+</table>
+
+{% include "scrapers/pagination.html" %}
+{% endblock %}

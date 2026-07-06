@@ -1,5 +1,9 @@
 composers.db
+gold.db*
+raw-data/
+apps/dashboard/dashboard.sqlite3
 __pycache__/
 .env
 .venv/
 *.egg-info/
+.DS_Store
