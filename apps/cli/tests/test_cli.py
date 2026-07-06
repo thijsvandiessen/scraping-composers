@@ -37,7 +37,7 @@ def _ingest_two_sources_disagreeing(session: Session) -> None:
                 external_id="cg:990",
             ),
         ),
-        name="concertgebouw",
+        name="concertgebouw_archive",
     )
     b = FakeSource(
         records=(
@@ -61,7 +61,7 @@ def test_entity_claims_attributes_each_value_to_its_source(session: Session) -> 
     assert entity.label == "Abert, Johann Joseph"  # deduped to one entity
 
     born = [(value, source) for predicate, value, _obj, source, _rec in rows if predicate == "born_on"]
-    assert born == [("1832", "concertgebouw"), ("1832-09-20", "wikidata")]
+    assert born == [("1832", "concertgebouw_archive"), ("1832-09-20", "wikidata")]
 
 
 def test_entity_claims_filters_by_predicate_and_source(session: Session) -> None:
