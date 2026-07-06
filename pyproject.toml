@@ -49,3 +49,11 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = "unfold.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "docling.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "pandas.*"
+ignore_missing_imports = true
