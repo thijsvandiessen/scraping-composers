@@ -396,7 +396,9 @@ def test_parse_rows_logs_warning_on_markdown_fallback(caplog: pytest.LogCaptureF
     mock_converter = _make_converter_mock(tables=[], markdown="Bach 1685 1750")
 
     with patch(_DC_PATH, return_value=mock_converter):
-        with caplog.at_level(logging.WARNING, logger="composer_ingest.scraper.sources.classicalcomposersposter.parse"):
+        with caplog.at_level(
+            logging.WARNING, logger="composer_ingest.scraper.sources.classicalcomposersposter.parse"
+        ):
             rows = _parse_rows(b"fake")
 
     assert any("falling back" in r.message.lower() for r in caplog.records)

@@ -150,7 +150,9 @@ def _parse_rows(pdf_bytes: bytes, max_pages: int | None = None) -> list[dict[str
             rows.extend(_rows_from_dataframe(df, 0, born_col, died_col))
 
     if not rows:
-        log.warning("classicalcomposersposter: no structured tables found, falling back to markdown text parsing")
+        log.warning(
+            "classicalcomposersposter: no structured tables found, falling back to markdown text parsing"
+        )
         rows = _parse_text_lines(result.document.export_to_markdown())
 
     return rows
