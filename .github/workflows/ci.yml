@@ -8,15 +8,23 @@ on:
 
 jobs:
   test:
-    name: tests (pytest)
+    name: tests (${{ matrix.member }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        member:
+          - packages/composer-ingest
+          - apps/api
+          - apps/cli
+          - apps/dashboard
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
       - run: uv sync --locked
-      - run: uv run pytest
+      - run: uv run --directory ${{ matrix.member }} pytest
 
   typecheck:
     name: types (mypy --strict)
