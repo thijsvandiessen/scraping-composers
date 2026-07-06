@@ -97,6 +97,7 @@ class WorkMentionDocument(ScrapedDocument):
 
 
 class RefreshCadence(StrEnum):
+    WEEKLY = "weekly"
     MONTHLY = "monthly"
     YEARLY = "yearly"
     STATIC = "static"  # rarely/never changes; only run on demand, never auto-due
@@ -105,6 +106,7 @@ class RefreshCadence(StrEnum):
     def interval(self) -> timedelta | None:
         """How long fetched data stays fresh, or ``None`` if it never goes stale."""
         return {
+            RefreshCadence.WEEKLY: timedelta(days=7),
             RefreshCadence.MONTHLY: timedelta(days=30),
             RefreshCadence.YEARLY: timedelta(days=365),
             RefreshCadence.STATIC: None,
@@ -157,12 +159,14 @@ from .berlinphil import BerlinPhilAdapter  # noqa: E402
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
 from .imslp import ImslpAdapter  # noqa: E402
 from .nyphil import NyPhilAdapter  # noqa: E402
+from .rco import RcoAdapter  # noqa: E402
 from .wikidata import WikidataAdapter  # noqa: E402
 
 REGISTRY: dict[str, SourceAdapter] = {
     "imslp": ImslpAdapter(),
     "wikidata": WikidataAdapter(),
-    "concertgebouw": ConcertgebouwAdapter(),
+    "concertgebouw_archive": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),
     "berlinphil": BerlinPhilAdapter(),
+    "rco": RcoAdapter(),
 }

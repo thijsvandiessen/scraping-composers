@@ -131,7 +131,7 @@ def _seed_concert_bronze(session: Session) -> None:
             person("Beinum, Eduard van", external_id="cg:beinum"),
             person("Mengelberg, Willem", external_id="cg:mengelberg"),
         ),
-        name="concertgebouw",
+        name="concertgebouw_archive",
         base_url="https://cg.example",
     )
     berlinphil = FakeSource(
