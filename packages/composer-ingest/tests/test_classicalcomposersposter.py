@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 from composer_ingest.scraper.sources._pdf import PdfSourceAdapter, _fetch_pdf_bytes
 from composer_ingest.scraper.sources.classicalcomposersposter import ClassicalComposersPosterAdapter
-from composer_ingest.scraper.sources.classicalcomposersposter.parse import _parse_rows
+from composer_ingest.scraper.sources.classicalcomposersposter.parse import _infer_date_columns, _parse_rows
 
 _DC_PATH = "composer_ingest.scraper.sources.classicalcomposersposter.parse.DocumentConverter"
 
@@ -289,3 +289,115 @@ def test_adapter_registered_in_registry() -> None:
 
     assert "classicalcomposersposter" in REGISTRY
     assert isinstance(REGISTRY["classicalcomposersposter"], ClassicalComposersPosterAdapter)
+
+
+# ---------------------------------------------------------------------------
+# NaN / missing cell handling
+# ---------------------------------------------------------------------------
+
+
+def test_parse_rows_skips_nan_name_cells() -> None:
+    """Pandas NaN in the name column must not produce a composer named 'nan'."""
+    import numpy as np
+
+    df = pd.DataFrame(
+        [
+            ["Name", "Born", "Died"],
+            ["Bach, Johann Sebastian", "1685", "1750"],
+            [np.nan, "1800", "1870"],
+        ]
+    )
+    mock_converter = _make_converter_mock(tables=[df])
+
+    with patch(_DC_PATH, return_value=mock_converter):
+        rows = _parse_rows(b"fake")
+
+    names = [r["name"] for r in rows]
+    assert "nan" not in names
+    assert len(rows) == 1
+    assert rows[0]["name"] == "Bach, Johann Sebastian"
+
+
+def test_parse_rows_nan_date_cells_treated_as_absent() -> None:
+    """Pandas NaN in born/died columns must produce None, not 'nan'."""
+    import numpy as np
+
+    df = pd.DataFrame(
+        [
+            ["Name", "Born", "Died"],
+            ["Chopin, Frédéric", "1810", np.nan],
+        ]
+    )
+    mock_converter = _make_converter_mock(tables=[df])
+
+    with patch(_DC_PATH, return_value=mock_converter):
+        rows = _parse_rows(b"fake")
+
+    assert rows[0]["died"] is None
+    assert rows[0]["born"] == "1810"
+
+
+# ---------------------------------------------------------------------------
+# Headerless table date-column inference
+# ---------------------------------------------------------------------------
+
+
+def test_parse_rows_infers_date_columns_without_header() -> None:
+    """Tables with no header row should still extract born/died via column inference."""
+    df = pd.DataFrame(
+        [
+            ["Bach, Johann Sebastian", "1685", "1750"],
+            ["Mozart, Wolfgang Amadeus", "1756", "1791"],
+            ["Beethoven, Ludwig van", "1770", "1827"],
+        ]
+    )
+    mock_converter = _make_converter_mock(tables=[df])
+
+    with patch(_DC_PATH, return_value=mock_converter):
+        rows = _parse_rows(b"fake")
+
+    assert len(rows) == 3
+    assert rows[0]["born"] == "1685"
+    assert rows[0]["died"] == "1750"
+
+
+def test_infer_date_columns_returns_none_when_no_year_density() -> None:
+    df = pd.DataFrame(
+        [
+            ["Bach, Johann Sebastian", "German", "Baroque"],
+            ["Mozart, Wolfgang Amadeus", "Austrian", "Classical"],
+        ]
+    )
+    born_col, died_col = _infer_date_columns(df)
+    assert born_col is None
+    assert died_col is None
+
+
+def test_infer_date_columns_finds_two_date_columns() -> None:
+    df = pd.DataFrame(
+        [
+            ["Bach, J.S.", "1685", "1750"],
+            ["Mozart, W.A.", "1756", "1791"],
+        ]
+    )
+    born_col, died_col = _infer_date_columns(df)
+    assert born_col == 1
+    assert died_col == 2
+
+
+# ---------------------------------------------------------------------------
+# Markdown fallback warning
+# ---------------------------------------------------------------------------
+
+
+def test_parse_rows_logs_warning_on_markdown_fallback(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    mock_converter = _make_converter_mock(tables=[], markdown="Bach 1685 1750")
+
+    with patch(_DC_PATH, return_value=mock_converter):
+        with caplog.at_level(logging.WARNING, logger="composer_ingest.scraper.sources.classicalcomposersposter.parse"):
+            rows = _parse_rows(b"fake")
+
+    assert any("falling back" in r.message.lower() for r in caplog.records)
+    assert len(rows) == 1

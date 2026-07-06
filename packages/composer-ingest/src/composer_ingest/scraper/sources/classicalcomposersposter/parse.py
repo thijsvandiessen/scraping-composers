@@ -10,6 +10,7 @@ Each parsed row is a dict with keys ``"name"``, ``"born"`` and ``"died"``
 from __future__ import annotations
 
 import logging
+import math
 import re
 from io import BytesIO
 from typing import Any
@@ -76,12 +77,24 @@ def _parse_text_lines(text: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _cell_str(v: Any) -> str:
+    """Convert a pandas cell value to a clean string, treating NaN as empty."""
+    if v is None:
+        return ""
+    try:
+        if math.isnan(float(v)):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(v)
+
+
 def _rows_from_dataframe(
     df: Any, name_col: int, born_col: int | None, died_col: int | None
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for _, cells in df.iterrows():
-        cell_list = [str(v) if v is not None else "" for v in cells]
+        cell_list = [_cell_str(v) for v in cells]
         if len(cell_list) <= name_col:
             continue
         name = cell_list[name_col].strip()
@@ -91,6 +104,27 @@ def _rows_from_dataframe(
         died_raw = cell_list[died_col] if died_col is not None and died_col < len(cell_list) else None
         rows.append({"name": name, "born": _clean_year(born_raw), "died": _clean_year(died_raw)})
     return rows
+
+
+def _infer_date_columns(df: Any) -> tuple[int | None, int | None]:
+    """Scan all columns and return (born_col, died_col) based on year-density heuristic.
+
+    A column is a candidate date column when the majority of its non-empty cells
+    contain a year-like value.  The first such column is treated as born, the
+    second as died.
+    """
+    n_rows = len(df)
+    if n_rows == 0:
+        return None, None
+    date_cols: list[int] = []
+    for col_idx in range(len(df.columns)):
+        col_vals = [_cell_str(v) for v in df.iloc[:, col_idx]]
+        year_hits = sum(1 for v in col_vals if v and _YEAR_RE.search(v))
+        if year_hits >= max(1, n_rows // 2):
+            date_cols.append(col_idx)
+    born_col = date_cols[0] if len(date_cols) > 0 else None
+    died_col = date_cols[1] if len(date_cols) > 1 else None
+    return born_col, died_col
 
 
 def _parse_rows(pdf_bytes: bytes, max_pages: int | None = None) -> list[dict[str, Any]]:
@@ -107,14 +141,16 @@ def _parse_rows(pdf_bytes: bytes, max_pages: int | None = None) -> list[dict[str
         df = table.export_to_dataframe()
         if df.empty:
             continue
-        header = [str(v) if v is not None else None for v in df.iloc[0]]
+        header = [_cell_str(v) or None for v in df.iloc[0]]
         if _looks_like_header(header):
             name_col, born_col, died_col = _detect_columns(header)
             rows.extend(_rows_from_dataframe(df.iloc[1:], name_col, born_col, died_col))
         else:
-            rows.extend(_rows_from_dataframe(df, 0, None, None))
+            born_col, died_col = _infer_date_columns(df)
+            rows.extend(_rows_from_dataframe(df, 0, born_col, died_col))
 
     if not rows:
+        log.warning("classicalcomposersposter: no structured tables found, falling back to markdown text parsing")
         rows = _parse_text_lines(result.document.export_to_markdown())
 
     return rows
