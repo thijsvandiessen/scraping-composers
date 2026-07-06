@@ -7,6 +7,22 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 
+[manifest]
+members = [
+    "composer-api",
+    "composer-cli",
+    "composer-dashboard",
+    "composer-ingest",
+]
+
+[manifest.dependency-groups]
+dev = [
+    { name = "mypy", specifier = ">=1.10" },
+    { name = "pytest", specifier = ">=8" },
+    { name = "pytest-django", specifier = ">=4.8" },
+    { name = "ruff", specifier = ">=0.4" },
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.4"
@@ -207,9 +223,56 @@ wheels = [
 ]
 
 [[package]]
+name = "composer-api"
+version = "0.1.0"
+source = { editable = "apps/api" }
+dependencies = [
+    { name = "composer-ingest" },
+    { name = "fastapi" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "composer-ingest", editable = "packages/composer-ingest" },
+    { name = "fastapi", specifier = ">=0.111" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
+
+[[package]]
+name = "composer-cli"
+version = "0.1.0"
+source = { editable = "apps/cli" }
+dependencies = [
+    { name = "composer-ingest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "composer-ingest", editable = "packages/composer-ingest" }]
+
+[[package]]
+name = "composer-dashboard"
+version = "0.1.0"
+source = { virtual = "apps/dashboard" }
+dependencies = [
+    { name = "django", version = "5.2.15", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "django", version = "6.0.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "django-unfold", version = "0.91.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "django-unfold", version = "0.99.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "django", specifier = ">=5.1" },
+    { name = "django-unfold", specifier = ">=0.40" },
+    { name = "httpx", specifier = ">=0.27" },
+]
+
+[[package]]
 name = "composer-ingest"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "packages/composer-ingest" }
 dependencies = [
     { name = "httpx" },
     { name = "kagglehub" },
@@ -217,62 +280,22 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-admin = [
-    { name = "fastapi" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-api = [
-    { name = "fastapi" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-dashboard = [
-    { name = "django", version = "5.2.15", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "django", version = "6.0.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "django-unfold", version = "0.91.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "django-unfold", version = "0.99.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-]
 postgres = [
     { name = "psycopg", extra = ["binary"] },
 ]
-
-[package.dev-dependencies]
-dev = [
-    { name = "django", version = "5.2.15", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "django", version = "6.0.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "django-unfold", version = "0.91.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "django-unfold", version = "0.99.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "fastapi" },
-    { name = "mypy" },
+testing = [
     { name = "pytest" },
-    { name = "pytest-django" },
-    { name = "ruff" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "django", marker = "extra == 'dashboard'", specifier = ">=5.1" },
-    { name = "django-unfold", marker = "extra == 'dashboard'", specifier = ">=0.40" },
-    { name = "fastapi", marker = "extra == 'admin'", specifier = ">=0.111" },
-    { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.111" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "kagglehub", specifier = ">=0.3" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8" },
     { name = "sqlalchemy", specifier = ">=2.0" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'admin'", specifier = ">=0.30" },
-    { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.30" },
 ]
-provides-extras = ["postgres", "api", "admin", "dashboard"]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "django", specifier = ">=5.1" },
-    { name = "django-unfold", specifier = ">=0.40" },
-    { name = "fastapi", specifier = ">=0.111" },
-    { name = "mypy", specifier = ">=1.10" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "pytest-django", specifier = ">=4.8" },
-    { name = "ruff", specifier = ">=0.4" },
-]
+provides-extras = ["postgres", "testing"]
 
 [[package]]
 name = "django"

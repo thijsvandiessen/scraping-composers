@@ -1,7 +1,7 @@
 composers.db
 gold.db*
 raw-data/
-dashboard/dashboard.sqlite3
+apps/dashboard/dashboard.sqlite3
 __pycache__/
 .env
 .venv/

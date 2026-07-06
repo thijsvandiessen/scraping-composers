@@ -84,9 +84,9 @@ Two read-only FastAPI apps with identical routes — gold is the product API,
 bronze serves the raw staging data for inspection:
 
 ```sh
-uv sync --extra api
-uv run uvicorn composer_ingest.api:gold_app --port 8000     # curated (default)
-uv run uvicorn composer_ingest.api:bronze_app --port 8003   # raw staging
+uv sync
+uv run uvicorn composer_api:gold_app --port 8000     # curated (default)
+uv run uvicorn composer_api:bronze_app --port 8003   # raw staging
 # open http://localhost:8000/docs
 ```
 
@@ -109,8 +109,8 @@ It is **separate from the read-only consumer API** so it can be deployed in its
 own, locked-down environment.
 
 ```sh
-uv sync --extra admin
-uv run uvicorn composer_ingest.admin:admin_app --port 8001
+uv sync
+uv run uvicorn composer_admin:admin_app --port 8001
 # open http://localhost:8001/docs and click "Try it out"
 ```
 
@@ -135,7 +135,7 @@ local use).
 
 ### Dashboard (Django + Unfold)
 
-A web UI (`dashboard/`) on top of the admin API, styled with
+A web UI (`apps/dashboard/`) on top of the admin API, styled with
 [Unfold](https://unfoldadmin.com/) and living behind the Django admin login,
 with one page per ingest phase:
 
@@ -160,13 +160,13 @@ Scrapers/Load/Promote pages auto-refresh every 5 seconds while work is in
 progress.
 
 ```sh
-uv sync --extra admin --extra api --extra dashboard
-uv run python dashboard/manage.py migrate            # once: Django's own tables
-uv run python dashboard/manage.py createsuperuser    # once: your login
-uv run uvicorn composer_ingest.api:gold_app --port 8000      # gold API (Musicians pages)
-uv run uvicorn composer_ingest.admin:admin_app --port 8001   # admin API (scrape/load/promote)
-uv run uvicorn composer_ingest.api:bronze_app --port 8003    # bronze API (Data pages)
-uv run python dashboard/manage.py runserver 8002             # the dashboard
+uv sync
+uv run python apps/dashboard/manage.py migrate            # once: Django's own tables
+uv run python apps/dashboard/manage.py createsuperuser    # once: your login
+uv run uvicorn composer_api:gold_app --port 8000      # gold API (Musicians pages)
+uv run uvicorn composer_admin:admin_app --port 8001   # admin API (scrape/load/promote)
+uv run uvicorn composer_api:bronze_app --port 8003    # bronze API (Data pages)
+uv run python apps/dashboard/manage.py runserver 8002             # the dashboard
 # open http://localhost:8002 and log in
 ```
 
@@ -175,7 +175,7 @@ actions go through the admin API (`ADMIN_API_URL`, default
 `http://localhost:8001`; `ADMIN_API_KEY` forwarded as `X-Admin-Key` when set)
 and data inspection goes through the consumer APIs (`GOLD_API_URL`, default
 `http://localhost:8000`; `BRONZE_API_URL`, default `http://localhost:8003`).
-Django's own SQLite (`dashboard/dashboard.sqlite3`, gitignored) stores only
+Django's own SQLite (`apps/dashboard/dashboard.sqlite3`, gitignored) stores only
 admin login users and sessions; the `scrapers` app defines no models, so
 scraper data cannot land in it. That keeps the APIs the only data paths, so
 the dashboard can be deployed anywhere they are reachable.
@@ -186,11 +186,11 @@ Every source moves through the same pipeline; only the adapter knows the
 source's protocol.
 
 1. **Fetch** — the source's `SourceAdapter`
-   (`src/composer_ingest/scraper/sources/<name>/`) talks to the source's API or
+   (`packages/composer-ingest/src/composer_ingest/scraper/sources/<name>/`) talks to the source's API or
    pages and yields a stream of typed documents: `EntityDocument` for named
    entities (with `SourceClaim`s attached) and `WorkMentionDocument` for
    concert-programme `(composer, title)` entries.
-2. **Load** — the ingest loop (`src/composer_ingest/etl/ingestion/`) opens an
+2. **Load** — the ingest loop (`packages/composer-ingest/src/composer_ingest/etl/ingestion/`) opens an
    `IngestRun` and consumes the stream:
    - A document already known for this source — matched on
      `(source, external_id)` — only gets its `last_seen` timestamp and run id
@@ -263,7 +263,7 @@ Concert programmes name works as free text — "Symphony No. 5 in C minor",
 "Sinfonie Nr. 5 c-moll", "Beethoven's Fifth" are all the same piece. Rather than
 deduplicating on the exact title (which collides across composers and splits the
 same work across spellings), works go through a resolution pipeline
-(`src/composer_ingest/etl/works/`):
+(`packages/composer-ingest/src/composer_ingest/etl/works/`):
 
 - **`raw_work_mentions`** — one row per `(composer, title)` a source reported,
   with the full performance context kept in `raw`, idempotent on
@@ -287,7 +287,7 @@ layer next.
 Exact-key dedup unifies "Beethoven, Ludwig van" ↔ "Ludwig van Beethoven" but
 misses surname-only ("Beethoven"), initials ("Bach, J.S." vs "Bach, Johann
 Sebastian"), and other variants. The `dedupe-persons` pass
-(`src/composer_ingest/etl/persons/`) closes the gap **non-destructively**: it parses
+(`packages/composer-ingest/src/composer_ingest/etl/persons/`) closes the gap **non-destructively**: it parses
 each person name (surname / given / initials / particles), groups by surname,
 and scores pairs with a few heuristics — given-name compatibility plus
 birth-year corroboration (a conflicting `born_on` year rules a pair out; a
@@ -299,7 +299,7 @@ nickname maps, external ids, …).
 
 ## Adding a source
 
-Create a package `src/composer_ingest/scraper/sources/<name>/` and subclass
+Create a package `packages/composer-ingest/src/composer_ingest/scraper/sources/<name>/` and subclass
 `SourceAdapter` from `composer_ingest.scraper.sources`:
 
 ```python
@@ -338,12 +338,26 @@ in `scraper/sources/__init__.py`.
 
 ## Development
 
+This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/):
+a `composer-ingest` core library under `packages/`, and three apps under `apps/`
+(`api` — the FastAPI product + admin services, `cli`, and the Django `dashboard`),
+sharing one lockfile. `uv sync` installs the whole workspace.
+
 ```sh
-uv run pytest              # tests (mock sources, in-memory SQLite — no network)
-uv run mypy                # strict type checking
+# tests run per member (each owns its pytest config; the Django settings stay
+# scoped to the dashboard) — mock sources, in-memory SQLite, no network:
+uv run --directory packages/composer-ingest pytest
+uv run --directory apps/api pytest
+uv run --directory apps/cli pytest
+uv run --directory apps/dashboard pytest
+
+uv run mypy                # strict type checking (whole workspace)
 uv run ruff check          # lint
 uv run ruff format --check # formatting
 ```
+
+Shared test fixtures and fake-source factories live in `composer_ingest.testing`;
+each member's `tests/conftest.py` loads it via `pytest_plugins`.
 
 CI (`.github/workflows/ci.yml`) runs all four on every pull request to `main`
 and again on the merge commit. Commit messages and PR titles must follow
