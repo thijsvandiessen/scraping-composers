@@ -142,7 +142,7 @@ def _concert_fields(source_name: str, raw: dict[str, Any]) -> _ConcertFields | N
     Each performance source encodes concert identity differently; unknown
     sources return None and are skipped.
     """
-    if source_name == "concertgebouw":
+    if source_name == "concertgebouw_archive":
         date = _iso_date(raw.get("date"))
         city = raw.get("city")
         if not date:

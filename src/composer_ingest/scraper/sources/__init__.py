@@ -165,7 +165,7 @@ from .wikidata import WikidataAdapter  # noqa: E402
 REGISTRY: dict[str, SourceAdapter] = {
     "imslp": ImslpAdapter(),
     "wikidata": WikidataAdapter(),
-    "concertgebouw": ConcertgebouwAdapter(),
+    "concertgebouw_archive": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),
     "berlinphil": BerlinPhilAdapter(),
     "rco": RcoAdapter(),

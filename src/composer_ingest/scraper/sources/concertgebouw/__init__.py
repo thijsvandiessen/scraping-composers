@@ -27,7 +27,7 @@ __all__ = ["BASE_URL", "ConcertgebouwAdapter"]
 
 
 class ConcertgebouwAdapter(SourceAdapter):
-    name = "concertgebouw"
+    name = "concertgebouw_archive"
     base_url = BASE_URL
     cadence = RefreshCadence.MONTHLY
 
