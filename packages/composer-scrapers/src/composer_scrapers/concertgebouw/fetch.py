@@ -25,7 +25,7 @@ def _fetch(label: str, **request: object) -> str:
     ) as client:
         for attempt in range(1, RETRIES + 1):
             try:
-                resp = client.request(**request)  # type: ignore[arg-type]
+                resp = client.request(**request)  # pyright: ignore[reportArgumentType]
                 resp.raise_for_status()
                 return resp.text
             except httpx.HTTPError as exc:

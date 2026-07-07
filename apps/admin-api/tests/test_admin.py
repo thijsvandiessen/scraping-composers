@@ -68,7 +68,7 @@ class _ExplodingSource(SourceAdapter):
 
 
 @pytest.fixture
-def factory():  # type: ignore[no-untyped-def]
+def factory():
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -83,7 +83,7 @@ def bucket_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, factory, bucket_path: Path) -> Iterator[TestClient]:  # type: ignore[no-untyped-def]
+def client(monkeypatch: pytest.MonkeyPatch, factory, bucket_path: Path) -> Iterator[TestClient]:  # pyright: ignore[reportMissingParameterType]
     monkeypatch.setattr(admin_deps, "_session_factory", factory)
     registry = {"fake": _FakeSource(), "archive": _ArchiveSource(), "exploding": _ExplodingSource()}
     monkeypatch.setattr(admin_routes, "REGISTRY", registry)
@@ -189,7 +189,7 @@ def test_process_unknown_snapshot_404(client: TestClient) -> None:
     assert client.post("/admin/v1/snapshots/nope/nope/process").status_code == 404
 
 
-def test_process_conflicts_while_ingest_running(client: TestClient, factory) -> None:  # type: ignore[no-untyped-def]
+def test_process_conflicts_while_ingest_running(client: TestClient, factory) -> None:  # pyright: ignore[reportMissingParameterType]
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
     # Seed an in-progress run that we never execute, so the source looks busy.
     with factory() as session:

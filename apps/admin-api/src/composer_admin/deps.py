@@ -1,5 +1,5 @@
 import os
-from collections.abc import Generator, Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Annotated
 
@@ -26,7 +26,7 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 
 @contextmanager
-def session_scope() -> Iterator[Session]:
+def session_scope() -> Generator[Session, None, None]:
     """A standalone session for background tasks.
 
     A request-scoped :data:`DbSession` is closed once the response is sent, so a

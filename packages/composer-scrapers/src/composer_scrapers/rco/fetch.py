@@ -50,7 +50,7 @@ def _get_text(client: httpx.Client, url: str, label: str) -> str:
 
 
 def _get_json(client: httpx.Client, url: str, label: str) -> dict[str, Any]:
-    return json.loads(_get_text(client, url, label))  # type: ignore[no-any-return]
+    return json.loads(_get_text(client, url, label))
 
 
 def page_slugs(html: str) -> list[str]:

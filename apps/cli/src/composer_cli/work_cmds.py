@@ -156,8 +156,9 @@ def cmd_rematch(args: argparse.Namespace) -> int:
             mention.match_score = result.score
             mention.match_method = result.method
             mention.candidate_work_id = result.candidate_work_id
-            if mention.work_id is not None:
-                _add_alias(session, mention.work_id, mention.raw_title, mention.source_id)
+            work_id = mention.work_id
+            if work_id is not None:
+                _add_alias(session, work_id, mention.raw_title, mention.source_id)
         session.commit()
         print(f"re-matched {len(pending)} mention(s)")
     return 0
