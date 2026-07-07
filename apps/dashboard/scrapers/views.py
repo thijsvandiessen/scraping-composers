@@ -378,3 +378,28 @@ def works(request: HttpRequest) -> HttpResponse:
         **_page_context(result, request.path, params),
     }
     return render(request, "scrapers/works.html", context)
+
+
+def gold_works(request: HttpRequest) -> HttpResponse:
+    """Performed works from the curated gold database."""
+    api = DataAPI.gold()
+    q = request.GET.get("q", "").strip()
+    sort = "mentions" if request.GET.get("sort") == "mentions" else "label"
+    page = int(request.GET.get("page", "1") or "1")
+    result: dict[str, object] = {}
+    error: str | None = None
+    try:
+        result = api.list_works(q=q or None, page=page, performed_only=True, sort=sort)
+    except AdminAPIError as exc:
+        error = f"{exc} — is the gold API running, and has the gold database been promoted?"
+    params = {key: value for key, value in (("q", q), ("sort", sort)) if value and value != "label"}
+    context = {
+        **admin.site.each_context(request),
+        "title": "Works",
+        "items": result.get("items", []),
+        "q": q,
+        "sort": sort,
+        "error": error,
+        **_page_context(result, request.path, params),
+    }
+    return render(request, "scrapers/works.html", context)

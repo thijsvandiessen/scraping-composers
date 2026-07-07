@@ -149,6 +149,11 @@ UNFOLD = {
                         "link": reverse_lazy("people", args=["conductors"]),
                     },
                     {
+                        "title": "Works",
+                        "icon": "library_music",
+                        "link": reverse_lazy("gold_works"),
+                    },
+                    {
                         "title": "Concerts",
                         "icon": "event",
                         "link": reverse_lazy("concerts_list"),
