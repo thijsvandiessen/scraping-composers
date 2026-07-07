@@ -76,9 +76,6 @@ def list_people(
         base = base.where(profession_filter(prof_id))
     if q:
         base = base.where(Entity.label.ilike(f"%{q}%"))
-    base = base.where(
-        Entity.id.in_(select(ConcertParticipant.entity_id).where(ConcertParticipant.entity_id.is_not(None)))
-    )
 
     total = db.scalar(select(func.count()).select_from(base.subquery()))
 

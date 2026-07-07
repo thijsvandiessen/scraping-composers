@@ -60,6 +60,7 @@ def _seeded_factory() -> sessionmaker[Session]:
             ),
             _person("Smith, John", SourceClaim("has_profession", "profession", "conductor")),
             _person("Bach, Johann", SourceClaim("has_profession", "profession", "composer")),
+            _person("Beethoven, Ludwig van", SourceClaim("has_profession", "profession", "composer")),
             _person(
                 "Multi, Person",
                 SourceClaim("has_profession", "profession", "soloist"),
@@ -212,13 +213,12 @@ def test_list_composers_returns_all_persons(client: TestClient) -> None:
     r = client.get("/v1/composers")
     assert r.status_code == 200
     data = r.json()
-    # all persons appear (4 ingested + the mentions' composer) — no profession filter
-    assert data["total"] == 5
+    assert data["total"] == 2
     labels = {item["label"] for item in data["items"]}
     assert "Bach, Johann" in labels
     assert "Beethoven, Ludwig van" in labels
-    assert "Doe, Jane" in labels
-    assert "Smith, John" in labels
+    assert "Doe, Jane" not in labels
+    assert "Smith, John" not in labels
 
 
 def test_list_composers_profession_entities_excluded(client: TestClient) -> None:
@@ -239,12 +239,12 @@ def test_list_composers_search_filter(client: TestClient) -> None:
 
 
 def test_list_composers_pagination(client: TestClient) -> None:
-    r = client.get("/v1/composers?page=1&limit=2")
+    r = client.get("/v1/composers?page=1&limit=1")
     assert r.status_code == 200
     data = r.json()
-    assert data["total"] == 5
-    assert data["limit"] == 2
-    assert len(data["items"]) == 2
+    assert data["total"] == 2
+    assert data["limit"] == 1
+    assert len(data["items"]) == 1
 
 
 def test_list_composers_invalid_page_returns_422(client: TestClient) -> None:
@@ -305,7 +305,7 @@ def test_stats_reports_dataset_counts(client: TestClient) -> None:
     assert data["entities_by_kind"]["person"] == 5
     assert data["entities_by_kind"]["profession"] == 3  # soloist, conductor, composer
     assert data["entities_total"] == sum(data["entities_by_kind"].values())
-    assert data["records_by_source"] == {"fake": 4}  # mentions are not entity records
+    assert data["records_by_source"] == {"fake": 5}  # mentions are not entity records
     assert data["works"] == 1  # both mentions resolve to one work (matching Op. 67)
     assert data["work_mentions"] == 2
     assert sum(data["mentions_by_status"].values()) == 2
@@ -600,4 +600,4 @@ def test_gold_keeps_works_with_mention_counts(gold_client: TestClient) -> None:
 def test_gold_stats_reflect_curation(gold_client: TestClient) -> None:
     stats = gold_client.get("/v1/stats").json()
     assert stats["entities_by_kind"]["person"] == 1
-    assert "profession" not in stats["entities_by_kind"]  # orphaned professions pruned
+    assert stats["entities_by_kind"].get("profession") == 1  # only the referenced "composer" survives
