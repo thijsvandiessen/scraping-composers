@@ -3,12 +3,12 @@ import logging
 from dataclasses import asdict
 from pathlib import Path
 
-from composer_ingest.etl.db import get_engine, init_db
-from composer_ingest.etl.gold import promote
-from composer_ingest.etl.ingestion import ingest_documents
-from composer_ingest.scraper.bucket import LOADABLE_STATUSES, LocalBucket
-from composer_ingest.scraper.scraper import Scraper, iter_from_bucket
-from composer_ingest.scraper.sources import REGISTRY
+from composer_bronze.bucket import LOADABLE_STATUSES, LocalBucket
+from composer_bronze.scraper import Scraper, iter_from_bucket
+from composer_gold import promote
+from composer_scrapers import REGISTRY
+from composer_warehouse.db import get_engine, init_db
+from composer_warehouse.ingestion import ingest_documents
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:

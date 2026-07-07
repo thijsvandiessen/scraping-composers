@@ -1,7 +1,7 @@
 import argparse
 
-from composer_ingest.etl.db import get_engine, init_db
-from composer_ingest.etl.models import (
+from composer_warehouse.db import get_engine, init_db
+from composer_warehouse.models import (
     Claim,
     Entity,
     EntityRecord,
@@ -12,7 +12,7 @@ from composer_ingest.etl.models import (
     Work,
     WorkTitle,
 )
-from composer_ingest.etl.normalize import dedup_key
+from composer_warehouse.normalize import dedup_key
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
 

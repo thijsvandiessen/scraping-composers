@@ -1,24 +1,21 @@
 [project]
-name = "composer-cli"
+name = "composer-consumer-api"
 version = "0.1.0"
-description = "Command-line interface for the composer ingestion pipeline"
+description = "Read-only consumer product API (serves the curated gold and raw staging datasets)"
 requires-python = ">=3.11"
 dependencies = [
-    "composer-bronze",
-    "composer-scrapers",
     "composer-warehouse",
     "composer-gold",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
 ]
-
-[project.scripts]
-composer-ingest = "composer_cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/composer_cli"]
+packages = ["src/composer_api"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

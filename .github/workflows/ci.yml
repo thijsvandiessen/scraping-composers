@@ -14,8 +14,13 @@ jobs:
       fail-fast: false
       matrix:
         member:
-          - packages/composer-ingest
-          - apps/api
+          - packages/composer-schema
+          - packages/composer-bronze
+          - packages/composer-scrapers
+          - packages/composer-warehouse
+          - packages/composer-gold
+          - apps/consumer-api
+          - apps/admin-api
           - apps/cli
           - apps/dashboard
     steps:
