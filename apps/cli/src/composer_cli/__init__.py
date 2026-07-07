@@ -2,9 +2,9 @@ import argparse
 import logging
 import sys
 
-from composer_ingest.etl.gold import DEFAULT_GOLD_DB_PATH
-from composer_ingest.scraper.bucket import DEFAULT_BUCKET_PATH
-from composer_ingest.scraper.sources import REGISTRY
+from composer_bronze.bucket import DEFAULT_BUCKET_PATH
+from composer_gold import DEFAULT_GOLD_DB_PATH
+from composer_scrapers import REGISTRY
 
 from .ingest_cmds import cmd_fetch, cmd_process, cmd_promote
 from .person_cmds import cmd_dedupe_persons, cmd_person_review

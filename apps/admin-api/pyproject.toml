@@ -1,24 +1,23 @@
 [project]
-name = "composer-cli"
+name = "composer-admin-api"
 version = "0.1.0"
-description = "Command-line interface for the composer ingestion pipeline"
+description = "Admin API: trigger scrapes, ingest snapshots, and promote gold from a browser"
 requires-python = ">=3.11"
 dependencies = [
     "composer-bronze",
     "composer-scrapers",
     "composer-warehouse",
     "composer-gold",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
 ]
-
-[project.scripts]
-composer-ingest = "composer_cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/composer_cli"]
+packages = ["src/composer_admin"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,8 +1,8 @@
 import argparse
 
-from composer_ingest.etl.db import get_engine, init_db
-from composer_ingest.etl.models import PersonMatch
-from composer_ingest.etl.persons import dedupe_persons
+from composer_warehouse.db import get_engine, init_db
+from composer_warehouse.models import PersonMatch
+from composer_warehouse.persons import dedupe_persons
 from sqlalchemy import select
 
 

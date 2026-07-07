@@ -1,10 +1,10 @@
 import argparse
 import uuid
 
-from composer_ingest.etl.db import get_engine, init_db
-from composer_ingest.etl.ingestion import new_work
-from composer_ingest.etl.models import Entity, RawWorkMention, Work, WorkTitle
-from composer_ingest.etl.works import Candidate, extract_features, normalize_title, resolve
+from composer_warehouse.db import get_engine, init_db
+from composer_warehouse.ingestion import new_work
+from composer_warehouse.models import Entity, RawWorkMention, Work, WorkTitle
+from composer_warehouse.works import Candidate, extract_features, normalize_title, resolve
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
 
