@@ -1,0 +1,127 @@
+"""Bronze storage tests: LocalBucket filesystem IO plus the SnapshotManifest
+state machine and its legacy-snapshot fallback."""
+
+import json
+import os
+from datetime import UTC, datetime
+from pathlib import Path
+
+from composer_bronze.bucket import (
+    MANIFEST_FILENAME,
+    LocalBucket,
+    Snapshot,
+    SnapshotManifest,
+)
+
+
+def test_manifest_start_is_running() -> None:
+    m = SnapshotManifest.start("rco", "run-1")
+    assert m.source == "rco"
+    assert m.run_id == "run-1"
+    assert m.status == "running"
+    assert m.started_at  # ISO 8601 timestamp
+    assert m.finished_at is None
+    assert m.record_count is None
+    assert m.error is None
+
+
+def test_manifest_completed_records_count_and_finish() -> None:
+    m = SnapshotManifest.start("rco", "run-1").completed(record_count=42)
+    assert m.status == "completed"
+    assert m.record_count == 42
+    assert m.finished_at is not None
+    assert m.error is None
+    # start() is immutable; a fresh manifest is returned each transition
+    assert SnapshotManifest.start("rco", "run-1").status == "running"
+
+
+def test_manifest_failed_carries_error_and_partial_count() -> None:
+    m = SnapshotManifest.start("rco", "run-1").failed("RuntimeError: boom", record_count=3)
+    assert m.status == "failed"
+    assert m.error == "RuntimeError: boom"
+    assert m.record_count == 3
+    assert m.finished_at is not None
+
+
+def test_records_round_trip_preserves_unicode(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    records = [{"_type": "entity", "name": "Antonín Dvořák"}, {"_type": "work_mention", "title": "Requiem"}]
+    bucket.write_records("rco", "run-1", records)
+
+    # ensure_ascii=False keeps non-ASCII readable on disk
+    raw = (tmp_path / "rco" / "run-1" / "records.ndjson").read_text(encoding="utf-8")
+    assert "Dvořák" in raw
+
+    assert list(bucket.read_records("rco", "run-1")) == records
+
+
+def test_read_records_skips_blank_lines(tmp_path: Path) -> None:
+    path = tmp_path / "rco" / "run-1" / "records.ndjson"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"a": 1}\n\n   \n{"b": 2}\n', encoding="utf-8")
+
+    bucket = LocalBucket(tmp_path)
+    assert list(bucket.read_records("rco", "run-1")) == [{"a": 1}, {"b": 2}]
+
+
+def test_manifest_round_trip(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    manifest = SnapshotManifest.start("rco", "run-1").completed(record_count=7)
+    bucket.write_manifest(manifest)
+    assert bucket.read_manifest("rco", "run-1") == manifest
+
+
+def test_read_manifest_returns_none_when_absent(tmp_path: Path) -> None:
+    assert LocalBucket(tmp_path).read_manifest("rco", "missing") is None
+
+
+def test_list_runs_empty_when_source_dir_missing(tmp_path: Path) -> None:
+    assert LocalBucket(tmp_path).list_runs("rco") == []
+
+
+def test_list_runs_returns_sorted_run_ids(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    for run_id in ("run-c", "run-a", "run-b"):
+        bucket.write_records("rco", run_id, [{"x": 1}])
+    assert bucket.list_runs("rco") == ["run-a", "run-b", "run-c"]
+
+
+def test_list_snapshots_reports_manifest_and_size(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    bucket.write_records("rco", "run-1", [{"x": 1}])
+    manifest = SnapshotManifest.start("rco", "run-1").completed(record_count=1)
+    bucket.write_manifest(manifest)
+
+    snapshots = bucket.list_snapshots("rco")
+    assert len(snapshots) == 1
+    snap = snapshots[0]
+    assert isinstance(snap, Snapshot)
+    assert snap.manifest == manifest
+    assert snap.size_bytes > 0
+
+
+def test_list_snapshots_synthesizes_manifest_for_legacy_dir(tmp_path: Path) -> None:
+    # A snapshot dir with records but no manifest predates the manifest feature.
+    bucket = LocalBucket(tmp_path)
+    bucket.write_records("rco", "legacy", [{"x": 1}])
+    assert not (tmp_path / "rco" / "legacy" / MANIFEST_FILENAME).exists()
+
+    (snap,) = bucket.list_snapshots("rco")
+    assert snap.manifest.status == "unknown"
+    assert snap.manifest.source == "rco"
+    assert snap.manifest.run_id == "legacy"
+    # started_at is synthesized from the records file mtime
+    assert snap.manifest.started_at
+    parsed = datetime.fromisoformat(snap.manifest.started_at)
+    ndjson = tmp_path / "rco" / "legacy" / "records.ndjson"
+    expected = datetime.fromtimestamp(os.stat(ndjson).st_mtime, tz=UTC)
+    assert parsed == expected
+
+
+def test_manifest_serialized_as_flat_json(tmp_path: Path) -> None:
+    # read_manifest reconstructs from a plain dict, so the on-disk shape matters.
+    bucket = LocalBucket(tmp_path)
+    bucket.write_manifest(SnapshotManifest.start("rco", "run-1"))
+    payload = json.loads((tmp_path / "rco" / "run-1" / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    assert payload["source"] == "rco"
+    assert payload["status"] == "running"

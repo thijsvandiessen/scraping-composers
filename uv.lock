@@ -22,10 +22,15 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "composer-api",
+    "composer-admin-api",
+    "composer-bronze",
     "composer-cli",
+    "composer-consumer-api",
     "composer-dashboard",
-    "composer-ingest",
+    "composer-gold",
+    "composer-schema",
+    "composer-scrapers",
+    "composer-warehouse",
 ]
 
 [manifest.dependency-groups]
@@ -295,32 +300,76 @@ wheels = [
 ]
 
 [[package]]
-name = "composer-api"
+name = "composer-admin-api"
 version = "0.1.0"
-source = { editable = "apps/api" }
+source = { editable = "apps/admin-api" }
 dependencies = [
-    { name = "composer-ingest" },
+    { name = "composer-bronze" },
+    { name = "composer-gold" },
+    { name = "composer-scrapers" },
+    { name = "composer-warehouse" },
     { name = "fastapi" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "composer-ingest", editable = "packages/composer-ingest" },
+    { name = "composer-bronze", editable = "packages/composer-bronze" },
+    { name = "composer-gold", editable = "packages/composer-gold" },
+    { name = "composer-scrapers", editable = "packages/composer-scrapers" },
+    { name = "composer-warehouse", editable = "packages/composer-warehouse" },
     { name = "fastapi", specifier = ">=0.111" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
+
+[[package]]
+name = "composer-bronze"
+version = "0.1.0"
+source = { editable = "packages/composer-bronze" }
+dependencies = [
+    { name = "composer-schema" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "composer-schema", editable = "packages/composer-schema" }]
 
 [[package]]
 name = "composer-cli"
 version = "0.1.0"
 source = { editable = "apps/cli" }
 dependencies = [
-    { name = "composer-ingest" },
+    { name = "composer-bronze" },
+    { name = "composer-gold" },
+    { name = "composer-scrapers" },
+    { name = "composer-warehouse" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "composer-ingest", editable = "packages/composer-ingest" }]
+requires-dist = [
+    { name = "composer-bronze", editable = "packages/composer-bronze" },
+    { name = "composer-gold", editable = "packages/composer-gold" },
+    { name = "composer-scrapers", editable = "packages/composer-scrapers" },
+    { name = "composer-warehouse", editable = "packages/composer-warehouse" },
+]
+
+[[package]]
+name = "composer-consumer-api"
+version = "0.1.0"
+source = { editable = "apps/consumer-api" }
+dependencies = [
+    { name = "composer-gold" },
+    { name = "composer-warehouse" },
+    { name = "fastapi" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "composer-gold", editable = "packages/composer-gold" },
+    { name = "composer-warehouse", editable = "packages/composer-warehouse" },
+    { name = "fastapi", specifier = ">=0.111" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+]
 
 [[package]]
 name = "composer-dashboard"
@@ -342,14 +391,61 @@ requires-dist = [
 ]
 
 [[package]]
-name = "composer-ingest"
+name = "composer-gold"
 version = "0.1.0"
-source = { editable = "packages/composer-ingest" }
+source = { editable = "packages/composer-gold" }
 dependencies = [
+    { name = "composer-warehouse" },
+    { name = "sqlalchemy" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "composer-warehouse", editable = "packages/composer-warehouse" },
+    { name = "sqlalchemy", specifier = ">=2.0" },
+]
+
+[[package]]
+name = "composer-schema"
+version = "0.1.0"
+source = { editable = "packages/composer-schema" }
+
+[package.optional-dependencies]
+testing = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pytest", marker = "extra == 'testing'", specifier = ">=8" }]
+provides-extras = ["testing"]
+
+[[package]]
+name = "composer-scrapers"
+version = "0.1.0"
+source = { editable = "packages/composer-scrapers" }
+dependencies = [
+    { name = "composer-schema" },
     { name = "docling" },
     { name = "httpx" },
     { name = "kagglehub" },
     { name = "pandas" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "composer-schema", editable = "packages/composer-schema" },
+    { name = "docling", specifier = ">=2.0" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "kagglehub", specifier = ">=0.3" },
+    { name = "pandas", specifier = ">=2.0" },
+]
+
+[[package]]
+name = "composer-warehouse"
+version = "0.1.0"
+source = { editable = "packages/composer-warehouse" }
+dependencies = [
+    { name = "composer-schema" },
     { name = "sqlalchemy" },
 ]
 
@@ -358,15 +454,14 @@ postgres = [
     { name = "psycopg", extra = ["binary"] },
 ]
 testing = [
+    { name = "composer-schema", extra = ["testing"] },
     { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "docling", specifier = ">=2.0" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "kagglehub", specifier = ">=0.3" },
-    { name = "pandas", specifier = ">=2.0" },
+    { name = "composer-schema", editable = "packages/composer-schema" },
+    { name = "composer-schema", extras = ["testing"], marker = "extra == 'testing'", editable = "packages/composer-schema" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=8" },
     { name = "sqlalchemy", specifier = ">=2.0" },

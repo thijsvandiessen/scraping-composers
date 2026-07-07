@@ -2,7 +2,11 @@
 members = ["packages/*", "apps/*"]
 
 [tool.uv.sources]
-composer-ingest = { workspace = true }
+composer-schema = { workspace = true }
+composer-bronze = { workspace = true }
+composer-scrapers = { workspace = true }
+composer-warehouse = { workspace = true }
+composer-gold = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -26,10 +30,20 @@ files = ["packages", "apps"]
 # package bases so files map to clean module names across the workspace.
 explicit_package_bases = true
 mypy_path = [
-    "packages/composer-ingest/src",
-    "packages/composer-ingest/tests",
-    "apps/api/src",
-    "apps/api/tests",
+    "packages/composer-schema/src",
+    "packages/composer-schema/tests",
+    "packages/composer-bronze/src",
+    "packages/composer-bronze/tests",
+    "packages/composer-scrapers/src",
+    "packages/composer-scrapers/tests",
+    "packages/composer-warehouse/src",
+    "packages/composer-warehouse/tests",
+    "packages/composer-gold/src",
+    "packages/composer-gold/tests",
+    "apps/consumer-api/src",
+    "apps/consumer-api/tests",
+    "apps/admin-api/src",
+    "apps/admin-api/tests",
     "apps/cli/src",
     "apps/cli/tests",
     "apps/dashboard",

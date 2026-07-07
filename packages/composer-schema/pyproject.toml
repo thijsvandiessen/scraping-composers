@@ -1,0 +1,20 @@
+[project]
+name = "composer-schema"
+version = "0.1.0"
+description = "Source contracts: document types and the SourceAdapter interface shared across tiers"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+# Pulled in by consumers that use the document/adapter test factories.
+testing = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/composer_schema"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

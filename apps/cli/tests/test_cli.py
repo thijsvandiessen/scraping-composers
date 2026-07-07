@@ -13,10 +13,10 @@ from composer_cli.ingest_cmds import cmd_fetch, cmd_process
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_review
 from composer_cli.query_cmds import cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
-from composer_ingest.etl.db import get_engine, init_db
-from composer_ingest.etl.models import Entity, PersonMatch, RawWorkMention, Work
-from composer_ingest.scraper.sources import SourceClaim
-from composer_ingest.testing import FakeSource, ingest_source, mention, person
+from composer_schema import SourceClaim
+from composer_warehouse.db import get_engine, init_db
+from composer_warehouse.models import Entity, PersonMatch, RawWorkMention, Work
+from composer_warehouse.testing import FakeSource, ingest_source, mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -323,7 +323,7 @@ def test_cmd_person_review_reject(tmp_path: Path) -> None:
 
 
 def test_cmd_fetch_then_process_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from composer_ingest.scraper.sources import REGISTRY
+    from composer_scrapers import REGISTRY
 
     db_url = f"sqlite:///{tmp_path}/test.db"
     bucket_path = str(tmp_path / "bucket")
@@ -347,7 +347,7 @@ def test_cmd_fetch_then_process_round_trip(tmp_path: Path, monkeypatch: pytest.M
 
 
 def test_cmd_fetch_returns_1_on_source_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from composer_ingest.scraper.sources import REGISTRY
+    from composer_scrapers import REGISTRY
 
     fake = FakeSource(records=(person("Mozart"), person("Haydn")), name="fake", fail_after=1)
     monkeypatch.setitem(REGISTRY, "fake", fake)
@@ -365,7 +365,7 @@ def test_cmd_fetch_returns_1_on_source_failure(tmp_path: Path, monkeypatch: pyte
 def test_cmd_process_default_skips_incomplete_snapshots(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from composer_ingest.scraper.sources import REGISTRY
+    from composer_scrapers import REGISTRY
 
     db_url = f"sqlite:///{tmp_path}/test.db"
     bucket_path = str(tmp_path / "bucket")
@@ -388,7 +388,7 @@ def test_cmd_process_default_skips_incomplete_snapshots(
 
 
 def test_cmd_process_returns_1_without_fetched_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from composer_ingest.scraper.sources import REGISTRY
+    from composer_scrapers import REGISTRY
 
     monkeypatch.setitem(REGISTRY, "fake", FakeSource(records=(), name="fake"))
     rc = cmd_process(
