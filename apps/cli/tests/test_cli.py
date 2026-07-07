@@ -150,7 +150,7 @@ def test_cmd_stats_shows_entity_and_claim_counts(tmp_path: Path, capsys: pytest.
 def _ingest(db_url: str, *records: object) -> None:
     factory = init_db(get_engine(db_url))
     with factory() as session:
-        ingest_source(session, FakeSource(records=records))  # type: ignore[arg-type]
+        ingest_source(session, FakeSource(records=records))  # pyright: ignore[reportArgumentType]
 
 
 def test_cmd_stats_shows_work_and_mention_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

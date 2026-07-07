@@ -12,7 +12,7 @@ composer-gold = { workspace = true }
 dev = [
     "pytest>=8",
     "pytest-django>=4.8",
-    "mypy>=1.10",
+    "pyright>=1.1.390",
     "ruff>=0.4",
 ]
 
@@ -23,13 +23,12 @@ src = ["packages", "apps"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
-[tool.mypy]
-strict = true
-files = ["packages", "apps"]
+[tool.pyright]
+typeCheckingMode = "strict"
+include = ["packages", "apps"]
 # Each member ships a `src` (or Django project root) plus a `tests/` dir; list them as
-# package bases so files map to clean module names across the workspace.
-explicit_package_bases = true
-mypy_path = [
+# extra import roots so files map to clean module names across the workspace.
+extraPaths = [
     "packages/composer-schema/src",
     "packages/composer-schema/tests",
     "packages/composer-bronze/src",
@@ -50,24 +49,26 @@ mypy_path = [
     "apps/dashboard/tests",
 ]
 # Trivial per-member conftests share the module name "conftest"; nothing to type-check there.
-exclude = ["/conftest\\.py$"]
-
-[[tool.mypy.overrides]]
-module = "kagglehub.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "django.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "unfold.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "docling.*"
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = "pandas.*"
-ignore_missing_imports = true
+exclude = ["**/conftest.py", "**/.venv", "**/__pycache__"]
+# django, pandas, docling, unfold and kagglehub ship no type information. Don't
+# infer half-typed signatures from their source (which produces false positives
+# on e.g. the Django test client and request objects); treat them as untyped,
+# matching how the previous mypy config silenced them with ignore_missing_imports.
+# Libraries that do ship py.typed (httpx, typer, pydantic, ...) are unaffected.
+useLibraryCodeForTypes = false
+reportMissingModuleSource = false
+# Missing stubs for those same untyped packages should not be an error either.
+reportMissingTypeStubs = false
+# The checks below have no equivalent under the mypy --strict config this replaces:
+# they flag values whose type is `Unknown` because it flows in from an untyped
+# dependency (pandas, django, docling, ...), tests reaching into a module's
+# private helpers, and fixtures pyright reads as unused. Keeping them on would
+# hold the code to a strictness it was never written against, so leave them off
+# and rely on the rest of strict mode for real type safety.
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false

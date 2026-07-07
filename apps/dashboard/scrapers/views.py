@@ -204,7 +204,7 @@ def promote_page(request: HttpRequest) -> HttpResponse:
         gold = api.gold_status()
     except AdminAPIError as exc:
         error = str(exc)
-    refreshing = bool(gold) and gold is not None and gold.get("status") == "running"
+    refreshing = bool(gold) and gold.get("status") == "running"
     context = {
         **admin.site.each_context(request),
         "title": "Promote",

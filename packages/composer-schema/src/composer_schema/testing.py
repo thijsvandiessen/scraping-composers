@@ -35,8 +35,8 @@ class FakeSource(SourceAdapter):
         fail_after: int | None = None,
     ) -> None:
         self._records = records
-        self.name = name  # type: ignore[misc]
-        self.base_url = base_url  # type: ignore[misc]
+        self.name = name  # pyright: ignore[reportAttributeAccessIssue]
+        self.base_url = base_url  # pyright: ignore[reportAttributeAccessIssue]
         self.fail_after = fail_after
 
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 
 def _ingest(session: Session, *people: object) -> None:
-    ingest_source(session, FakeSource(records=people))  # type: ignore[arg-type]
+    ingest_source(session, FakeSource(records=people))  # pyright: ignore[reportArgumentType]
 
 
 def _by_label(session: Session) -> dict[str, Entity]:

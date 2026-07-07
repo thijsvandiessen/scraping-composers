@@ -370,7 +370,7 @@ uv run --directory apps/admin-api pytest
 uv run --directory apps/cli pytest
 uv run --directory apps/dashboard pytest
 
-uv run mypy                # strict type checking (whole workspace)
+uv run pyright             # strict type checking (whole workspace)
 uv run ruff check          # lint
 uv run ruff format --check # formatting
 ```

@@ -126,8 +126,6 @@ def test_iter_from_bucket_reads_back_typed_documents(tmp_path: Path) -> None:
 def test_dump_to_bucket_shim_delegates_to_scraper(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path)
     # dump_to_bucket is an intentionally-untyped back-compat shim.
-    run_id = raw_fetch.dump_to_bucket(  # type: ignore[no-untyped-call]
-        FakeSource(records=(person("a"),), name="fake"), bucket
-    )
+    run_id = raw_fetch.dump_to_bucket(FakeSource(records=(person("a"),), name="fake"), bucket)
     assert bucket.read_manifest("fake", run_id) is not None
     assert len(list(bucket.read_records("fake", run_id))) == 1
