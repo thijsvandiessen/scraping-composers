@@ -114,6 +114,7 @@ own, locked-down environment.
 
 ```sh
 uv sync
+export ADMIN_API_KEY=dev-key
 uv run uvicorn composer_admin:admin_app --port 8001
 # open http://localhost:8001/docs and click "Try it out"
 ```
@@ -133,10 +134,12 @@ The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
 - `GET  /admin/v1/runs` / `GET /admin/v1/runs/{run_id}` — load history and status
 
 Fetch status lives in the snapshot's manifest on disk; loads are recorded in
-`ingest_runs` (the same log the CLI `runs` command shows). Set `ADMIN_API_KEY`
-to require an `X-Admin-Key` header on every admin request (unset = open, for
-local use). The fetch endpoints run the scrapers, so the admin API process
-also needs `SCRAPER_CONTACT_EMAIL` set (see Usage).
+`ingest_runs` (the same log the CLI `runs` command shows). `ADMIN_API_KEY` is
+**required**: every admin request must carry a matching `X-Admin-Key` header,
+and while the variable is unset the API fails closed and refuses all requests
+with a 503 — so set it for local use too (any value, e.g. `dev-key`). The
+fetch endpoints run the scrapers, so the admin API process also needs
+`SCRAPER_CONTACT_EMAIL` set (see Usage).
 
 ### Dashboard (Django + Unfold)
 
@@ -166,6 +169,7 @@ progress.
 
 ```sh
 uv sync
+export ADMIN_API_KEY=dev-key  # the admin API requires it; the dashboard forwards it
 uv run python apps/dashboard/manage.py migrate            # once: Django's own tables
 uv run python apps/dashboard/manage.py createsuperuser    # once: your login
 uv run uvicorn composer_api:gold_app --port 8000      # gold API (Musicians pages)
@@ -177,7 +181,8 @@ uv run python apps/dashboard/manage.py runserver 8002             # the dashboar
 
 The dashboard never touches any composer database — scrape/load/promote
 actions go through the admin API (`ADMIN_API_URL`, default
-`http://localhost:8001`; `ADMIN_API_KEY` forwarded as `X-Admin-Key` when set)
+`http://localhost:8001`; `ADMIN_API_KEY` forwarded as `X-Admin-Key`, so it
+must be set in the dashboard's environment too)
 and data inspection goes through the consumer APIs (`GOLD_API_URL`, default
 `http://localhost:8000`; `BRONZE_API_URL`, default `http://localhost:8003`).
 Django's own SQLite (`apps/dashboard/dashboard.sqlite3`, gitignored) stores only

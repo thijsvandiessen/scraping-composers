@@ -1,3 +1,4 @@
+import hmac
 import os
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -37,11 +38,17 @@ def session_scope() -> Generator[Session, None, None]:
 
 
 def require_admin_key(x_admin_key: Annotated[str | None, Header()] = None) -> None:
-    """Guard the admin surface with a shared secret when ``ADMIN_API_KEY`` is set.
+    """Guard the admin surface with the shared secret in ``ADMIN_API_KEY``.
 
-    No-op when the env var is unset, so local development stays friction-free
-    while a deployed admin environment can require the ``X-Admin-Key`` header.
+    Fails closed: when the env var is unset the API refuses every request with
+    a 503, so a deployment that forgets to configure the key is unusable rather
+    than wide open. Local development sets the key explicitly (see README).
     """
     expected = os.environ.get("ADMIN_API_KEY")
-    if expected and x_admin_key != expected:
+    if not expected:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "admin API not configured: set ADMIN_API_KEY",
+        )
+    if x_admin_key is None or not hmac.compare_digest(x_admin_key.encode(), expected.encode()):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing X-Admin-Key")
