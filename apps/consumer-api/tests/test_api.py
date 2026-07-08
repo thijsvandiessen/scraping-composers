@@ -358,6 +358,15 @@ def test_entity_detail_404_for_missing(client: TestClient) -> None:
     assert client.get("/v1/entities/00000000-0000-0000-0000-000000000000").status_code == 404
 
 
+def test_crud_not_found_surfaces_as_404_with_detail(client: TestClient, gold_client: TestClient) -> None:
+    """A NotFoundError raised in crud maps to a 404 whose body matches
+    FastAPI's HTTPException shape, on both the bronze and gold apps."""
+    for app_client in (client, gold_client):
+        r = app_client.get("/v1/entities/00000000-0000-0000-0000-000000000000")
+        assert r.status_code == 404
+        assert r.json() == {"detail": "entity not found"}
+
+
 def test_list_entities_random_order_samples(client: TestClient) -> None:
     r = client.get("/v1/entities?order=random&kind=person&limit=3")
     assert r.status_code == 200
