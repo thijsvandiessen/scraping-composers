@@ -29,7 +29,7 @@ def test_fetch_json_returns_parsed_response() -> None:
 
 
 def test_fetch_json_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.berlinphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_scrapers._http.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -46,7 +46,7 @@ def test_fetch_json_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_fetch_json_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.berlinphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_scrapers._http.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="Always failing")

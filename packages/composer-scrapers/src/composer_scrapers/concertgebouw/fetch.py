@@ -6,35 +6,24 @@ search form's "List" button with no filters.
 
 from __future__ import annotations
 
-import logging
-import time
-
 import httpx
+
+from .._http import call_with_retries, user_agent
 
 BASE_URL = "https://archief.concertgebouworkest.nl"
 SEARCH_URL = BASE_URL + "/en/archive/search/"
 RETRIES = 3
 
-log = logging.getLogger(__name__)
-
 
 def _fetch(label: str, **request: object) -> str:
-    with httpx.Client(
-        headers={"User-Agent": "composer-ingest/0.1 (research; thijsvandiessen@gmail.com)"},
-        timeout=30,
-    ) as client:
-        for attempt in range(1, RETRIES + 1):
-            try:
-                resp = client.request(**request)  # pyright: ignore[reportArgumentType]
-                resp.raise_for_status()
-                return resp.text
-            except httpx.HTTPError as exc:
-                if attempt == RETRIES:
-                    raise
-                wait = 2**attempt
-                log.warning("%s fetch failed (%s), retrying in %ds", label, exc, wait)
-                time.sleep(wait)
-    raise AssertionError("unreachable")
+    with httpx.Client(headers={"User-Agent": user_agent()}, timeout=30) as client:
+
+        def do() -> str:
+            resp = client.request(**request)  # pyright: ignore[reportArgumentType]
+            resp.raise_for_status()
+            return resp.text
+
+        return call_with_retries(do, label=label, retries=RETRIES)
 
 
 def _fetch_search_page() -> str:

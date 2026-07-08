@@ -8,34 +8,25 @@ to retrieve the raw bytes.
 
 from __future__ import annotations
 
-import logging
-import time
 from typing import ClassVar
 
 import httpx
 
 from . import SourceAdapter
+from ._http import browser_user_agent, call_with_retries
 
-_UA = "Mozilla/5.0 (compatible; composer-ingest/0.1; research; thijsvandiessen@gmail.com)"
 _RETRIES = 3
-
-log = logging.getLogger(__name__)
 
 
 def _fetch_pdf_bytes(client: httpx.Client, url: str) -> bytes:
     """GET *url* and return the response body, retrying up to ``_RETRIES`` times."""
-    for attempt in range(1, _RETRIES + 1):
-        try:
-            resp = client.get(url)
-            resp.raise_for_status()
-            return resp.content
-        except httpx.HTTPError as exc:
-            if attempt == _RETRIES:
-                raise
-            wait = 2**attempt
-            log.warning("PDF fetch failed (%s), retrying in %ds", exc, wait)
-            time.sleep(wait)
-    raise AssertionError("unreachable")
+
+    def do() -> bytes:
+        resp = client.get(url)
+        resp.raise_for_status()
+        return resp.content
+
+    return call_with_retries(do, label="PDF fetch", retries=_RETRIES)
 
 
 class PdfSourceAdapter(SourceAdapter):
@@ -50,7 +41,7 @@ class PdfSourceAdapter(SourceAdapter):
     def _download_pdf(self) -> bytes:
         """Download :attr:`pdf_url` with browser-style headers and return raw bytes."""
         with httpx.Client(
-            headers={"User-Agent": _UA, "Referer": self.base_url},
+            headers={"User-Agent": browser_user_agent(), "Referer": self.base_url},
             timeout=60,
             follow_redirects=True,
         ) as client:
