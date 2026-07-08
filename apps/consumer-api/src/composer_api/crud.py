@@ -466,20 +466,44 @@ def get_concert(db: Session, concert_id: int) -> ConcertDetail:
     )
 
 
-def list_works(db: Session, q: str | None, page: int, limit: int) -> WorkPage:
+def list_works(
+    db: Session, q: str | None, page: int, limit: int, performed_only: bool = False, sort: str = "label"
+) -> WorkPage:
     composer = aliased(Entity)
     base = select(Work).outerjoin(composer, composer.id == Work.composer_entity_id)
     if q:
         base = base.where(or_(Work.canonical_title.ilike(f"%{q}%"), composer.label.ilike(f"%{q}%")))
+    if performed_only:
+        base = base.where(
+            Work.id.in_(
+                select(RawWorkMention.work_id)
+                .join(ConcertWork, ConcertWork.mention_id == RawWorkMention.id)
+                .where(RawWorkMention.work_id.is_not(None))
+            )
+        )
 
     total = db.scalar(select(func.count()).select_from(base.subquery()))
-    works = db.scalars(base.order_by(Work.canonical_title).offset((page - 1) * limit).limit(limit)).all()
+
+    mention_counts = (
+        select(
+            RawWorkMention.work_id.label("work_id"),
+            func.count(RawWorkMention.id).label("mention_count"),
+        )
+        .where(RawWorkMention.work_id.is_not(None))
+        .group_by(RawWorkMention.work_id)
+        .subquery()
+    )
+    query = base.add_columns(mention_counts.c.mention_count).outerjoin(
+        mention_counts, mention_counts.c.work_id == Work.id
+    )
+    if sort == "mentions":
+        query = query.order_by(mention_counts.c.mention_count.desc().nulls_last(), Work.canonical_title)
+    else:
+        query = query.order_by(Work.canonical_title)
+    rows = db.execute(query.offset((page - 1) * limit).limit(limit)).all()
 
     items = []
-    for work in works:
-        mention_count = (
-            db.scalar(select(func.count(RawWorkMention.id)).where(RawWorkMention.work_id == work.id)) or 0
-        )
+    for work, mention_count in rows:
         aliases = [
             title
             for title in db.scalars(
@@ -499,7 +523,7 @@ def list_works(db: Session, q: str | None, page: int, limit: int) -> WorkPage:
                 catalogue=catalogue,
                 musical_key=work.musical_key,
                 number=work.number,
-                mention_count=mention_count,
+                mention_count=mention_count or 0,
                 aliases=aliases,
             )
         )

@@ -60,8 +60,10 @@ def works(
     q: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    performed: bool = False,
+    sort: Annotated[str, Query(pattern="^(label|mentions)$")] = "label",
 ) -> WorkPage:
-    return list_works(db, q, page, limit)
+    return list_works(db, q, page, limit, performed_only=performed, sort=sort)
 
 
 @v1.get("/mentions", response_model=MentionPage)
@@ -111,7 +113,7 @@ def list_composers(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, q, page, limit, sort=sort)
+    return list_people(db, q, page, limit, profession="composer", sort=sort)
 
 
 @v1.get("/composers/{composer_id}", response_model=ComposerDetail)

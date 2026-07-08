@@ -7,7 +7,15 @@
 
 <form method="get" class="sc-toolbar">
   <input type="text" name="q" value="{{ q }}" placeholder="search by title or composer…" class="sc-btn" style="cursor: text; min-width: 22rem;">
+  {% if sort == "mentions" %}<input type="hidden" name="sort" value="mentions">{% endif %}
   <button type="submit" class="sc-btn sc-btn-primary">Search</button>
+  {% if sort %}
+    {% if sort == "mentions" %}
+    <a class="sc-btn" href="?q={{ q|urlencode }}">sort by title</a>
+    {% else %}
+    <a class="sc-btn" href="?q={{ q|urlencode }}&sort=mentions">sort by mentions</a>
+    {% endif %}
+  {% endif %}
   <span class="sc-muted">{{ total }} works — page {{ page }} of {{ pages }}</span>
 </form>
 

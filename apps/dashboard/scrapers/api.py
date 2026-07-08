@@ -157,10 +157,19 @@ class DataAPI(_BaseAPI):
         concert: dict[str, Any] = self._request("GET", f"/v1/concerts/{concert_id}")
         return concert
 
-    def list_works(self, q: str | None = None, page: int = 1, limit: int = 20) -> dict[str, Any]:
-        params: dict[str, Any] = {"page": page, "limit": limit}
+    def list_works(
+        self,
+        q: str | None = None,
+        page: int = 1,
+        limit: int = 20,
+        performed_only: bool = False,
+        sort: str = "label",
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"page": page, "limit": limit, "sort": sort}
         if q:
             params["q"] = q
+        if performed_only:
+            params["performed"] = "true"
         result: dict[str, Any] = self._request("GET", "/v1/works", params=params)
         return result
 
