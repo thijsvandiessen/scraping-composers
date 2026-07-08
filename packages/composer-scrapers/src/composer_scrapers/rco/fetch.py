@@ -16,6 +16,8 @@ from typing import Any
 
 import httpx
 
+from .._http import call_with_retries, user_agent
+
 BASE_URL = "https://www.concertgebouworkest.nl"
 REQUEST_DELAY_S = 0.5
 RETRIES = 3
@@ -28,25 +30,16 @@ log = logging.getLogger(__name__)
 
 
 def _make_client() -> httpx.Client:
-    return httpx.Client(
-        headers={"User-Agent": "composer-ingest/0.1 (research; thijsvandiessen@gmail.com)"},
-        timeout=30,
-    )
+    return httpx.Client(headers={"User-Agent": user_agent()}, timeout=30)
 
 
 def _get_text(client: httpx.Client, url: str, label: str) -> str:
-    for attempt in range(1, RETRIES + 1):
-        try:
-            resp = client.get(url)
-            resp.raise_for_status()
-            return resp.text
-        except httpx.HTTPError as exc:
-            if attempt == RETRIES:
-                raise
-            wait = 2**attempt
-            log.warning("%s fetch failed (%s), retrying in %ds", label, exc, wait)
-            time.sleep(wait)
-    raise AssertionError("unreachable")
+    def do() -> str:
+        resp = client.get(url)
+        resp.raise_for_status()
+        return resp.text
+
+    return call_with_retries(do, label=label, retries=RETRIES)
 
 
 def _get_json(client: httpx.Client, url: str, label: str) -> dict[str, Any]:

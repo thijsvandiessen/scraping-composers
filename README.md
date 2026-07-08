@@ -10,6 +10,10 @@ ingest run produced it.
 ```sh
 uv sync
 
+# scrapers identify themselves (User-Agent) to the sites they crawl; a
+# reachable contact email is required before fetching
+export SCRAPER_CONTACT_EMAIL="you@example.com"
+
 # fetch everything from IMSLP (~55k people, ~55 pages, a few minutes) to the
 # bucket, then load the snapshot into the database (no network)
 uv run composer-ingest fetch imslp
@@ -131,7 +135,8 @@ The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
 Fetch status lives in the snapshot's manifest on disk; loads are recorded in
 `ingest_runs` (the same log the CLI `runs` command shows). Set `ADMIN_API_KEY`
 to require an `X-Admin-Key` header on every admin request (unset = open, for
-local use).
+local use). The fetch endpoints run the scrapers, so the admin API process
+also needs `SCRAPER_CONTACT_EMAIL` set (see Usage).
 
 ### Dashboard (Django + Unfold)
 

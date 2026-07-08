@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 import httpx
 
 from .. import EntityDocument, RefreshCadence, SourceAdapter
+from .._http import user_agent
 from .fetch import BASE_URL, PAGE_SIZE, REQUEST_DELAY_S, _fetch_page
 
 log = logging.getLogger(__name__)
@@ -33,10 +34,7 @@ class ImslpAdapter(SourceAdapter):
         """Yield every person listed on IMSLP, paging until the API is exhausted."""
         start = 0
         pages = 0
-        with httpx.Client(
-            headers={"User-Agent": "composer-ingest/0.1 (research; thijsvandiessen@gmail.com)"},
-            timeout=30,
-        ) as client:
+        with httpx.Client(headers={"User-Agent": user_agent()}, timeout=30) as client:
             while True:
                 data = _fetch_page(client, start)
                 meta = data.pop("metadata", {})
