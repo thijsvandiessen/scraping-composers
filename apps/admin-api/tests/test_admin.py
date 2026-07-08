@@ -88,7 +88,8 @@ def client(monkeypatch: pytest.MonkeyPatch, factory, bucket_path: Path) -> Itera
     registry = {"fake": _FakeSource(), "archive": _ArchiveSource(), "exploding": _ExplodingSource()}
     monkeypatch.setattr(admin_routes, "REGISTRY", registry)
     monkeypatch.setattr(admin_routes, "DEFAULT_BUCKET_PATH", str(bucket_path))
-    yield TestClient(admin_app)
+    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    yield TestClient(admin_app, headers={"X-Admin-Key": "test-key"})
 
 
 def test_list_scrapers_reports_cadence_and_due(client: TestClient) -> None:
@@ -239,8 +240,15 @@ def test_promote_conflicts_while_running(
     assert client.post("/admin/v1/promote").status_code == 409
 
 
-def test_admin_key_guard(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
-    monkeypatch.setenv("ADMIN_API_KEY", "secret")
-    assert client.get("/admin/v1/scrapers").status_code == 401
-    ok = client.get("/admin/v1/scrapers", headers={"X-Admin-Key": "secret"})
-    assert ok.status_code == 200
+def test_admin_key_guard(client: TestClient) -> None:
+    # A bare client sends no X-Admin-Key header; the fixture client sends the right one.
+    assert TestClient(admin_app).get("/admin/v1/scrapers").status_code == 401
+    assert client.get("/admin/v1/scrapers", headers={"X-Admin-Key": "wrong"}).status_code == 401
+    assert client.get("/admin/v1/scrapers").status_code == 200
+
+
+def test_admin_key_unset_fails_closed(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
+    monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+    r = client.get("/admin/v1/scrapers")
+    assert r.status_code == 503
+    assert "ADMIN_API_KEY" in r.json()["detail"]
