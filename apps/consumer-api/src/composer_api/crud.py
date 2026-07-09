@@ -14,10 +14,10 @@ from composer_warehouse.models import (
     WorkTitle,
 )
 from composer_warehouse.normalize import dedup_key
-from fastapi import HTTPException
 from sqlalchemy import ColumnElement, Select, UnaryExpression, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
+from .errors import NotFoundError
 from .schemas import (
     ClaimOut,
     ComposerDetail,
@@ -115,7 +115,7 @@ def get_person(
 ) -> ComposerDetail:
     entity = db.get(Entity, person_id)
     if entity is None or entity.kind != "person":
-        raise HTTPException(status_code=404, detail=not_found_detail)
+        raise NotFoundError(not_found_detail)
 
     if profession is not None:
         prof_id = db.scalar(select(Entity.id).where(Entity.kind == "profession", Entity.label == profession))
@@ -127,7 +127,7 @@ def get_person(
             )
         )
         if not has_prof:
-            raise HTTPException(status_code=404, detail=not_found_detail)
+            raise NotFoundError(not_found_detail)
 
     return ComposerDetail(
         id=entity.id,
@@ -237,7 +237,7 @@ def list_entities(
 def get_entity(db: Session, entity_id: uuid.UUID) -> EntityDetail:
     entity = db.get(Entity, entity_id)
     if entity is None:
-        raise HTTPException(status_code=404, detail="entity not found")
+        raise NotFoundError("entity not found")
 
     incoming_total = db.scalar(select(func.count(Claim.id)).where(Claim.object_id == entity.id)) or 0
     subject = aliased(Entity)
@@ -312,7 +312,7 @@ def person_concerts(db: Session, person_id: uuid.UUID, page: int, limit: int) ->
     """Concerts a person took part in, newest first (populated in gold)."""
     entity = db.get(Entity, person_id)
     if entity is None or entity.kind != "person":
-        raise HTTPException(status_code=404, detail="person not found")
+        raise NotFoundError("person not found")
 
     base = (
         select(Concert, ConcertParticipant.role, Source.name)
@@ -435,7 +435,7 @@ def get_concert(db: Session, concert_id: int) -> ConcertDetail:
         .where(Concert.id == concert_id)
     ).first()
     if row is None:
-        raise HTTPException(status_code=404, detail="concert not found")
+        raise NotFoundError("concert not found")
     concert, source_name = row
 
     participants = db.execute(

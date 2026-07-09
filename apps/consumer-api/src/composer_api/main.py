@@ -12,13 +12,23 @@ from collections.abc import Callable, Generator
 
 from composer_gold import DEFAULT_GOLD_DB_PATH
 from composer_warehouse.db import get_engine, init_db
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from .deps import get_db
+from .errors import NotFoundError
 from .routes import v1
+
+
+def _not_found_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Typed (Request, Exception) because Starlette's add_exception_handler
+    # expects Callable[[Request, Exception], Response]; the registration
+    # below guarantees exc is a NotFoundError.
+    assert isinstance(exc, NotFoundError)
+    return JSONResponse(status_code=404, content={"detail": exc.detail})
 
 
 def create_app(title: str, factory_provider: Callable[[], sessionmaker[Session]]) -> FastAPI:
@@ -29,6 +39,7 @@ def create_app(title: str, factory_provider: Callable[[], sessionmaker[Session]]
     """
     app = FastAPI(title=title)
     app.include_router(v1)
+    app.add_exception_handler(NotFoundError, _not_found_handler)
     cached: sessionmaker[Session] | None = None
 
     def _get_db() -> Generator[Session, None, None]:
