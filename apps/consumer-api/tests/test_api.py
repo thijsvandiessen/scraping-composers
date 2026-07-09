@@ -19,10 +19,12 @@ from sqlalchemy.pool import StaticPool
 _INGESTED_AT = datetime(2024, 1, 1, tzinfo=UTC)
 
 
-def _person(name: str, *claims: SourceClaim, external_id: str | None = None) -> EntityDocument:
+def _person(
+    name: str, *claims: SourceClaim, external_id: str | None = None, url: str | None = None
+) -> EntityDocument:
     return EntityDocument(
         id=external_id or f"id:{name}",
-        url=None,
+        url=url,
         source_name="fake",
         ingested_at=_INGESTED_AT,
         name=name,
@@ -60,7 +62,13 @@ def _seeded_factory() -> sessionmaker[Session]:
             ),
             _person("Smith, John", SourceClaim("has_profession", "profession", "conductor")),
             _person("Bach, Johann", SourceClaim("has_profession", "profession", "composer")),
-            _person("Beethoven, Ludwig van", SourceClaim("has_profession", "profession", "composer")),
+            # Wikidata-style record: the source's own id plus the exact page URL
+            _person(
+                "Beethoven, Ludwig van",
+                SourceClaim("has_profession", "profession", "composer"),
+                external_id="Q255",
+                url="https://fake.example/wiki/Q255",
+            ),
             _person(
                 "Multi, Person",
                 SourceClaim("has_profession", "profession", "soloist"),
@@ -266,6 +274,26 @@ def test_get_composer_returns_detail_with_claims(client: TestClient) -> None:
     assert data["kind"] == "person"
     predicates = {c["predicate"] for c in data["claims"]}
     assert "has_profession" in predicates
+
+
+def test_claim_source_url_is_record_page(client: TestClient) -> None:
+    """Claims point at the exact source page they came from, not the source homepage."""
+    listing = client.get("/v1/composers").json()
+    beethoven = next(i for i in listing["items"] if i["label"] == "Beethoven, Ludwig van")
+    data = client.get(f"/v1/composers/{beethoven['id']}").json()
+    profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
+    assert profession["source"] == "fake"
+    assert profession["source_url"] == "https://fake.example/wiki/Q255"
+    assert profession["source_external_id"] == "Q255"
+
+
+def test_claim_source_url_falls_back_to_base_url(client: TestClient) -> None:
+    """Records without a page URL fall back to the source homepage."""
+    listing = client.get("/v1/composers").json()
+    bach = next(i for i in listing["items"] if i["label"] == "Bach, Johann")
+    data = client.get(f"/v1/composers/{bach['id']}").json()
+    profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
+    assert profession["source_url"] == "https://fake.example"
 
 
 def test_get_composer_not_found(client: TestClient) -> None:
@@ -597,6 +625,16 @@ def test_gold_hides_people_without_performance_evidence(gold_client: TestClient)
     data = gold_client.get("/v1/composers").json()
     assert data["total"] == 1
     assert data["items"][0]["label"] == "Beethoven, Ludwig van"
+
+
+def test_gold_claim_source_url_survives_promotion(gold_client: TestClient) -> None:
+    """Promotion copies entity records, so gold claims still link the exact source page."""
+    listing = gold_client.get("/v1/composers").json()
+    beethoven = next(i for i in listing["items"] if i["label"] == "Beethoven, Ludwig van")
+    data = gold_client.get(f"/v1/composers/{beethoven['id']}").json()
+    profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
+    assert profession["source_url"] == "https://fake.example/wiki/Q255"
+    assert profession["source_external_id"] == "Q255"
 
 
 def test_gold_keeps_works_with_mention_counts(gold_client: TestClient) -> None:

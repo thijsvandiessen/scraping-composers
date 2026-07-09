@@ -19,7 +19,10 @@ class ClaimOut(BaseModel):
     object_label: str | None
     object_id: uuid.UUID | None = None
     source: str
+    # The exact source page the claim came from (e.g. https://www.wikidata.org/wiki/Q255),
+    # falling back to the source homepage when the record carries no URL.
     source_url: str | None
+    source_external_id: str | None = None  # the source's own id for the subject (e.g. wikidata QID)
 
 
 class ComposerDetail(BaseModel):
