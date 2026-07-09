@@ -1,5 +1,8 @@
 [tool.uv.workspace]
 members = ["packages/*", "apps/*"]
+# apps/frontend is a Node (Astro) app, not a Python project; keep it out of the
+# member glob or uv fails on the missing pyproject.toml.
+exclude = ["apps/frontend"]
 
 [tool.uv.sources]
 composer-schema = { workspace = true }

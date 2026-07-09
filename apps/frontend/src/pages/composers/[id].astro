@@ -1,0 +1,66 @@
+---
+import FactValue from "../../components/FactValue.astro";
+import Base from "../../layouts/Base.astro";
+import { getComposer } from "../../lib/api";
+import { METRIC_PREDICATES, predicateLabel } from "../../lib/predicates";
+import type { Claim } from "../../lib/schemas";
+
+const { id } = Astro.params;
+const composer = id ? await getComposer(id) : null;
+if (!composer) {
+  return new Response("Composer not found", { status: 404 });
+}
+
+// Biographical facts up front, source-popularity counters apart at the bottom.
+const facts = composer.claims.filter((c) => !METRIC_PREDICATES.has(c.predicate));
+const metrics = composer.claims.filter((c) => METRIC_PREDICATES.has(c.predicate));
+
+function groupByPredicate(claims: Claim[]): Map<string, Claim[]> {
+  const grouped = new Map<string, Claim[]>();
+  for (const claim of claims) {
+    const bucket = grouped.get(claim.predicate);
+    if (bucket) {
+      bucket.push(claim);
+    } else {
+      grouped.set(claim.predicate, [claim]);
+    }
+  }
+  return grouped;
+}
+
+const factGroups = groupByPredicate(facts);
+const metricGroups = groupByPredicate(metrics);
+---
+
+<Base title={`${composer.label} — Composers`}>
+  <p class="back-link"><a href="/composers">← All composers</a></p>
+  <h1>{composer.label}</h1>
+  <p class="meta">In the dataset since {composer.created_at.slice(0, 10)}.</p>
+
+  {facts.length === 0 && <p class="empty">No facts recorded for this composer yet.</p>}
+
+  {facts.length > 0 && (
+    <dl class="facts">
+      {[...factGroups.entries()].map(([predicate, claims]) => (
+        <>
+          <dt>{predicateLabel(predicate)}</dt>
+          <dd>{claims.map((claim) => <FactValue claim={claim} />)}</dd>
+        </>
+      ))}
+    </dl>
+  )}
+
+  {metrics.length > 0 && (
+    <>
+      <h2>Source metrics</h2>
+      <dl class="facts">
+        {[...metricGroups.entries()].map(([predicate, claims]) => (
+          <>
+            <dt>{predicateLabel(predicate)}</dt>
+            <dd>{claims.map((claim) => <FactValue claim={claim} />)}</dd>
+          </>
+        ))}
+      </dl>
+    </>
+  )}
+</Base>

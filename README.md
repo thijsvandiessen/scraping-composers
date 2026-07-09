@@ -106,6 +106,27 @@ uv run uvicorn composer_api:bronze_app --port 8003   # raw staging
 - `GET /v1/mentions?status=` — work mentions with the matcher's decision;
   `status=needs_review` is the review queue, each entry with its best candidate work
 
+Every claim in a detail response carries its provenance: `source` (the scraper
+name), `source_url` (the exact page the fact came from, e.g.
+`https://www.wikidata.org/wiki/Q255`, falling back to the source homepage), and
+`source_external_id` (the source's own id for the person, e.g. the Wikidata QID).
+
+### Frontend (Astro)
+
+A public-facing web UI (`apps/frontend/`) over the gold consumer API: a
+searchable composer list plus a detail page where every fact shows the source
+it came from — Wikidata-backed facts link to the exact item page (and show the
+QID). It is a pure HTTP client of the gold API, like the dashboard, and renders
+server-side so no CORS setup is needed. Data appears once `composer-ingest
+promote` has produced `gold.db`.
+
+```sh
+cd apps/frontend
+npm install
+GOLD_API_URL=http://localhost:8000 npm run dev   # http://localhost:4321
+npm run build && npm start                        # production build
+```
+
 ## Admin API (manage & run scrapers)
 
 A small FastAPI app for triggering scrapes from a browser instead of the CLI.

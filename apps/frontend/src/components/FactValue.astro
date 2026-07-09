@@ -1,0 +1,23 @@
+---
+import type { Claim } from "../lib/schemas";
+import SourceChip from "./SourceChip.astro";
+
+interface Props {
+  claim: Claim;
+}
+
+const { claim } = Astro.props;
+const text = claim.object_label ?? claim.value ?? "—";
+// Some values are themselves URLs (e.g. the auto-injected mentioned_in claim
+// carries the record's page); render those as links.
+const isUrl = /^https?:\/\//.test(text);
+---
+
+<div class="fact-value">
+  {isUrl ? <a href={text}>{text}</a> : <span>{text}</span>}
+  <SourceChip
+    source={claim.source}
+    sourceUrl={claim.source_url}
+    sourceExternalId={claim.source_external_id}
+  />
+</div>
