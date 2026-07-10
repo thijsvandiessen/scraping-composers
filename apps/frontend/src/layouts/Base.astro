@@ -1,0 +1,32 @@
+---
+import "../styles/global.css";
+
+interface Props {
+  title: string;
+}
+
+const { title } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/composers">Composers</a>
+      <span class="tagline">a curated dataset of composers and their concerts</span>
+    </header>
+    <main>
+      <slot />
+    </main>
+    <footer class="site-footer">
+      Every fact shows the source it came from; the source tag links to the exact page where the
+      information can be verified.
+    </footer>
+  </body>
+</html>

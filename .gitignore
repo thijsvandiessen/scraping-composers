@@ -2,6 +2,9 @@ composers.db
 gold.db*
 raw-data/
 apps/dashboard/dashboard.sqlite3
+node_modules/
+apps/frontend/dist/
+apps/frontend/.astro/
 __pycache__/
 .env
 .venv/

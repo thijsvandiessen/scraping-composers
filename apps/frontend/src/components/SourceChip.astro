@@ -1,0 +1,31 @@
+---
+interface Props {
+  source: string;
+  sourceUrl: string | null;
+  sourceExternalId?: string | null;
+}
+
+const { source, sourceUrl, sourceExternalId } = Astro.props;
+
+// For Wikidata the exact item page matters: surface the QID in the chip so the
+// reader knows precisely where the fact lives. If the API didn't send the id,
+// derive it from an item-page URL as a fallback.
+const qid =
+  source === "wikidata"
+    ? (sourceExternalId ?? sourceUrl?.match(/\/wiki\/(Q\d+)$/)?.[1] ?? null)
+    : null;
+const label = qid ? `wikidata: ${qid}` : source;
+const title = sourceUrl ? `View this information at ${sourceUrl}` : `Reported by ${source}`;
+---
+
+{
+  sourceUrl ? (
+    <a class="source-chip" href={sourceUrl} target="_blank" rel="noopener noreferrer" title={title}>
+      {label}
+    </a>
+  ) : (
+    <span class="source-chip" title={title}>
+      {label}
+    </span>
+  )
+}
