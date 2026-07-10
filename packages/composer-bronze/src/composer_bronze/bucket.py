@@ -111,11 +111,14 @@ class LocalBucket:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
 
-    def _source_dir(self, source: str) -> Path:
-        return self.root / _validated_segment(source, "source")
-
     def _run_dir(self, source: str, run_id: str) -> Path:
-        return self._source_dir(source) / _validated_segment(run_id, "run_id")
+        _validated_segment(source, "source")
+        _validated_segment(run_id, "run_id")
+        base_path = os.path.abspath(self.root)
+        fullpath = os.path.normpath(os.path.join(base_path, source, run_id))
+        if not fullpath.startswith(base_path):
+            raise ValueError(f"Path traversal detected: {fullpath}")
+        return Path(fullpath)
 
     def _ndjson_path(self, source: str, run_id: str) -> Path:
         return self._run_dir(source, run_id) / "records.ndjson"
@@ -137,10 +140,15 @@ class LocalBucket:
                     yield json.loads(line)
 
     def list_runs(self, source: str) -> list[str]:
-        source_dir = self._source_dir(source)
-        if not source_dir.is_dir():
+        _validated_segment(source, "source")
+        base_path = os.path.abspath(self.root)
+        source_dir = os.path.normpath(os.path.join(base_path, source))
+        if not source_dir.startswith(base_path):
+            raise ValueError(f"Path traversal detected: {source_dir}")
+        source_dir_path = Path(source_dir)
+        if not source_dir_path.is_dir():
             return []
-        return sorted(p.name for p in source_dir.iterdir() if p.is_dir())
+        return sorted(p.name for p in source_dir_path.iterdir() if p.is_dir())
 
     def write_manifest(self, manifest: SnapshotManifest) -> None:
         run_dir = self._run_dir(manifest.source, manifest.run_id)
