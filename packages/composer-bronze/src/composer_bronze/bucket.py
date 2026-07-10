@@ -32,6 +32,25 @@ MANIFEST_FILENAME = "manifest.json"
 LOADABLE_STATUSES = ("completed", "unknown")
 
 
+def _validated_segment(value: str, field: str) -> str:
+    """Require *value* to be a single path segment, guarding against traversal (CWE-22).
+
+    ``source`` and ``run_id`` may come from untrusted input (API path
+    parameters, CLI arguments); joined onto the bucket root unchecked, a value
+    like ``../../etc`` or an absolute path would escape the bucket.
+    """
+    if (
+        not value
+        or value in (".", "..")
+        or "/" in value
+        or "\\" in value
+        or "\x00" in value
+        or os.path.basename(value) != value
+    ):
+        raise ValueError(f"invalid {field} {value!r}: must be a single path segment")
+    return value
+
+
 @dataclass(frozen=True)
 class SnapshotManifest:
     source: str
@@ -92,8 +111,11 @@ class LocalBucket:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
 
+    def _source_dir(self, source: str) -> Path:
+        return self.root / _validated_segment(source, "source")
+
     def _run_dir(self, source: str, run_id: str) -> Path:
-        return self.root / source / run_id
+        return self._source_dir(source) / _validated_segment(run_id, "run_id")
 
     def _ndjson_path(self, source: str, run_id: str) -> Path:
         return self._run_dir(source, run_id) / "records.ndjson"
@@ -115,7 +137,7 @@ class LocalBucket:
                     yield json.loads(line)
 
     def list_runs(self, source: str) -> list[str]:
-        source_dir = self.root / source
+        source_dir = self._source_dir(source)
         if not source_dir.is_dir():
             return []
         return sorted(p.name for p in source_dir.iterdir() if p.is_dir())

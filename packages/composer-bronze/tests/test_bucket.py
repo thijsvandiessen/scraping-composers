@@ -6,6 +6,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 from composer_bronze.bucket import (
     MANIFEST_FILENAME,
     LocalBucket,
@@ -116,6 +117,44 @@ def test_list_snapshots_synthesizes_manifest_for_legacy_dir(tmp_path: Path) -> N
     ndjson = tmp_path / "rco" / "legacy" / "records.ndjson"
     expected = datetime.fromtimestamp(os.stat(ndjson).st_mtime, tz=UTC)
     assert parsed == expected
+
+
+@pytest.mark.parametrize(
+    "bad_segment",
+    [
+        "",
+        ".",
+        "..",
+        "../other",
+        "..\\other",
+        "nested/run-1",
+        "/etc/passwd",
+        "run\x00id",
+    ],
+)
+def test_path_traversal_segments_rejected(tmp_path: Path, bad_segment: str) -> None:
+    # source and run_id may come from untrusted input (API path params, CLI
+    # args); anything that is not a single path segment must never touch disk.
+    bucket = LocalBucket(tmp_path)
+    with pytest.raises(ValueError, match="single path segment"):
+        bucket.write_records("rco", bad_segment, [{"x": 1}])
+    with pytest.raises(ValueError, match="single path segment"):
+        list(bucket.read_records(bad_segment, "run-1"))
+    with pytest.raises(ValueError, match="single path segment"):
+        bucket.list_runs(bad_segment)
+    with pytest.raises(ValueError, match="single path segment"):
+        bucket.read_manifest("rco", bad_segment)
+    with pytest.raises(ValueError, match="single path segment"):
+        bucket.write_manifest(SnapshotManifest.start(bad_segment, "run-1"))
+
+
+def test_traversal_run_id_cannot_escape_bucket_root(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    root = tmp_path / "bucket"
+    bucket = LocalBucket(root)
+    with pytest.raises(ValueError):
+        bucket.write_records("rco", "../../outside", [{"x": 1}])
+    assert not outside.exists()
 
 
 def test_manifest_serialized_as_flat_json(tmp_path: Path) -> None:
