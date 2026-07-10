@@ -29,6 +29,7 @@ FIELDS: tuple[tuple[str, str, str | None], ...] = (
     ("countryLabel", "citizen_of", "place"),
     ("genreLabel", "has_genre", "genre"),
     ("movementLabel", "in_movement", "movement"),
+    ("alias", "also_known_as", None),
 )
 
 # METRICS_QUERY result variable -> claim predicate (all literal-valued).

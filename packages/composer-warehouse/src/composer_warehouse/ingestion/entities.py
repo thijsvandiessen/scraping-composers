@@ -18,9 +18,13 @@ def get_or_create_source(session: Session, name: str, base_url: str) -> Source:
 
 
 def get_or_create_entity(
-    session: Session, cache: dict[tuple[str, str], uuid.UUID], kind: str, label: str
+    session: Session,
+    cache: dict[tuple[str, str], uuid.UUID],
+    kind: str,
+    label: str,
+    wikidata_id: str | None = None,
 ) -> uuid.UUID:
-    key = dedup_key(label)
+    key = dedup_key(label, wikidata_id)
     entity_id = cache.get((kind, key))
     if entity_id is None:
         entity_id = entity_uuid(kind, key)

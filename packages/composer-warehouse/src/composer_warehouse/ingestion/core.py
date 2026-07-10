@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import uuid
 from collections.abc import Iterator
 
@@ -15,6 +16,14 @@ from .mentions import ingest_mention
 log = logging.getLogger(__name__)
 
 COMMIT_BATCH = 1000
+
+
+def _extract_wikidata_id(url: str | None) -> str | None:
+    if not url:
+        return None
+    if match := re.search(r"wikidata\.org/wiki/(Q\d+)", url):
+        return match.group(1)
+    return None
 
 
 class IngestError(Exception):
@@ -124,7 +133,10 @@ def run_ingest_records(
                 if existing_entity_id is not None:
                     seen_entity_ids.add(existing_entity_id)
             else:
-                entity_id = get_or_create_entity(session, entities_by_key, record.kind, record.name)
+                wikidata_id = _extract_wikidata_id(record.url)
+                entity_id = get_or_create_entity(
+                    session, entities_by_key, record.kind, record.name, wikidata_id
+                )
                 db_record = EntityRecord(
                     source_id=source.id,
                     entity_id=entity_id,

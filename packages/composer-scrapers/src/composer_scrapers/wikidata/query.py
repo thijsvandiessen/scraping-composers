@@ -32,7 +32,7 @@ RETRIES = 5
 
 QUERY = """\
 SELECT ?item ?itemLabel ?birth ?birthPrecision ?death ?deathPrecision
-       ?birthPlaceLabel ?deathPlaceLabel ?countryLabel ?genreLabel ?movementLabel
+       ?birthPlaceLabel ?deathPlaceLabel ?countryLabel ?genreLabel ?movementLabel ?alias
 WHERE {{
   {{ SELECT ?item WHERE {{ ?item wdt:P106 wd:Q36834 . {after_filter} }} ORDER BY ?item LIMIT {page_size} }}
   # Take the truthy (best-rank) date via wdt:, then join the statement value
@@ -53,6 +53,7 @@ WHERE {{
   OPTIONAL {{ ?item wdt:P27 ?country . }}
   OPTIONAL {{ ?item wdt:P136 ?genre . }}
   OPTIONAL {{ ?item wdt:P135 ?movement . }}
+  OPTIONAL {{ ?item skos:altLabel ?alias . }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
 }}
 """
