@@ -25,7 +25,7 @@ def entity_uuid(kind: str, key: str) -> uuid.UUID:
     return uuid.uuid5(_NAMESPACE, f"{kind}:{key}")
 
 
-def dedup_key(name: str) -> str:
+def dedup_key(name: str, wikidata_id: str | None = None) -> str:
     name = name.strip()
     if "," in name:
         last, _, rest = name.partition(",")
@@ -35,4 +35,7 @@ def dedup_key(name: str) -> str:
     name = "".join(c for c in name if not unicodedata.combining(c))
     name = name.lower()
     name = re.sub(r"[^\w\s]", "", name)
-    return re.sub(r"\s+", " ", name).strip()
+    base = re.sub(r"\s+", " ", name).strip()
+    if wikidata_id:
+        return f"{base}|{wikidata_id}"
+    return base

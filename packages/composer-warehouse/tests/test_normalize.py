@@ -52,3 +52,9 @@ def test_dedup_key_name_with_digits() -> None:
 def test_dedup_key_multiple_commas() -> None:
     # only the first comma triggers inversion; the remainder stays in the name
     assert dedup_key("Elgar, Edward, Sir") == "edward sir elgar"
+
+
+def test_dedup_key_with_wikidata_id() -> None:
+    assert dedup_key("Beethoven, Ludwig van", wikidata_id="Q255") == "ludwig van beethoven|Q255"
+    assert dedup_key("Strauss, Johann", wikidata_id="Q72340") == "johann strauss|Q72340"
+    assert dedup_key("Strauss, Johann", wikidata_id="Q312683") == "johann strauss|Q312683"

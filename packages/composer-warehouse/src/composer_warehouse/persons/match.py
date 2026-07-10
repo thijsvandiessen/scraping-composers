@@ -39,10 +39,9 @@ def _given_score(a: PersonName, b: PersonName) -> tuple[float, str]:
     return 0.20, "given_conflict"
 
 
-def score(
+def _score_pair(
     a: PersonName, b: PersonName, a_year: int | None = None, b_year: int | None = None
 ) -> tuple[float, str]:
-    """Similarity of two people in [0, 1] with the method that decided it."""
     if a.surname != b.surname:
         return 0.0, "surname_gate"
 
@@ -57,6 +56,31 @@ def score(
         return round(min(1.0, base + 0.2), 4), method
 
     return base, method
+
+
+def score(
+    a: PersonName,
+    b: PersonName,
+    a_year: int | None = None,
+    b_year: int | None = None,
+    a_aliases: list[PersonName] | None = None,
+    b_aliases: list[PersonName] | None = None,
+) -> tuple[float, str]:
+    """Similarity of two people in [0, 1] with the method that decided it."""
+    best_score = -1.0
+    best_method = ""
+
+    a_names = [a] + (a_aliases or [])
+    b_names = [b] + (b_aliases or [])
+
+    for an in a_names:
+        for bn in b_names:
+            val, meth = _score_pair(an, bn, a_year, b_year)
+            if val > best_score:
+                best_score = val
+                best_method = meth
+
+    return best_score, best_method
 
 
 def classify(value: float) -> str:

@@ -38,6 +38,17 @@ def _birth_years(session: Session) -> dict[uuid.UUID, int]:
     return years
 
 
+def _aliases(session: Session) -> dict[uuid.UUID, list[PersonName]]:
+    """Map person entity id -> list of aliases, parsed from also_known_as claims."""
+    aliases: dict[uuid.UUID, list[PersonName]] = defaultdict(list)
+    for subject_id, value in session.execute(
+        select(Claim.subject_id, Claim.value).where(Claim.predicate == "also_known_as")
+    ).tuples():
+        if value:
+            aliases[subject_id].append(parse_name(value))
+    return dict(aliases)
+
+
 def _given_length(name: PersonName) -> int:
     """Total spelled-out length of the given names — so "Johann Sebastian"
     counts as fuller than the initials "J. S." (same token count)."""
@@ -57,6 +68,7 @@ def _canonical_and_duplicate(
 def dedupe_persons(session: Session) -> tuple[int, int]:
     """Run the dedupe pass. Returns (auto-linked count, needs-review count)."""
     years = _birth_years(session)
+    aliases = _aliases(session)
     persons = list(session.scalars(select(Entity).where(Entity.kind == "person")))
     parsed = {e.id: parse_name(e.label) for e in persons}
     decided: set[tuple[uuid.UUID, uuid.UUID]] = set(
@@ -64,18 +76,35 @@ def dedupe_persons(session: Session) -> tuple[int, int]:
     )
     linked = {e.id for e in persons if e.canonical_entity_id is not None}
 
-    groups: dict[str, list[Entity]] = defaultdict(list)
+    groups: dict[str, set[Entity]] = defaultdict(set)
     for entity in persons:
-        surname = parsed[entity.id].surname
-        if surname:  # skip mononyms / empty surnames — nothing to gate on
-            groups[surname].append(entity)
+        surnames = {parsed[entity.id].surname}
+        for alias in aliases.get(entity.id, []):
+            surnames.add(alias.surname)
+
+        for surname in surnames:
+            if surname:  # skip mononyms / empty surnames — nothing to gate on
+                groups[surname].add(entity)
 
     auto = review = pending = 0
-    for group in groups.values():
+    for group_set in groups.values():
+        group = list(group_set)
         for i in range(len(group)):
             for j in range(i + 1, len(group)):
                 a, b = group[i], group[j]
-                value, method = score(parsed[a.id], parsed[b.id], years.get(a.id), years.get(b.id))
+
+                # We might encounter the same pair in multiple surname groups
+                if (a.id, b.id) in decided or (b.id, a.id) in decided:
+                    continue
+
+                value, method = score(
+                    parsed[a.id],
+                    parsed[b.id],
+                    years.get(a.id),
+                    years.get(b.id),
+                    aliases.get(a.id),
+                    aliases.get(b.id),
+                )
                 status = classify(value)
                 if status == "distinct":
                     continue

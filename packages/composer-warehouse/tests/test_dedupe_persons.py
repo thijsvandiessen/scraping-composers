@@ -67,3 +67,20 @@ def test_reingest_pass_is_idempotent(session: Session) -> None:
 def test_different_surnames_are_not_compared(session: Session) -> None:
     _ingest(session, person("Bach, Johann Sebastian"), person("Handel, George Frideric"))
     assert dedupe_persons(session) == (0, 0)
+
+
+def test_aliases_are_used_for_matching(session: Session) -> None:
+    # "Strauss, Johann" and "Strauss, J." (son)
+    # But let's test a completely different name using alias!
+    _ingest(
+        session,
+        person("Beethoven, Ludwig van", SourceClaim("also_known_as", value="Louis van Beethoven")),
+        person("Beethoven, Louis van"),
+    )
+    auto, review = dedupe_persons(session)
+    assert (auto, review) == (1, 0)
+    people = _by_label(session)
+    # The fuller name "Ludwig van Beethoven" (19 chars) vs "Louis van Beethoven" (18 chars)
+    canonical = people["Beethoven, Ludwig van"]
+    dup = people["Beethoven, Louis van"]
+    assert dup.canonical_entity_id == canonical.id
