@@ -15,6 +15,7 @@ yields two kinds of record:
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
@@ -24,6 +25,20 @@ from .fetch import BASE_URL, _fetch_dump, _make_client
 log = logging.getLogger(__name__)
 
 __all__ = ["BASE_URL", "OpenOpusAdapter"]
+
+# The work dump identifies neither composers nor works by id — it keys them by
+# ``complete_name`` and ``title`` only. External ids are therefore derived
+# deterministically as a UUIDv5 seeded by the composer's name (and, for works,
+# the composer plus the work title). Re-fetching the same dump yields the same
+# ids, so loads stay idempotent, without inventing a numeric id the source
+# never gave us.
+_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://openopus.org")
+
+
+def _stable_id(*seed: str) -> str:
+    """A deterministic UUIDv5 seeded by ``seed`` (joined with a NUL separator so
+    distinct part boundaries can't collide, e.g. ("ab", "c") vs ("a", "bc"))."""
+    return str(uuid.uuid5(_NAMESPACE, "\x00".join(seed)))
 
 
 def _year(date: object) -> str | None:
@@ -50,14 +65,14 @@ class OpenOpusAdapter(SourceAdapter):
         seen = 0
         mentions = 0
         for composer in composers:
-            name = composer.get("complete_name") or composer.get("name") or ""
-            composer_id = str(composer.get("id") or "").strip()
-            if not name or not composer_id:
-                log.debug("skipping composer without name/id: %r", composer)
+            name = (composer.get("complete_name") or composer.get("name") or "").strip()
+            if not name:
+                log.debug("skipping composer without a name: %r", composer)
                 continue
             if max_pages is not None and seen >= max_pages:
                 break
             seen += 1
+            composer_id = _stable_id(name)
 
             claims = [SourceClaim("has_profession", "profession", "composer")]
             born = _year(composer.get("birth"))
@@ -73,7 +88,7 @@ class OpenOpusAdapter(SourceAdapter):
             # catalogue inside every composer's raw payload would only bloat it
             raw = {key: value for key, value in composer.items() if key != "works"}
             yield EntityDocument(
-                id=f"composer:{composer_id}",
+                id=composer_id,
                 url=BASE_URL,
                 source_name=self.name,
                 ingested_at=ingested_at,
@@ -84,14 +99,13 @@ class OpenOpusAdapter(SourceAdapter):
             )
 
             for work in composer.get("works") or ():
-                title = work.get("title") or ""
-                work_id = str(work.get("id") or "").strip()
-                if not title or not work_id:
-                    log.debug("skipping work without title/id for composer %s: %r", composer_id, work)
+                title = (work.get("title") or "").strip()
+                if not title:
+                    log.debug("skipping work without a title for composer %s: %r", name, work)
                     continue
                 mentions += 1
                 yield WorkMentionDocument(
-                    id=f"work:{work_id}",
+                    id=_stable_id(name, title),
                     url=BASE_URL,
                     source_name=self.name,
                     ingested_at=ingested_at,
