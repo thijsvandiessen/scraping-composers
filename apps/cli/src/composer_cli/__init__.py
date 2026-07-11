@@ -3,7 +3,7 @@ import logging
 import sys
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH
-from composer_gold import DEFAULT_GOLD_DB_PATH
+from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS
 from composer_scrapers import REGISTRY
 
 from .ingest_cmds import cmd_fetch, cmd_process, cmd_promote
@@ -81,6 +81,13 @@ def main() -> None:
         "promote", help="rebuild the curated gold database from the bronze (raw) database"
     )
     p_promote.add_argument("--gold-path", default=DEFAULT_GOLD_DB_PATH, help="path of the gold SQLite file")
+    p_promote.add_argument(
+        "--min-sitelinks",
+        type=int,
+        default=DEFAULT_MIN_SITELINKS,
+        help="also promote persons whose Wikipedia sitelink count is at least N, "
+        "even without concert/work evidence (default: $GOLD_MIN_SITELINKS or off)",
+    )
     p_promote.set_defaults(func=cmd_promote)
 
     p_dedupe = sub.add_parser(

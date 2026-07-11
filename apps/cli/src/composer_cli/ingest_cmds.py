@@ -30,7 +30,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
     session_factory = init_db(engine)
     with session_factory() as session:
         try:
-            stats = promote(session, args.gold_path)
+            stats = promote(session, args.gold_path, min_sitelinks=args.min_sitelinks)
         except Exception as exc:
             logging.getLogger(__name__).error("promote failed: %s: %s", type(exc).__name__, exc)
             return 1

@@ -14,4 +14,16 @@ from .promote import GoldManifest, PromoteStats, promote, read_gold_manifest
 
 DEFAULT_GOLD_DB_PATH = os.environ.get("GOLD_DB_PATH", "./gold.db")
 
-__all__ = ["DEFAULT_GOLD_DB_PATH", "GoldManifest", "PromoteStats", "promote", "read_gold_manifest"]
+# Optional sitelink-count threshold for promotion (see ``promote``). Unset leaves
+# the extra signal off, so promotion keeps its default performance/work rule.
+_min_sitelinks_env = os.environ.get("GOLD_MIN_SITELINKS")
+DEFAULT_MIN_SITELINKS: int | None = int(_min_sitelinks_env) if _min_sitelinks_env else None
+
+__all__ = [
+    "DEFAULT_GOLD_DB_PATH",
+    "DEFAULT_MIN_SITELINKS",
+    "GoldManifest",
+    "PromoteStats",
+    "promote",
+    "read_gold_manifest",
+]

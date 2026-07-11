@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,6 +42,7 @@ IN_CHUNK = 500
 class PromoteStats:
     persons_kept: int = 0
     persons_dropped: int = 0
+    persons_promoted_by_sitelinks: int = 0
     duplicates_collapsed: int = 0
     entities_kept_other: int = 0
     entities_pruned: int = 0
@@ -210,17 +211,54 @@ def _resolve_roots(bronze: Session) -> dict[uuid.UUID, uuid.UUID]:
     return roots
 
 
-def promote(bronze: Session, gold_path: str | Path) -> PromoteStats:
+def _sitelink_roots(
+    bronze: Session,
+    root: Callable[[uuid.UUID], uuid.UUID],
+    all_persons: set[uuid.UUID],
+    min_sitelinks: int | None,
+) -> set[uuid.UUID]:
+    """Person roots whose Wikipedia sitelink count reaches ``min_sitelinks``.
+
+    Sitelink counts are stored as string literals on the ``sitelink_count``
+    claim; the count is taken per dedup cluster (max across its members, so the
+    best-documented spelling wins) and non-numeric values are ignored. Returns
+    an empty set when no threshold is configured.
+    """
+    if min_sitelinks is None:
+        return set()
+    all_person_roots = {root(p) for p in all_persons}
+    max_sitelinks: dict[uuid.UUID, int] = {}
+    for subject_id, value in bronze.execute(
+        select(Claim.subject_id, Claim.value).where(Claim.predicate == "sitelink_count")
+    ).tuples():
+        if value is None:
+            continue
+        try:
+            count = int(value)
+        except ValueError:
+            continue
+        r = root(subject_id)
+        if count > max_sitelinks.get(r, -1):
+            max_sitelinks[r] = count
+    return {r for r, count in max_sitelinks.items() if r in all_person_roots and count >= min_sitelinks}
+
+
+def promote(bronze: Session, gold_path: str | Path, *, min_sitelinks: int | None = None) -> PromoteStats:
     """Rebuild the gold database at ``gold_path`` from the bronze session.
 
     Builds into ``{gold_path}.tmp`` and atomically swaps it in, so readers
     never see a half-built database. Progress and outcome land in
     ``{gold_path}.manifest.json``.
+
+    ``min_sitelinks`` is an optional extra promotion signal: when set, a person
+    whose Wikipedia sitelink count reaches it is kept even without the
+    performance/work evidence rule 1 otherwise requires (see ``_build``). ``None``
+    leaves promotion unchanged.
     """
     manifest = GoldManifest.start()
     write_gold_manifest(gold_path, manifest)
     try:
-        stats = _build(bronze, Path(f"{gold_path}.tmp"))
+        stats = _build(bronze, Path(f"{gold_path}.tmp"), min_sitelinks=min_sitelinks)
         os.replace(f"{gold_path}.tmp", gold_path)
     except Exception as exc:
         write_gold_manifest(gold_path, manifest.failed(f"{type(exc).__name__}: {exc}"))
@@ -230,7 +268,7 @@ def promote(bronze: Session, gold_path: str | Path) -> PromoteStats:
     return stats
 
 
-def _build(bronze: Session, tmp_path: Path) -> PromoteStats:
+def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None) -> PromoteStats:
     tmp_path.unlink(missing_ok=True)
     gold_engine = create_engine(f"sqlite:///{tmp_path}")
     Base.metadata.create_all(gold_engine)
@@ -260,7 +298,15 @@ def _build(bronze: Session, tmp_path: Path) -> PromoteStats:
     evidence = mention_composers | archive_reported
 
     all_persons = set(bronze.scalars(select(Entity.id).where(Entity.kind == "person")))
-    kept_roots = {root(p) for p in all_persons if p in evidence}
+    evidence_roots = {root(p) for p in all_persons if p in evidence}
+
+    # --- extra signal: culturally significant persons by sitelink count -----
+    # Wikipedia sitelink count (from Wikidata) is a proxy for significance. When
+    # a threshold is set, a person clearing it is promoted even without the
+    # performance/work evidence above; this only ever adds persons, never drops.
+    sitelink_roots = _sitelink_roots(bronze, root, all_persons, min_sitelinks)
+
+    kept_roots = evidence_roots | sitelink_roots
     kept_members = {p for p in all_persons if root(p) in kept_roots}
 
     with gold_engine.begin() as gold:
@@ -570,6 +616,7 @@ def _build(bronze: Session, tmp_path: Path) -> PromoteStats:
     return PromoteStats(
         persons_kept=len(kept_roots),
         persons_dropped=len(all_persons) - len(kept_members),
+        persons_promoted_by_sitelinks=len(sitelink_roots - evidence_roots),
         duplicates_collapsed=len(kept_members) - len(kept_roots),
         entities_kept_other=len(kept_other),
         entities_pruned=len(all_other - kept_other),

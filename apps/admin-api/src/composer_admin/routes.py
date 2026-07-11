@@ -5,7 +5,7 @@ from typing import Annotated
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH, LOADABLE_STATUSES, LocalBucket, Snapshot
 from composer_bronze.scraper import Scraper, iter_from_bucket, new_snapshot_id
-from composer_gold import DEFAULT_GOLD_DB_PATH, promote, read_gold_manifest
+from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS, promote, read_gold_manifest
 from composer_scrapers import REGISTRY, SourceAdapter, is_due
 from composer_warehouse.ingestion import create_run, execute_run
 from composer_warehouse.models import IngestRun, utcnow
@@ -169,7 +169,7 @@ def _promote_in_background() -> None:
     """Rebuild the gold database; status lives in the gold manifest."""
     with session_scope() as session:
         try:
-            promote(session, DEFAULT_GOLD_DB_PATH)
+            promote(session, DEFAULT_GOLD_DB_PATH, min_sitelinks=DEFAULT_MIN_SITELINKS)
         except Exception:
             # Recorded as a failed manifest by promote; log for the server console.
             log.exception("background promote failed")

@@ -229,6 +229,73 @@ def test_concert_tables_stay_empty_in_bronze(session: Session, tmp_path: Path) -
     assert session.scalar(select(ConcertWork.id)) is None
 
 
+def _seed_sitelink_bronze(session: Session) -> None:
+    """Bronze with a performed composer and an encyclopedia-only, but famous, one.
+
+    - Beethoven: composer of a work mention (kept by rule 1, no sitelink needed)
+    - Famous, Unperformed: only in the encyclopedia, no concerts/works, but with
+      a Wikidata sitelink count of 200 (kept only when the threshold allows)
+    """
+    archive = FakeSource(
+        records=(mention("Symphony No. 5, Op. 67", "Beethoven, Ludwig van", "m1"),),
+        name="archive",
+        base_url="https://archive.example",
+    )
+    encyclopedia = FakeSource(
+        records=(
+            person(
+                "Famous, Unperformed",
+                SourceClaim("sitelink_count", value="200"),
+                external_id="e:famous",
+            ),
+        ),
+        name="encyclopedia",
+        base_url="https://encyclopedia.example",
+    )
+    ingest_source(session, archive)
+    ingest_source(session, encyclopedia)
+
+
+def test_sitelink_threshold_off_by_default(session: Session, tmp_path: Path) -> None:
+    _seed_sitelink_bronze(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path)  # no threshold: promotion unchanged
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Beethoven, Ludwig van" in labels  # kept by work evidence
+        assert "Famous, Unperformed" not in labels  # no evidence, threshold off
+    assert stats.persons_promoted_by_sitelinks == 0
+
+
+def test_sitelink_threshold_promotes_significant_person(session: Session, tmp_path: Path) -> None:
+    _seed_sitelink_bronze(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path, min_sitelinks=100)  # 200 >= 100
+
+    with _gold_session(gold_path) as gold:
+        famous = gold.scalars(select(Entity).where(Entity.label == "Famous, Unperformed")).one()
+        # the sitelink_count claim rides along with the promoted person
+        sitelink = gold.scalars(
+            select(Claim).where(Claim.subject_id == famous.id, Claim.predicate == "sitelink_count")
+        ).one()
+        assert sitelink.value == "200"
+    assert stats.persons_promoted_by_sitelinks == 1
+    assert stats.persons_kept == 2  # Beethoven (evidence) + Famous (sitelinks)
+
+
+def test_sitelink_threshold_below_count_drops_person(session: Session, tmp_path: Path) -> None:
+    _seed_sitelink_bronze(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path, min_sitelinks=300)  # 200 < 300
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Famous, Unperformed" not in labels  # numeric compare, not mere presence
+        assert "Beethoven, Ludwig van" in labels  # evidence still wins independently
+    assert stats.persons_promoted_by_sitelinks == 0
+
+
 def test_promote_writes_manifest_and_is_rerunnable(session: Session, tmp_path: Path) -> None:
     _seed_bronze(session)
     gold_path = tmp_path / "gold.db"
