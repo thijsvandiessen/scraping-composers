@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from collections.abc import Callable
 from typing import TypeVar
@@ -25,7 +24,8 @@ def contact_email() -> str:
     Read at call time, not import time, so the environment can be set after
     the module is imported.
     """
-    email = os.environ.get("SCRAPER_CONTACT_EMAIL")
+    from composer_config import settings
+    email = settings.scraper_contact_email
     if not email:
         raise RuntimeError(
             "SCRAPER_CONTACT_EMAIL is not set; scrapers must advertise a reachable contact email"

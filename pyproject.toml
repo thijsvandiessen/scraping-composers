@@ -10,6 +10,7 @@ composer-bronze = { workspace = true }
 composer-scrapers = { workspace = true }
 composer-warehouse = { workspace = true }
 composer-gold = { workspace = true }
+composer-config = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -42,6 +43,7 @@ extraPaths = [
     "packages/composer-warehouse/tests",
     "packages/composer-gold/src",
     "packages/composer-gold/tests",
+    "packages/composer-config/src",
     "apps/consumer-api/src",
     "apps/consumer-api/tests",
     "apps/admin-api/src",

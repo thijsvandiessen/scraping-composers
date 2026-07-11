@@ -9,6 +9,7 @@ dependencies = [
     "composer-warehouse",
     "composer-gold",
     "python-dotenv>=1.2.2",
+    "composer-config",
 ]
 
 [project.scripts]
@@ -23,3 +24,6 @@ packages = ["src/composer_cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+composer-config = { workspace = true }

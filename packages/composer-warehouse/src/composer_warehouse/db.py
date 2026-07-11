@@ -4,18 +4,17 @@
 
 from __future__ import annotations
 
-import os
+
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base
 
-DEFAULT_URL = "sqlite:///composers.db"
-
+from composer_config import settings
 
 def get_engine(url: str | None = None) -> Engine:
-    return create_engine(url or os.environ.get("DATABASE_URL", DEFAULT_URL))
+    return create_engine(url or settings.database_url)
 
 
 def init_db(engine: Engine) -> sessionmaker[Session]:

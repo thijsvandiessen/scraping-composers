@@ -9,6 +9,7 @@ dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
     "python-dotenv>=1.2.2",
+    "composer-config",
 ]
 
 [build-system]
@@ -20,3 +21,6 @@ packages = ["src/composer_api"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+composer-config = { workspace = true }
