@@ -7,7 +7,7 @@ import httpx
 import pytest
 from composer_schema import SourceClaim
 from composer_scrapers.wikidata.parse import _format_time, _records_from_rows
-from composer_scrapers.wikidata.query import _fetch_metrics, _fetch_page, _run_query
+from composer_scrapers.wikidata.query import QUERY, _fetch_metrics, _fetch_page, _run_query
 
 
 def row(qid: str, label: str | None = None, **vars: str) -> dict[str, Any]:
@@ -199,6 +199,25 @@ def test_fetch_metrics_keys_rows_by_qid() -> None:
 
     assert metrics["Q255"] == {"sitelinks": "273", "statements": "547", "identifiers": "370", "works": "342"}
     assert metrics["Q7"]["works"] == "0"
+
+
+def test_query_requests_the_musicbrainz_artist_id() -> None:
+    assert "wdt:P434 ?musicbrainz" in QUERY
+    assert "?musicbrainz\n" in QUERY  # projected in the SELECT clause
+
+
+def test_musicbrainz_id_becomes_a_literal_claim() -> None:
+    (record,) = _records_from_rows(
+        [row("Q255", "Ludwig van Beethoven", musicbrainz="1f9df192-a621-4f54-8850-2c5373b7eac9")]
+    )
+    assert SourceClaim("musicbrainz_id", value="1f9df192-a621-4f54-8850-2c5373b7eac9") in record.claims
+    assert record.raw["musicbrainz"] == ["1f9df192-a621-4f54-8850-2c5373b7eac9"]
+
+
+def test_aliases_are_stored_verbatim_not_date_truncated() -> None:
+    # aliases must not run through the time formatter, which splits on "T"
+    (record,) = _records_from_rows([row("Q13", "Pyotr Ilyich Tchaikovsky", alias="Peter Tschaikowsky")])
+    assert SourceClaim("also_known_as", value="Peter Tschaikowsky") in record.claims
 
 
 def test_movement_becomes_an_in_movement_claim() -> None:
