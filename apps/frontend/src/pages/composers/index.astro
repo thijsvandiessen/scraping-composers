@@ -4,7 +4,9 @@ import { listComposers, type ComposerSort } from "../../lib/api";
 import type { ComposerPage } from "../../lib/schemas";
 
 const q = Astro.url.searchParams.get("q")?.trim() ?? "";
-const sort: ComposerSort = Astro.url.searchParams.get("sort") === "concerts" ? "concerts" : "label";
+const sortParam = Astro.url.searchParams.get("sort");
+const sort: ComposerSort =
+  sortParam === "concerts" || sortParam === "sitelinks" ? sortParam : "label";
 const rawPage = Number(Astro.url.searchParams.get("page") ?? "1");
 const page = Number.isInteger(rawPage) && rawPage >= 1 ? rawPage : 1;
 
@@ -36,6 +38,7 @@ function pageUrl(target: number): string {
     <select name="sort" aria-label="Sort order">
       <option value="label" selected={sort === "label"}>By name</option>
       <option value="concerts" selected={sort === "concerts"}>By concerts</option>
+      <option value="sitelinks" selected={sort === "sitelinks"}>By significance</option>
     </select>
     <button type="submit">Search</button>
   </form>
@@ -56,9 +59,13 @@ function pageUrl(target: number): string {
           <li>
             <a href={`/composers/${composer.id}`}>{composer.label}</a>
             <span class="concert-count">
-              {composer.concert_count > 0
-                ? `${composer.concert_count} concert${composer.concert_count === 1 ? "" : "s"}`
-                : ""}
+              {sort === "sitelinks"
+                ? composer.sitelink_count != null
+                  ? `${composer.sitelink_count} Wikipedia${composer.sitelink_count === 1 ? " edition" : " editions"}`
+                  : ""
+                : composer.concert_count > 0
+                  ? `${composer.concert_count} concert${composer.concert_count === 1 ? "" : "s"}`
+                  : ""}
             </span>
           </li>
         ))}

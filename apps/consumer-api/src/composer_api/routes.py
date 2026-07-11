@@ -111,7 +111,7 @@ def list_composers(
     q: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
+    sort: Annotated[str, Query(pattern="^(label|concerts|sitelinks)$")] = "label",
 ) -> ComposerPage:
     return list_people(db, q, page, limit, profession="composer", sort=sort)
 
@@ -127,7 +127,7 @@ def list_soloists(
     q: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
+    sort: Annotated[str, Query(pattern="^(label|concerts|sitelinks)$")] = "label",
 ) -> ComposerPage:
     return list_people(db, q, page, limit, profession="soloist", sort=sort)
 
@@ -143,7 +143,7 @@ def list_conductors(
     q: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
+    sort: Annotated[str, Query(pattern="^(label|concerts|sitelinks)$")] = "label",
 ) -> ComposerPage:
     return list_people(db, q, page, limit, profession="conductor", sort=sort)
 

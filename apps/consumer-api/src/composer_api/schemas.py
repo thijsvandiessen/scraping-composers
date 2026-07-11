@@ -9,6 +9,10 @@ class ComposerSummary(BaseModel):
     label: str
     created_at: datetime
     concert_count: int = 0  # concerts participated in (populated in gold)
+    # Wikipedia language editions with an article on the person (from the
+    # Wikidata sitelink_count claim); None when the person has no such claim,
+    # which is different from a claimed count of 0.
+    sitelink_count: int | None = None
 
     model_config = {"from_attributes": True}
 

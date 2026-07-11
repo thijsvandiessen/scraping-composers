@@ -61,11 +61,18 @@ def _seeded_factory() -> sessionmaker[Session]:
                 SourceClaim("performs_as", value="violin"),
             ),
             _person("Smith, John", SourceClaim("has_profession", "profession", "conductor")),
-            _person("Bach, Johann", SourceClaim("has_profession", "profession", "composer")),
+            # sitelink counts where numeric and lexicographic order disagree
+            # ("9" > "150" as strings), so a text sort would invert them
+            _person(
+                "Bach, Johann",
+                SourceClaim("has_profession", "profession", "composer"),
+                SourceClaim("sitelink_count", value="9"),
+            ),
             # Wikidata-style record: the source's own id plus the exact page URL
             _person(
                 "Beethoven, Ludwig van",
                 SourceClaim("has_profession", "profession", "composer"),
+                SourceClaim("sitelink_count", value="150"),
                 external_id="Q255",
                 url="https://fake.example/wiki/Q255",
             ),
@@ -253,6 +260,37 @@ def test_list_composers_pagination(client: TestClient) -> None:
     assert data["total"] == 2
     assert data["limit"] == 1
     assert len(data["items"]) == 1
+
+
+def test_list_composers_sortable_by_sitelinks(client: TestClient) -> None:
+    """sort=sitelinks ranks by cultural footprint: the numeric sitelink count,
+    highest first. 150 before 9 proves the sort casts, since "9" > "150" as text."""
+    r = client.get("/v1/composers?sort=sitelinks")
+    assert r.status_code == 200
+    assert [(i["label"], i["sitelink_count"]) for i in r.json()["items"]] == [
+        ("Beethoven, Ludwig van", 150),
+        ("Bach, Johann", 9),
+    ]
+
+
+def test_list_composers_default_sort_still_carries_sitelinks(client: TestClient) -> None:
+    data = client.get("/v1/composers").json()
+    assert [(i["label"], i["sitelink_count"]) for i in data["items"]] == [
+        ("Bach, Johann", 9),
+        ("Beethoven, Ludwig van", 150),
+    ]
+
+
+def test_sitelink_count_null_without_wikidata_claim(client: TestClient) -> None:
+    """People with no sitelink_count claim report None (unknown), not 0."""
+    data = client.get("/v1/soloists?sort=sitelinks").json()
+    assert all(i["sitelink_count"] is None for i in data["items"])
+    # nulls sort last and ties fall back to the label ordering
+    assert [i["label"] for i in data["items"]] == ["Doe, Jane", "Multi, Person"]
+
+
+def test_list_composers_rejects_unknown_sort(client: TestClient) -> None:
+    assert client.get("/v1/composers?sort=nope").status_code == 422
 
 
 def test_list_composers_invalid_page_returns_422(client: TestClient) -> None:
@@ -635,6 +673,11 @@ def test_gold_claim_source_url_survives_promotion(gold_client: TestClient) -> No
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
     assert profession["source_url"] == "https://fake.example/wiki/Q255"
     assert profession["source_external_id"] == "Q255"
+
+
+def test_gold_sitelink_count_survives_promotion(gold_client: TestClient) -> None:
+    data = gold_client.get("/v1/composers?sort=sitelinks").json()
+    assert [(i["label"], i["sitelink_count"]) for i in data["items"]] == [("Beethoven, Ludwig van", 150)]
 
 
 def test_gold_keeps_works_with_mention_counts(gold_client: TestClient) -> None:

@@ -14,7 +14,7 @@ from composer_warehouse.models import (
     WorkTitle,
 )
 from composer_warehouse.normalize import dedup_key
-from sqlalchemy import ColumnElement, Select, UnaryExpression, func, or_, select
+from sqlalchemy import ColumnElement, Integer, Select, UnaryExpression, cast, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
 from .errors import NotFoundError
@@ -88,11 +88,28 @@ def list_people(
         .group_by(ConcertParticipant.entity_id)
         .subquery()
     )
-    query = base.add_columns(concert_counts.c.concert_count).outerjoin(
-        concert_counts, concert_counts.c.entity_id == Entity.id
+    # Wikipedia sitelink count (how many language editions have an article on
+    # the person — the cultural-footprint metric from Wikidata). Claim values
+    # are strings, so cast before aggregating: "9" would otherwise sort above
+    # "150". Max across sources/merged duplicates.
+    sitelink_counts = (
+        select(
+            Claim.subject_id.label("entity_id"),
+            func.max(cast(Claim.value, Integer)).label("sitelink_count"),
+        )
+        .where(Claim.predicate == "sitelink_count")
+        .group_by(Claim.subject_id)
+        .subquery()
+    )
+    query = (
+        base.add_columns(concert_counts.c.concert_count, sitelink_counts.c.sitelink_count)
+        .outerjoin(concert_counts, concert_counts.c.entity_id == Entity.id)
+        .outerjoin(sitelink_counts, sitelink_counts.c.entity_id == Entity.id)
     )
     if sort == "concerts":
         query = query.order_by(concert_counts.c.concert_count.desc().nulls_last(), Entity.label)
+    elif sort == "sitelinks":
+        query = query.order_by(sitelink_counts.c.sitelink_count.desc().nulls_last(), Entity.label)
     else:
         query = query.order_by(Entity.label)
     rows = db.execute(query.offset((page - 1) * limit).limit(limit)).all()
@@ -100,9 +117,13 @@ def list_people(
     return ComposerPage(
         items=[
             ComposerSummary(
-                id=entity.id, label=entity.label, created_at=entity.created_at, concert_count=count or 0
+                id=entity.id,
+                label=entity.label,
+                created_at=entity.created_at,
+                concert_count=count or 0,
+                sitelink_count=sitelinks,
             )
-            for entity, count in rows
+            for entity, count, sitelinks in rows
         ],
         total=total or 0,
         page=page,
