@@ -19,17 +19,25 @@ BASE_URL = "https://www.wikidata.org"
 
 log = logging.getLogger(__name__)
 
+# Marker kind for Wikidata time literals, which get truncated to their
+# recorded precision (see _format_time). Not an entity kind.
+_DATE = "date"
+
 # SPARQL result variable -> (claim predicate, object entity kind).
-# kind None means the claim object is a literal (a date string).
+# kind _DATE means the value is a time literal; kind None means the value is a
+# plain string literal stored verbatim.
 FIELDS: tuple[tuple[str, str, str | None], ...] = (
-    ("birth", "born_on", None),
-    ("death", "died_on", None),
+    ("birth", "born_on", _DATE),
+    ("death", "died_on", _DATE),
     ("birthPlaceLabel", "born_in", "place"),
     ("deathPlaceLabel", "died_in", "place"),
     ("countryLabel", "citizen_of", "place"),
     ("genreLabel", "has_genre", "genre"),
     ("movementLabel", "in_movement", "movement"),
     ("alias", "also_known_as", None),
+    # P434 MusicBrainz artist id: carried as a claim so a MusicBrainz source
+    # can be linked by identifier instead of fuzzy name matching.
+    ("musicbrainz", "musicbrainz_id", None),
 )
 
 # METRICS_QUERY result variable -> claim predicate (all literal-valued).
@@ -101,9 +109,9 @@ def _records_from_rows(
             value = _literal(row, var)
             if value is None:
                 continue
-            if kind is None:
+            if kind == _DATE:
                 value = _format_time(value, _literal(row, f"{var}Precision"))
-            elif _BARE_QID.match(value):
+            elif kind is not None and _BARE_QID.match(value):
                 continue  # claim object has no English label
             item["values"].setdefault(var, set()).add(value)
 
@@ -117,7 +125,7 @@ def _records_from_rows(
         claims = [SourceClaim("has_profession", "profession", "composer")]
         for var, predicate, kind in FIELDS:
             for value in sorted(item["values"].get(var, ())):
-                if kind is None:
+                if kind is None or kind == _DATE:
                     claims.append(SourceClaim(predicate, value=value))
                 else:
                     claims.append(SourceClaim(predicate, kind, value))
