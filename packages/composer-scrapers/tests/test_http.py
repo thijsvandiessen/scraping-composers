@@ -117,6 +117,7 @@ def test_retry_on_extends_the_retryable_exceptions(monkeypatch: pytest.MonkeyPat
 
 def test_contact_email_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     from composer_config import settings
+
     monkeypatch.setattr(settings, "scraper_contact_email", "someone@example.org")
     assert contact_email() == "someone@example.org"
     assert "someone@example.org" in user_agent()
@@ -125,6 +126,7 @@ def test_contact_email_reads_the_environment(monkeypatch: pytest.MonkeyPatch) ->
 
 def test_contact_email_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
     from composer_config import settings
+
     monkeypatch.setattr(settings, "scraper_contact_email", None)
     with pytest.raises(RuntimeError, match="SCRAPER_CONTACT_EMAIL"):
         contact_email()
@@ -132,6 +134,7 @@ def test_contact_email_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_empty_contact_email_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     from composer_config import settings
+
     monkeypatch.setattr(settings, "scraper_contact_email", "")
     with pytest.raises(RuntimeError, match="SCRAPER_CONTACT_EMAIL"):
         user_agent()

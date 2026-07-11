@@ -44,6 +44,7 @@ def require_admin_key(x_admin_key: Annotated[str | None, Header()] = None) -> No
     than wide open. Local development sets the key explicitly (see README).
     """
     from composer_config import settings
+
     expected = settings.admin_api_key
     if not expected:
         raise HTTPException(

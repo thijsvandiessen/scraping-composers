@@ -7,9 +7,10 @@ class Settings(BaseSettings):
     gold_min_sitelinks: int | None = None
     bucket_path: str = "./raw-data"
     scraper_contact_email: str | None = None
-    
+
     admin_api_key: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
 
 settings = Settings()

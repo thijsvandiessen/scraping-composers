@@ -25,6 +25,7 @@ def contact_email() -> str:
     the module is imported.
     """
     from composer_config import settings
+
     email = settings.scraper_contact_email
     if not email:
         raise RuntimeError(

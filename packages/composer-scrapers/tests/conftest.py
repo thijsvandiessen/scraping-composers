@@ -9,4 +9,5 @@ import pytest
 def scraper_contact_email(monkeypatch: pytest.MonkeyPatch) -> None:
     """Scrapers refuse to build a User-Agent without SCRAPER_CONTACT_EMAIL; give tests one."""
     from composer_config import settings
+
     monkeypatch.setattr(settings, "scraper_contact_email", "test-contact@example.com")

@@ -89,6 +89,7 @@ def client(monkeypatch: pytest.MonkeyPatch, factory, bucket_path: Path) -> Itera
     monkeypatch.setattr(admin_routes, "REGISTRY", registry)
     monkeypatch.setattr(admin_routes, "DEFAULT_BUCKET_PATH", str(bucket_path))
     from composer_config import settings
+
     monkeypatch.setattr(settings, "admin_api_key", "test-key")
     yield TestClient(admin_app, headers={"X-Admin-Key": "test-key"})
 
@@ -250,6 +251,7 @@ def test_admin_key_guard(client: TestClient) -> None:
 
 def test_admin_key_unset_fails_closed(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
     from composer_config import settings
+
     monkeypatch.setattr(settings, "admin_api_key", None)
     r = client.get("/admin/v1/scrapers")
     assert r.status_code == 503

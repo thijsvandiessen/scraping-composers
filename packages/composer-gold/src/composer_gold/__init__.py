@@ -8,8 +8,6 @@ database from it, applying the curation rules research consumers want:
 3. prune entities left unreferenced by the above.
 """
 
-
-
 from composer_config import settings
 
 from .promote import GoldManifest, PromoteStats, promote, read_gold_manifest
