@@ -70,6 +70,7 @@ from .classicalcomposersposter import ClassicalComposersPosterAdapter  # noqa: E
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
 from .imslp import ImslpAdapter  # noqa: E402
 from .nyphil import NyPhilAdapter  # noqa: E402
+from .openopus import OpenOpusAdapter  # noqa: E402
 from .rco import RcoAdapter  # noqa: E402
 from .wikidata import WikidataAdapter  # noqa: E402
 
@@ -81,4 +82,5 @@ REGISTRY: dict[str, SourceAdapter] = {
     "berlinphil": BerlinPhilAdapter(),
     "classicalcomposersposter": ClassicalComposersPosterAdapter(),
     "rco": RcoAdapter(),
+    "openopus": OpenOpusAdapter(),
 }

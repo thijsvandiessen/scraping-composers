@@ -1,6 +1,6 @@
 # composer-ingest
 
-Ingests classical composer data from IMSLP, Wikidata, Concertgebouw,
+Ingests classical composer data from IMSLP, Wikidata, Open Opus, Concertgebouw,
 NY Phil, and Berlin Phil into a database, with full provenance: every record
 knows which source it came from, when it was first and last seen, and which
 ingest run produced it.
@@ -266,8 +266,8 @@ provenance layer. This repo is the raw staging layer: it records what sources
 say, verbatim; curation and conflict resolution happen downstream when data
 moves into the golden research index.
 
-- **`sources`** — where data comes from (`imslp`, `wikidata`, `concertgebouw`,
-  `nyphil`, `berlinphil`).
+- **`sources`** — where data comes from (`imslp`, `wikidata`, `openopus`,
+  `concertgebouw`, `nyphil`, `berlinphil`, ...).
 - **`ingest_runs`** — the collection log: one row per ingest, with source,
   timestamps, status, and seen/new counts.
 - **`entity_records`** — raw records per source, unique on
