@@ -4,14 +4,12 @@
 
 from __future__ import annotations
 
-
-
+from composer_config import settings
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base
 
-from composer_config import settings
 
 def get_engine(url: str | None = None) -> Engine:
     return create_engine(url or settings.database_url)

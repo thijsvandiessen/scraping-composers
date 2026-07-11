@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from composer_config import settings
+
 DEFAULT_BUCKET_PATH = settings.bucket_path
 
 MANIFEST_FILENAME = "manifest.json"

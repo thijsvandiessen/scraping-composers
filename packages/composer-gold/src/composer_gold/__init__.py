@@ -11,6 +11,7 @@ database from it, applying the curation rules research consumers want:
 
 
 from composer_config import settings
+
 from .promote import GoldManifest, PromoteStats, promote, read_gold_manifest
 
 DEFAULT_GOLD_DB_PATH = settings.gold_db_path

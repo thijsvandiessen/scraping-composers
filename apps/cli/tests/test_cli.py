@@ -516,6 +516,7 @@ def test_main_routes_to_runs_subcommand(
 
 def test_get_engine_reads_database_url_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_url = f"sqlite:///{tmp_path}/env.db"
-    monkeypatch.setenv("DATABASE_URL", db_url)
+    from composer_config import settings
+    monkeypatch.setattr(settings, "database_url", db_url)
     engine = get_engine()  # no explicit URL — falls back to env var
     assert str(engine.url) == db_url

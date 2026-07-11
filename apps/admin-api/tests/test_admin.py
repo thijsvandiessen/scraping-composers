@@ -88,7 +88,8 @@ def client(monkeypatch: pytest.MonkeyPatch, factory, bucket_path: Path) -> Itera
     registry = {"fake": _FakeSource(), "archive": _ArchiveSource(), "exploding": _ExplodingSource()}
     monkeypatch.setattr(admin_routes, "REGISTRY", registry)
     monkeypatch.setattr(admin_routes, "DEFAULT_BUCKET_PATH", str(bucket_path))
-    monkeypatch.setenv("ADMIN_API_KEY", "test-key")
+    from composer_config import settings
+    monkeypatch.setattr(settings, "admin_api_key", "test-key")
     yield TestClient(admin_app, headers={"X-Admin-Key": "test-key"})
 
 
@@ -248,7 +249,8 @@ def test_admin_key_guard(client: TestClient) -> None:
 
 
 def test_admin_key_unset_fails_closed(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
-    monkeypatch.delenv("ADMIN_API_KEY", raising=False)
+    from composer_config import settings
+    monkeypatch.setattr(settings, "admin_api_key", None)
     r = client.get("/admin/v1/scrapers")
     assert r.status_code == 503
     assert "ADMIN_API_KEY" in r.json()["detail"]
