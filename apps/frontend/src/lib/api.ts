@@ -9,7 +9,7 @@ import {
 
 export const PAGE_SIZE = 25;
 
-export type ComposerSort = "label" | "concerts" | "sitelinks";
+export type ComposerSort = "label" | "concerts";
 
 export class ApiError extends Error {
   constructor(

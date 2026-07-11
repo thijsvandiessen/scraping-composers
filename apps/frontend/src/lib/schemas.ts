@@ -10,10 +10,6 @@ export const ComposerSummarySchema = z.looseObject({
   label: z.string(),
   created_at: z.string(),
   concert_count: z.number().int(),
-  // Wikipedia language editions with an article on the composer (Wikidata
-  // sitelinks) — the cultural-footprint metric. Null when the composer has no
-  // Wikidata record; optional to tolerate consumer APIs predating the field.
-  sitelink_count: z.number().int().nullable().optional(),
 });
 
 export const ComposerPageSchema = z.looseObject({
