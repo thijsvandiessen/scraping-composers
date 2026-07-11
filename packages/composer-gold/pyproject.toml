@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Gold tier: promote the warehouse staging DB into a curated, deduplicated copy"
 requires-python = ">=3.11"
 dependencies = [
+    "composer-config",
     "composer-warehouse",
     "sqlalchemy>=2.0",
 ]
@@ -17,3 +18,6 @@ packages = ["src/composer_gold"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+composer-config = { workspace = true }

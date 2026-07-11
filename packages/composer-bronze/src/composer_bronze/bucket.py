@@ -23,7 +23,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-DEFAULT_BUCKET_PATH = os.environ.get("BUCKET_PATH", "./raw-data")
+from composer_config import settings
+
+DEFAULT_BUCKET_PATH = settings.bucket_path
 
 MANIFEST_FILENAME = "manifest.json"
 
