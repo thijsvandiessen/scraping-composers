@@ -8,15 +8,16 @@ from typing import Any
 import httpx
 import pytest
 from composer_scrapers import EntityDocument, RefreshCadence, WorkMentionDocument
-from composer_scrapers.openopus import OpenOpusAdapter, _year
+from composer_scrapers.openopus import OpenOpusAdapter, _stable_id, _year
 from composer_scrapers.openopus.fetch import _fetch_dump, _make_client
 
-# A dump excerpt: one dead composer with two works, one living composer
-# (death: null) whose work carries a subtitle.
+# A dump excerpt mirroring the real /work/dump.json shape: composers keyed by
+# ``complete_name`` and works by ``title`` only — neither carries an id. One
+# dead composer with two works, one living composer (death: null) whose work
+# carries a subtitle.
 _DUMP: dict[str, Any] = {
     "composers": [
         {
-            "id": "87",
             "name": "Bach",
             "complete_name": "Johann Sebastian Bach",
             "birth": "1685-01-01",
@@ -25,7 +26,6 @@ _DUMP: dict[str, Any] = {
             "portrait": "https://assets.openopus.org/portraits/12091447-1568084857.jpg",
             "works": [
                 {
-                    "id": "20090",
                     "title": "Brandenburg Concerto No. 1 in F major, BWV 1046",
                     "subtitle": "",
                     "searchterms": "brandenburg",
@@ -34,7 +34,6 @@ _DUMP: dict[str, Any] = {
                     "genre": "Orchestral",
                 },
                 {
-                    "id": "20232",
                     "title": "Mass in B minor, BWV 232",
                     "subtitle": "",
                     "searchterms": "",
@@ -45,7 +44,6 @@ _DUMP: dict[str, Any] = {
             ],
         },
         {
-            "id": 129,
             "name": "Adams",
             "complete_name": "John Adams",
             "birth": "1947-01-01",
@@ -54,7 +52,6 @@ _DUMP: dict[str, Any] = {
             "portrait": None,
             "works": [
                 {
-                    "id": 18443,
                     "title": "Shaker Loops",
                     "subtitle": "for string septet",
                     "searchterms": "",
@@ -159,9 +156,18 @@ def test_fetch_yields_person_records(monkeypatch: pytest.MonkeyPatch) -> None:
     people = [d for d in _fetch_all(monkeypatch, _DUMP) if isinstance(d, EntityDocument)]
     assert [p.name for p in people] == ["Johann Sebastian Bach", "John Adams"]
     bach = people[0]
-    assert bach.id == "composer:87"
+    # the dump has no id, so the external id is a deterministic UUID seeded by name
+    assert bach.id == _stable_id("Johann Sebastian Bach")
     assert bach.kind == "person"
     assert bach.source_name == "openopus"
+
+
+def test_ids_are_deterministic_across_fetches(monkeypatch: pytest.MonkeyPatch) -> None:
+    first = [d.id for d in _fetch_all(monkeypatch, _DUMP)]
+    second = [d.id for d in _fetch_all(monkeypatch, _DUMP)]
+    assert first == second
+    # composer and work ids don't collide despite sharing the seed namespace
+    assert len(set(first)) == len(first)
 
 
 def test_fetch_attaches_composer_claims(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -189,12 +195,12 @@ def test_fetch_strips_works_from_composer_raw(monkeypatch: pytest.MonkeyPatch) -
     assert bach.raw["portrait"] == "https://assets.openopus.org/portraits/12091447-1568084857.jpg"
 
 
-def test_fetch_skips_composers_without_name_or_id(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_skips_composers_without_a_name(monkeypatch: pytest.MonkeyPatch) -> None:
     dump = {
         "composers": [
-            {"id": "1", "complete_name": "", "name": "", "works": []},
-            {"complete_name": "No Id", "works": []},
-            {"id": "2", "complete_name": "Kept Composer", "works": []},
+            {"complete_name": "", "name": "", "works": []},
+            {"complete_name": "   ", "works": []},
+            {"complete_name": "Kept Composer", "works": []},
         ]
     }
     docs = _fetch_all(monkeypatch, dump)
@@ -202,7 +208,7 @@ def test_fetch_skips_composers_without_name_or_id(monkeypatch: pytest.MonkeyPatc
 
 
 def test_fetch_falls_back_to_short_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    dump = {"composers": [{"id": "3", "name": "Anonymous", "works": []}]}
+    dump = {"composers": [{"name": "Anonymous", "works": []}]}
     (doc,) = _fetch_all(monkeypatch, dump)
     assert isinstance(doc, EntityDocument)
     assert doc.name == "Anonymous"
@@ -225,7 +231,7 @@ def test_fetch_yields_work_mentions(monkeypatch: pytest.MonkeyPatch) -> None:
     mentions = [d for d in _fetch_all(monkeypatch, _DUMP) if isinstance(d, WorkMentionDocument)]
     assert len(mentions) == 3
     first = mentions[0]
-    assert first.id == "work:20090"
+    assert first.id == _stable_id("Johann Sebastian Bach", "Brandenburg Concerto No. 1 in F major, BWV 1046")
     assert first.title == "Brandenburg Concerto No. 1 in F major, BWV 1046"
     assert first.composer == "Johann Sebastian Bach"
     assert first.source_name == "openopus"
@@ -236,20 +242,20 @@ def test_work_mention_raw_keeps_catalogue_context(monkeypatch: pytest.MonkeyPatc
     assert shaker.raw["subtitle"] == "for string septet"
     assert shaker.raw["genre"] == "Chamber"
     assert shaker.raw["recommended"] == "1"
-    assert shaker.raw["composer_id"] == "129"
+    assert shaker.raw["composer_id"] == _stable_id("John Adams")
     assert shaker.raw["epoch"] == "Post-War"
 
 
-def test_fetch_skips_works_without_title_or_id(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_skips_works_without_a_title(monkeypatch: pytest.MonkeyPatch) -> None:
     dump = {
         "composers": [
             {
-                "id": "4",
                 "complete_name": "Test Composer",
                 "works": [
-                    {"id": "10", "title": ""},
-                    {"title": "No Id Work"},
-                    {"id": "11", "title": "Kept Work"},
+                    {"title": ""},
+                    {"title": "   "},
+                    {"genre": "Orchestral"},
+                    {"title": "Kept Work"},
                 ],
             }
         ]
@@ -259,7 +265,7 @@ def test_fetch_skips_works_without_title_or_id(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_fetch_handles_missing_works_list(monkeypatch: pytest.MonkeyPatch) -> None:
-    dump = {"composers": [{"id": "5", "complete_name": "Workless Composer"}]}
+    dump = {"composers": [{"complete_name": "Workless Composer"}]}
     docs = _fetch_all(monkeypatch, dump)
     assert len(docs) == 1
     assert isinstance(docs[0], EntityDocument)

@@ -8,7 +8,10 @@
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
-    "start": "node ./dist/server/entry.mjs"
+    "start": "node ./dist/server/entry.mjs",
+    "gen:openapi": "uv run --project ../.. python scripts/dump_openapi.py > openapi.json",
+    "gen:api": "openapi-ts",
+    "gen": "npm run gen:openapi && npm run gen:api"
   },
   "dependencies": {
     "@astrojs/node": "^11.0.2",
@@ -17,6 +20,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
+    "@hey-api/openapi-ts": "^0.99.0",
     "@types/node": "^22.20.1",
     "typescript": "^5.9.3"
   }
