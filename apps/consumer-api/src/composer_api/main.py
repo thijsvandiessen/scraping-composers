@@ -13,6 +13,9 @@ from collections.abc import Callable, Generator
 from composer_gold import DEFAULT_GOLD_DB_PATH
 from composer_warehouse.db import get_engine, init_db
 from fastapi import FastAPI, Request
+from dotenv import load_dotenv
+
+load_dotenv()
 from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker

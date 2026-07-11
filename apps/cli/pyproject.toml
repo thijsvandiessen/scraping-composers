@@ -8,6 +8,7 @@ dependencies = [
     "composer-scrapers",
     "composer-warehouse",
     "composer-gold",
+    "python-dotenv>=1.2.2",
 ]
 
 [project.scripts]

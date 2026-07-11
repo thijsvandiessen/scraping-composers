@@ -24,7 +24,7 @@ export class ApiError extends Error {
 // Read per request, not at module load: the standalone node server should pick
 // up the environment it was started with, and tests can override it.
 function apiBaseUrl(): string {
-  return (process.env.GOLD_API_URL ?? "http://localhost:8000").replace(/\/+$/, "");
+  return (process.env.GOLD_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
 }
 
 async function apiFetch<T>(path: string, schema: ZodType<T>): Promise<T> {

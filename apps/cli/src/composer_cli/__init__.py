@@ -2,6 +2,10 @@ import argparse
 import logging
 import sys
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH
 from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS
 from composer_scrapers import REGISTRY

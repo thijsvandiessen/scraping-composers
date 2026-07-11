@@ -269,6 +269,7 @@ dependencies = [
     { name = "composer-scrapers" },
     { name = "composer-warehouse" },
     { name = "fastapi" },
+    { name = "python-dotenv" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -279,6 +280,7 @@ requires-dist = [
     { name = "composer-scrapers", editable = "packages/composer-scrapers" },
     { name = "composer-warehouse", editable = "packages/composer-warehouse" },
     { name = "fastapi", specifier = ">=0.111" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 
@@ -302,6 +304,7 @@ dependencies = [
     { name = "composer-gold" },
     { name = "composer-scrapers" },
     { name = "composer-warehouse" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
@@ -310,6 +313,7 @@ requires-dist = [
     { name = "composer-gold", editable = "packages/composer-gold" },
     { name = "composer-scrapers", editable = "packages/composer-scrapers" },
     { name = "composer-warehouse", editable = "packages/composer-warehouse" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
 ]
 
 [[package]]
@@ -320,6 +324,7 @@ dependencies = [
     { name = "composer-gold" },
     { name = "composer-warehouse" },
     { name = "fastapi" },
+    { name = "python-dotenv" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -328,6 +333,7 @@ requires-dist = [
     { name = "composer-gold", editable = "packages/composer-gold" },
     { name = "composer-warehouse", editable = "packages/composer-warehouse" },
     { name = "fastapi", specifier = ">=0.111" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 
@@ -341,6 +347,7 @@ dependencies = [
     { name = "django-unfold", version = "0.91.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "django-unfold", version = "0.99.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "httpx" },
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
@@ -348,6 +355,7 @@ requires-dist = [
     { name = "django", specifier = ">=5.1" },
     { name = "django-unfold", specifier = ">=0.40" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
 ]
 
 [[package]]

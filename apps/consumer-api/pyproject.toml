@@ -8,6 +8,7 @@ dependencies = [
     "composer-gold",
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
+    "python-dotenv>=1.2.2",
 ]
 
 [build-system]
