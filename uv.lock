@@ -413,6 +413,7 @@ name = "composer-warehouse"
 version = "0.1.0"
 source = { editable = "packages/composer-warehouse" }
 dependencies = [
+    { name = "composer-bronze" },
     { name = "composer-config" },
     { name = "composer-schema" },
     { name = "sqlalchemy" },
@@ -429,6 +430,7 @@ testing = [
 
 [package.metadata]
 requires-dist = [
+    { name = "composer-bronze", editable = "packages/composer-bronze" },
     { name = "composer-config", editable = "packages/composer-config" },
     { name = "composer-schema", editable = "packages/composer-schema" },
     { name = "composer-schema", extras = ["testing"], marker = "extra == 'testing'", editable = "packages/composer-schema" },

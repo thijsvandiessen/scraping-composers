@@ -6,7 +6,7 @@ from composer_bronze.bucket import DEFAULT_BUCKET_PATH
 from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS
 from composer_scrapers import REGISTRY
 
-from .ingest_cmds import cmd_fetch, cmd_process, cmd_promote
+from .ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_promote, cmd_rebuild_silver
 from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
@@ -78,7 +78,7 @@ def main() -> None:
     p_process.set_defaults(func=cmd_process)
 
     p_promote = sub.add_parser(
-        "promote", help="rebuild the curated gold database from the bronze (raw) database"
+        "promote", help="rebuild the curated gold database from the silver (staging) database"
     )
     p_promote.add_argument("--gold-path", default=DEFAULT_GOLD_DB_PATH, help="path of the gold SQLite file")
     p_promote.add_argument(
@@ -90,10 +90,25 @@ def main() -> None:
     )
     p_promote.set_defaults(func=cmd_promote)
 
+    p_rebuild = sub.add_parser(
+        "rebuild-silver",
+        help="rebuild the silver database from the bucket with the current heuristics "
+        "(human review decisions are preserved)",
+    )
+    p_rebuild.add_argument(
+        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
+    )
+    p_rebuild.set_defaults(func=cmd_rebuild_silver)
+
     p_dedupe = sub.add_parser(
         "dedupe-persons", help="link near-duplicate person entities (surname/initials/birth-year heuristics)"
     )
     p_dedupe.set_defaults(func=cmd_dedupe_persons)
+
+    p_concerts = sub.add_parser(
+        "derive-concerts", help="rebuild the concert tables from the work mentions' performance context"
+    )
+    p_concerts.set_defaults(func=cmd_derive_concerts)
 
     p_preview = sub.add_parser(
         "person-review", help="list (or resolve) person duplicate pairs flagged for review"

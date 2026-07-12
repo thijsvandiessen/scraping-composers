@@ -1,8 +1,9 @@
-"""Concert model, derived into the gold database by the promote step.
+"""Concert model, derived into silver by the ``derive-concerts`` pass.
 
-Bronze keeps the raw performance context inside ``raw_work_mentions.raw``;
-promotion groups those mentions into concerts per source and links the people
-involved. The tables exist in both databases but are only populated in gold.
+Silver keeps the raw performance context inside ``raw_work_mentions.raw``;
+``derive_concerts`` groups those mentions into concerts per source and links
+the people involved. The promote step copies the tables into gold, collapsing
+participant links to their canonical entities.
 """
 
 from __future__ import annotations

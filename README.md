@@ -46,6 +46,9 @@ uv run composer-ingest dedupe-persons
 uv run composer-ingest person-review                    # pairs the matcher wasn't sure about
 uv run composer-ingest person-review --accept 7         # confirm a duplicate link
 uv run composer-ingest person-review --reject 7         # reject a proposed link
+
+# group performance mentions into concerts (also runs before every promote)
+uv run composer-ingest derive-concerts
 ```
 
 Data lands in `composers.db` (SQLite) by default. To use Postgres instead:
@@ -55,42 +58,69 @@ uv sync --extra postgres
 export DATABASE_URL="postgresql+psycopg://user:pass@host:5432/composers"
 ```
 
-## Bronze & gold
+## Bronze, silver & gold
 
-Data lives in two tiers. **Bronze** (`composers.db`) is the raw staging layer:
-everything every source said, verbatim, with provenance — ingest only ever
-writes here. **Gold** (`gold.db`) is the curated copy rebuilt from bronze by
-the promote step:
+Data lives in three tiers. **Bronze** is the raw NDJSON bucket (`raw-data/`,
+written by `fetch`): everything every source said, verbatim, as complete
+documents — the only tier holding the full fetch output, and the only way data
+enters the pipeline. **Silver** (`composers.db`) is the staging database built
+from bronze by `process`: raw records with provenance plus the interpretation
+passes over them — entity resolution, claims, work matching, person dedupe,
+and human review decisions. **Gold** (`gold.db`) is the curated copy rebuilt
+from silver by the promote step:
 
 ```sh
-uv run composer-ingest promote        # bronze → gold (full rebuild, atomic swap)
+uv run composer-ingest promote        # silver → gold (full rebuild, atomic swap)
 ```
 
 Promotion applies the curation rules: people with no concerts, recordings, or
 works mentioned are dropped (kept only if they composed a mentioned work or a
 performance archive reported them); duplicate person entities (linked by
 `dedupe-persons`) are collapsed into their canonical row with claims, works,
-and mentions re-pointed; entities left unreferenced are pruned. Bronze is
-never modified, so promotion is repeatable at any time; status and stats land
-in `gold.db.manifest.json`.
+and mentions re-pointed; entities left unreferenced are pruned. Silver is
+never modified by promotion, so it is repeatable at any time; status and
+stats land in `gold.db.manifest.json`.
 
-Promotion also **derives concerts** from the mentions' raw performance
-context: mentions are grouped into concerts per source (berlinphil by its
-concert id, nyphil by program + date, concertgebouw by date + city, dates
+### Rebuilding silver
+
+Interpretation (entity resolution, work matching) is applied when a record is
+first loaded — improving the heuristics doesn't fix rows already in the
+database. `rebuild-silver` closes that gap by replaying the latest complete
+snapshot of every source from the bucket into a fresh database with the
+current code, then re-running dedupe and concert derivation:
+
+```sh
+uv run composer-ingest rebuild-silver   # bucket → composers.db (atomic swap)
+```
+
+Human review decisions survive the rebuild: accepted/rejected person pairs
+carry over directly (entity ids are deterministic), and manual work matches
+are re-resolved by the work's composer + title (created again if matching no
+longer produces the work). The run log (`ingest_runs`) starts fresh, and
+**work ids may change** across rebuilds — only entity ids are stable. The
+rebuild requires a file-backed SQLite `DATABASE_URL` (the atomic swap is a
+file replace); status and stats land in `composers.db.manifest.json`.
+
+**Concerts are derived in silver** from the mentions' raw performance
+context (`composer-ingest derive-concerts`, also run automatically before
+every promote): mentions are grouped into concerts per source (berlinphil by
+its concert id, nyphil by program + date, concertgebouw by date + city, dates
 normalized to ISO) with season and event type; conductors *and soloists*
 (with their instrument/voice) are resolved to person entities by normalized
-name; and each concert keeps its programme. That powers the concert browser,
-per-person concert lists, and concert-count sorting in gold.
+name; and each concert keeps its programme. Promotion copies the concert
+tables into gold, collapsing participant links to canonical entities. That
+powers the concert browser, per-person concert lists, and concert-count
+sorting in both APIs.
 
 ## Consumer API (read the dataset)
 
 Two read-only FastAPI apps with identical routes — gold is the product API,
-bronze serves the raw staging data for inspection:
+silver serves the staging data for inspection:
 
 ```sh
 uv sync
 uv run uvicorn composer_api:gold_app --port 8000     # curated (default)
-uv run uvicorn composer_api:bronze_app --port 8003   # raw staging
+uv run uvicorn composer_api:silver_app --port 8003   # staging
 # open http://localhost:8000/docs
 ```
 
@@ -174,8 +204,8 @@ with one page per ingest phase:
 - **Load** — every raw snapshot in the bucket (status, record count, size)
   with a **Load into DB** button on complete ones, plus the recent-loads log.
 - **Promote** — gold status (last rebuild, curation stats) and the button to
-  rebuild gold from bronze.
-- **Data (bronze)** (Overview / Entities / Works / Review) — inspect the raw
+  rebuild gold from silver.
+- **Data (silver)** (Overview / Entities / Works / Review) — inspect the
   staging data: dataset counts, a searchable entity browser (per-kind pages,
   random sampling, claims with per-source provenance, cross-linked entities),
   a searchable works browser, and the work-mention review queue (resolving
@@ -196,7 +226,7 @@ uv run python apps/dashboard/manage.py migrate            # once: Django's own t
 uv run python apps/dashboard/manage.py createsuperuser    # once: your login
 uv run uvicorn composer_api:gold_app --port 8000      # gold API (Musicians pages)
 uv run uvicorn composer_admin:admin_app --port 8001   # admin API (scrape/load/promote)
-uv run uvicorn composer_api:bronze_app --port 8003    # bronze API (Data pages)
+uv run uvicorn composer_api:silver_app --port 8003    # silver API (Data pages)
 uv run python apps/dashboard/manage.py runserver 8002             # the dashboard
 # open http://localhost:8002 and log in
 ```
@@ -210,7 +240,8 @@ actions go through the admin API (`ADMIN_API_URL`, default
 `http://localhost:8001`; `ADMIN_API_KEY` forwarded as `X-Admin-Key`, so it
 must be set in the dashboard's environment too)
 and data inspection goes through the consumer APIs (`GOLD_API_URL`, default
-`http://localhost:8000`; `BRONZE_API_URL`, default `http://localhost:8003`).
+`http://localhost:8000`; `SILVER_API_URL`, default `http://localhost:8003` —
+the deprecated `BRONZE_API_URL` still works as a fallback).
 Django's own SQLite (`apps/dashboard/dashboard.sqlite3`, gitignored) stores only
 admin login users and sessions; the `scrapers` app defines no models, so
 scraper data cannot land in it. That keeps the APIs the only data paths, so
@@ -267,9 +298,9 @@ explicitly to override.
 ## Data model
 
 Entities connected by claims (the Wikidata pattern), on top of a raw
-provenance layer. This repo is the raw staging layer: it records what sources
-say, verbatim; curation and conflict resolution happen downstream when data
-moves into the golden research index.
+provenance layer. This is the silver staging schema: it records what sources
+say, verbatim, plus the matching passes over it; curation and conflict
+resolution happen downstream when data is promoted into gold.
 
 - **`sources`** — where data comes from (`imslp`, `wikidata`, `openopus`,
   `concertgebouw`, `nyphil`, `berlinphil`, ...).

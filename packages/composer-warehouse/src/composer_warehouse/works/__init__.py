@@ -9,6 +9,12 @@ or create a new work. The ingest pipeline drives this for every
 
 from __future__ import annotations
 
+import uuid
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from ..models import WorkTitle
 from .extract import WorkFeatures, extract_features, normalize_title
 from .match import (
     AUTO_THRESHOLD,
@@ -21,12 +27,28 @@ from .match import (
     score,
 )
 
+
+def add_alias(session: Session, work_id: uuid.UUID, title: str, source_id: int) -> None:
+    """Record ``title`` as an alias of a work, once per (work, title, source)."""
+    title_key = normalize_title(title)
+    exists = session.scalar(
+        select(WorkTitle.id).where(
+            WorkTitle.work_id == work_id,
+            WorkTitle.title_key == title_key,
+            WorkTitle.source_id == source_id,
+        )
+    )
+    if exists is None:
+        session.add(WorkTitle(work_id=work_id, title=title, title_key=title_key, source_id=source_id))
+
+
 __all__ = [
     "AUTO_THRESHOLD",
     "REVIEW_THRESHOLD",
     "Candidate",
     "MatchResult",
     "WorkFeatures",
+    "add_alias",
     "best_match",
     "classify",
     "extract_features",

@@ -88,7 +88,7 @@ class AdminAPI(_BaseAPI):
 
 @dataclass
 class DataAPI(_BaseAPI):
-    """Client for a read-only consumer API app (gold = curated, bronze = raw)."""
+    """Client for a read-only consumer API app (gold = curated, silver = staging)."""
 
     @classmethod
     def gold(cls) -> DataAPI:
@@ -97,10 +97,10 @@ class DataAPI(_BaseAPI):
         return cls(base_url=settings.GOLD_API_URL)
 
     @classmethod
-    def bronze(cls) -> DataAPI:
+    def silver(cls) -> DataAPI:
         from django.conf import settings
 
-        return cls(base_url=settings.BRONZE_API_URL)
+        return cls(base_url=settings.SILVER_API_URL)
 
     def stats(self) -> dict[str, Any]:
         stats: dict[str, Any] = self._request("GET", "/v1/stats")

@@ -1,7 +1,8 @@
-"""Gold layer: promote the raw (bronze) staging database into a curated copy.
+"""Gold layer: promote the silver staging database into a curated copy.
 
-Bronze records what sources say, verbatim. ``promote`` rebuilds the gold
-database from it, applying the curation rules research consumers want:
+Silver records what sources say plus the matching passes over it. ``promote``
+rebuilds the gold database from it, applying the curation rules research
+consumers want:
 
 1. drop people with no concerts/recordings/works mentioned,
 2. collapse duplicate person entities into their canonical row,

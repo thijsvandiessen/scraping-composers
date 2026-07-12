@@ -14,10 +14,10 @@
   <form method="post" action="{% url 'start_promote' %}">
     {% csrf_token %}
     <button type="submit" class="sc-btn sc-btn-primary" {% if gold.status == "running" %}disabled{% endif %}>
-      Promote bronze → gold
+      Promote silver → gold
     </button>
   </form>
-  <span class="sc-muted">full rebuild of the curated gold database from the raw bronze database</span>
+  <span class="sc-muted">full rebuild of the curated gold database from the silver staging database</span>
   {% if refreshing %}<span class="sc-muted">promoting — refreshing every 5 s…</span>{% endif %}
 </div>
 
@@ -47,7 +47,7 @@
 <p class="sc-muted" style="max-width: 44rem; font-size: 0.875rem;">
   Promotion applies the curation rules: people without any concerts, recordings, or
   works mentioned are dropped; duplicate person entities are collapsed into their
-  canonical row; entities left unreferenced are pruned. Bronze is never modified.
+  canonical row; entities left unreferenced are pruned. Silver is never modified.
 </p>
 {% endif %}
 {% endblock %}

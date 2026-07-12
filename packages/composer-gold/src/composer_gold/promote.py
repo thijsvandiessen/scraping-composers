@@ -1,18 +1,15 @@
-"""Rebuild the gold database from bronze, applying the curation rules."""
+"""Rebuild the gold database from silver, applying the curation rules."""
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-import re
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass, field, replace
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from composer_warehouse.build import BuildManifest, read_build_manifest, run_build
 from composer_warehouse.models import (
     Base,
     Claim,
@@ -27,7 +24,6 @@ from composer_warehouse.models import (
     Work,
     WorkTitle,
 )
-from composer_warehouse.normalize import dedup_key
 from sqlalchemy import create_engine, insert, select
 from sqlalchemy.orm import Session
 
@@ -56,42 +52,13 @@ class PromoteStats:
     unresolved_participant_names: int = 0
 
 
-@dataclass(frozen=True)
-class GoldManifest:
-    status: str  # running | completed | failed
-    started_at: str
-    finished_at: str | None = None
-    error: str | None = None
-    stats: dict[str, int] = field(default_factory=dict)
-
-    @classmethod
-    def start(cls) -> GoldManifest:
-        return cls(status="running", started_at=datetime.now(UTC).isoformat())
-
-    def completed(self, stats: PromoteStats) -> GoldManifest:
-        return replace(
-            self, status="completed", finished_at=datetime.now(UTC).isoformat(), stats=asdict(stats)
-        )
-
-    def failed(self, error: str) -> GoldManifest:
-        return replace(self, status="failed", finished_at=datetime.now(UTC).isoformat(), error=error)
+# The gold manifest predates the shared build helper; keep the old names
+# working for existing callers.
+GoldManifest = BuildManifest
 
 
-def _manifest_path(gold_path: str | Path) -> Path:
-    return Path(f"{gold_path}.manifest.json")
-
-
-def write_gold_manifest(gold_path: str | Path, manifest: GoldManifest) -> None:
-    path = _manifest_path(gold_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(manifest), ensure_ascii=False), encoding="utf-8")
-
-
-def read_gold_manifest(gold_path: str | Path) -> GoldManifest | None:
-    path = _manifest_path(gold_path)
-    if not path.exists():
-        return None
-    return GoldManifest(**json.loads(path.read_text(encoding="utf-8")))
+def read_gold_manifest(gold_path: str | Path) -> BuildManifest | None:
+    return read_build_manifest(gold_path)
 
 
 def _chunked(ids: list[Any]) -> Iterable[list[Any]]:
@@ -99,103 +66,11 @@ def _chunked(ids: list[Any]) -> Iterable[list[Any]]:
         yield ids[i : i + IN_CHUNK]
 
 
-_DDMMYYYY = re.compile(r"^(\d{2})-(\d{2})-(\d{4})$")
-
-
-def _iso_date(value: str | None) -> str | None:
-    """Normalize DD-MM-YYYY (concertgebouw) to ISO; pass other formats through."""
-    if not value:
-        return None
-    match = _DDMMYYYY.match(value)
-    if match:
-        day, month, year = match.groups()
-        return f"{year}-{month}-{day}"
-    return value
-
-
-@dataclass(frozen=True)
-class _ConcertFields:
-    """One mention's concert-level payload, in a source-independent shape."""
-
-    external_key: str
-    date: str | None
-    venue: str | None
-    season: str | None
-    event_type: str | None
-    url: str | None
-    conductors: tuple[str, ...]
-    soloists: tuple[tuple[str, str | None], ...]  # (name, discipline)
-
-
-def _soloists(raw: dict[str, Any]) -> tuple[tuple[str, str | None], ...]:
-    # all three sources report soloists as {"name": ..., "discipline": ...}
-    return tuple(
-        (s["name"], s.get("discipline"))
-        for s in raw.get("soloists") or []
-        if isinstance(s, dict) and s.get("name")
-    )
-
-
-def _concert_fields(source_name: str, raw: dict[str, Any]) -> _ConcertFields | None:
-    """Concert identity and fields for one mention's payload.
-
-    Each performance source encodes concert identity differently; unknown
-    sources return None and are skipped.
-    """
-    if source_name == "concertgebouw_archive":
-        date = _iso_date(raw.get("date"))
-        city = raw.get("city")
-        if not date:
-            return None
-        conductor = raw.get("conductor")
-        return _ConcertFields(
-            external_key=f"{date}|{city or ''}",
-            date=date,
-            venue=city,
-            season=None,
-            event_type=None,
-            url=None,
-            conductors=(conductor,) if conductor else (),
-            soloists=_soloists(raw),
-        )
-    if source_name == "nyphil":
-        program = raw.get("programID")
-        date = raw.get("date")
-        if not program or not date:
-            return None
-        venue = ", ".join(part for part in (raw.get("venue"), raw.get("location")) if part) or None
-        return _ConcertFields(
-            external_key=f"{program}|{date}",
-            date=date,
-            venue=venue,
-            season=raw.get("season"),
-            event_type=raw.get("eventType"),
-            url=None,
-            conductors=tuple(raw.get("conductors") or ()),
-            soloists=_soloists(raw),
-        )
-    if source_name == "berlinphil":
-        concert_id = raw.get("concert_id")
-        if not concert_id:
-            return None
-        return _ConcertFields(
-            external_key=str(concert_id),
-            date=raw.get("date"),
-            venue=None,
-            season=raw.get("season"),
-            event_type=None,
-            url=raw.get("url"),
-            conductors=tuple(raw.get("conductors") or ()),
-            soloists=_soloists(raw),
-        )
-    return None
-
-
-def _resolve_roots(bronze: Session) -> dict[uuid.UUID, uuid.UUID]:
+def _resolve_roots(silver: Session) -> dict[uuid.UUID, uuid.UUID]:
     """Map every canonical-linked person to its transitive canonical root."""
     links: dict[uuid.UUID, uuid.UUID] = {
         entity_id: canonical_id
-        for entity_id, canonical_id in bronze.execute(
+        for entity_id, canonical_id in silver.execute(
             select(Entity.id, Entity.canonical_entity_id).where(Entity.canonical_entity_id.is_not(None))
         ).tuples()
         if canonical_id is not None  # guaranteed by the WHERE; narrows the type
@@ -212,7 +87,7 @@ def _resolve_roots(bronze: Session) -> dict[uuid.UUID, uuid.UUID]:
 
 
 def _sitelink_roots(
-    bronze: Session,
+    silver: Session,
     root: Callable[[uuid.UUID], uuid.UUID],
     all_persons: set[uuid.UUID],
     min_sitelinks: int | None,
@@ -228,7 +103,7 @@ def _sitelink_roots(
         return set()
     all_person_roots = {root(p) for p in all_persons}
     max_sitelinks: dict[uuid.UUID, int] = {}
-    for subject_id, value in bronze.execute(
+    for subject_id, value in silver.execute(
         select(Claim.subject_id, Claim.value).where(Claim.predicate == "sitelink_count")
     ).tuples():
         if value is None:
@@ -243,8 +118,8 @@ def _sitelink_roots(
     return {r for r, count in max_sitelinks.items() if r in all_person_roots and count >= min_sitelinks}
 
 
-def promote(bronze: Session, gold_path: str | Path, *, min_sitelinks: int | None = None) -> PromoteStats:
-    """Rebuild the gold database at ``gold_path`` from the bronze session.
+def promote(silver: Session, gold_path: str | Path, *, min_sitelinks: int | None = None) -> PromoteStats:
+    """Rebuild the gold database at ``gold_path`` from the silver session.
 
     Builds into ``{gold_path}.tmp`` and atomically swaps it in, so readers
     never see a half-built database. Progress and outcome land in
@@ -255,33 +130,25 @@ def promote(bronze: Session, gold_path: str | Path, *, min_sitelinks: int | None
     performance/work evidence rule 1 otherwise requires (see ``_build``). ``None``
     leaves promotion unchanged.
     """
-    manifest = GoldManifest.start()
-    write_gold_manifest(gold_path, manifest)
-    try:
-        stats = _build(bronze, Path(f"{gold_path}.tmp"), min_sitelinks=min_sitelinks)
-        os.replace(f"{gold_path}.tmp", gold_path)
-    except Exception as exc:
-        write_gold_manifest(gold_path, manifest.failed(f"{type(exc).__name__}: {exc}"))
-        raise
-    write_gold_manifest(gold_path, manifest.completed(stats))
+    stats = run_build(gold_path, lambda tmp: _build(silver, tmp, min_sitelinks=min_sitelinks))
     log.info("gold promoted to %s: %s", gold_path, stats)
     return stats
 
 
-def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None) -> PromoteStats:
+def _build(silver: Session, tmp_path: Path, *, min_sitelinks: int | None = None) -> PromoteStats:
     tmp_path.unlink(missing_ok=True)
     gold_engine = create_engine(f"sqlite:///{tmp_path}")
     Base.metadata.create_all(gold_engine)
 
     # --- rule 2 groundwork: duplicate clusters -----------------------------
-    roots = _resolve_roots(bronze)
+    roots = _resolve_roots(silver)
 
     def root(entity_id: uuid.UUID) -> uuid.UUID:
         return roots.get(entity_id, entity_id)
 
     # --- rule 1: persons with performance/work evidence --------------------
     mention_composers = set(
-        bronze.scalars(
+        silver.scalars(
             select(RawWorkMention.composer_entity_id)
             .where(RawWorkMention.composer_entity_id.is_not(None))
             .distinct()
@@ -289,7 +156,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
     )
     perf_sources = select(RawWorkMention.source_id).distinct().scalar_subquery()
     archive_reported = set(
-        bronze.scalars(
+        silver.scalars(
             select(EntityRecord.entity_id)
             .where(EntityRecord.source_id.in_(perf_sources), EntityRecord.entity_id.is_not(None))
             .distinct()
@@ -297,23 +164,21 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
     )
     evidence = mention_composers | archive_reported
 
-    all_persons = set(bronze.scalars(select(Entity.id).where(Entity.kind == "person")))
+    all_persons = set(silver.scalars(select(Entity.id).where(Entity.kind == "person")))
     evidence_roots = {root(p) for p in all_persons if p in evidence}
 
     # --- extra signal: culturally significant persons by sitelink count -----
     # Wikipedia sitelink count (from Wikidata) is a proxy for significance. When
     # a threshold is set, a person clearing it is promoted even without the
     # performance/work evidence above; this only ever adds persons, never drops.
-    sitelink_roots = _sitelink_roots(bronze, root, all_persons, min_sitelinks)
+    sitelink_roots = _sitelink_roots(silver, root, all_persons, min_sitelinks)
 
     kept_roots = evidence_roots | sitelink_roots
     kept_members = {p for p in all_persons if root(p) in kept_roots}
 
     with gold_engine.begin() as gold:
         # --- FK targets: sources and runs, wholesale -----------------------
-        source_names: dict[int, str] = {}
-        for row in bronze.execute(select(Source)).scalars():
-            source_names[row.id] = row.name
+        for row in silver.execute(select(Source)).scalars():
             gold.execute(
                 insert(Source).values(
                     id=row.id, name=row.name, base_url=row.base_url, created_at=row.created_at
@@ -330,7 +195,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                 "records_new": r.records_new,
                 "error": r.error,
             }
-            for r in bronze.execute(select(IngestRun)).scalars()
+            for r in silver.execute(select(IngestRun)).scalars()
         ]
         if run_rows:
             gold.execute(insert(IngestRun), run_rows)
@@ -351,7 +216,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
 
         for chunk in _chunked(sorted(kept_roots, key=str)):
             rows = [
-                entity_row(e) for e in bronze.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
+                entity_row(e) for e in silver.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
             ]
             if rows:
                 gold.execute(insert(Entity), rows)
@@ -361,7 +226,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
         seen_claims: set[tuple[uuid.UUID, str, uuid.UUID | None, str | None, int]] = set()
         referenced: set[uuid.UUID] = set()
         for chunk in _chunked(sorted(kept_members, key=str)):
-            for c in bronze.execute(
+            for c in silver.execute(
                 select(Claim).where(Claim.subject_id.in_(chunk)).order_by(Claim.id)
             ).scalars():
                 subject = root(c.subject_id)
@@ -391,7 +256,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
             kept_other |= frontier
             next_frontier: set[uuid.UUID] = set()
             for chunk in _chunked(sorted(frontier, key=str)):
-                for c in bronze.execute(select(Claim).where(Claim.subject_id.in_(chunk))).scalars():
+                for c in silver.execute(select(Claim).where(Claim.subject_id.in_(chunk))).scalars():
                     obj = root(c.object_id) if c.object_id is not None else None
                     if obj is None or obj in kept_roots or obj in kept_other:
                         continue
@@ -410,7 +275,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
             frontier = next_frontier
         # own claims of kept non-person entities (literals, e.g. mentioned_in)
         for chunk in _chunked(sorted(kept_other, key=str)):
-            for c in bronze.execute(
+            for c in silver.execute(
                 select(Claim).where(Claim.subject_id.in_(chunk), Claim.object_id.is_(None))
             ).scalars():
                 claim_rows.append(
@@ -427,7 +292,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
 
         for chunk in _chunked(sorted(kept_other, key=str)):
             rows = [
-                entity_row(e) for e in bronze.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
+                entity_row(e) for e in silver.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
             ]
             if rows:
                 gold.execute(insert(Entity), rows)
@@ -453,7 +318,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                     "first_run_id": r.first_run_id,
                     "last_run_id": r.last_run_id,
                 }
-                for r in bronze.execute(
+                for r in silver.execute(
                     select(EntityRecord).where(EntityRecord.entity_id.in_(chunk))
                 ).scalars()
             ]
@@ -478,7 +343,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                 "first_ingested_at": w.first_ingested_at,
                 "last_ingested_at": w.last_ingested_at,
             }
-            for w in bronze.execute(select(Work)).scalars()
+            for w in silver.execute(select(Work)).scalars()
         ]
         for i in range(0, len(work_rows), INSERT_BATCH):
             gold.execute(insert(Work), work_rows[i : i + INSERT_BATCH])
@@ -492,14 +357,14 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                 "source_id": t.source_id,
                 "first_seen_at": t.first_seen_at,
             }
-            for t in bronze.execute(select(WorkTitle)).scalars()
+            for t in silver.execute(select(WorkTitle)).scalars()
         ]
         for i in range(0, len(title_rows), INSERT_BATCH):
             gold.execute(insert(WorkTitle), title_rows[i : i + INSERT_BATCH])
 
         mention_count = 0
         mention_rows: list[dict[str, Any]] = []
-        for m in bronze.execute(select(RawWorkMention)).scalars():
+        for m in silver.execute(select(RawWorkMention)).scalars():
             mention_rows.append(
                 {
                     "id": m.id,
@@ -524,84 +389,49 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
         for i in range(0, len(mention_rows), INSERT_BATCH):
             gold.execute(insert(RawWorkMention), mention_rows[i : i + INSERT_BATCH])
 
-        # --- concerts: derive from the mentions' raw performance context ----
-        # Every kept person's dedup key resolves to its gold (canonical) id, so
-        # conductor names match regardless of which duplicate spelling appears.
-        person_by_key: dict[str, uuid.UUID] = {}
-        for chunk in _chunked(sorted(kept_members, key=str)):
-            for member_id, member_key in bronze.execute(
-                select(Entity.id, Entity.dedup_key).where(Entity.id.in_(chunk))
-            ).tuples():
-                person_by_key[member_key] = root(member_id)
-
-        concerts: dict[tuple[int, str], dict[str, Any]] = {}
-        for m_row in mention_rows:
-            source_name = source_names.get(m_row["source_id"], "")
-            fields = _concert_fields(source_name, json.loads(m_row["raw"]))
-            if fields is None:
-                continue
-            concert = concerts.setdefault(
-                (m_row["source_id"], fields.external_key),
-                {
-                    "date": fields.date,
-                    "venue": fields.venue,
-                    "season": fields.season,
-                    "event_type": fields.event_type,
-                    "url": fields.url,
-                    "conductors": set(),
-                    "soloists": {},  # name -> discipline (first non-null wins)
-                    "mention_ids": [],
-                },
-            )
-            concert["conductors"].update(fields.conductors)
-            for soloist_name, discipline in fields.soloists:
-                if concert["soloists"].get(soloist_name) is None:
-                    concert["soloists"][soloist_name] = discipline
-            concert["mention_ids"].append(m_row["id"])
-
-        concert_rows: list[dict[str, Any]] = []
-        participant_rows: list[dict[str, Any]] = []
-        concert_work_rows: list[dict[str, Any]] = []
+        # --- concerts: copy the silver-derived tables, re-pointing people ---
+        # `derive_concerts` resolved participants against every person entity;
+        # here duplicates collapse to their canonical root, and links to
+        # persons that didn't make it into gold are nulled (the verbatim name
+        # is always kept).
+        gold_entities = kept_roots | kept_other
+        concert_rows = [
+            {
+                "id": c.id,
+                "source_id": c.source_id,
+                "external_key": c.external_key,
+                "date": c.date,
+                "venue": c.venue,
+                "season": c.season,
+                "event_type": c.event_type,
+                "url": c.url,
+            }
+            for c in silver.execute(select(Concert)).scalars()
+        ]
         participant_links = 0
         unresolved_names: set[str] = set()
-
-        def add_participant(concert_id: int, role: str, name: str, discipline: str | None) -> None:
-            nonlocal participant_links
-            resolved = person_by_key.get(dedup_key(name))
-            if resolved is not None:
+        participant_rows: list[dict[str, Any]] = []
+        for p in silver.execute(select(ConcertParticipant)).scalars():
+            entity_id = root(p.entity_id) if p.entity_id is not None else None
+            if entity_id is not None and entity_id not in gold_entities:
+                entity_id = None
+            if entity_id is not None:
                 participant_links += 1
             else:
-                unresolved_names.add(name)
+                unresolved_names.add(p.name)
             participant_rows.append(
                 {
-                    "concert_id": concert_id,
-                    "role": role,
-                    "name": name,
-                    "discipline": discipline,
-                    "entity_id": resolved,
+                    "concert_id": p.concert_id,
+                    "role": p.role,
+                    "name": p.name,
+                    "discipline": p.discipline,
+                    "entity_id": entity_id,
                 }
             )
-
-        for concert_id, ((source_id, external_key), data) in enumerate(sorted(concerts.items()), start=1):
-            concert_rows.append(
-                {
-                    "id": concert_id,
-                    "source_id": source_id,
-                    "external_key": external_key,
-                    "date": data["date"],
-                    "venue": data["venue"],
-                    "season": data["season"],
-                    "event_type": data["event_type"],
-                    "url": data["url"],
-                }
-            )
-            for name in sorted(data["conductors"]):
-                add_participant(concert_id, "conductor", name, None)
-            for name in sorted(data["soloists"]):
-                add_participant(concert_id, "soloist", name, data["soloists"][name])
-            concert_work_rows.extend(
-                {"concert_id": concert_id, "mention_id": mention_id} for mention_id in data["mention_ids"]
-            )
+        concert_work_rows = [
+            {"concert_id": cw.concert_id, "mention_id": cw.mention_id}
+            for cw in silver.execute(select(ConcertWork)).scalars()
+        ]
 
         for i in range(0, len(concert_rows), INSERT_BATCH):
             gold.execute(insert(Concert), concert_rows[i : i + INSERT_BATCH])
@@ -612,7 +442,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
 
     gold_engine.dispose()
 
-    all_other = set(bronze.scalars(select(Entity.id).where(Entity.kind != "person")))
+    all_other = set(silver.scalars(select(Entity.id).where(Entity.kind != "person")))
     return PromoteStats(
         persons_kept=len(kept_roots),
         persons_dropped=len(all_persons) - len(kept_members),

@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 from composer_cli import main
-from composer_cli.ingest_cmds import cmd_fetch, cmd_process
+from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_review
 from composer_cli.query_cmds import cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
 from composer_schema import SourceClaim
 from composer_warehouse.db import get_engine, init_db
-from composer_warehouse.models import Entity, PersonMatch, RawWorkMention, Work
-from composer_warehouse.testing import FakeSource, ingest_source, mention, person
+from composer_warehouse.models import Concert, Entity, PersonMatch, RawWorkMention, Work
+from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -318,6 +318,45 @@ def test_cmd_person_review_reject(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# cmd_derive_concerts
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_derive_concerts_builds_concert_tables(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        # a real performance-source name: concert derivation is per-source
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    perf_mention(
+                        "perf:1-1",
+                        "Ein Heldenleben",
+                        "Richard Strauss",
+                        {"concert_id": "1", "date": "1985-03-01", "conductors": ["Karajan, Herbert von"]},
+                    ),
+                    person("Karajan, Herbert von"),
+                ),
+                name="berlinphil",
+                base_url="https://bp.example",
+            ),
+        )
+
+    assert cmd_derive_concerts(_ns(database_url=db_url)) == 0
+    out = capsys.readouterr().out
+    assert "derived 1 concerts" in out
+    assert "participant links      1" in out
+
+    with factory() as session:
+        concert = session.scalars(select(Concert)).one()
+        assert concert.date == "1985-03-01"
+
+
+# ---------------------------------------------------------------------------
 # cmd_fetch / cmd_process
 # ---------------------------------------------------------------------------
 
@@ -400,6 +439,45 @@ def test_cmd_process_returns_1_without_fetched_runs(tmp_path: Path, monkeypatch:
         )
     )
     assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# cmd_rebuild_silver
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_rebuild_silver_replays_bucket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from composer_scrapers import REGISTRY
+
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    bucket_path = str(tmp_path / "bucket")
+    fake = FakeSource(records=(person("Bach, Johann Sebastian"),), name="fake")
+    monkeypatch.setitem(REGISTRY, "fake", fake)
+    assert cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path)) == 0
+
+    rc = cmd_rebuild_silver(_ns(database_url=db_url, bucket_path=bucket_path))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "silver rebuilt from the bucket" in out
+    assert "sources replayed" in out
+
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+        assert entity.label == "Bach, Johann Sebastian"
+
+
+def test_cmd_rebuild_silver_rejects_non_sqlite(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    rc = cmd_rebuild_silver(
+        _ns(
+            database_url="postgresql+psycopg://user:pass@host:5432/composers",
+            bucket_path=str(tmp_path / "bucket"),
+        )
+    )
+    assert rc == 1
+    assert "sqlite" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

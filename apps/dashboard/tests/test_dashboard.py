@@ -559,7 +559,7 @@ def _install_data(monkeypatch: pytest.MonkeyPatch, stub: StubDataAPI) -> None:
     fake = type(
         "FakeDataAPI",
         (),
-        {"gold": classmethod(lambda cls: stub), "bronze": classmethod(lambda cls: stub)},
+        {"gold": classmethod(lambda cls: stub), "silver": classmethod(lambda cls: stub)},
     )
     monkeypatch.setattr(views, "DataAPI", fake)
 
@@ -745,7 +745,7 @@ def test_entity_detail_renders_when_gold_is_down(
     response = staff_client.get(f"/admin/data/entities/{ENTITY_ID}/")
     assert response.status_code == 200
     page = response.content.decode()
-    assert "born_on" in page  # bronze content still there
+    assert "born_on" in page  # silver content still there
     assert "concerts by this person" in page  # link offered, just without a count
     assert "concerts by this person (" not in page
 
@@ -788,7 +788,7 @@ def test_concert_pages_require_login() -> None:
 def test_promote_page_shows_gold_status(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     _install(monkeypatch, StubAPI())
     page = staff_client.get("/admin/promote/").content.decode()
-    assert "Promote bronze" in page
+    assert "Promote silver" in page
     assert "sc-badge sc-completed" in page  # gold present + last promote completed
     assert "persons_kept" in page and "15387" in page
 

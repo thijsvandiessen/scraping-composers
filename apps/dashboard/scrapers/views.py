@@ -123,7 +123,7 @@ def _page_context(page_data: dict[str, Any], base_path: str, params: dict[str, s
 
 def data_overview(request: HttpRequest) -> HttpResponse:
     """Data overview: dataset counts, per kind / source / mention status."""
-    api = DataAPI.bronze()
+    api = DataAPI.silver()
     stats: dict[str, object] | None = None
     error: str | None = None
     try:
@@ -141,7 +141,7 @@ def data_overview(request: HttpRequest) -> HttpResponse:
 
 def entities(request: HttpRequest, kind: str | None = None) -> HttpResponse:
     """Searchable entity browser; with ``kind`` in the path, one kind's page."""
-    api = DataAPI.bronze()
+    api = DataAPI.silver()
     q = request.GET.get("q", "").strip()
     if kind is None:
         kind = request.GET.get("kind", "").strip()
@@ -172,7 +172,7 @@ def entities(request: HttpRequest, kind: str | None = None) -> HttpResponse:
 
 def entity_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpResponse:
     """One entity: its claims (with source provenance) and incoming claims."""
-    api = DataAPI.bronze()
+    api = DataAPI.silver()
     entity: dict[str, object] | None = None
     error: str | None = None
     try:
@@ -184,7 +184,7 @@ def entity_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpResponse:
         try:
             concert_total = int(DataAPI.gold().person_concerts(str(entity_id), limit=1)["total"])
         except (AdminAPIError, KeyError, TypeError, ValueError):
-            pass  # bronze page must render even when gold is down or unpromoted
+            pass  # silver page must render even when gold is down or unpromoted
     context = {
         **admin.site.each_context(request),
         "title": str(entity["label"]) if entity else "Entity",
@@ -196,7 +196,7 @@ def entity_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpResponse:
 
 
 def promote_page(request: HttpRequest) -> HttpResponse:
-    """Gold status and the button to rebuild it from bronze."""
+    """Gold status and the button to rebuild it from silver."""
     api = AdminAPI.from_env()
     gold: dict[str, object] | None = None
     error: str | None = None
@@ -224,7 +224,7 @@ def start_promote(request: HttpRequest) -> HttpResponse:
     except AdminAPIError as exc:
         messages.error(request, str(exc))
     else:
-        messages.success(request, "rebuilding the gold database from bronze")
+        messages.success(request, "rebuilding the gold database from silver")
     return redirect("promote")
 
 
@@ -335,7 +335,7 @@ MENTION_STATUSES = ("needs_review", "unmatched", "auto_matched", "created", "man
 
 def review(request: HttpRequest) -> HttpResponse:
     """Work mentions the matcher wasn't confident about, best candidate first."""
-    api = DataAPI.bronze()
+    api = DataAPI.silver()
     status = request.GET.get("status", "needs_review").strip()
     page = int(request.GET.get("page", "1") or "1")
     result: dict[str, object] = {}
@@ -359,7 +359,7 @@ def review(request: HttpRequest) -> HttpResponse:
 
 def works(request: HttpRequest) -> HttpResponse:
     """Searchable resolved-works browser (by title or composer)."""
-    api = DataAPI.bronze()
+    api = DataAPI.silver()
     q = request.GET.get("q", "").strip()
     page = int(request.GET.get("page", "1") or "1")
     result: dict[str, object] = {}

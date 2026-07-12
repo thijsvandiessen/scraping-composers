@@ -1,4 +1,4 @@
-"""Consumer API tests: the bronze app over raw seed data, the gold app over
+"""Consumer API tests: the silver app over staging seed data, the gold app over
 its promoted copy — both using in-memory/tmp databases, no network."""
 
 from collections.abc import Iterator
@@ -9,6 +9,7 @@ import pytest
 from composer_api import create_app
 from composer_gold import promote
 from composer_schema import EntityDocument, SourceAdapter, SourceClaim
+from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import init_db
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
 from fastapi.testclient import TestClient
@@ -92,9 +93,9 @@ def _seeded_factory() -> sessionmaker[Session]:
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    """Client over the bronze app: raw staging data, nothing curated away."""
+    """Client over the silver app: staging data, nothing curated away."""
     factory = _seeded_factory()
-    yield TestClient(create_app("test-bronze", lambda: factory))
+    yield TestClient(create_app("test-silver", lambda: factory))
 
 
 @pytest.fixture
@@ -388,7 +389,7 @@ def test_entity_detail_404_for_missing(client: TestClient) -> None:
 
 def test_crud_not_found_surfaces_as_404_with_detail(client: TestClient, gold_client: TestClient) -> None:
     """A NotFoundError raised in crud maps to a 404 whose body matches
-    FastAPI's HTTPException shape, on both the bronze and gold apps."""
+    FastAPI's HTTPException shape, on both the silver and gold apps."""
     for app_client in (client, gold_client):
         r = app_client.get("/v1/entities/00000000-0000-0000-0000-000000000000")
         assert r.status_code == 404
@@ -432,7 +433,7 @@ def review_client() -> Iterator[TestClient]:
     with factory() as s:
         ingest_source(s, programmes)
 
-    yield TestClient(create_app("test-bronze", lambda: factory))
+    yield TestClient(create_app("test-silver", lambda: factory))
 
 
 def test_mentions_needs_review_lists_queue_with_candidate(review_client: TestClient) -> None:
@@ -539,6 +540,7 @@ def concerts_client(tmp_path: Path) -> Iterator[TestClient]:
     )
     with factory() as s:
         ingest_source(s, berlinphil)
+        derive_concerts(s)
         gold_path = tmp_path / "gold.db"
         promote(s, gold_path)
     gold_factory = init_db(create_engine(f"sqlite:///{gold_path}"))
@@ -610,10 +612,37 @@ def test_person_concerts_404_and_invalid_sort(concerts_client: TestClient) -> No
     assert concerts_client.get("/v1/conductors?sort=nope").status_code == 422
 
 
-def test_person_concerts_empty_on_bronze(client: TestClient) -> None:
-    person = client.get("/v1/composers?q=Bach").json()["items"][0]
-    data = client.get(f"/v1/people/{person['id']}/concerts").json()
-    assert data["total"] == 0 and data["items"] == []
+def test_person_concerts_on_silver(tmp_path: Path) -> None:
+    """Concerts are silver-derived, so the silver app serves them too."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    factory = init_db(engine)
+    berlinphil = FakeSource(
+        records=(
+            perf_mention(
+                "perf:1-1",
+                "Ein Heldenleben",
+                "Richard Strauss",
+                {"concert_id": "1", "date": "1985-03-01", "conductors": ["Karajan, Herbert von"]},
+            ),
+            _person("Karajan, Herbert von", SourceClaim("has_profession", "profession", "conductor")),
+        ),
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    with factory() as s:
+        ingest_source(s, berlinphil)
+        derive_concerts(s)
+    silver = TestClient(create_app("test-silver-concerts", lambda: factory))
+
+    assert silver.get("/v1/concerts").json()["total"] == 1
+    karajan = silver.get("/v1/conductors?q=Karajan").json()["items"][0]
+    data = silver.get(f"/v1/people/{karajan['id']}/concerts").json()
+    assert data["total"] == 1
+    assert data["items"][0]["works"] == ["Ein Heldenleben"]
 
 
 # --- gold app: same routes over the curated database ---

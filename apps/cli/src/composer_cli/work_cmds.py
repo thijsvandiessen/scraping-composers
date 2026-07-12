@@ -4,9 +4,9 @@ import uuid
 from composer_warehouse.db import get_engine, init_db
 from composer_warehouse.ingestion import new_work
 from composer_warehouse.models import Entity, RawWorkMention, Work, WorkTitle
-from composer_warehouse.works import Candidate, extract_features, normalize_title, resolve
+from composer_warehouse.works import Candidate, add_alias, extract_features, resolve
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import aliased
 
 
 def _work_features_line(work: Work) -> str:
@@ -61,19 +61,6 @@ def cmd_works(args: argparse.Namespace) -> int:
     return 0
 
 
-def _add_alias(session: Session, work_id: uuid.UUID, title: str, source_id: int) -> None:
-    title_key = normalize_title(title)
-    exists = session.scalar(
-        select(WorkTitle.id).where(
-            WorkTitle.work_id == work_id,
-            WorkTitle.title_key == title_key,
-            WorkTitle.source_id == source_id,
-        )
-    )
-    if exists is None:
-        session.add(WorkTitle(work_id=work_id, title=title, title_key=title_key, source_id=source_id))
-
-
 def cmd_review(args: argparse.Namespace) -> int:
     engine = get_engine(args.database_url)
     session_factory = init_db(engine)
@@ -88,7 +75,7 @@ def cmd_review(args: argparse.Namespace) -> int:
             mention.work_id = work.id
             mention.match_status = "manual_matched"
             mention.match_method = "manual"
-            _add_alias(session, work.id, mention.raw_title, mention.source_id)
+            add_alias(session, work.id, mention.raw_title, mention.source_id)
             session.commit()
             print(f"matched mention #{mention.id} to {work.id} ({work.canonical_title})")
             return 0
@@ -105,7 +92,7 @@ def cmd_review(args: argparse.Namespace) -> int:
             mention.work_id = work.id
             mention.match_status = "manual_matched"
             mention.match_method = "manual"
-            _add_alias(session, work.id, mention.raw_title, mention.source_id)
+            add_alias(session, work.id, mention.raw_title, mention.source_id)
             session.commit()
             print(f"created work {work.id} from mention #{mention.id}: {work.canonical_title}")
             return 0
@@ -158,7 +145,7 @@ def cmd_rematch(args: argparse.Namespace) -> int:
             mention.candidate_work_id = result.candidate_work_id
             work_id = mention.work_id
             if work_id is not None:
-                _add_alias(session, work_id, mention.raw_title, mention.source_id)
+                add_alias(session, work_id, mention.raw_title, mention.source_id)
         session.commit()
         print(f"re-matched {len(pending)} mention(s)")
     return 0
