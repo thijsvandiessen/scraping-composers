@@ -195,7 +195,7 @@ def gold_status() -> GoldStatus:
 
 @admin.post("/promote", status_code=status.HTTP_202_ACCEPTED, response_model=GoldStatus)
 def start_promote(background: BackgroundTasks) -> GoldStatus:
-    """Rebuild the curated gold database from bronze (background)."""
+    """Rebuild the curated gold database from silver (background)."""
     manifest = read_gold_manifest(DEFAULT_GOLD_DB_PATH)
     if manifest is not None and manifest.status == "running":
         raise HTTPException(status.HTTP_409_CONFLICT, "a promote is already in progress")

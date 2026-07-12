@@ -1,4 +1,4 @@
-"""Consumer API tests: the bronze app over raw seed data, the gold app over
+"""Consumer API tests: the silver app over staging seed data, the gold app over
 its promoted copy — both using in-memory/tmp databases, no network."""
 
 from collections.abc import Iterator
@@ -92,9 +92,9 @@ def _seeded_factory() -> sessionmaker[Session]:
 
 @pytest.fixture
 def client() -> Iterator[TestClient]:
-    """Client over the bronze app: raw staging data, nothing curated away."""
+    """Client over the silver app: staging data, nothing curated away."""
     factory = _seeded_factory()
-    yield TestClient(create_app("test-bronze", lambda: factory))
+    yield TestClient(create_app("test-silver", lambda: factory))
 
 
 @pytest.fixture
@@ -388,7 +388,7 @@ def test_entity_detail_404_for_missing(client: TestClient) -> None:
 
 def test_crud_not_found_surfaces_as_404_with_detail(client: TestClient, gold_client: TestClient) -> None:
     """A NotFoundError raised in crud maps to a 404 whose body matches
-    FastAPI's HTTPException shape, on both the bronze and gold apps."""
+    FastAPI's HTTPException shape, on both the silver and gold apps."""
     for app_client in (client, gold_client):
         r = app_client.get("/v1/entities/00000000-0000-0000-0000-000000000000")
         assert r.status_code == 404
@@ -432,7 +432,7 @@ def review_client() -> Iterator[TestClient]:
     with factory() as s:
         ingest_source(s, programmes)
 
-    yield TestClient(create_app("test-bronze", lambda: factory))
+    yield TestClient(create_app("test-silver", lambda: factory))
 
 
 def test_mentions_needs_review_lists_queue_with_candidate(review_client: TestClient) -> None:
@@ -610,7 +610,7 @@ def test_person_concerts_404_and_invalid_sort(concerts_client: TestClient) -> No
     assert concerts_client.get("/v1/conductors?sort=nope").status_code == 422
 
 
-def test_person_concerts_empty_on_bronze(client: TestClient) -> None:
+def test_person_concerts_empty_on_silver(client: TestClient) -> None:
     person = client.get("/v1/composers?q=Bach").json()["items"][0]
     data = client.get(f"/v1/people/{person['id']}/concerts").json()
     assert data["total"] == 0 and data["items"] == []

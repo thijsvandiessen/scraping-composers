@@ -1,6 +1,6 @@
 """Concert model, derived into the gold database by the promote step.
 
-Bronze keeps the raw performance context inside ``raw_work_mentions.raw``;
+Silver keeps the raw performance context inside ``raw_work_mentions.raw``;
 promotion groups those mentions into concerts per source and links the people
 involved. The tables exist in both databases but are only populated in gold.
 """

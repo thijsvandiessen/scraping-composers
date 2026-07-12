@@ -1,4 +1,4 @@
-"""Tests for the bronze → gold promote pipeline."""
+"""Tests for the silver → gold promote pipeline."""
 
 from pathlib import Path
 
@@ -19,8 +19,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 
-def _seed_bronze(session: Session) -> None:
-    """Bronze with every promote-relevant case:
+def _seed_silver(session: Session) -> None:
+    """Silver with every promote-relevant case:
 
     - Beethoven: mentioned as a composer of two work mentions (kept, rule 1a)
     - Mahler, Gustav: reported by the same performance archive (kept, rule 1b)
@@ -61,7 +61,7 @@ def _gold_session(gold_path: Path) -> Session:
 
 
 def test_promote_applies_all_three_rules(session: Session, tmp_path: Path) -> None:
-    _seed_bronze(session)
+    _seed_silver(session)
     gold_path = tmp_path / "gold.db"
     stats = promote(session, gold_path)
 
@@ -88,7 +88,7 @@ def test_promote_applies_all_three_rules(session: Session, tmp_path: Path) -> No
 
 
 def test_promote_repoints_claims_and_mentions_to_canonical(session: Session, tmp_path: Path) -> None:
-    _seed_bronze(session)
+    _seed_silver(session)
     gold_path = tmp_path / "gold.db"
     promote(session, gold_path)
 
@@ -106,8 +106,8 @@ def test_promote_repoints_claims_and_mentions_to_canonical(session: Session, tmp
         assert gold.scalar(select(RawWorkMention.id).where(RawWorkMention.id == 1)) is not None
 
 
-def _seed_concert_bronze(session: Session) -> None:
-    """Bronze with performance payloads in each source's real shape."""
+def _seed_concert_silver(session: Session) -> None:
+    """Silver with performance payloads in each source's real shape."""
     concertgebouw = FakeSource(
         records=(
             perf_mention(
@@ -180,7 +180,7 @@ def _seed_concert_bronze(session: Session) -> None:
 
 
 def test_promote_derives_concerts_from_mentions(session: Session, tmp_path: Path) -> None:
-    _seed_concert_bronze(session)
+    _seed_concert_silver(session)
     gold_path = tmp_path / "gold.db"
     stats = promote(session, gold_path)
 
@@ -221,16 +221,16 @@ def test_promote_derives_concerts_from_mentions(session: Session, tmp_path: Path
     assert stats.unresolved_participant_names == 1
 
 
-def test_concert_tables_stay_empty_in_bronze(session: Session, tmp_path: Path) -> None:
-    _seed_concert_bronze(session)
+def test_concert_tables_stay_empty_in_silver(session: Session, tmp_path: Path) -> None:
+    _seed_concert_silver(session)
     promote(session, tmp_path / "gold.db")
     assert session.scalar(select(Concert.id)) is None
     assert session.scalar(select(ConcertParticipant.id)) is None
     assert session.scalar(select(ConcertWork.id)) is None
 
 
-def _seed_sitelink_bronze(session: Session) -> None:
-    """Bronze with a performed composer and an encyclopedia-only, but famous, one.
+def _seed_sitelink_silver(session: Session) -> None:
+    """Silver with a performed composer and an encyclopedia-only, but famous, one.
 
     - Beethoven: composer of a work mention (kept by rule 1, no sitelink needed)
     - Famous, Unperformed: only in the encyclopedia, no concerts/works, but with
@@ -257,7 +257,7 @@ def _seed_sitelink_bronze(session: Session) -> None:
 
 
 def test_sitelink_threshold_off_by_default(session: Session, tmp_path: Path) -> None:
-    _seed_sitelink_bronze(session)
+    _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
     stats = promote(session, gold_path)  # no threshold: promotion unchanged
 
@@ -269,7 +269,7 @@ def test_sitelink_threshold_off_by_default(session: Session, tmp_path: Path) -> 
 
 
 def test_sitelink_threshold_promotes_significant_person(session: Session, tmp_path: Path) -> None:
-    _seed_sitelink_bronze(session)
+    _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
     stats = promote(session, gold_path, min_sitelinks=100)  # 200 >= 100
 
@@ -285,7 +285,7 @@ def test_sitelink_threshold_promotes_significant_person(session: Session, tmp_pa
 
 
 def test_sitelink_threshold_below_count_drops_person(session: Session, tmp_path: Path) -> None:
-    _seed_sitelink_bronze(session)
+    _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
     stats = promote(session, gold_path, min_sitelinks=300)  # 200 < 300
 
@@ -297,7 +297,7 @@ def test_sitelink_threshold_below_count_drops_person(session: Session, tmp_path:
 
 
 def test_promote_writes_manifest_and_is_rerunnable(session: Session, tmp_path: Path) -> None:
-    _seed_bronze(session)
+    _seed_silver(session)
     gold_path = tmp_path / "gold.db"
     first = promote(session, gold_path)
     second = promote(session, gold_path)  # full rebuild: same result, no leftovers

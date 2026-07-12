@@ -78,7 +78,7 @@ def main() -> None:
     p_process.set_defaults(func=cmd_process)
 
     p_promote = sub.add_parser(
-        "promote", help="rebuild the curated gold database from the bronze (raw) database"
+        "promote", help="rebuild the curated gold database from the silver (staging) database"
     )
     p_promote.add_argument("--gold-path", default=DEFAULT_GOLD_DB_PATH, help="path of the gold SQLite file")
     p_promote.add_argument(

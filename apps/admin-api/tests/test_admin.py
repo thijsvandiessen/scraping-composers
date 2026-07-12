@@ -218,7 +218,7 @@ def test_promote_builds_gold_and_reports_stats(
 ) -> None:
     gold_path = tmp_path / "gold.db"
     monkeypatch.setattr(admin_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
-    # seed bronze through the API: fetch + process the fake source
+    # seed silver through the API: fetch + process the fake source
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
     client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/process")
 

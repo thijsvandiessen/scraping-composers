@@ -1,4 +1,4 @@
-"""Rebuild the gold database from bronze, applying the curation rules."""
+"""Rebuild the gold database from silver, applying the curation rules."""
 
 from __future__ import annotations
 
@@ -191,11 +191,11 @@ def _concert_fields(source_name: str, raw: dict[str, Any]) -> _ConcertFields | N
     return None
 
 
-def _resolve_roots(bronze: Session) -> dict[uuid.UUID, uuid.UUID]:
+def _resolve_roots(silver: Session) -> dict[uuid.UUID, uuid.UUID]:
     """Map every canonical-linked person to its transitive canonical root."""
     links: dict[uuid.UUID, uuid.UUID] = {
         entity_id: canonical_id
-        for entity_id, canonical_id in bronze.execute(
+        for entity_id, canonical_id in silver.execute(
             select(Entity.id, Entity.canonical_entity_id).where(Entity.canonical_entity_id.is_not(None))
         ).tuples()
         if canonical_id is not None  # guaranteed by the WHERE; narrows the type
@@ -212,7 +212,7 @@ def _resolve_roots(bronze: Session) -> dict[uuid.UUID, uuid.UUID]:
 
 
 def _sitelink_roots(
-    bronze: Session,
+    silver: Session,
     root: Callable[[uuid.UUID], uuid.UUID],
     all_persons: set[uuid.UUID],
     min_sitelinks: int | None,
@@ -228,7 +228,7 @@ def _sitelink_roots(
         return set()
     all_person_roots = {root(p) for p in all_persons}
     max_sitelinks: dict[uuid.UUID, int] = {}
-    for subject_id, value in bronze.execute(
+    for subject_id, value in silver.execute(
         select(Claim.subject_id, Claim.value).where(Claim.predicate == "sitelink_count")
     ).tuples():
         if value is None:
@@ -243,8 +243,8 @@ def _sitelink_roots(
     return {r for r, count in max_sitelinks.items() if r in all_person_roots and count >= min_sitelinks}
 
 
-def promote(bronze: Session, gold_path: str | Path, *, min_sitelinks: int | None = None) -> PromoteStats:
-    """Rebuild the gold database at ``gold_path`` from the bronze session.
+def promote(silver: Session, gold_path: str | Path, *, min_sitelinks: int | None = None) -> PromoteStats:
+    """Rebuild the gold database at ``gold_path`` from the silver session.
 
     Builds into ``{gold_path}.tmp`` and atomically swaps it in, so readers
     never see a half-built database. Progress and outcome land in
@@ -258,7 +258,7 @@ def promote(bronze: Session, gold_path: str | Path, *, min_sitelinks: int | None
     manifest = GoldManifest.start()
     write_gold_manifest(gold_path, manifest)
     try:
-        stats = _build(bronze, Path(f"{gold_path}.tmp"), min_sitelinks=min_sitelinks)
+        stats = _build(silver, Path(f"{gold_path}.tmp"), min_sitelinks=min_sitelinks)
         os.replace(f"{gold_path}.tmp", gold_path)
     except Exception as exc:
         write_gold_manifest(gold_path, manifest.failed(f"{type(exc).__name__}: {exc}"))
@@ -268,20 +268,20 @@ def promote(bronze: Session, gold_path: str | Path, *, min_sitelinks: int | None
     return stats
 
 
-def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None) -> PromoteStats:
+def _build(silver: Session, tmp_path: Path, *, min_sitelinks: int | None = None) -> PromoteStats:
     tmp_path.unlink(missing_ok=True)
     gold_engine = create_engine(f"sqlite:///{tmp_path}")
     Base.metadata.create_all(gold_engine)
 
     # --- rule 2 groundwork: duplicate clusters -----------------------------
-    roots = _resolve_roots(bronze)
+    roots = _resolve_roots(silver)
 
     def root(entity_id: uuid.UUID) -> uuid.UUID:
         return roots.get(entity_id, entity_id)
 
     # --- rule 1: persons with performance/work evidence --------------------
     mention_composers = set(
-        bronze.scalars(
+        silver.scalars(
             select(RawWorkMention.composer_entity_id)
             .where(RawWorkMention.composer_entity_id.is_not(None))
             .distinct()
@@ -289,7 +289,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
     )
     perf_sources = select(RawWorkMention.source_id).distinct().scalar_subquery()
     archive_reported = set(
-        bronze.scalars(
+        silver.scalars(
             select(EntityRecord.entity_id)
             .where(EntityRecord.source_id.in_(perf_sources), EntityRecord.entity_id.is_not(None))
             .distinct()
@@ -297,14 +297,14 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
     )
     evidence = mention_composers | archive_reported
 
-    all_persons = set(bronze.scalars(select(Entity.id).where(Entity.kind == "person")))
+    all_persons = set(silver.scalars(select(Entity.id).where(Entity.kind == "person")))
     evidence_roots = {root(p) for p in all_persons if p in evidence}
 
     # --- extra signal: culturally significant persons by sitelink count -----
     # Wikipedia sitelink count (from Wikidata) is a proxy for significance. When
     # a threshold is set, a person clearing it is promoted even without the
     # performance/work evidence above; this only ever adds persons, never drops.
-    sitelink_roots = _sitelink_roots(bronze, root, all_persons, min_sitelinks)
+    sitelink_roots = _sitelink_roots(silver, root, all_persons, min_sitelinks)
 
     kept_roots = evidence_roots | sitelink_roots
     kept_members = {p for p in all_persons if root(p) in kept_roots}
@@ -312,7 +312,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
     with gold_engine.begin() as gold:
         # --- FK targets: sources and runs, wholesale -----------------------
         source_names: dict[int, str] = {}
-        for row in bronze.execute(select(Source)).scalars():
+        for row in silver.execute(select(Source)).scalars():
             source_names[row.id] = row.name
             gold.execute(
                 insert(Source).values(
@@ -330,7 +330,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                 "records_new": r.records_new,
                 "error": r.error,
             }
-            for r in bronze.execute(select(IngestRun)).scalars()
+            for r in silver.execute(select(IngestRun)).scalars()
         ]
         if run_rows:
             gold.execute(insert(IngestRun), run_rows)
@@ -351,7 +351,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
 
         for chunk in _chunked(sorted(kept_roots, key=str)):
             rows = [
-                entity_row(e) for e in bronze.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
+                entity_row(e) for e in silver.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
             ]
             if rows:
                 gold.execute(insert(Entity), rows)
@@ -361,7 +361,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
         seen_claims: set[tuple[uuid.UUID, str, uuid.UUID | None, str | None, int]] = set()
         referenced: set[uuid.UUID] = set()
         for chunk in _chunked(sorted(kept_members, key=str)):
-            for c in bronze.execute(
+            for c in silver.execute(
                 select(Claim).where(Claim.subject_id.in_(chunk)).order_by(Claim.id)
             ).scalars():
                 subject = root(c.subject_id)
@@ -391,7 +391,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
             kept_other |= frontier
             next_frontier: set[uuid.UUID] = set()
             for chunk in _chunked(sorted(frontier, key=str)):
-                for c in bronze.execute(select(Claim).where(Claim.subject_id.in_(chunk))).scalars():
+                for c in silver.execute(select(Claim).where(Claim.subject_id.in_(chunk))).scalars():
                     obj = root(c.object_id) if c.object_id is not None else None
                     if obj is None or obj in kept_roots or obj in kept_other:
                         continue
@@ -410,7 +410,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
             frontier = next_frontier
         # own claims of kept non-person entities (literals, e.g. mentioned_in)
         for chunk in _chunked(sorted(kept_other, key=str)):
-            for c in bronze.execute(
+            for c in silver.execute(
                 select(Claim).where(Claim.subject_id.in_(chunk), Claim.object_id.is_(None))
             ).scalars():
                 claim_rows.append(
@@ -427,7 +427,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
 
         for chunk in _chunked(sorted(kept_other, key=str)):
             rows = [
-                entity_row(e) for e in bronze.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
+                entity_row(e) for e in silver.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
             ]
             if rows:
                 gold.execute(insert(Entity), rows)
@@ -453,7 +453,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                     "first_run_id": r.first_run_id,
                     "last_run_id": r.last_run_id,
                 }
-                for r in bronze.execute(
+                for r in silver.execute(
                     select(EntityRecord).where(EntityRecord.entity_id.in_(chunk))
                 ).scalars()
             ]
@@ -478,7 +478,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                 "first_ingested_at": w.first_ingested_at,
                 "last_ingested_at": w.last_ingested_at,
             }
-            for w in bronze.execute(select(Work)).scalars()
+            for w in silver.execute(select(Work)).scalars()
         ]
         for i in range(0, len(work_rows), INSERT_BATCH):
             gold.execute(insert(Work), work_rows[i : i + INSERT_BATCH])
@@ -492,14 +492,14 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                 "source_id": t.source_id,
                 "first_seen_at": t.first_seen_at,
             }
-            for t in bronze.execute(select(WorkTitle)).scalars()
+            for t in silver.execute(select(WorkTitle)).scalars()
         ]
         for i in range(0, len(title_rows), INSERT_BATCH):
             gold.execute(insert(WorkTitle), title_rows[i : i + INSERT_BATCH])
 
         mention_count = 0
         mention_rows: list[dict[str, Any]] = []
-        for m in bronze.execute(select(RawWorkMention)).scalars():
+        for m in silver.execute(select(RawWorkMention)).scalars():
             mention_rows.append(
                 {
                     "id": m.id,
@@ -529,7 +529,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
         # conductor names match regardless of which duplicate spelling appears.
         person_by_key: dict[str, uuid.UUID] = {}
         for chunk in _chunked(sorted(kept_members, key=str)):
-            for member_id, member_key in bronze.execute(
+            for member_id, member_key in silver.execute(
                 select(Entity.id, Entity.dedup_key).where(Entity.id.in_(chunk))
             ).tuples():
                 person_by_key[member_key] = root(member_id)
@@ -612,7 +612,7 @@ def _build(bronze: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
 
     gold_engine.dispose()
 
-    all_other = set(bronze.scalars(select(Entity.id).where(Entity.kind != "person")))
+    all_other = set(silver.scalars(select(Entity.id).where(Entity.kind != "person")))
     return PromoteStats(
         persons_kept=len(kept_roots),
         persons_dropped=len(all_persons) - len(kept_members),
