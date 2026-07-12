@@ -46,6 +46,9 @@ uv run composer-ingest dedupe-persons
 uv run composer-ingest person-review                    # pairs the matcher wasn't sure about
 uv run composer-ingest person-review --accept 7         # confirm a duplicate link
 uv run composer-ingest person-review --reject 7         # reject a proposed link
+
+# group performance mentions into concerts (also runs before every promote)
+uv run composer-ingest derive-concerts
 ```
 
 Data lands in `composers.db` (SQLite) by default. To use Postgres instead:
@@ -78,13 +81,16 @@ and mentions re-pointed; entities left unreferenced are pruned. Silver is
 never modified by promotion, so it is repeatable at any time; status and
 stats land in `gold.db.manifest.json`.
 
-Promotion also **derives concerts** from the mentions' raw performance
-context: mentions are grouped into concerts per source (berlinphil by its
-concert id, nyphil by program + date, concertgebouw by date + city, dates
+**Concerts are derived in silver** from the mentions' raw performance
+context (`composer-ingest derive-concerts`, also run automatically before
+every promote): mentions are grouped into concerts per source (berlinphil by
+its concert id, nyphil by program + date, concertgebouw by date + city, dates
 normalized to ISO) with season and event type; conductors *and soloists*
 (with their instrument/voice) are resolved to person entities by normalized
-name; and each concert keeps its programme. That powers the concert browser,
-per-person concert lists, and concert-count sorting in gold.
+name; and each concert keeps its programme. Promotion copies the concert
+tables into gold, collapsing participant links to canonical entities. That
+powers the concert browser, per-person concert lists, and concert-count
+sorting in both APIs.
 
 ## Consumer API (read the dataset)
 

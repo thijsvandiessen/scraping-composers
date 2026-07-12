@@ -229,6 +229,8 @@ def test_promote_builds_gold_and_reports_stats(
     # the fake source produces no mentions, so nothing qualifies for gold
     assert data["stats"]["persons_kept"] == 0
     assert data["stats"]["persons_dropped"] == 2
+    # concerts were derived (into silver) and copied; none here, but reported
+    assert data["stats"]["concerts"] == 0
 
 
 def test_promote_conflicts_while_running(

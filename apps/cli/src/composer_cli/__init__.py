@@ -6,7 +6,7 @@ from composer_bronze.bucket import DEFAULT_BUCKET_PATH
 from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS
 from composer_scrapers import REGISTRY
 
-from .ingest_cmds import cmd_fetch, cmd_process, cmd_promote
+from .ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_promote
 from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
@@ -94,6 +94,11 @@ def main() -> None:
         "dedupe-persons", help="link near-duplicate person entities (surname/initials/birth-year heuristics)"
     )
     p_dedupe.set_defaults(func=cmd_dedupe_persons)
+
+    p_concerts = sub.add_parser(
+        "derive-concerts", help="rebuild the concert tables from the work mentions' performance context"
+    )
+    p_concerts.set_defaults(func=cmd_derive_concerts)
 
     p_preview = sub.add_parser(
         "person-review", help="list (or resolve) person duplicate pairs flagged for review"

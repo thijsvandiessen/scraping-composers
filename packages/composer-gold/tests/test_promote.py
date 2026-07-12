@@ -4,12 +4,12 @@ from pathlib import Path
 
 from composer_gold import promote, read_gold_manifest
 from composer_schema import SourceClaim
+from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import init_db
 from composer_warehouse.models import (
     Claim,
     Concert,
     ConcertParticipant,
-    ConcertWork,
     Entity,
     RawWorkMention,
     Work,
@@ -179,8 +179,9 @@ def _seed_concert_silver(session: Session) -> None:
         ingest_source(session, source)
 
 
-def test_promote_derives_concerts_from_mentions(session: Session, tmp_path: Path) -> None:
+def test_promote_copies_silver_derived_concerts(session: Session, tmp_path: Path) -> None:
     _seed_concert_silver(session)
+    derive_concerts(session)
     gold_path = tmp_path / "gold.db"
     stats = promote(session, gold_path)
 
@@ -221,12 +222,75 @@ def test_promote_derives_concerts_from_mentions(session: Session, tmp_path: Path
     assert stats.unresolved_participant_names == 1
 
 
-def test_concert_tables_stay_empty_in_silver(session: Session, tmp_path: Path) -> None:
-    _seed_concert_silver(session)
-    promote(session, tmp_path / "gold.db")
-    assert session.scalar(select(Concert.id)) is None
-    assert session.scalar(select(ConcertParticipant.id)) is None
-    assert session.scalar(select(ConcertWork.id)) is None
+def test_promote_over_underived_silver_yields_no_concerts(session: Session, tmp_path: Path) -> None:
+    _seed_concert_silver(session)  # deliberately no derive_concerts
+    stats = promote(session, tmp_path / "gold.db")
+    assert stats.concerts == 0
+
+
+def test_promote_repoints_concert_participants(session: Session, tmp_path: Path) -> None:
+    """A participant resolved to a duplicate collapses to its canonical root in
+    gold; one resolved to a dropped person keeps the name but loses the link."""
+    concertgebouw = FakeSource(
+        records=(
+            perf_mention(
+                "perf:0",
+                "Symfonie nr. 5",
+                "Beethoven, Ludwig van",
+                {"date": "30-06-1929", "city": "Amsterdam", "conductor": "Beinum, Eduard"},
+            ),
+            person("Beinum, Eduard", external_id="cg:beinum-short"),
+            person("Beinum, Eduard van", external_id="cg:beinum"),
+        ),
+        name="concertgebouw_archive",
+        base_url="https://cg.example",
+    )
+    nyphil = FakeSource(
+        records=(
+            perf_mention(
+                "perf:100:0:0",
+                "Luisa Miller",
+                "Verdi, Giuseppe",
+                {"programID": "100", "date": "1993-06-26", "conductors": ["Ghost, Dropped"]},
+            ),
+        ),
+        name="nyphil",
+        base_url="https://nyp.example",
+    )
+    # the ghost conductor exists only in a non-performance source, so rule 1 drops it
+    encyclopedia = FakeSource(
+        records=(person("Ghost, Dropped", external_id="e:ghost"),),
+        name="encyclopedia",
+        base_url="https://encyclopedia.example",
+    )
+    for source in (concertgebouw, nyphil, encyclopedia):
+        ingest_source(session, source)
+
+    # link the short-name duplicate to the fuller name (what dedupe-persons does)
+    canonical = session.scalars(select(Entity).where(Entity.label == "Beinum, Eduard van")).one()
+    duplicate = session.scalars(select(Entity).where(Entity.label == "Beinum, Eduard")).one()
+    duplicate.canonical_entity_id = canonical.id
+    session.commit()
+
+    derive_concerts(session)
+    # in silver the participant resolves to the duplicate spelling
+    silver_conductor = session.scalars(
+        select(ConcertParticipant).where(ConcertParticipant.name == "Beinum, Eduard")
+    ).one()
+    assert silver_conductor.entity_id == duplicate.id
+
+    stats = promote(session, tmp_path / "gold.db")
+
+    with _gold_session(tmp_path / "gold.db") as gold:
+        conductor = gold.scalars(
+            select(ConcertParticipant).where(ConcertParticipant.name == "Beinum, Eduard")
+        ).one()
+        assert conductor.entity_id == canonical.id  # re-pointed to the root
+        ghost = gold.scalars(
+            select(ConcertParticipant).where(ConcertParticipant.name == "Ghost, Dropped")
+        ).one()
+        assert ghost.entity_id is None  # dropped person: name kept, link nulled
+    assert stats.unresolved_participant_names == 1
 
 
 def _seed_sitelink_silver(session: Session) -> None:

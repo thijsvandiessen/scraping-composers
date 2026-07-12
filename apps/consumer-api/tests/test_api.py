@@ -9,6 +9,7 @@ import pytest
 from composer_api import create_app
 from composer_gold import promote
 from composer_schema import EntityDocument, SourceAdapter, SourceClaim
+from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import init_db
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
 from fastapi.testclient import TestClient
@@ -539,6 +540,7 @@ def concerts_client(tmp_path: Path) -> Iterator[TestClient]:
     )
     with factory() as s:
         ingest_source(s, berlinphil)
+        derive_concerts(s)
         gold_path = tmp_path / "gold.db"
         promote(s, gold_path)
     gold_factory = init_db(create_engine(f"sqlite:///{gold_path}"))
@@ -610,10 +612,37 @@ def test_person_concerts_404_and_invalid_sort(concerts_client: TestClient) -> No
     assert concerts_client.get("/v1/conductors?sort=nope").status_code == 422
 
 
-def test_person_concerts_empty_on_silver(client: TestClient) -> None:
-    person = client.get("/v1/composers?q=Bach").json()["items"][0]
-    data = client.get(f"/v1/people/{person['id']}/concerts").json()
-    assert data["total"] == 0 and data["items"] == []
+def test_person_concerts_on_silver(tmp_path: Path) -> None:
+    """Concerts are silver-derived, so the silver app serves them too."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    factory = init_db(engine)
+    berlinphil = FakeSource(
+        records=(
+            perf_mention(
+                "perf:1-1",
+                "Ein Heldenleben",
+                "Richard Strauss",
+                {"concert_id": "1", "date": "1985-03-01", "conductors": ["Karajan, Herbert von"]},
+            ),
+            _person("Karajan, Herbert von", SourceClaim("has_profession", "profession", "conductor")),
+        ),
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    with factory() as s:
+        ingest_source(s, berlinphil)
+        derive_concerts(s)
+    silver = TestClient(create_app("test-silver-concerts", lambda: factory))
+
+    assert silver.get("/v1/concerts").json()["total"] == 1
+    karajan = silver.get("/v1/conductors?q=Karajan").json()["items"][0]
+    data = silver.get(f"/v1/people/{karajan['id']}/concerts").json()
+    assert data["total"] == 1
+    assert data["items"][0]["works"] == ["Ein Heldenleben"]
 
 
 # --- gold app: same routes over the curated database ---
