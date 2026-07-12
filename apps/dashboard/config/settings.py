@@ -15,7 +15,7 @@ from django.urls import reverse_lazy
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = os.environ.get("DASHBOARD_SECRET_KEY", "dev-only-insecure-key")
-DEBUG = os.environ.get("DASHBOARD_DEBUG", "1") == "1"
+DEBUG = os.environ.get("DASHBOARD_DEBUG", "0") == "1"
 ALLOWED_HOSTS = os.environ.get("DASHBOARD_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 # Where the FastAPI apps live; everything the dashboard shows comes from

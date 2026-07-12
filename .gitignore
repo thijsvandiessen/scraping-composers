@@ -6,6 +6,8 @@ node_modules/
 apps/frontend/dist/
 apps/frontend/.astro/
 __pycache__/
+.coverage
+.coverage.*
 .env
 .venv/
 *.egg-info/

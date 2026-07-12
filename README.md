@@ -191,6 +191,7 @@ progress.
 ```sh
 uv sync
 export ADMIN_API_KEY=dev-key  # the admin API requires it; the dashboard forwards it
+export DASHBOARD_DEBUG=1      # DEBUG defaults off; local dev needs it on (see below)
 uv run python apps/dashboard/manage.py migrate            # once: Django's own tables
 uv run python apps/dashboard/manage.py createsuperuser    # once: your login
 uv run uvicorn composer_api:gold_app --port 8000      # gold API (Musicians pages)
@@ -199,6 +200,10 @@ uv run uvicorn composer_api:bronze_app --port 8003    # bronze API (Data pages)
 uv run python apps/dashboard/manage.py runserver 8002             # the dashboard
 # open http://localhost:8002 and log in
 ```
+
+`DEBUG` is off unless `DASHBOARD_DEBUG=1` is set. With `DEBUG` off,
+`runserver` does not serve static files, so the Unfold admin CSS breaks —
+always set it for local development.
 
 The dashboard never touches any composer database — scrape/load/promote
 actions go through the admin API (`ADMIN_API_URL`, default

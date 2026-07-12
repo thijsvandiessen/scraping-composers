@@ -16,23 +16,38 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        member:
-          - packages/composer-schema
-          - packages/composer-bronze
-          - packages/composer-scrapers
-          - packages/composer-warehouse
-          - packages/composer-gold
-          - apps/consumer-api
-          - apps/admin-api
-          - apps/cli
-          - apps/dashboard
+        # cov targets are import names, which differ from the member directory
+        include:
+          - { member: packages/composer-schema,    cov: "--cov=composer_schema" }
+          - { member: packages/composer-bronze,    cov: "--cov=composer_bronze" }
+          - { member: packages/composer-scrapers,  cov: "--cov=composer_scrapers" }
+          - { member: packages/composer-warehouse, cov: "--cov=composer_warehouse" }
+          - { member: packages/composer-gold,      cov: "--cov=composer_gold" }
+          - { member: apps/consumer-api,           cov: "--cov=composer_api" }
+          - { member: apps/admin-api,              cov: "--cov=composer_admin" }
+          - { member: apps/cli,                    cov: "--cov=composer_cli" }
+          - { member: apps/dashboard,              cov: "--cov=scrapers --cov=config" }
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
       - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
         with:
           python-version: "3.12"
       - run: uv sync --locked
-      - run: uv run --directory ${{ matrix.member }} pytest --rootdir .
+      # report-only: no --cov-fail-under until a baseline is established
+      - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }} --cov-report=term-missing
+
+  audit:
+    name: dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+      # audit the pinned lock export without re-resolving; workspace members
+      # are unpublished, so they are excluded from the export
+      - run: uv export --frozen --no-emit-workspace --format requirements-txt -o requirements.txt
+      - run: uvx pip-audit --disable-pip --no-deps -r requirements.txt
 
   frontend:
     name: frontend (astro check & build)

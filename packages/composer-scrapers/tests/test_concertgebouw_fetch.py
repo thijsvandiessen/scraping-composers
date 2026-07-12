@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 import pytest
+from composer_scrapers.concertgebouw import ConcertgebouwAdapter
 from composer_scrapers.concertgebouw.fetch import (
     SEARCH_URL,
     _fetch,
@@ -15,18 +16,8 @@ from composer_scrapers.concertgebouw.fetch import (
 )
 
 
-def _patch_client(
-    monkeypatch: pytest.MonkeyPatch,
-    handler: Callable[[httpx.Request], httpx.Response],
-) -> None:
-    """Replace httpx.Client inside concertgebouw.fetch with one backed by a mock transport."""
-
-    class _MockedClient(httpx.Client):
-        def __init__(self, **kw: Any) -> None:
-            kw["transport"] = httpx.MockTransport(handler)
-            super().__init__(**kw)
-
-    monkeypatch.setattr("composer_scrapers.concertgebouw.fetch.httpx.Client", _MockedClient)
+def _mock_client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler))
 
 
 # ---------------------------------------------------------------------------
@@ -34,12 +25,12 @@ def _patch_client(
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_returns_response_text(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_returns_response_text() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text="<html>archive</html>")
 
-    _patch_client(monkeypatch, handler)
-    assert _fetch("test", method="GET", url=SEARCH_URL) == "<html>archive</html>"
+    with _mock_client(handler) as client:
+        assert _fetch(client, "test", method="GET", url=SEARCH_URL) == "<html>archive</html>"
 
 
 def test_fetch_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,8 +43,8 @@ def test_fetch_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
             return httpx.Response(503, text="Server Error")
         return httpx.Response(200, text="<html>ok</html>")
 
-    _patch_client(monkeypatch, handler)
-    result = _fetch("test", method="GET", url=SEARCH_URL)
+    with _mock_client(handler) as client:
+        result = _fetch(client, "test", method="GET", url=SEARCH_URL)
 
     assert len(attempts) == 3
     assert result == "<html>ok</html>"
@@ -65,9 +56,8 @@ def test_fetch_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatc
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="Always failing")
 
-    _patch_client(monkeypatch, handler)
-    with pytest.raises(httpx.HTTPStatusError):
-        _fetch("test", method="GET", url=SEARCH_URL)
+    with _mock_client(handler) as client, pytest.raises(httpx.HTTPStatusError):
+        _fetch(client, "test", method="GET", url=SEARCH_URL)
 
 
 # ---------------------------------------------------------------------------
@@ -78,12 +68,13 @@ def test_fetch_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatc
 def test_fetch_search_page_issues_get_to_search_url(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_fetch(label: str, **kwargs: Any) -> str:
+    def fake_fetch(client: httpx.Client, label: str, **kwargs: Any) -> str:
         calls.append(kwargs)
         return "<html/>"
 
     monkeypatch.setattr("composer_scrapers.concertgebouw.fetch._fetch", fake_fetch)
-    _fetch_search_page()
+    with _mock_client(lambda request: httpx.Response(200)) as client:
+        _fetch_search_page(client)
 
     assert len(calls) == 1
     assert calls[0]["method"] == "GET"
@@ -93,14 +84,48 @@ def test_fetch_search_page_issues_get_to_search_url(monkeypatch: pytest.MonkeyPa
 def test_fetch_list_page_issues_post_with_list_button(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
 
-    def fake_fetch(label: str, **kwargs: Any) -> str:
+    def fake_fetch(client: httpx.Client, label: str, **kwargs: Any) -> str:
         calls.append(kwargs)
         return "<html/>"
 
     monkeypatch.setattr("composer_scrapers.concertgebouw.fetch._fetch", fake_fetch)
-    _fetch_list_page()
+    with _mock_client(lambda request: httpx.Response(200)) as client:
+        _fetch_list_page(client)
 
     assert len(calls) == 1
     assert calls[0]["method"] == "POST"
     assert calls[0]["url"] == SEARCH_URL
     assert calls[0]["files"] == {"list": (None, "List")}
+
+
+# ---------------------------------------------------------------------------
+# adapter-level client reuse
+# ---------------------------------------------------------------------------
+
+
+def test_adapter_shares_one_client_across_both_requests(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("composer_scrapers.concertgebouw.time.sleep", lambda _: None)
+    created: list[httpx.Client] = []
+    requests: list[httpx.Request] = []
+
+    # the parsers raise unless the search page has every filter select and the
+    # list view has the result table, so serve an empty-but-well-formed page
+    selects = "".join(
+        f'<select id="{select_id}"></select>' for select_id in ("componistcode", "dirigentcode", "solistcode")
+    )
+    page = f'<html>{selects}<table id="zoekresultaat"></table></html>'
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, text=page)
+
+    def fake_make_client() -> httpx.Client:
+        client = _mock_client(handler)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr("composer_scrapers.concertgebouw._make_client", fake_make_client)
+    list(ConcertgebouwAdapter().fetch())
+
+    assert len(created) == 1
+    assert [request.method for request in requests] == ["GET", "POST"]
