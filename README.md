@@ -81,6 +81,26 @@ and mentions re-pointed; entities left unreferenced are pruned. Silver is
 never modified by promotion, so it is repeatable at any time; status and
 stats land in `gold.db.manifest.json`.
 
+### Rebuilding silver
+
+Interpretation (entity resolution, work matching) is applied when a record is
+first loaded — improving the heuristics doesn't fix rows already in the
+database. `rebuild-silver` closes that gap by replaying the latest complete
+snapshot of every source from the bucket into a fresh database with the
+current code, then re-running dedupe and concert derivation:
+
+```sh
+uv run composer-ingest rebuild-silver   # bucket → composers.db (atomic swap)
+```
+
+Human review decisions survive the rebuild: accepted/rejected person pairs
+carry over directly (entity ids are deterministic), and manual work matches
+are re-resolved by the work's composer + title (created again if matching no
+longer produces the work). The run log (`ingest_runs`) starts fresh, and
+**work ids may change** across rebuilds — only entity ids are stable. The
+rebuild requires a file-backed SQLite `DATABASE_URL` (the atomic swap is a
+file replace); status and stats land in `composers.db.manifest.json`.
+
 **Concerts are derived in silver** from the mentions' raw performance
 context (`composer-ingest derive-concerts`, also run automatically before
 every promote): mentions are grouped into concerts per source (berlinphil by

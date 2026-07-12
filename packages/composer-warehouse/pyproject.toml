@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Warehouse (silver) tier: ORM models, ingestion, and person/work matching over the staging DB"
 requires-python = ">=3.11"
 dependencies = [
+    "composer-bronze",
     "composer-config",
     "composer-schema",
     "sqlalchemy>=2.0",
@@ -25,4 +26,5 @@ packages = ["src/composer_warehouse"]
 testpaths = ["tests"]
 
 [tool.uv.sources]
+composer-bronze = { workspace = true }
 composer-config = { workspace = true }

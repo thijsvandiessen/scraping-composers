@@ -6,7 +6,7 @@ from composer_bronze.bucket import DEFAULT_BUCKET_PATH
 from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS
 from composer_scrapers import REGISTRY
 
-from .ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_promote
+from .ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_promote, cmd_rebuild_silver
 from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
@@ -89,6 +89,16 @@ def main() -> None:
         "even without concert/work evidence (default: $GOLD_MIN_SITELINKS or off)",
     )
     p_promote.set_defaults(func=cmd_promote)
+
+    p_rebuild = sub.add_parser(
+        "rebuild-silver",
+        help="rebuild the silver database from the bucket with the current heuristics "
+        "(human review decisions are preserved)",
+    )
+    p_rebuild.add_argument(
+        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
+    )
+    p_rebuild.set_defaults(func=cmd_rebuild_silver)
 
     p_dedupe = sub.add_parser(
         "dedupe-persons", help="link near-duplicate person entities (surname/initials/birth-year heuristics)"

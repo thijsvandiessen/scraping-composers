@@ -52,3 +52,12 @@ class GoldStatus(BaseModel):
     finished_at: str | None
     error: str | None
     stats: dict[str, int]
+
+
+class SilverStatus(BaseModel):
+    exists: bool  # whether the silver database file is present (False when not sqlite)
+    status: str | None  # running | completed | failed | None (never rebuilt)
+    started_at: str | None
+    finished_at: str | None
+    error: str | None
+    stats: dict[str, int]

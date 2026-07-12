@@ -5,16 +5,33 @@ from typing import Annotated
 
 from composer_warehouse.db import get_engine, init_db
 from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+_engine: Engine | None = None
 _session_factory: sessionmaker[Session] | None = None
 
 
 def _get_session_factory() -> sessionmaker[Session]:
-    global _session_factory
+    global _engine, _session_factory
     if _session_factory is None:
-        _session_factory = init_db(get_engine())
+        _engine = get_engine()
+        _session_factory = init_db(_engine)
     return _session_factory
+
+
+def dispose_db() -> None:
+    """Drop the cached engine and session factory.
+
+    After ``rebuild-silver`` atomically swaps the database file, pooled
+    connections still point at the old inode; disposing forces the next
+    request to re-open the new file.
+    """
+    global _engine, _session_factory
+    if _engine is not None:
+        _engine.dispose()
+    _engine = None
+    _session_factory = None
 
 
 def get_db() -> Generator[Session, None, None]:

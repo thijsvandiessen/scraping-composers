@@ -244,6 +244,59 @@ def test_promote_conflicts_while_running(
     assert client.post("/admin/v1/promote").status_code == 409
 
 
+def test_silver_status_before_any_rebuild(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from composer_config import settings
+
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path}/silver.db")
+    data = client.get("/admin/v1/silver").json()
+    assert data["exists"] is False
+    assert data["status"] is None
+
+
+def test_rebuild_silver_replays_bucket_and_reports_stats(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from composer_config import settings
+
+    silver_path = tmp_path / "silver.db"
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{silver_path}")
+    snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
+    assert snapshot_id
+
+    assert client.post("/admin/v1/rebuild-silver").status_code == 202
+    data = client.get("/admin/v1/silver").json()  # background task already ran (TestClient)
+    assert data["exists"] is True
+    assert data["status"] == "completed"
+    assert data["stats"]["sources_replayed"] == 1
+    assert data["stats"]["records_seen"] == 2
+
+
+def test_rebuild_silver_conflicts_while_running(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from composer_config import settings
+    from composer_warehouse.build import BuildManifest, write_build_manifest
+
+    silver_path = tmp_path / "silver.db"
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{silver_path}")
+    write_build_manifest(silver_path, BuildManifest.start())
+    assert client.post("/admin/v1/rebuild-silver").status_code == 409
+
+
+def test_rebuild_silver_rejects_non_sqlite_database(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from composer_config import settings
+
+    monkeypatch.setattr(settings, "database_url", "postgresql+psycopg://user:pass@host:5432/composers")
+    assert client.get("/admin/v1/silver").json()["exists"] is False
+    r = client.post("/admin/v1/rebuild-silver")
+    assert r.status_code == 400
+    assert "sqlite" in r.json()["detail"]
+
+
 def test_admin_key_guard(client: TestClient) -> None:
     # A bare client sends no X-Admin-Key header; the fixture client sends the right one.
     assert TestClient(admin_app).get("/admin/v1/scrapers").status_code == 401

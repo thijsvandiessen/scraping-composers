@@ -10,11 +10,12 @@ database. Same routes, different databases:
 
 from collections.abc import Callable, Generator
 
+from composer_config import settings
 from composer_gold import DEFAULT_GOLD_DB_PATH
 from composer_warehouse.db import get_engine, init_db
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
@@ -61,6 +62,11 @@ def _gold_factory() -> sessionmaker[Session]:
 
 
 def _silver_factory() -> sessionmaker[Session]:
+    # For a sqlite file, NullPool for the same reason as gold: `rebuild-silver`
+    # swaps the file with os.replace, and pooled connections would keep serving
+    # the old inode until a restart.
+    if make_url(settings.database_url).drivername.partition("+")[0] == "sqlite":
+        return init_db(create_engine(settings.database_url, poolclass=NullPool))
     return init_db(get_engine())
 
 

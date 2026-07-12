@@ -10,6 +10,7 @@ from composer_scrapers import REGISTRY
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import get_engine, init_db
 from composer_warehouse.ingestion import ingest_documents
+from composer_warehouse.rebuild import rebuild_silver
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
@@ -52,6 +53,23 @@ def cmd_promote(args: argparse.Namespace) -> int:
     print(f"gold rebuilt at {args.gold_path}")
     for key, value in asdict(stats).items():
         print(f"  {key.replace('_', ' '):<22} {value}")
+    return 0
+
+
+def cmd_rebuild_silver(args: argparse.Namespace) -> int:
+    bucket = LocalBucket(args.bucket_path)
+    sources = [(adapter.name, adapter.base_url) for adapter in REGISTRY.values()]
+    try:
+        stats = rebuild_silver(bucket, sources, args.database_url)
+    except ValueError as exc:
+        print(exc)
+        return 1
+    except Exception as exc:
+        logging.getLogger(__name__).error("rebuild-silver failed: %s: %s", type(exc).__name__, exc)
+        return 1
+    print("silver rebuilt from the bucket")
+    for key, value in asdict(stats).items():
+        print(f"  {key.replace('_', ' '):<26} {value}")
     return 0
 
 

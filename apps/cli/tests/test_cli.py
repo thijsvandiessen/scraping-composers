@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 from composer_cli import main
-from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process
+from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_review
 from composer_cli.query_cmds import cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
@@ -439,6 +439,45 @@ def test_cmd_process_returns_1_without_fetched_runs(tmp_path: Path, monkeypatch:
         )
     )
     assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# cmd_rebuild_silver
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_rebuild_silver_replays_bucket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from composer_scrapers import REGISTRY
+
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    bucket_path = str(tmp_path / "bucket")
+    fake = FakeSource(records=(person("Bach, Johann Sebastian"),), name="fake")
+    monkeypatch.setitem(REGISTRY, "fake", fake)
+    assert cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path)) == 0
+
+    rc = cmd_rebuild_silver(_ns(database_url=db_url, bucket_path=bucket_path))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "silver rebuilt from the bucket" in out
+    assert "sources replayed" in out
+
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+        assert entity.label == "Bach, Johann Sebastian"
+
+
+def test_cmd_rebuild_silver_rejects_non_sqlite(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    rc = cmd_rebuild_silver(
+        _ns(
+            database_url="postgresql+psycopg://user:pass@host:5432/composers",
+            bucket_path=str(tmp_path / "bucket"),
+        )
+    )
+    assert rc == 1
+    assert "sqlite" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

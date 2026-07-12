@@ -7,14 +7,16 @@ from composer_bronze.bucket import DEFAULT_BUCKET_PATH, LOADABLE_STATUSES, Local
 from composer_bronze.scraper import Scraper, iter_from_bucket, new_snapshot_id
 from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS, promote, read_gold_manifest
 from composer_scrapers import REGISTRY, SourceAdapter, is_due
+from composer_warehouse.build import read_build_manifest
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.ingestion import create_run, execute_run
 from composer_warehouse.models import IngestRun, utcnow
+from composer_warehouse.rebuild import rebuild_silver, sqlite_db_path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from .crud import get_run, has_running, list_runs
-from .deps import DbSession, require_admin_key, session_scope
-from .schemas import FetchStarted, GoldStatus, RunOut, RunStarted, ScraperOut, SnapshotOut
+from .deps import DbSession, dispose_db, require_admin_key, session_scope
+from .schemas import FetchStarted, GoldStatus, RunOut, RunStarted, ScraperOut, SilverStatus, SnapshotOut
 
 log = logging.getLogger(__name__)
 
@@ -205,6 +207,66 @@ def start_promote(background: BackgroundTasks) -> GoldStatus:
         raise HTTPException(status.HTTP_409_CONFLICT, "a promote is already in progress")
     background.add_task(_promote_in_background)
     current = _gold_status()
+    current.status = "running"
+    return current
+
+
+def _silver_db_path() -> Path | None:
+    """The silver database file, or None when DATABASE_URL isn't sqlite."""
+    from composer_config import settings
+
+    try:
+        return sqlite_db_path(settings.database_url)
+    except ValueError:
+        return None
+
+
+def _rebuild_silver_in_background() -> None:
+    """Rebuild silver from the bucket; status lives in the silver manifest."""
+    sources = [(adapter.name, adapter.base_url) for adapter in REGISTRY.values()]
+    try:
+        rebuild_silver(_bucket(), sources)
+    except Exception:
+        # Recorded as a failed manifest by rebuild_silver; log for the console.
+        log.exception("background silver rebuild failed")
+    finally:
+        # The swap replaced the database file; drop pooled connections to it.
+        dispose_db()
+
+
+def _silver_status() -> SilverStatus:
+    path = _silver_db_path()
+    manifest = read_build_manifest(path) if path is not None else None
+    return SilverStatus(
+        exists=path.exists() if path is not None else False,
+        status=manifest.status if manifest else None,
+        started_at=manifest.started_at if manifest else None,
+        finished_at=manifest.finished_at if manifest else None,
+        error=manifest.error if manifest else None,
+        stats=manifest.stats if manifest else {},
+    )
+
+
+@admin.get("/silver", response_model=SilverStatus)
+def silver_status() -> SilverStatus:
+    """State of the silver database: last rebuild, its stats, current activity."""
+    return _silver_status()
+
+
+@admin.post("/rebuild-silver", status_code=status.HTTP_202_ACCEPTED, response_model=SilverStatus)
+def start_rebuild_silver(background: BackgroundTasks) -> SilverStatus:
+    """Rebuild the silver database from the bucket (background)."""
+    path = _silver_db_path()
+    if path is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "rebuild-silver requires a file-backed sqlite DATABASE_URL",
+        )
+    manifest = read_build_manifest(path)
+    if manifest is not None and manifest.status == "running":
+        raise HTTPException(status.HTTP_409_CONFLICT, "a silver rebuild is already in progress")
+    background.add_task(_rebuild_silver_in_background)
+    current = _silver_status()
     current.status = "running"
     return current
 
