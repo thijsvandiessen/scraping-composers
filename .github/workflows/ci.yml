@@ -36,6 +36,19 @@ jobs:
       # report-only: no --cov-fail-under until a baseline is established
       - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }} --cov-report=term-missing
 
+  audit:
+    name: dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          python-version: "3.12"
+      # audit the pinned lock export without re-resolving; workspace members
+      # are unpublished, so they are excluded from the export
+      - run: uv export --frozen --no-emit-workspace --format requirements-txt -o requirements.txt
+      - run: uvx pip-audit --disable-pip --no-deps -r requirements.txt
+
   frontend:
     name: frontend (astro check & build)
     runs-on: ubuntu-latest
