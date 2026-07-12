@@ -4,15 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass, field, replace
-from datetime import UTC, datetime
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from composer_warehouse.build import BuildManifest, read_build_manifest, run_build
 from composer_warehouse.models import (
     Base,
     Claim,
@@ -56,42 +55,13 @@ class PromoteStats:
     unresolved_participant_names: int = 0
 
 
-@dataclass(frozen=True)
-class GoldManifest:
-    status: str  # running | completed | failed
-    started_at: str
-    finished_at: str | None = None
-    error: str | None = None
-    stats: dict[str, int] = field(default_factory=dict)
-
-    @classmethod
-    def start(cls) -> GoldManifest:
-        return cls(status="running", started_at=datetime.now(UTC).isoformat())
-
-    def completed(self, stats: PromoteStats) -> GoldManifest:
-        return replace(
-            self, status="completed", finished_at=datetime.now(UTC).isoformat(), stats=asdict(stats)
-        )
-
-    def failed(self, error: str) -> GoldManifest:
-        return replace(self, status="failed", finished_at=datetime.now(UTC).isoformat(), error=error)
+# The gold manifest predates the shared build helper; keep the old names
+# working for existing callers.
+GoldManifest = BuildManifest
 
 
-def _manifest_path(gold_path: str | Path) -> Path:
-    return Path(f"{gold_path}.manifest.json")
-
-
-def write_gold_manifest(gold_path: str | Path, manifest: GoldManifest) -> None:
-    path = _manifest_path(gold_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(manifest), ensure_ascii=False), encoding="utf-8")
-
-
-def read_gold_manifest(gold_path: str | Path) -> GoldManifest | None:
-    path = _manifest_path(gold_path)
-    if not path.exists():
-        return None
-    return GoldManifest(**json.loads(path.read_text(encoding="utf-8")))
+def read_gold_manifest(gold_path: str | Path) -> BuildManifest | None:
+    return read_build_manifest(gold_path)
 
 
 def _chunked(ids: list[Any]) -> Iterable[list[Any]]:
@@ -255,15 +225,7 @@ def promote(silver: Session, gold_path: str | Path, *, min_sitelinks: int | None
     performance/work evidence rule 1 otherwise requires (see ``_build``). ``None``
     leaves promotion unchanged.
     """
-    manifest = GoldManifest.start()
-    write_gold_manifest(gold_path, manifest)
-    try:
-        stats = _build(silver, Path(f"{gold_path}.tmp"), min_sitelinks=min_sitelinks)
-        os.replace(f"{gold_path}.tmp", gold_path)
-    except Exception as exc:
-        write_gold_manifest(gold_path, manifest.failed(f"{type(exc).__name__}: {exc}"))
-        raise
-    write_gold_manifest(gold_path, manifest.completed(stats))
+    stats = run_build(gold_path, lambda tmp: _build(silver, tmp, min_sitelinks=min_sitelinks))
     log.info("gold promoted to %s: %s", gold_path, stats)
     return stats
 

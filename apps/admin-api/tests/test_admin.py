@@ -234,11 +234,11 @@ def test_promote_builds_gold_and_reports_stats(
 def test_promote_conflicts_while_running(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from composer_gold.promote import GoldManifest, write_gold_manifest
+    from composer_warehouse.build import BuildManifest, write_build_manifest
 
     gold_path = tmp_path / "gold.db"
     monkeypatch.setattr(admin_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
-    write_gold_manifest(gold_path, GoldManifest.start())
+    write_build_manifest(gold_path, BuildManifest.start())
     assert client.post("/admin/v1/promote").status_code == 409
 
 
