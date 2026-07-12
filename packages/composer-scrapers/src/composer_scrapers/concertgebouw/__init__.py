@@ -13,12 +13,13 @@ for the List view of every work performed):
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
 from .dropdowns import SELECTS, _options, _record
-from .fetch import BASE_URL, _fetch_list_page, _fetch_search_page
+from .fetch import BASE_URL, REQUEST_DELAY_S, _fetch_list_page, _fetch_search_page, _make_client
 from .performances import _performances
 
 log = logging.getLogger(__name__)
@@ -37,7 +38,10 @@ class ConcertgebouwAdapter(SourceAdapter):
         view (one work mention each). The whole source is two fetches;
         ``max_pages`` is accepted for interface compatibility and ignored."""
         ingested_at = datetime.now(UTC)
-        page = _fetch_search_page()
+        with _make_client() as client:
+            page = _fetch_search_page(client)
+            time.sleep(REQUEST_DELAY_S)
+            list_page = _fetch_list_page(client)
         for select_id, profession in SELECTS:
             count = 0
             for value, label in _options(page, select_id):
@@ -57,7 +61,7 @@ class ConcertgebouwAdapter(SourceAdapter):
             log.info("concertgebouw %s: %d records", select_id, count)
 
         count = 0
-        for mention in _performances(_fetch_list_page()):
+        for mention in _performances(list_page):
             count += 1
             yield WorkMentionDocument(
                 id=mention.external_id,
