@@ -166,8 +166,9 @@ class StubAPI:
             "stats": {"persons_kept": 15387, "persons_dropped": 130192},
         }
 
-    def start_promote(self) -> dict[str, Any]:
+    def start_promote(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
         self._maybe_fail()
+        self.promote_options = options
         return {
             "exists": True,
             "status": "running",
@@ -794,11 +795,73 @@ def test_promote_page_shows_gold_status(monkeypatch: pytest.MonkeyPatch, staff_c
 
 
 def test_promote_button_posts_and_redirects(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
-    _install(monkeypatch, StubAPI())
+    stub = StubAPI()
+    _install(monkeypatch, stub)
     response = staff_client.post("/admin/promote/start", follow=True)
     assert response.redirect_chain[0] == ("/admin/promote/", 302)
     assert "rebuilding the gold database" in response.content.decode()
+    assert stub.promote_options is None  # bare POST stays an all-default run
     assert staff_client.get("/admin/promote/start").status_code == 405
+
+
+def test_promote_page_renders_config_fields(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    _install(monkeypatch, StubAPI())
+    page = staff_client.get("/admin/promote/").content.decode()
+    for field in ("drop_unevidenced_persons", "collapse_duplicates", "prune_unreferenced"):
+        assert f'name="{field}" checked' in page
+    assert 'name="min_sitelinks"' in page
+    assert 'name="gold_path"' in page
+
+
+def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    stub = StubAPI()
+    _install(monkeypatch, stub)
+    # rule 3 unchecked (absent), the others checked; a threshold and custom path set
+    response = staff_client.post(
+        "/admin/promote/start",
+        {
+            "options_form": "1",
+            "drop_unevidenced_persons": "on",
+            "collapse_duplicates": "on",
+            "min_sitelinks": "150",
+            "gold_path": "/data/gold-alt.db",
+        },
+        follow=True,
+    )
+    assert "rebuilding the gold database" in response.content.decode()
+    assert stub.promote_options == {
+        "prune_unreferenced": False,
+        "min_sitelinks": 150,
+        "gold_path": "/data/gold-alt.db",
+    }
+
+
+def test_promote_form_defaults_send_no_options(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    stub = StubAPI()
+    _install(monkeypatch, stub)
+    fields = {
+        "options_form": "1",
+        "drop_unevidenced_persons": "on",
+        "collapse_duplicates": "on",
+        "prune_unreferenced": "on",
+        "min_sitelinks": "",
+        "gold_path": "",
+    }
+    staff_client.post("/admin/promote/start", fields, follow=True)
+    assert stub.promote_options is None  # untouched form: bodiless POST, server defaults
+
+
+def test_promote_form_rejects_non_numeric_sitelinks(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    stub = StubAPI()
+    _install(monkeypatch, stub)
+    response = staff_client.post(
+        "/admin/promote/start", {"options_form": "1", "min_sitelinks": "many"}, follow=True
+    )
+    assert response.redirect_chain[0] == ("/admin/promote/", 302)
+    assert "min sitelinks must be a whole number" in response.content.decode()
+    assert not hasattr(stub, "promote_options")  # the API was never called
 
 
 def test_review_page_lists_needs_review_mentions(

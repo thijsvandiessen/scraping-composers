@@ -88,6 +88,24 @@ def main() -> None:
         help="also promote persons whose Wikipedia sitelink count is at least N, "
         "even without concert/work evidence (default: $GOLD_MIN_SITELINKS or off)",
     )
+    p_promote.add_argument(
+        "--drop-unevidenced-persons",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="rule 1: drop persons without concert/work evidence",
+    )
+    p_promote.add_argument(
+        "--collapse-duplicates",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="rule 2: collapse duplicate persons into their canonical row",
+    )
+    p_promote.add_argument(
+        "--prune-unreferenced",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="rule 3: prune entities left unreferenced by the other rules",
+    )
     p_promote.set_defaults(func=cmd_promote)
 
     p_rebuild = sub.add_parser(

@@ -11,7 +11,7 @@ consumers want:
 
 from composer_config import settings
 
-from .promote import GoldManifest, PromoteStats, promote, read_gold_manifest
+from .promote import GoldManifest, PromoteConfig, PromoteStats, promote, read_gold_manifest
 
 DEFAULT_GOLD_DB_PATH = settings.gold_db_path
 
@@ -23,6 +23,7 @@ __all__ = [
     "DEFAULT_GOLD_DB_PATH",
     "DEFAULT_MIN_SITELINKS",
     "GoldManifest",
+    "PromoteConfig",
     "PromoteStats",
     "promote",
     "read_gold_manifest",

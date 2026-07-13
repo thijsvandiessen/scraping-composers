@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RunOut(BaseModel):
@@ -43,6 +43,21 @@ class RunStarted(BaseModel):
     run_id: int
     source: str
     status: str
+
+
+class PromoteOptions(BaseModel):
+    """Optional per-run promotion settings; an omitted field means its default.
+
+    ``min_sitelinks`` distinguishes omitted (use the server's configured
+    default) from an explicit ``null`` (turn the sitelink signal off) via
+    ``model_fields_set``.
+    """
+
+    gold_path: str | None = None  # None: the server's configured gold path
+    min_sitelinks: int | None = Field(default=None, ge=0)
+    drop_unevidenced_persons: bool = True  # rule 1
+    collapse_duplicates: bool = True  # rule 2
+    prune_unreferenced: bool = True  # rule 3
 
 
 class GoldStatus(BaseModel):

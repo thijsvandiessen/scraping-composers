@@ -5,7 +5,7 @@ from pathlib import Path
 
 from composer_bronze.bucket import LOADABLE_STATUSES, LocalBucket
 from composer_bronze.scraper import Scraper, iter_from_bucket
-from composer_gold import promote
+from composer_gold import PromoteConfig, promote
 from composer_scrapers import REGISTRY
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import get_engine, init_db
@@ -46,7 +46,13 @@ def cmd_promote(args: argparse.Namespace) -> int:
             # Concerts are silver-derived state the gold build copies; refresh
             # them first so promote-after-load never publishes stale concerts.
             derive_concerts(session)
-            stats = promote(session, args.gold_path, min_sitelinks=args.min_sitelinks)
+            config = PromoteConfig(
+                min_sitelinks=args.min_sitelinks,
+                drop_unevidenced_persons=args.drop_unevidenced_persons,
+                collapse_duplicates=args.collapse_duplicates,
+                prune_unreferenced=args.prune_unreferenced,
+            )
+            stats = promote(session, args.gold_path, config)
         except Exception as exc:
             logging.getLogger(__name__).error("promote failed: %s: %s", type(exc).__name__, exc)
             return 1
