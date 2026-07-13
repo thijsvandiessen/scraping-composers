@@ -81,8 +81,9 @@ class AdminAPI(_BaseAPI):
         status: dict[str, Any] = self._request("GET", "/admin/v1/gold")
         return status
 
-    def start_promote(self) -> dict[str, Any]:
-        status: dict[str, Any] = self._request("POST", "/admin/v1/promote")
+    def start_promote(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"json": options} if options else {}
+        status: dict[str, Any] = self._request("POST", "/admin/v1/promote", **kwargs)
         return status
 
 

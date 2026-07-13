@@ -215,12 +215,40 @@ def promote_page(request: HttpRequest) -> HttpResponse:
     return render(request, "scrapers/promote.html", context)
 
 
+PROMOTE_RULES = ("drop_unevidenced_persons", "collapse_duplicates", "prune_unreferenced")
+
+
+def _promote_options(request: HttpRequest) -> dict[str, object]:
+    """Promotion options from the promote form; empty means an all-default run.
+
+    Unchecked checkboxes are absent from the POST, so rule toggles are only
+    read when the form marker is present — a bare POST stays a default run.
+    """
+    options: dict[str, object] = {}
+    if request.POST.get("options_form"):
+        for rule in PROMOTE_RULES:
+            if request.POST.get(rule) != "on":
+                options[rule] = False
+    raw_sitelinks = request.POST.get("min_sitelinks", "").strip()
+    if raw_sitelinks:
+        options["min_sitelinks"] = int(raw_sitelinks)  # ValueError handled by the view
+    gold_path = request.POST.get("gold_path", "").strip()
+    if gold_path:
+        options["gold_path"] = gold_path
+    return options
+
+
 def start_promote(request: HttpRequest) -> HttpResponse:
     if request.method != "POST":
         return HttpResponseNotAllowed(["POST"])
+    try:
+        options = _promote_options(request)
+    except ValueError:
+        messages.error(request, "min sitelinks must be a whole number")
+        return redirect("promote")
     api = AdminAPI.from_env()
     try:
-        api.start_promote()
+        api.start_promote(options or None)
     except AdminAPIError as exc:
         messages.error(request, str(exc))
     else:

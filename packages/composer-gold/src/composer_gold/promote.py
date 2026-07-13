@@ -52,6 +52,21 @@ class PromoteStats:
     unresolved_participant_names: int = 0
 
 
+@dataclass(frozen=True)
+class PromoteConfig:
+    """Per-run knobs of the promotion: the curation rules and their signals.
+
+    Every rule defaults to on; the two-argument ``promote(silver, gold_path)``
+    call is the fully curated build. ``min_sitelinks`` only matters while
+    rule 1 is on — with rule 1 off every person is kept anyway.
+    """
+
+    min_sitelinks: int | None = None
+    drop_unevidenced_persons: bool = True  # rule 1
+    collapse_duplicates: bool = True  # rule 2
+    prune_unreferenced: bool = True  # rule 3
+
+
 # The gold manifest predates the shared build helper; keep the old names
 # working for existing callers.
 GoldManifest = BuildManifest
@@ -118,62 +133,71 @@ def _sitelink_roots(
     return {r for r, count in max_sitelinks.items() if r in all_person_roots and count >= min_sitelinks}
 
 
-def promote(silver: Session, gold_path: str | Path, *, min_sitelinks: int | None = None) -> PromoteStats:
+def promote(silver: Session, gold_path: str | Path, config: PromoteConfig | None = None) -> PromoteStats:
     """Rebuild the gold database at ``gold_path`` from the silver session.
 
     Builds into ``{gold_path}.tmp`` and atomically swaps it in, so readers
     never see a half-built database. Progress and outcome land in
     ``{gold_path}.manifest.json``.
 
-    ``min_sitelinks`` is an optional extra promotion signal: when set, a person
-    whose Wikipedia sitelink count reaches it is kept even without the
-    performance/work evidence rule 1 otherwise requires (see ``_build``). ``None``
-    leaves promotion unchanged.
+    ``config`` tunes the run: the sitelink promotion signal and per-rule
+    toggles (see ``PromoteConfig``). ``None`` runs the full curation with
+    the sitelink signal off.
     """
-    stats = run_build(gold_path, lambda tmp: _build(silver, tmp, min_sitelinks=min_sitelinks))
+    cfg = config or PromoteConfig()
+    stats = run_build(gold_path, lambda tmp: _build(silver, tmp, cfg))
     log.info("gold promoted to %s: %s", gold_path, stats)
     return stats
 
 
-def _build(silver: Session, tmp_path: Path, *, min_sitelinks: int | None = None) -> PromoteStats:
+def _build(silver: Session, tmp_path: Path, config: PromoteConfig) -> PromoteStats:
     tmp_path.unlink(missing_ok=True)
     gold_engine = create_engine(f"sqlite:///{tmp_path}")
     Base.metadata.create_all(gold_engine)
 
     # --- rule 2 groundwork: duplicate clusters -----------------------------
-    roots = _resolve_roots(silver)
+    # With the rule off, no links are resolved and every spelling stands on
+    # its own (including for rule 1's evidence check).
+    roots = _resolve_roots(silver) if config.collapse_duplicates else {}
 
     def root(entity_id: uuid.UUID) -> uuid.UUID:
         return roots.get(entity_id, entity_id)
 
-    # --- rule 1: persons with performance/work evidence --------------------
-    mention_composers = set(
-        silver.scalars(
-            select(RawWorkMention.composer_entity_id)
-            .where(RawWorkMention.composer_entity_id.is_not(None))
-            .distinct()
-        )
-    )
-    perf_sources = select(RawWorkMention.source_id).distinct().scalar_subquery()
-    archive_reported = set(
-        silver.scalars(
-            select(EntityRecord.entity_id)
-            .where(EntityRecord.source_id.in_(perf_sources), EntityRecord.entity_id.is_not(None))
-            .distinct()
-        )
-    )
-    evidence = mention_composers | archive_reported
-
     all_persons = set(silver.scalars(select(Entity.id).where(Entity.kind == "person")))
-    evidence_roots = {root(p) for p in all_persons if p in evidence}
 
-    # --- extra signal: culturally significant persons by sitelink count -----
-    # Wikipedia sitelink count (from Wikidata) is a proxy for significance. When
-    # a threshold is set, a person clearing it is promoted even without the
-    # performance/work evidence above; this only ever adds persons, never drops.
-    sitelink_roots = _sitelink_roots(silver, root, all_persons, min_sitelinks)
+    if config.drop_unevidenced_persons:
+        # --- rule 1: persons with performance/work evidence ----------------
+        mention_composers = set(
+            silver.scalars(
+                select(RawWorkMention.composer_entity_id)
+                .where(RawWorkMention.composer_entity_id.is_not(None))
+                .distinct()
+            )
+        )
+        perf_sources = select(RawWorkMention.source_id).distinct().scalar_subquery()
+        archive_reported = set(
+            silver.scalars(
+                select(EntityRecord.entity_id)
+                .where(EntityRecord.source_id.in_(perf_sources), EntityRecord.entity_id.is_not(None))
+                .distinct()
+            )
+        )
+        evidence = mention_composers | archive_reported
+        evidence_roots = {root(p) for p in all_persons if p in evidence}
 
-    kept_roots = evidence_roots | sitelink_roots
+        # --- extra signal: culturally significant persons by sitelink count -
+        # Wikipedia sitelink count (from Wikidata) is a proxy for significance.
+        # When a threshold is set, a person clearing it is promoted even without
+        # the performance/work evidence above; this only ever adds persons,
+        # never drops.
+        sitelink_roots = _sitelink_roots(silver, root, all_persons, config.min_sitelinks)
+
+        kept_roots = evidence_roots | sitelink_roots
+    else:
+        evidence_roots = set()
+        sitelink_roots = set()
+        kept_roots = {root(p) for p in all_persons}
+
     kept_members = {p for p in all_persons if root(p) in kept_roots}
 
     with gold_engine.begin() as gold:
@@ -250,6 +274,7 @@ def _build(silver: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                 )
 
         # --- rule 3: referenced non-person entities (to a fixpoint) --------
+        all_other = set(silver.scalars(select(Entity.id).where(Entity.kind != "person")))
         kept_other: set[uuid.UUID] = set()
         frontier = {r for r in referenced if r not in kept_roots}
         while frontier:
@@ -273,6 +298,12 @@ def _build(silver: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
                         }
                     )
             frontier = next_frontier
+        # With rule 3 off, unreferenced non-person entities are kept as well.
+        # Joining after the walk (not seeding it) keeps the referenced part of
+        # gold — including discovery-edge claims — identical to a curated run;
+        # the pass below picks up the extra entities' literal claims.
+        if not config.prune_unreferenced:
+            kept_other |= {root(e) for e in all_other} - kept_roots
         # own claims of kept non-person entities (literals, e.g. mentioned_in)
         for chunk in _chunked(sorted(kept_other, key=str)):
             for c in silver.execute(
@@ -442,7 +473,6 @@ def _build(silver: Session, tmp_path: Path, *, min_sitelinks: int | None = None)
 
     gold_engine.dispose()
 
-    all_other = set(silver.scalars(select(Entity.id).where(Entity.kind != "person")))
     return PromoteStats(
         persons_kept=len(kept_roots),
         persons_dropped=len(all_persons) - len(kept_members),

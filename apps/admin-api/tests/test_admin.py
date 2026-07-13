@@ -244,6 +244,60 @@ def test_promote_conflicts_while_running(
     assert client.post("/admin/v1/promote").status_code == 409
 
 
+def test_promote_body_toggles_rules(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    gold_path = tmp_path / "gold.db"
+    monkeypatch.setattr(admin_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
+    snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
+    client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/process")
+
+    # the fake persons have no performance evidence; with rule 1 off they're kept
+    r = client.post("/admin/v1/promote", json={"drop_unevidenced_persons": False})
+    assert r.status_code == 202
+    data = client.get("/admin/v1/gold").json()
+    assert data["status"] == "completed"
+    assert data["stats"]["persons_kept"] == 2
+    assert data["stats"]["persons_dropped"] == 0
+
+
+def test_promote_body_resolves_path_and_sitelinks(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from composer_gold import PromoteConfig, PromoteStats
+
+    calls: list[tuple[str, PromoteConfig]] = []
+
+    def record_promote(session: object, gold_path: str, config: PromoteConfig) -> PromoteStats:
+        calls.append((str(gold_path), config))
+        return PromoteStats()
+
+    monkeypatch.setattr(admin_routes, "promote", record_promote)
+    monkeypatch.setattr(admin_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
+    monkeypatch.setattr(admin_routes, "DEFAULT_MIN_SITELINKS", 50)
+
+    # bodiless: configured defaults, all rules on
+    assert client.post("/admin/v1/promote").status_code == 202
+    # explicit null: the sitelink signal is switched off, not defaulted
+    assert client.post("/admin/v1/promote", json={"min_sitelinks": None}).status_code == 202
+    # explicit values win over the defaults
+    custom = tmp_path / "elsewhere.db"
+    body = {"min_sitelinks": 120, "gold_path": str(custom), "collapse_duplicates": False}
+    assert client.post("/admin/v1/promote", json=body).status_code == 202
+
+    paths = [path for path, _ in calls]
+    configs = [config for _, config in calls]
+    assert paths == [str(tmp_path / "gold.db"), str(tmp_path / "gold.db"), str(custom)]
+    assert [c.min_sitelinks for c in configs] == [50, None, 120]
+    assert [c.collapse_duplicates for c in configs] == [True, True, False]
+    assert all(c.drop_unevidenced_persons and c.prune_unreferenced for c in configs)
+
+
+def test_promote_rejects_invalid_body(client: TestClient) -> None:
+    assert client.post("/admin/v1/promote", json={"min_sitelinks": "abc"}).status_code == 422
+    assert client.post("/admin/v1/promote", json={"min_sitelinks": -1}).status_code == 422
+
+
 def test_silver_status_before_any_rebuild(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

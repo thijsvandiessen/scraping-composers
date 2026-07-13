@@ -5,7 +5,13 @@ from typing import Annotated
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH, LOADABLE_STATUSES, LocalBucket, Snapshot
 from composer_bronze.scraper import Scraper, iter_from_bucket, new_snapshot_id
-from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS, promote, read_gold_manifest
+from composer_gold import (
+    DEFAULT_GOLD_DB_PATH,
+    DEFAULT_MIN_SITELINKS,
+    PromoteConfig,
+    promote,
+    read_gold_manifest,
+)
 from composer_scrapers import REGISTRY, SourceAdapter, is_due
 from composer_warehouse.build import read_build_manifest
 from composer_warehouse.concerts import derive_concerts
@@ -16,7 +22,16 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 
 from .crud import get_run, has_running, list_runs
 from .deps import DbSession, dispose_db, require_admin_key, session_scope
-from .schemas import FetchStarted, GoldStatus, RunOut, RunStarted, ScraperOut, SilverStatus, SnapshotOut
+from .schemas import (
+    FetchStarted,
+    GoldStatus,
+    PromoteOptions,
+    RunOut,
+    RunStarted,
+    ScraperOut,
+    SilverStatus,
+    SnapshotOut,
+)
 
 log = logging.getLogger(__name__)
 
@@ -168,23 +183,42 @@ def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: B
     return RunStarted(run_id=run.id, source=source, status=run.status)
 
 
-def _promote_in_background() -> None:
+def _promote_in_background(gold_path: str, config: PromoteConfig) -> None:
     """Rebuild the gold database; status lives in the gold manifest."""
     with session_scope() as session:
         try:
             # Concerts are silver-derived state the gold build copies; refresh
             # them first so the Promote button never publishes stale concerts.
             derive_concerts(session)
-            promote(session, DEFAULT_GOLD_DB_PATH, min_sitelinks=DEFAULT_MIN_SITELINKS)
+            promote(session, gold_path, config)
         except Exception:
             # Recorded as a failed manifest by promote; log for the server console.
             log.exception("background promote failed")
 
 
-def _gold_status() -> GoldStatus:
-    manifest = read_gold_manifest(DEFAULT_GOLD_DB_PATH)
+def _promote_config(options: PromoteOptions | None) -> tuple[str, PromoteConfig]:
+    """Resolve the request body (or its absence) into a gold path and config.
+
+    ``min_sitelinks`` left out of the body falls back to the configured
+    default; an explicit ``null`` switches the sitelink signal off.
+    """
+    opts = options or PromoteOptions()
+    gold_path = opts.gold_path or DEFAULT_GOLD_DB_PATH
+    min_sitelinks = opts.min_sitelinks if "min_sitelinks" in opts.model_fields_set else DEFAULT_MIN_SITELINKS
+    config = PromoteConfig(
+        min_sitelinks=min_sitelinks,
+        drop_unevidenced_persons=opts.drop_unevidenced_persons,
+        collapse_duplicates=opts.collapse_duplicates,
+        prune_unreferenced=opts.prune_unreferenced,
+    )
+    return str(gold_path), config
+
+
+def _gold_status(gold_path: str | None = None) -> GoldStatus:
+    path = gold_path or DEFAULT_GOLD_DB_PATH
+    manifest = read_gold_manifest(path)
     return GoldStatus(
-        exists=Path(DEFAULT_GOLD_DB_PATH).exists(),
+        exists=Path(path).exists(),
         status=manifest.status if manifest else None,
         started_at=manifest.started_at if manifest else None,
         finished_at=manifest.finished_at if manifest else None,
@@ -200,13 +234,18 @@ def gold_status() -> GoldStatus:
 
 
 @admin.post("/promote", status_code=status.HTTP_202_ACCEPTED, response_model=GoldStatus)
-def start_promote(background: BackgroundTasks) -> GoldStatus:
-    """Rebuild the curated gold database from silver (background)."""
-    manifest = read_gold_manifest(DEFAULT_GOLD_DB_PATH)
+def start_promote(background: BackgroundTasks, options: PromoteOptions | None = None) -> GoldStatus:
+    """Rebuild the curated gold database from silver (background).
+
+    The optional body tunes the run (see ``PromoteOptions``); a bodiless POST
+    runs the full curation with the configured defaults.
+    """
+    gold_path, config = _promote_config(options)
+    manifest = read_gold_manifest(gold_path)
     if manifest is not None and manifest.status == "running":
         raise HTTPException(status.HTTP_409_CONFLICT, "a promote is already in progress")
-    background.add_task(_promote_in_background)
-    current = _gold_status()
+    background.add_task(_promote_in_background, gold_path, config)
+    current = _gold_status(gold_path)
     current.status = "running"
     return current
 

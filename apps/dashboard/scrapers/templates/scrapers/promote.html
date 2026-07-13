@@ -10,16 +10,30 @@
 {% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
 
 {% if gold %}
-<div class="sc-toolbar">
-  <form method="post" action="{% url 'start_promote' %}">
-    {% csrf_token %}
+<form method="post" action="{% url 'start_promote' %}">
+  {% csrf_token %}
+  <input type="hidden" name="options_form" value="1">
+  <div class="sc-toolbar">
     <button type="submit" class="sc-btn sc-btn-primary" {% if gold.status == "running" %}disabled{% endif %}>
       Promote silver → gold
     </button>
-  </form>
-  <span class="sc-muted">full rebuild of the curated gold database from the silver staging database</span>
-  {% if refreshing %}<span class="sc-muted">promoting — refreshing every 5 s…</span>{% endif %}
-</div>
+    <span class="sc-muted">full rebuild of the curated gold database from the silver staging database</span>
+    {% if refreshing %}<span class="sc-muted">promoting — refreshing every 5 s…</span>{% endif %}
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 0.375rem; margin: 0.75rem 0; font-size: 0.875rem;">
+    <label><input type="checkbox" name="drop_unevidenced_persons" checked>
+      drop persons without concert/work evidence (rule 1)</label>
+    <label><input type="checkbox" name="collapse_duplicates" checked>
+      collapse duplicate persons into their canonical row (rule 2)</label>
+    <label><input type="checkbox" name="prune_unreferenced" checked>
+      prune entities left unreferenced (rule 3)</label>
+    <label>min sitelinks
+      <input type="number" name="min_sitelinks" min="0" placeholder="server default" style="width: 9rem;">
+      <span class="sc-muted">also promote persons with at least this many Wikipedia sitelinks</span></label>
+    <label>gold path
+      <input type="text" name="gold_path" placeholder="server default" style="width: 18rem;"></label>
+  </div>
+</form>
 
 <table class="sc-table" style="max-width: 34rem;">
   <tr>
@@ -45,9 +59,10 @@
 </table>
 
 <p class="sc-muted" style="max-width: 44rem; font-size: 0.875rem;">
-  Promotion applies the curation rules: people without any concerts, recordings, or
-  works mentioned are dropped; duplicate person entities are collapsed into their
-  canonical row; entities left unreferenced are pruned. Silver is never modified.
+  Promotion applies the curation rules selected above: people without any concerts,
+  recordings, or works mentioned are dropped; duplicate person entities are collapsed
+  into their canonical row; entities left unreferenced are pruned. Each rule can be
+  switched off for a run. Silver is never modified.
 </p>
 {% endif %}
 {% endblock %}

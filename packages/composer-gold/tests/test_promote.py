@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from composer_gold import promote, read_gold_manifest
+from composer_gold import PromoteConfig, promote, read_gold_manifest
 from composer_schema import SourceClaim
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import init_db
@@ -335,7 +335,7 @@ def test_sitelink_threshold_off_by_default(session: Session, tmp_path: Path) -> 
 def test_sitelink_threshold_promotes_significant_person(session: Session, tmp_path: Path) -> None:
     _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, min_sitelinks=100)  # 200 >= 100
+    stats = promote(session, gold_path, PromoteConfig(min_sitelinks=100))  # 200 >= 100
 
     with _gold_session(gold_path) as gold:
         famous = gold.scalars(select(Entity).where(Entity.label == "Famous, Unperformed")).one()
@@ -351,13 +351,76 @@ def test_sitelink_threshold_promotes_significant_person(session: Session, tmp_pa
 def test_sitelink_threshold_below_count_drops_person(session: Session, tmp_path: Path) -> None:
     _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, min_sitelinks=300)  # 200 < 300
+    stats = promote(session, gold_path, PromoteConfig(min_sitelinks=300))  # 200 < 300
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
         assert "Famous, Unperformed" not in labels  # numeric compare, not mere presence
         assert "Beethoven, Ludwig van" in labels  # evidence still wins independently
     assert stats.persons_promoted_by_sitelinks == 0
+
+
+def test_rule1_off_keeps_unevidenced_persons(session: Session, tmp_path: Path) -> None:
+    _seed_silver(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path, PromoteConfig(drop_unevidenced_persons=False))
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Nobody, Obscure" in labels  # no evidence required anymore
+        # rule 3 now keeps Atlantis: its only referrer is kept
+        assert "Atlantis" in labels
+        # the other rules still apply
+        assert "Beethoven" not in labels  # duplicate still collapsed
+    assert stats.persons_dropped == 0
+    assert stats.persons_kept == 3  # Beethoven root, Mahler, Nobody
+    assert stats.duplicates_collapsed == 1
+    assert stats.persons_promoted_by_sitelinks == 0
+
+
+def test_rule2_off_judges_each_spelling_on_its_own(session: Session, tmp_path: Path) -> None:
+    _seed_silver(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path, PromoteConfig(collapse_duplicates=False))
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Beethoven, Ludwig van" in labels  # evidence of its own
+        # without collapsing, the encyclopedia-only spelling has no evidence
+        assert "Beethoven" not in labels
+    assert stats.duplicates_collapsed == 0
+    assert stats.persons_dropped == 2  # Nobody, Obscure + the short spelling
+
+
+def test_rules_1_and_2_off_keep_both_spellings(session: Session, tmp_path: Path) -> None:
+    _seed_silver(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(
+        session, gold_path, PromoteConfig(drop_unevidenced_persons=False, collapse_duplicates=False)
+    )
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert {"Beethoven", "Beethoven, Ludwig van", "Nobody, Obscure"} <= labels
+        # gold never carries canonical links, even with collapsing off
+        assert gold.scalar(select(Entity.id).where(Entity.canonical_entity_id.is_not(None))) is None
+    assert stats.persons_dropped == 0
+    assert stats.duplicates_collapsed == 0
+    assert stats.persons_kept == 4
+
+
+def test_rule3_off_keeps_unreferenced_entities(session: Session, tmp_path: Path) -> None:
+    _seed_silver(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path, PromoteConfig(prune_unreferenced=False))
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Atlantis" in labels  # kept although only a dropped person referred to it
+        assert "Nobody, Obscure" not in labels  # rule 1 still applies
+        assert "Vienna" in labels  # referenced entities unaffected
+    assert stats.entities_pruned == 0
+    assert stats.persons_dropped == 1
 
 
 def test_promote_writes_manifest_and_is_rerunnable(session: Session, tmp_path: Path) -> None:

@@ -81,6 +81,14 @@ and mentions re-pointed; entities left unreferenced are pruned. Silver is
 never modified by promotion, so it is repeatable at any time; status and
 stats land in `gold.db.manifest.json`.
 
+Each run is configurable: every rule can be switched off (CLI
+`--no-drop-unevidenced-persons`, `--no-collapse-duplicates`,
+`--no-prune-unreferenced`; the same toggles appear in the dashboard's promote
+form and in the `POST /admin/v1/promote` body), `--min-sitelinks N` also keeps
+persons with at least N Wikipedia sitelinks, and `--gold-path` writes the gold
+database elsewhere. In code the knobs travel as a single `PromoteConfig`
+passed to `promote()`.
+
 ### Rebuilding silver
 
 Interpretation (entity resolution, work matching) is applied when a record is
