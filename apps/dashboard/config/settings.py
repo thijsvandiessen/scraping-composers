@@ -24,8 +24,7 @@ ALLOWED_HOSTS = os.environ.get("DASHBOARD_ALLOWED_HOSTS", "localhost,127.0.0.1")
 ADMIN_API_URL = os.environ.get("ADMIN_API_URL", "http://localhost:8001")
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY")
 GOLD_API_URL = os.environ.get("GOLD_API_URL", "http://localhost:8000")
-# BRONZE_API_URL is the deprecated name for the same app, kept as a fallback.
-SILVER_API_URL = os.environ.get("SILVER_API_URL") or os.environ.get("BRONZE_API_URL", "http://localhost:8003")
+SILVER_API_URL = os.environ.get("SILVER_API_URL", "http://localhost:8003")
 
 INSTALLED_APPS = [
     "unfold",  # must precede django.contrib.admin

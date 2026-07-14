@@ -113,7 +113,7 @@ file replace); status and stats land in `composers.db.manifest.json`.
 context (`composer-ingest derive-concerts`, also run automatically before
 every promote): mentions are grouped into concerts per source (berlinphil by
 its concert id, nyphil by program + date, concertgebouw by date + city, dates
-normalized to ISO) with season and event type; conductors *and soloists*
+normalized to ISO) with season and event type; conductors _and soloists_
 (with their instrument/voice) are resolved to person entities by normalized
 name; and each concert keeps its programme. Promotion copies the concert
 tables into gold, collapsing participant links to canonical entities. That
@@ -179,7 +179,7 @@ uv run uvicorn composer_admin:admin_app --port 8001
 ```
 
 Each scraper carries a **refresh cadence** (`monthly`, `yearly`, or `static`)
-declared on its `SourceAdapter`. The API surfaces which scrapers are *due* so
+declared on its `SourceAdapter`. The API surfaces which scrapers are _due_ so
 you can refresh by staleness rather than by data type:
 
 The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
@@ -248,12 +248,7 @@ actions go through the admin API (`ADMIN_API_URL`, default
 `http://localhost:8001`; `ADMIN_API_KEY` forwarded as `X-Admin-Key`, so it
 must be set in the dashboard's environment too)
 and data inspection goes through the consumer APIs (`GOLD_API_URL`, default
-`http://localhost:8000`; `SILVER_API_URL`, default `http://localhost:8003` —
-the deprecated `BRONZE_API_URL` still works as a fallback).
-Django's own SQLite (`apps/dashboard/dashboard.sqlite3`, gitignored) stores only
-admin login users and sessions; the `scrapers` app defines no models, so
-scraper data cannot land in it. That keeps the APIs the only data paths, so
-the dashboard can be deployed anywhere they are reachable.
+`http://localhost:8000`; `SILVER_API_URL`, default `http://localhost:8003`
 
 ## Ingest flow
 
@@ -281,6 +276,7 @@ source's protocol.
    Existing keys are preloaded up front and commits happen in 1000-record
    batches, so the per-record loop needs no queries. A mid-run failure commits
    what was ingested so far and marks the run `failed` with partial counts.
+
 3. **Record** — the finished run's status, seen/new counts, and timestamps land
    in `ingest_runs` (shown by `composer-ingest runs` and the admin API).
 
