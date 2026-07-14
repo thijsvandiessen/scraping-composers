@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "composer-config",
     "composer-warehouse",
-    "sqlalchemy>=2.0",
+    "sqlalchemy>=2.0.51",
 ]
 
 [build-system]
