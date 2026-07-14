@@ -1,4 +1,4 @@
 .PHONY: dev
 
 dev:
-	uvx honcho start
+	uvx honcho start -e .env
