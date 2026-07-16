@@ -78,3 +78,8 @@ reportUnknownParameterType = false
 reportUnknownLambdaType = false
 reportPrivateUsage = false
 reportUnusedFunction = false
+
+[tool.uv]
+constraint-dependencies = [
+    "setuptools>=83.0.0",
+]
