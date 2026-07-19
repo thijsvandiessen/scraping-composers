@@ -3,9 +3,11 @@ import logging
 import sys
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH
+from composer_crawler import CRAWL_REGISTRY
 from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS
 from composer_scrapers import REGISTRY
 
+from .crawl_cmds import cmd_crawl
 from .ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_promote, cmd_rebuild_silver
 from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
@@ -66,6 +68,18 @@ def main() -> None:
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
     )
     p_fetch.set_defaults(func=cmd_fetch)
+
+    p_crawl = sub.add_parser(
+        "crawl",
+        help="crawl raw pages/endpoints into the bucket, no parsing (register CrawlConfigs "
+        "in composer_crawler.CRAWL_REGISTRY)",
+    )
+    p_crawl.add_argument("config", choices=sorted(CRAWL_REGISTRY))
+    p_crawl.add_argument("--max-pages", type=int, help="total request budget (overrides the config)")
+    p_crawl.add_argument(
+        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
+    )
+    p_crawl.set_defaults(func=cmd_crawl)
 
     p_process = sub.add_parser(
         "process", help="ingest previously fetched records from the bucket into the DB"

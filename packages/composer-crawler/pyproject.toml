@@ -1,30 +1,24 @@
 [project]
-name = "composer-cli"
+name = "composer-crawler"
 version = "0.1.0"
-description = "Command-line interface for the composer ingestion pipeline"
+description = "Generic config-driven crawler: raw HTML/JSON snapshots into the bronze bucket"
 requires-python = ">=3.11"
 dependencies = [
     "composer-bronze",
-    "composer-crawler",
-    "composer-scrapers",
-    "composer-warehouse",
-    "composer-gold",
-    "python-dotenv>=1.2.2",
     "composer-config",
+    "httpx>=0.27",
 ]
-
-[project.scripts]
-composer-ingest = "composer_cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/composer_cli"]
+packages = ["src/composer_crawler"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.uv.sources]
+composer-bronze = { workspace = true }
 composer-config = { workspace = true }
