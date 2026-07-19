@@ -21,6 +21,7 @@ jobs:
           - { member: packages/composer-schema,    cov: "--cov=composer_schema" }
           - { member: packages/composer-bronze,    cov: "--cov=composer_bronze" }
           - { member: packages/composer-scrapers,  cov: "--cov=composer_scrapers" }
+          - { member: packages/composer-crawler,   cov: "--cov=composer_crawler" }
           - { member: packages/composer-warehouse, cov: "--cov=composer_warehouse" }
           - { member: packages/composer-gold,      cov: "--cov=composer_gold" }
           - { member: apps/consumer-api,           cov: "--cov=composer_api" }
