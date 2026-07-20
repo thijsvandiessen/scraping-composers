@@ -1,3 +1,5 @@
+import uuid
+
 from composer_warehouse.models import ConcertWork, Entity, RawWorkMention, Source, Work, WorkTitle
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
@@ -76,7 +78,7 @@ def list_works(
         .group_by(RawWorkMention.work_id)
         .subquery()
     )
-    query = base.add_columns(mention_counts.c.mention_count).outerjoin(
+    query = base.add_columns(composer.label, mention_counts.c.mention_count).outerjoin(
         mention_counts, mention_counts.c.work_id == Work.id
     )
     if sort == "mentions":
@@ -85,22 +87,26 @@ def list_works(
         query = query.order_by(Work.canonical_title)
     rows = db.execute(query.offset(pager.offset).limit(pager.limit)).all()
 
+    # all alias titles for the page's works in one query, instead of one
+    # query (plus a lazy composer load) per row
+    titles_by_work: dict[uuid.UUID, list[str]] = {}
+    work_ids = [work.id for work, _composer_label, _count in rows]
+    if work_ids:
+        for work_id, title in db.execute(
+            select(WorkTitle.work_id, WorkTitle.title).where(WorkTitle.work_id.in_(work_ids)).distinct()
+        ):
+            titles_by_work.setdefault(work_id, []).append(title)
+
     items = []
-    for work, mention_count in rows:
-        aliases = [
-            title
-            for title in db.scalars(
-                select(WorkTitle.title).where(WorkTitle.work_id == work.id).distinct()
-            ).all()
-            if title != work.canonical_title
-        ]
+    for work, composer_label, mention_count in rows:
+        aliases = [title for title in titles_by_work.get(work.id, []) if title != work.canonical_title]
         catalogue = f"{work.catalogue_prefix or ''} {work.catalogue_number or ''}".strip() or None
         items.append(
             WorkSummary(
                 id=work.id,
                 canonical_title=work.canonical_title,
                 composer_id=work.composer_entity_id,
-                composer_label=work.composer.label if work.composer else None,
+                composer_label=composer_label,
                 work_type=work.work_type,
                 opus_number=work.opus_number,
                 catalogue=catalogue,
