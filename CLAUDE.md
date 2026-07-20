@@ -1,7 +1,7 @@
 # Scraping Composers Guidelines
 
 ## Commands
-- **Linting & Formatting**: `uv run ruff check .` and `uv run ruff format .` (Line length is configured to 110 characters).
+- **Linting & Formatting**: `uv run ruff check .` and `uv run ruff format .` (Line length is configured to 110 characters). The frontend uses `npm run lint` (oxlint) and `npm run format` / `npm run format:check` (oxfmt) in `apps/frontend`; generated files are excluded via `ignorePatterns` in `.oxfmtrc.json`.
 - **File Length Limit**: `uv run pylint packages apps` (max 300 lines per Python file, via C0302 only). Oversized legacy files carry a `# pylint: disable=too-many-lines` pragma — remove it when splitting them, never add it to new files. The frontend enforces the same limit via `npm run lint` (oxlint `max-lines`) in `apps/frontend`.
 - **Type Checking**: `uv run pyright`
 - **Testing**: `uv run pytest`

@@ -52,8 +52,8 @@ npx openapi-ts -i http://localhost:8000/openapi.json -o src/lib/generated
 
 ## Configuration
 
-| Variable       | Default                 | Meaning                        |
-| -------------- | ----------------------- | ------------------------------ |
+| Variable       | Default                 | Meaning                           |
+| -------------- | ----------------------- | --------------------------------- |
 | `GOLD_API_URL` | `http://localhost:8000` | Base URL of the gold consumer API |
 
 ## Design notes
