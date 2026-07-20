@@ -22,6 +22,14 @@ dev = [
     "ruff>=0.4",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["packages", "apps"]
+# The dashboard's own pytest settings (pythonpath, Django settings module) only
+# apply when pytest's rootdir is apps/dashboard, as in per-member CI runs;
+# mirror them here so a workspace-root `uv run pytest` can import its tests too.
+pythonpath = ["apps/dashboard"]
+DJANGO_SETTINGS_MODULE = "config.settings"
+
 [tool.ruff]
 line-length = 110
 src = ["packages", "apps"]

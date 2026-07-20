@@ -1,8 +1,8 @@
 """Shared pytest fixtures and helpers for the warehouse and downstream tiers.
 
-Members load this as a pytest plugin via
-``pytest_plugins = ["composer_warehouse.testing"]`` in their ``tests/conftest.py``;
-test modules import the factories below directly. The document/adapter factories
+Members re-export the ``session`` fixture from this module in their
+``tests/conftest.py`` (a plain import, since ``pytest_plugins`` is only legal
+in the rootdir conftest); test modules import the factories below directly. The document/adapter factories
 (``person``, ``mention``, ``perf_mention``, ``FakeSource``) come from
 :mod:`composer_schema.testing` and are re-exported here for convenience.
 """
