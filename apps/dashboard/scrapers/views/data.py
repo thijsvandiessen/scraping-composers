@@ -7,7 +7,7 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
 from ..api import AdminAPIError, DataAPI
-from .common import page_context
+from .common import page_context, page_number
 
 
 def data_overview(request: HttpRequest) -> HttpResponse:
@@ -35,7 +35,7 @@ def entities(request: HttpRequest, kind: str | None = None) -> HttpResponse:
     if kind is None:
         kind = request.GET.get("kind", "").strip()
     order = "random" if request.GET.get("order") == "random" else "label"
-    page = int(request.GET.get("page", "1") or "1")
+    page = page_number(request)
     result: dict[str, object] = {}
     kind_counts: dict[str, int] = {}
     error: str | None = None
@@ -91,7 +91,7 @@ def review(request: HttpRequest) -> HttpResponse:
     """Work mentions the matcher wasn't confident about, best candidate first."""
     api = DataAPI.silver()
     status = request.GET.get("status", "needs_review").strip()
-    page = int(request.GET.get("page", "1") or "1")
+    page = page_number(request)
     result: dict[str, object] = {}
     error: str | None = None
     try:
@@ -115,7 +115,7 @@ def works(request: HttpRequest) -> HttpResponse:
     """Searchable resolved-works browser (by title or composer)."""
     api = DataAPI.silver()
     q = request.GET.get("q", "").strip()
-    page = int(request.GET.get("page", "1") or "1")
+    page = page_number(request)
     result: dict[str, object] = {}
     error: str | None = None
     try:

@@ -4,9 +4,19 @@ import math
 from typing import Any
 from urllib.parse import urlencode
 
+from django.http import HttpRequest
+
 
 def is_running(item: object) -> bool:
     return isinstance(item, dict) and item.get("status") == "running"
+
+
+def page_number(request: HttpRequest) -> int:
+    """The 1-based ``?page=`` parameter; a missing or invalid value means page 1."""
+    try:
+        return max(1, int(request.GET.get("page", "1") or "1"))
+    except ValueError:
+        return 1
 
 
 def page_context(page_data: dict[str, Any], base_path: str, params: dict[str, str]) -> dict[str, object]:

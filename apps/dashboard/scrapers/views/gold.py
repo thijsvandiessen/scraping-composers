@@ -7,7 +7,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
 
 from ..api import AdminAPIError, DataAPI
-from .common import page_context
+from .common import page_context, page_number
 
 PEOPLE_ROLES = ("composers", "soloists", "conductors")
 
@@ -19,7 +19,7 @@ def people(request: HttpRequest, role: str) -> HttpResponse:
     api = DataAPI.gold()
     q = request.GET.get("q", "").strip()
     sort = "concerts" if request.GET.get("sort") == "concerts" else "label"
-    page = int(request.GET.get("page", "1") or "1")
+    page = page_number(request)
     result: dict[str, object] = {}
     error: str | None = None
     try:
@@ -50,7 +50,7 @@ def person_concerts(request: HttpRequest, person_id: uuid.UUID, role: str | None
     if role is not None and role not in PEOPLE_ROLES:
         raise Http404(f"unknown role {role!r}")
     api = DataAPI.gold()
-    page = int(request.GET.get("page", "1") or "1")
+    page = page_number(request)
     result: dict[str, object] = {}
     error: str | None = None
     try:
@@ -74,7 +74,7 @@ def concerts_list(request: HttpRequest) -> HttpResponse:
     """Browse the derived concerts in gold, newest first."""
     api = DataAPI.gold()
     q = request.GET.get("q", "").strip()
-    page = int(request.GET.get("page", "1") or "1")
+    page = page_number(request)
     result: dict[str, object] = {}
     error: str | None = None
     try:
@@ -116,7 +116,7 @@ def gold_works(request: HttpRequest) -> HttpResponse:
     api = DataAPI.gold()
     q = request.GET.get("q", "").strip()
     sort = "mentions" if request.GET.get("sort") == "mentions" else "label"
-    page = int(request.GET.get("page", "1") or "1")
+    page = page_number(request)
     result: dict[str, object] = {}
     error: str | None = None
     try:

@@ -603,6 +603,15 @@ def test_entities_page_renders_rows_and_pagination(
     assert "ArrowRight" in page and "ArrowLeft" in page
 
 
+def test_entities_page_tolerates_junk_page_param(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install_data(monkeypatch, StubDataAPI())
+    response = staff_client.get("/admin/data/entities/?page=abc")
+    assert response.status_code == 200
+    assert "page 1 of" in response.content.decode()
+
+
 def test_entity_detail_renders_claims_and_links(
     monkeypatch: pytest.MonkeyPatch, staff_client: Client
 ) -> None:
