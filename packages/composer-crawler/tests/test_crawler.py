@@ -73,9 +73,8 @@ def test_max_depth_stops_link_following() -> None:
 
 def test_robots_disallow_skips_url() -> None:
     records = list(_crawler(_config(respect_robots=True)).crawl())
-    urls = [r.url for r in records]
-    assert "https://example.org/a" not in urls
-    assert "https://example.org/" in urls
+    # /a is disallowed by robots.txt, so /deep (only linked from /a) is never discovered
+    assert [r.url for r in records] == ["https://example.org/", "https://example.org/b"]
 
 
 def test_error_page_is_recorded_but_not_followed() -> None:
@@ -108,9 +107,8 @@ def test_failed_discovered_link_is_skipped(monkeypatch: pytest.MonkeyPatch) -> N
         return _site_handler(request)
 
     records = list(_crawler(_config(), handler).crawl())
-    urls = [r.url for r in records]
-    assert "https://example.org/a" not in urls
-    assert "https://example.org/b" in urls  # crawl continued past the failure
+    # /a failed and was skipped, the crawl continued to /b; /deep was never discovered
+    assert [r.url for r in records] == ["https://example.org/", "https://example.org/b"]
 
 
 def test_non_text_body_is_skipped() -> None:
