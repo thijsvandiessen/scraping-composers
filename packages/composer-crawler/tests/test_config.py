@@ -24,6 +24,16 @@ def test_follow_links_requires_allow_patterns() -> None:
         CrawlConfig(name="example", seeds=("https://example.org/",), follow_links=True)
 
 
+def test_rejects_invalid_allow_pattern() -> None:
+    with pytest.raises(ValueError, match="invalid allow pattern"):
+        CrawlConfig(
+            name="example",
+            seeds=("https://example.org/",),
+            follow_links=True,
+            allow_patterns=("(",),
+        )
+
+
 def test_follow_links_with_patterns_is_valid() -> None:
     config = CrawlConfig(
         name="example",

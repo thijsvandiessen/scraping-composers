@@ -5,6 +5,7 @@ description = "Admin API: trigger scrapes, ingest snapshots, and promote gold fr
 requires-python = ">=3.11"
 dependencies = [
     "composer-bronze",
+    "composer-crawler",
     "composer-scrapers",
     "composer-warehouse",
     "composer-gold",
@@ -26,3 +27,4 @@ testpaths = ["tests"]
 
 [tool.uv.sources]
 composer-config = { workspace = true }
+composer-crawler = { workspace = true }

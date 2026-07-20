@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     gold_db_path: str = "./gold.db"
     gold_min_sitelinks: int | None = None
     bucket_path: str = "./raw-data"
+    crawl_configs_path: str = "./crawl_configs.json"
     scraper_contact_email: str | None = None
 
     admin_api_key: str | None = None

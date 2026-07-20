@@ -40,6 +40,8 @@ class _BaseAPI:
             except ValueError:
                 detail = response.text
             raise AdminAPIError(f"API returned {response.status_code}: {detail}")
+        if response.status_code == 204:
+            return None
         return response.json()
 
 
@@ -85,6 +87,25 @@ class AdminAPI(_BaseAPI):
         kwargs: dict[str, Any] = {"json": options} if options else {}
         status: dict[str, Any] = self._request("POST", "/admin/v1/promote", **kwargs)
         return status
+
+    def list_crawls(self) -> list[dict[str, Any]]:
+        crawls: list[dict[str, Any]] = self._request("GET", "/admin/v1/crawls")
+        return crawls
+
+    def get_crawl(self, name: str) -> dict[str, Any]:
+        crawl: dict[str, Any] = self._request("GET", f"/admin/v1/crawls/{name}")
+        return crawl
+
+    def put_crawl(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        crawl: dict[str, Any] = self._request("PUT", f"/admin/v1/crawls/{name}", json=payload)
+        return crawl
+
+    def delete_crawl(self, name: str) -> None:
+        self._request("DELETE", f"/admin/v1/crawls/{name}")
+
+    def start_crawl(self, name: str) -> dict[str, Any]:
+        started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/fetch")
+        return started
 
 
 @dataclass

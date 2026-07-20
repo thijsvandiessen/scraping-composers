@@ -94,6 +94,11 @@ UNFOLD = {
                         "link": reverse_lazy("scrapers_index"),
                     },
                     {
+                        "title": "Crawls",
+                        "icon": "travel_explore",
+                        "link": reverse_lazy("crawls_index"),
+                    },
+                    {
                         "title": "Load",
                         "icon": "database",
                         "link": reverse_lazy("load_index"),

@@ -1,0 +1,69 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% if refreshing %}<meta http-equiv="refresh" content="5">{% endif %}
+{% include "scrapers/style.html" %}
+
+{% for message in messages %}
+  <div class="sc-banner {{ message.tags }}">{{ message }}</div>
+{% endfor %}
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<div class="sc-toolbar">
+  <a href="{% url 'crawl_new' %}" class="sc-btn sc-btn-primary">New crawl</a>
+  <span class="sc-muted">generic crawls fetch raw pages into the bucket, without parsing —
+    configs marked <em>code</em> are registered in the source tree and read-only here</span>
+  {% if refreshing %}<span class="sc-muted">a crawl is in progress — refreshing every 5 s…</span>{% endif %}
+</div>
+
+<table class="sc-table">
+  <tr>
+    <th>crawl</th><th>seeds</th><th>options</th>
+    <th>last crawl</th><th class="sc-num">records</th><th></th>
+  </tr>
+  {% for crawl in crawls %}
+  <tr>
+    <td>
+      <strong>{{ crawl.name }}</strong>
+      {% if not crawl.editable %}<span class="sc-badge sc-unknown">code</span>{% endif %}
+    </td>
+    <td>{{ crawl.seeds|length }} URL{{ crawl.seeds|length|pluralize }}</td>
+    <td class="sc-muted">
+      {% if crawl.follow_links %}follow links · depth {{ crawl.max_depth }}{% else %}seeds only{% endif %}
+      {% if crawl.pagination %} · {{ crawl.pagination.type }}{% endif %}
+      {% if crawl.max_pages %} · max {{ crawl.max_pages }} pages{% endif %}
+    </td>
+    {% with snapshot=crawl.last_snapshot %}
+    {% if snapshot %}
+    <td>
+      <span class="sc-badge sc-{{ snapshot.status }}">{{ snapshot.status }}</span>
+      {{ snapshot.started_at|slice:":16" }}
+      {% if snapshot.error %}<div class="sc-error-text">{{ snapshot.error }}</div>{% endif %}
+    </td>
+    <td class="sc-num">{{ snapshot.record_count|default_if_none:"—" }}</td>
+    {% else %}
+    <td class="sc-muted">never crawled</td><td class="sc-num">—</td>
+    {% endif %}
+    {% endwith %}
+    <td>
+      <div style="display: flex; gap: 0.375rem; align-items: center;">
+        <form method="post" action="{% url 'start_crawl' crawl.name %}">
+          {% csrf_token %}
+          <button type="submit" class="sc-btn">Crawl</button>
+        </form>
+        {% if crawl.editable %}
+        <a href="{% url 'crawl_edit' crawl.name %}" class="sc-btn">Edit</a>
+        <form method="post" action="{% url 'crawl_delete' crawl.name %}"
+              onsubmit="return confirm('Delete crawl {{ crawl.name }}? Raw data already in the bucket is kept.')">
+          {% csrf_token %}
+          <button type="submit" class="sc-btn">Delete</button>
+        </form>
+        {% endif %}
+      </div>
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="sc-muted">no crawls configured yet — create one with “New crawl”</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}
