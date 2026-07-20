@@ -51,7 +51,7 @@ jobs:
       - run: uvx pip-audit --disable-pip --no-deps -r requirements.txt
 
   frontend:
-    name: frontend (astro check & build)
+    name: frontend (lint, astro check & build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -64,6 +64,7 @@ jobs:
           cache: npm
           cache-dependency-path: apps/frontend/package-lock.json
       - run: npm ci
+      - run: npm run lint
       - run: npm run check
       - run: npm run build
 
@@ -79,7 +80,7 @@ jobs:
       - run: uv run pyright
 
   lint:
-    name: lint & format (ruff)
+    name: lint & format (ruff, pylint)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -89,3 +90,5 @@ jobs:
       - run: uv sync --locked
       - run: uv run ruff check
       - run: uv run ruff format --check
+      # pylint is scoped to C0302 (file length limit) in pyproject.toml
+      - run: uv run pylint packages apps

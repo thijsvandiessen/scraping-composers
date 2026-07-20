@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import uuid
 
 from composer_warehouse.models import (

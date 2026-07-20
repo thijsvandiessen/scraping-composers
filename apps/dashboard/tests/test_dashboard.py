@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """Dashboard tests: the admin-API client against a mock transport, and the
 views against a stubbed client — no network access."""
 

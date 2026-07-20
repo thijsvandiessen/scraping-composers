@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 import math
 import uuid
 from typing import Any

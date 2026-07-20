@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """Rebuild the gold database from silver, applying the curation rules."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """Consumer API tests: the silver app over staging seed data, the gold app over
 its promoted copy — both using in-memory/tmp databases, no network."""
 
