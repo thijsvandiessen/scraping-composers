@@ -16,8 +16,7 @@
 
 body {
   margin: 0;
-  font-family:
-    ui-serif, "Iowan Old Style", Georgia, Cambria, "Times New Roman", serif;
+  font-family: ui-serif, "Iowan Old Style", Georgia, Cambria, "Times New Roman", serif;
   background: var(--bg);
   color: var(--fg);
   line-height: 1.55;
