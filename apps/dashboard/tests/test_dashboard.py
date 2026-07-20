@@ -182,7 +182,7 @@ class StubAPI:
 
 def _install(monkeypatch: pytest.MonkeyPatch, stub: StubAPI) -> None:
     fake = type("FakeAdminAPI", (), {"from_env": classmethod(lambda cls: stub)})
-    monkeypatch.setattr(views, "AdminAPI", fake)
+    monkeypatch.setattr(views.pipeline, "AdminAPI", fake)
 
 
 @pytest.fixture
@@ -563,7 +563,8 @@ def _install_data(monkeypatch: pytest.MonkeyPatch, stub: StubDataAPI) -> None:
         (),
         {"gold": classmethod(lambda cls: stub), "silver": classmethod(lambda cls: stub)},
     )
-    monkeypatch.setattr(views, "DataAPI", fake)
+    monkeypatch.setattr(views.data, "DataAPI", fake)
+    monkeypatch.setattr(views.gold, "DataAPI", fake)
 
 
 @pytest.mark.django_db
