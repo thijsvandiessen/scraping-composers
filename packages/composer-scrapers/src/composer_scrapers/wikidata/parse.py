@@ -94,7 +94,7 @@ def _literal(row: dict[str, Any], var: str) -> str | None:
     return value
 
 
-def _records_from_rows(
+def _records_from_rows(  # noqa: C901, PLR0912
     rows: list[dict[str, Any]], metrics: dict[str, dict[str, str]] | None = None
 ) -> list[SourceRecord]:
     """Fold SPARQL result rows (several per composer when properties have

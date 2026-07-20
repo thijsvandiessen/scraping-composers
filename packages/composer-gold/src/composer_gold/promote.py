@@ -151,7 +151,9 @@ def promote(silver: Session, gold_path: str | Path, config: PromoteConfig | None
     return stats
 
 
-def _build(silver: Session, tmp_path: Path, config: PromoteConfig) -> PromoteStats:
+def _build(  # noqa: C901, PLR0912, PLR0915
+    silver: Session, tmp_path: Path, config: PromoteConfig
+) -> PromoteStats:
     tmp_path.unlink(missing_ok=True)
     gold_engine = create_engine(f"sqlite:///{tmp_path}")
     Base.metadata.create_all(gold_engine)

@@ -81,7 +81,7 @@ def _normalize_key(letter: str, accidental: str | None, mode: str) -> str:
     return " ".join(parts)
 
 
-def extract_features(raw_title: str) -> WorkFeatures:
+def extract_features(raw_title: str) -> WorkFeatures:  # noqa: C901
     text = _strip_diacritics(raw_title).lower()
     spans: list[tuple[int, int]] = []
 

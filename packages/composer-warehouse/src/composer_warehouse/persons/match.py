@@ -58,7 +58,7 @@ def _score_pair(
     return base, method
 
 
-def score(
+def score(  # noqa: PLR0913
     a: PersonName,
     b: PersonName,
     a_year: int | None = None,

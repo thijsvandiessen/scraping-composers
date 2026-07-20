@@ -108,7 +108,7 @@ class Crawler:
         self._client = client
         self._patterns = tuple(re.compile(p) for p in config.allow_patterns)
 
-    def crawl(self, max_pages: int | None = None) -> Iterator[CrawlRecord]:
+    def crawl(self, max_pages: int | None = None) -> Iterator[CrawlRecord]:  # noqa: C901, PLR0912
         """Fetch seeds (plus paginated and discovered pages) and yield raw records.
 
         *max_pages* overrides ``config.max_pages`` when given; it caps the

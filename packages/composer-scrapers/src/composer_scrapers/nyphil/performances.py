@@ -34,7 +34,7 @@ def _title(value: object) -> str:
     return _WS.sub(" ", text).strip()
 
 
-def _performance_record(
+def _performance_record(  # noqa: PLR0913
     program_id: str,
     season: str,
     concert_idx: int,

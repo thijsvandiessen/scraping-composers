@@ -13,7 +13,7 @@ from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0915
     parser = argparse.ArgumentParser(prog="composer-ingest", description="Ingest classical composer data")
     parser.add_argument(
         "--database-url",

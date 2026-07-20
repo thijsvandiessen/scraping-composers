@@ -65,7 +65,7 @@ def _soloists(raw: dict[str, Any]) -> tuple[tuple[str, str | None], ...]:
     )
 
 
-def _concert_fields(source_name: str, raw: dict[str, Any]) -> _ConcertFields | None:
+def _concert_fields(source_name: str, raw: dict[str, Any]) -> _ConcertFields | None:  # noqa: PLR0911
     """Concert identity and fields for one mention's payload.
 
     Each performance source encodes concert identity differently; unknown
@@ -127,7 +127,7 @@ class DeriveConcertsStats:
     unresolved_participant_names: int = 0
 
 
-def derive_concerts(session: Session) -> DeriveConcertsStats:
+def derive_concerts(session: Session) -> DeriveConcertsStats:  # noqa: C901
     """Rebuild the concert tables from the work mentions' raw payloads."""
     session.execute(delete(ConcertWork))
     session.execute(delete(ConcertParticipant))
