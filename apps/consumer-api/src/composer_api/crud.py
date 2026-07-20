@@ -18,6 +18,7 @@ from composer_warehouse.normalize import dedup_key
 from sqlalchemy import ColumnElement, Select, UnaryExpression, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
+from .deps import Pagination
 from .errors import NotFoundError
 from .schemas import (
     ClaimOut,
@@ -61,11 +62,10 @@ def profession_filter(prof_id: uuid.UUID) -> ColumnElement[bool]:
     )
 
 
-def list_people(  # noqa: PLR0913
+def list_people(
     db: Session,
     q: str | None,
-    page: int,
-    limit: int,
+    pager: Pagination,
     profession: str | None = None,
     sort: str = "label",
 ) -> ComposerPage:
@@ -73,7 +73,7 @@ def list_people(  # noqa: PLR0913
     if profession is not None:
         prof_id = _profession_id(db, profession)
         if prof_id is None:
-            return ComposerPage(items=[], total=0, page=page, limit=limit)
+            return ComposerPage(items=[], total=0, page=pager.page, limit=pager.limit)
         base = base.where(profession_filter(prof_id))
     if q:
         base = base.where(Entity.label.ilike(f"%{q}%"))
@@ -96,7 +96,7 @@ def list_people(  # noqa: PLR0913
         query = query.order_by(concert_counts.c.concert_count.desc().nulls_last(), Entity.label)
     else:
         query = query.order_by(Entity.label)
-    rows = db.execute(query.offset((page - 1) * limit).limit(limit)).all()
+    rows = db.execute(query.offset(pager.offset).limit(pager.limit)).all()
 
     return ComposerPage(
         items=[
@@ -106,8 +106,8 @@ def list_people(  # noqa: PLR0913
             for entity, count in rows
         ],
         total=total or 0,
-        page=page,
-        limit=limit,
+        page=pager.page,
+        limit=pager.limit,
     )
 
 
@@ -219,8 +219,8 @@ def get_stats(db: Session) -> StatsOut:
     )
 
 
-def list_entities(  # noqa: PLR0913
-    db: Session, q: str | None, kind: str | None, page: int, limit: int, order: str = "label"
+def list_entities(
+    db: Session, q: str | None, kind: str | None, pager: Pagination, order: str = "label"
 ) -> EntityPage:
     base = select(Entity)
     ordering: list[UnaryExpression[bool]] = []
@@ -235,16 +235,16 @@ def list_entities(  # noqa: PLR0913
     total = db.scalar(select(func.count()).select_from(base.subquery()))
     if order == "random":
         # spot-checking mode: a fresh random sample each request
-        query = base.order_by(func.random()).limit(limit)
+        query = base.order_by(func.random()).limit(pager.limit)
     else:
-        query = base.order_by(*ordering, Entity.kind, Entity.label).offset((page - 1) * limit).limit(limit)
+        query = base.order_by(*ordering, Entity.kind, Entity.label).offset(pager.offset).limit(pager.limit)
     items = db.scalars(query).all()
 
     return EntityPage(
         items=[EntitySummary.model_validate(e) for e in items],
         total=total or 0,
-        page=page,
-        limit=limit,
+        page=pager.page,
+        limit=pager.limit,
     )
 
 
@@ -480,8 +480,8 @@ def get_concert(db: Session, concert_id: int) -> ConcertDetail:
     )
 
 
-def list_works(  # noqa: PLR0913
-    db: Session, q: str | None, page: int, limit: int, performed_only: bool = False, sort: str = "label"
+def list_works(
+    db: Session, q: str | None, pager: Pagination, performed_only: bool = False, sort: str = "label"
 ) -> WorkPage:
     composer = aliased(Entity)
     base = select(Work).outerjoin(composer, composer.id == Work.composer_entity_id)
@@ -514,7 +514,7 @@ def list_works(  # noqa: PLR0913
         query = query.order_by(mention_counts.c.mention_count.desc().nulls_last(), Work.canonical_title)
     else:
         query = query.order_by(Work.canonical_title)
-    rows = db.execute(query.offset((page - 1) * limit).limit(limit)).all()
+    rows = db.execute(query.offset(pager.offset).limit(pager.limit)).all()
 
     items = []
     for work, mention_count in rows:
@@ -542,4 +542,4 @@ def list_works(  # noqa: PLR0913
             )
         )
 
-    return WorkPage(items=items, total=total or 0, page=page, limit=limit)
+    return WorkPage(items=items, total=total or 0, page=pager.page, limit=pager.limit)

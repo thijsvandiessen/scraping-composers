@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import dataclass
 
 from composer_warehouse.db import get_engine, init_db
 from composer_warehouse.models import (
@@ -66,24 +67,27 @@ def cmd_stats(args: argparse.Namespace) -> int:
 EntityClaims = list[tuple[Entity, list[tuple[str, str | None, str | None, str, int | None]]]]
 
 
-def entity_claims(  # noqa: PLR0913
-    session: Session,
-    name: str,
-    *,
-    kind: str | None = None,
-    predicate: str | None = None,
-    source: str | None = None,
-    limit: int = 10,
-) -> EntityClaims:
+@dataclass(frozen=True)
+class ClaimFilters:
+    """Optional narrowing of an ``entity_claims`` listing."""
+
+    kind: str | None = None
+    predicate: str | None = None
+    source: str | None = None
+    limit: int = 10
+
+
+def entity_claims(session: Session, name: str, filters: ClaimFilters | None = None) -> EntityClaims:
     """For each entity matching ``name`` (exact dedup key or label substring),
     its outgoing claims as (predicate, value, object_label, source_name,
     record_id). The ingest already collapses identical assertions per source,
     so competing values for a predicate line up one row per source that made
     them — the basis for deciding which to trust."""
+    filters = filters or ClaimFilters()
     query = select(Entity).where(or_(Entity.dedup_key == dedup_key(name), Entity.label.ilike(f"%{name}%")))
-    if kind is not None:
-        query = query.where(Entity.kind == kind)
-    entities = session.scalars(query.order_by(Entity.kind, Entity.label).limit(limit)).all()
+    if filters.kind is not None:
+        query = query.where(Entity.kind == filters.kind)
+    entities = session.scalars(query.order_by(Entity.kind, Entity.label).limit(filters.limit)).all()
 
     obj = aliased(Entity)
     results: EntityClaims = []
@@ -95,10 +99,10 @@ def entity_claims(  # noqa: PLR0913
             .where(Claim.subject_id == entity.id)
             .order_by(Claim.predicate, Source.name, Claim.value)
         )
-        if predicate is not None:
-            claims = claims.where(Claim.predicate == predicate)
-        if source is not None:
-            claims = claims.where(Source.name == source)
+        if filters.predicate is not None:
+            claims = claims.where(Claim.predicate == filters.predicate)
+        if filters.source is not None:
+            claims = claims.where(Source.name == filters.source)
         results.append((entity, list(session.execute(claims).tuples())))
     return results
 
@@ -110,10 +114,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
         results = entity_claims(
             session,
             args.name,
-            kind=args.kind,
-            predicate=args.predicate,
-            source=args.source,
-            limit=args.limit,
+            ClaimFilters(kind=args.kind, predicate=args.predicate, source=args.source, limit=args.limit),
         )
     if not results:
         print(f"no entity matching {args.name!r}")

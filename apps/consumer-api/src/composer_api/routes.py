@@ -15,7 +15,7 @@ from .crud import (
     list_works,
     person_concerts,
 )
-from .deps import DbSession
+from .deps import DbSession, PageQuery
 from .schemas import (
     ComposerDetail,
     ComposerPage,
@@ -38,15 +38,14 @@ def stats(db: DbSession) -> StatsOut:
 
 
 @v1.get("/entities", response_model=EntityPage)
-def entities(  # noqa: PLR0913
+def entities(
     db: DbSession,
+    pager: PageQuery,
     q: str | None = None,
     kind: str | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
     order: Annotated[str, Query(pattern="^(label|random)$")] = "label",
 ) -> EntityPage:
-    return list_entities(db, q, kind, page, limit, order)
+    return list_entities(db, q, kind, pager, order)
 
 
 @v1.get("/entities/{entity_id}", response_model=EntityDetail)
@@ -55,15 +54,14 @@ def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
 
 
 @v1.get("/works", response_model=WorkPage)
-def works(  # noqa: PLR0913
+def works(
     db: DbSession,
+    pager: PageQuery,
     q: str | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
     performed: bool = False,
     sort: Annotated[str, Query(pattern="^(label|mentions)$")] = "label",
 ) -> WorkPage:
-    return list_works(db, q, page, limit, performed_only=performed, sort=sort)
+    return list_works(db, q, pager, performed_only=performed, sort=sort)
 
 
 @v1.get("/mentions", response_model=MentionPage)
@@ -108,12 +106,11 @@ def get_person_concerts(
 @v1.get("/composers", response_model=ComposerPage)
 def list_composers(
     db: DbSession,
+    pager: PageQuery,
     q: str | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
     sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, q, page, limit, profession="composer", sort=sort)
+    return list_people(db, q, pager, profession="composer", sort=sort)
 
 
 @v1.get("/composers/{composer_id}", response_model=ComposerDetail)
@@ -124,12 +121,11 @@ def get_composer(composer_id: uuid.UUID, db: DbSession) -> ComposerDetail:
 @v1.get("/soloists", response_model=ComposerPage)
 def list_soloists(
     db: DbSession,
+    pager: PageQuery,
     q: str | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
     sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, q, page, limit, profession="soloist", sort=sort)
+    return list_people(db, q, pager, profession="soloist", sort=sort)
 
 
 @v1.get("/soloists/{soloist_id}", response_model=ComposerDetail)
@@ -140,12 +136,11 @@ def get_soloist(soloist_id: uuid.UUID, db: DbSession) -> ComposerDetail:
 @v1.get("/conductors", response_model=ComposerPage)
 def list_conductors(
     db: DbSession,
+    pager: PageQuery,
     q: str | None = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    limit: Annotated[int, Query(ge=1, le=100)] = 20,
     sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, q, page, limit, profession="conductor", sort=sort)
+    return list_people(db, q, pager, profession="conductor", sort=sort)
 
 
 @v1.get("/conductors/{conductor_id}", response_model=ComposerDetail)

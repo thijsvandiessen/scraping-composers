@@ -94,12 +94,8 @@ def _literal(row: dict[str, Any], var: str) -> str | None:
     return value
 
 
-def _records_from_rows(  # noqa: C901, PLR0912
-    rows: list[dict[str, Any]], metrics: dict[str, dict[str, str]] | None = None
-) -> list[SourceRecord]:
-    """Fold SPARQL result rows (several per composer when properties have
-    multiple values) into one SourceRecord per composer, attaching the
-    composer's popularity ``metrics`` (from ``_fetch_metrics``) as claims."""
+def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Group result rows by QID, collecting each field's values into a set."""
     items: dict[str, dict[str, Any]] = {}
     for row in rows:
         uri = row["item"]["value"]
@@ -114,25 +110,37 @@ def _records_from_rows(  # noqa: C901, PLR0912
             elif kind is not None and _BARE_QID.match(value):
                 continue  # claim object has no English label
             item["values"].setdefault(var, set()).add(value)
+    return items
 
+
+def _item_claims(item: dict[str, Any], item_metrics: dict[str, str]) -> tuple[SourceClaim, ...]:
+    # every record matched the occupation=composer query
+    claims = [SourceClaim("has_profession", "profession", "composer")]
+    for var, predicate, kind in FIELDS:
+        for value in sorted(item["values"].get(var, ())):
+            if kind is None or kind == _DATE:
+                claims.append(SourceClaim(predicate, value=value))
+            else:
+                claims.append(SourceClaim(predicate, kind, value))
+    for var, predicate in METRICS:
+        if var in item_metrics:
+            claims.append(SourceClaim(predicate, value=item_metrics[var]))
+    return tuple(claims)
+
+
+def _records_from_rows(
+    rows: list[dict[str, Any]], metrics: dict[str, dict[str, str]] | None = None
+) -> list[SourceRecord]:
+    """Fold SPARQL result rows (several per composer when properties have
+    multiple values) into one SourceRecord per composer, attaching the
+    composer's popularity ``metrics`` (from ``_fetch_metrics``) as claims."""
     records = []
-    for qid, item in items.items():
+    for qid, item in _fold_rows(rows).items():
         name = item["label"]
         if not name or _BARE_QID.match(name):
             log.debug("skipping %s: no English label", qid)
             continue
-        # every record matched the occupation=composer query
-        claims = [SourceClaim("has_profession", "profession", "composer")]
-        for var, predicate, kind in FIELDS:
-            for value in sorted(item["values"].get(var, ())):
-                if kind is None or kind == _DATE:
-                    claims.append(SourceClaim(predicate, value=value))
-                else:
-                    claims.append(SourceClaim(predicate, kind, value))
         item_metrics = (metrics or {}).get(qid, {})
-        for var, predicate in METRICS:
-            if var in item_metrics:
-                claims.append(SourceClaim(predicate, value=item_metrics[var]))
         raw = {"item": f"http://www.wikidata.org/entity/{qid}", "label": name}
         raw.update({var: sorted(values) for var, values in item["values"].items()})
         raw.update(item_metrics)
@@ -142,7 +150,7 @@ def _records_from_rows(  # noqa: C901, PLR0912
                 name=name,
                 url=f"{BASE_URL}/wiki/{qid}",
                 raw=raw,
-                claims=tuple(claims),
+                claims=_item_claims(item, item_metrics),
             )
         )
     return records

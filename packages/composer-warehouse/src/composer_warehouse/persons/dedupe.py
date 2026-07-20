@@ -13,13 +13,14 @@ from __future__ import annotations
 import re
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Claim, Entity, PersonMatch
 from .extract import PersonName, parse_name
-from .match import classify, score
+from .match import PersonProfile, classify, score
 
 COMMIT_BATCH = 1000
 _YEAR = re.compile(r"\d{4}")
@@ -65,72 +66,96 @@ def _canonical_and_duplicate(
     return (a, b) if str(a.id) < str(b.id) else (b, a)
 
 
-def dedupe_persons(session: Session) -> tuple[int, int]:  # noqa: C901, PLR0912
-    """Run the dedupe pass. Returns (auto-linked count, needs-review count)."""
-    years = _birth_years(session)
-    aliases = _aliases(session)
-    persons = list(session.scalars(select(Entity).where(Entity.kind == "person")))
-    parsed = {e.id: parse_name(e.label) for e in persons}
-    decided: set[tuple[uuid.UUID, uuid.UUID]] = set(
-        session.execute(select(PersonMatch.entity_id, PersonMatch.canonical_entity_id)).tuples()
-    )
-    linked = {e.id for e in persons if e.canonical_entity_id is not None}
+@dataclass
+class _DedupeState:
+    """Preloaded lookups plus progress counters for one dedupe pass."""
 
+    session: Session
+    years: dict[uuid.UUID, int]
+    aliases: dict[uuid.UUID, list[PersonName]]
+    parsed: dict[uuid.UUID, PersonName]
+    decided: set[tuple[uuid.UUID, uuid.UUID]]
+    linked: set[uuid.UUID]
+    auto: int = 0
+    review: int = 0
+    pending: int = 0
+
+
+def _surname_groups(state: _DedupeState, persons: list[Entity]) -> dict[str, set[Entity]]:
+    """Group persons by surname (primary name and aliases) so only namesake
+    pairs are ever scored."""
     groups: dict[str, set[Entity]] = defaultdict(set)
     for entity in persons:
-        surnames = {parsed[entity.id].surname}
-        for alias in aliases.get(entity.id, []):
+        surnames = {state.parsed[entity.id].surname}
+        for alias in state.aliases.get(entity.id, []):
             surnames.add(alias.surname)
 
         for surname in surnames:
             if surname:  # skip mononyms / empty surnames — nothing to gate on
                 groups[surname].add(entity)
+    return groups
 
-    auto = review = pending = 0
-    for group_set in groups.values():
+
+def _profile(state: _DedupeState, entity: Entity) -> PersonProfile:
+    return PersonProfile(
+        name=state.parsed[entity.id],
+        birth_year=state.years.get(entity.id),
+        aliases=tuple(state.aliases.get(entity.id, [])),
+    )
+
+
+def _decide_pair(state: _DedupeState, a: Entity, b: Entity) -> None:
+    """Score one pair and record the decision (link, queue for review, or skip)."""
+    # We might encounter the same pair in multiple surname groups
+    if (a.id, b.id) in state.decided or (b.id, a.id) in state.decided:
+        return
+
+    value, method = score(_profile(state, a), _profile(state, b))
+    status = classify(value)
+    if status == "distinct":
+        return
+    canonical, duplicate = _canonical_and_duplicate(a, b, state.parsed)
+    if (duplicate.id, canonical.id) in state.decided:
+        return
+    state.session.add(
+        PersonMatch(
+            entity_id=duplicate.id,
+            canonical_entity_id=canonical.id,
+            score=value,
+            method=method,
+            status=status,
+        )
+    )
+    state.decided.add((duplicate.id, canonical.id))
+    if status == "auto_linked":
+        if duplicate.id not in state.linked:
+            duplicate.canonical_entity_id = canonical.id
+            state.linked.add(duplicate.id)
+        state.auto += 1
+    else:
+        state.review += 1
+    state.pending += 1
+    if state.pending % COMMIT_BATCH == 0:
+        state.session.commit()
+
+
+def dedupe_persons(session: Session) -> tuple[int, int]:
+    """Run the dedupe pass. Returns (auto-linked count, needs-review count)."""
+    persons = list(session.scalars(select(Entity).where(Entity.kind == "person")))
+    state = _DedupeState(
+        session=session,
+        years=_birth_years(session),
+        aliases=_aliases(session),
+        parsed={e.id: parse_name(e.label) for e in persons},
+        decided=set(session.execute(select(PersonMatch.entity_id, PersonMatch.canonical_entity_id)).tuples()),
+        linked={e.id for e in persons if e.canonical_entity_id is not None},
+    )
+
+    for group_set in _surname_groups(state, persons).values():
         group = list(group_set)
         for i in range(len(group)):
             for j in range(i + 1, len(group)):
-                a, b = group[i], group[j]
-
-                # We might encounter the same pair in multiple surname groups
-                if (a.id, b.id) in decided or (b.id, a.id) in decided:
-                    continue
-
-                value, method = score(
-                    parsed[a.id],
-                    parsed[b.id],
-                    years.get(a.id),
-                    years.get(b.id),
-                    aliases.get(a.id),
-                    aliases.get(b.id),
-                )
-                status = classify(value)
-                if status == "distinct":
-                    continue
-                canonical, duplicate = _canonical_and_duplicate(a, b, parsed)
-                if (duplicate.id, canonical.id) in decided:
-                    continue
-                session.add(
-                    PersonMatch(
-                        entity_id=duplicate.id,
-                        canonical_entity_id=canonical.id,
-                        score=value,
-                        method=method,
-                        status=status,
-                    )
-                )
-                decided.add((duplicate.id, canonical.id))
-                if status == "auto_linked":
-                    if duplicate.id not in linked:
-                        duplicate.canonical_entity_id = canonical.id
-                        linked.add(duplicate.id)
-                    auto += 1
-                else:
-                    review += 1
-                pending += 1
-                if pending % COMMIT_BATCH == 0:
-                    session.commit()
+                _decide_pair(state, group[i], group[j])
 
     session.commit()
-    return auto, review
+    return state.auto, state.review

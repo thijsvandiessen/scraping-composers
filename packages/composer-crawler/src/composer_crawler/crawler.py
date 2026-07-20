@@ -100,6 +100,35 @@ def _get(client: httpx.Client, url: str) -> httpx.Response:
     return response
 
 
+def _pop_allowed(frontier: Frontier, robots: RobotsCache | None) -> tuple[str, int] | None:
+    """The next fetchable frontier entry, skipping robots-disallowed URLs;
+    None when the frontier is exhausted."""
+    while (item := frontier.pop()) is not None:
+        if robots is not None and not robots.allowed(item[0]):
+            log.info("robots.txt disallows %s; skipping", item[0])
+            continue
+        return item
+    return None
+
+
+def _record_from_response(response: httpx.Response, url: str, depth: int) -> CrawlRecord | None:
+    """A CrawlRecord for the response, or None for non-text bodies."""
+    content_type = _normalize_content_type(response.headers.get("Content-Type"))
+    if not _is_text(content_type):
+        log.warning("skipping non-text body at %s (%s)", url, content_type)
+        return None
+    return CrawlRecord(
+        url=url,
+        final_url=str(response.url),
+        status_code=response.status_code,
+        content_type=content_type,
+        fetched_at=datetime.now(UTC).isoformat(),
+        depth=depth,
+        body=response.text,
+        headers=kept_headers(response.headers),
+    )
+
+
 class Crawler:
     """Generic crawl workflow; the target is described entirely by the config."""
 
@@ -107,8 +136,9 @@ class Crawler:
         self.config = config
         self._client = client
         self._patterns = tuple(re.compile(p) for p in config.allow_patterns)
+        self._seed_urls = {normalize_url(seed) for seed in config.seeds}
 
-    def crawl(self, max_pages: int | None = None) -> Iterator[CrawlRecord]:  # noqa: C901, PLR0912
+    def crawl(self, max_pages: int | None = None) -> Iterator[CrawlRecord]:
         """Fetch seeds (plus paginated and discovered pages) and yield raw records.
 
         *max_pages* overrides ``config.max_pages`` when given; it caps the
@@ -123,53 +153,50 @@ class Crawler:
             frontier = Frontier()
             for seed in self.config.seeds:
                 frontier.add(seed, 0)
-            seed_urls = {normalize_url(seed) for seed in self.config.seeds}
             prev_pages: dict[str, str] = {}
             fetched = 0
-            while frontier and (budget is None or fetched < budget):
-                item = frontier.pop()
+            while budget is None or fetched < budget:
+                item = _pop_allowed(frontier, robots)
                 if item is None:
                     break
                 url, depth = item
-                if robots is not None and not robots.allowed(url):
-                    log.info("robots.txt disallows %s; skipping", url)
-                    continue
                 if fetched:
                     time.sleep(self.config.request_delay_s)
-                try:
-                    response = call_with_retries(partial(_get, client, url), label=url)
-                except httpx.HTTPError as exc:
-                    if depth == 0 and url in seed_urls:
-                        raise
-                    log.warning("skipping %s after retries (%s)", url, exc)
+                response = self._fetch(client, url, depth)
+                if response is None:
                     continue
                 fetched += 1
-                content_type = _normalize_content_type(response.headers.get("Content-Type"))
-                if not _is_text(content_type):
-                    log.warning("skipping non-text body at %s (%s)", url, content_type)
+                record = _record_from_response(response, url, depth)
+                if record is None:
                     continue
-                record = CrawlRecord(
-                    url=url,
-                    final_url=str(response.url),
-                    status_code=response.status_code,
-                    content_type=content_type,
-                    fetched_at=datetime.now(UTC).isoformat(),
-                    depth=depth,
-                    body=response.text,
-                    headers=kept_headers(response.headers),
-                )
                 yield record
-                if record.status_code >= 400:
-                    continue
-                if depth == 0 and self.config.pagination is not None:
-                    self._enqueue_next_page(record, frontier, prev_pages)
-                if self.config.follow_links and depth < self.config.max_depth and content_type == "text/html":
-                    for link in extract_links(record.body, record.final_url):
-                        if any(pattern.search(link) for pattern in self._patterns):
-                            frontier.add(link, depth + 1)
+                self._enqueue_followups(record, frontier, prev_pages)
         finally:
             if self._client is None:
                 client.close()
+
+    def _fetch(self, client: httpx.Client, url: str, depth: int) -> httpx.Response | None:
+        """GET with retries. A seed that still fails aborts the crawl; other
+        failures return None so the URL is skipped."""
+        try:
+            return call_with_retries(partial(_get, client, url), label=url)
+        except httpx.HTTPError as exc:
+            if depth == 0 and url in self._seed_urls:
+                raise
+            log.warning("skipping %s after retries (%s)", url, exc)
+            return None
+
+    def _enqueue_followups(self, record: CrawlRecord, frontier: Frontier, prev_pages: dict[str, str]) -> None:
+        """Queue the next page and any allowed discovered links after a success."""
+        if record.status_code >= 400:
+            return
+        depth = record.depth
+        if depth == 0 and self.config.pagination is not None:
+            self._enqueue_next_page(record, frontier, prev_pages)
+        if self.config.follow_links and depth < self.config.max_depth and record.content_type == "text/html":
+            for link in extract_links(record.body, record.final_url):
+                if any(pattern.search(link) for pattern in self._patterns):
+                    frontier.add(link, depth + 1)
 
     def _enqueue_next_page(self, record: CrawlRecord, frontier: Frontier, prev_pages: dict[str, str]) -> None:
         pagination = self.config.pagination
