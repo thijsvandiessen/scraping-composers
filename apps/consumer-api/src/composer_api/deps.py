@@ -1,7 +1,8 @@
 from collections.abc import Generator
+from dataclasses import dataclass
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
 
@@ -13,3 +14,18 @@ def get_db() -> Generator[Session, None, None]:
 
 
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+@dataclass(frozen=True)
+class Pagination:
+    """The shared ``page``/``limit`` query parameters of the list endpoints."""
+
+    page: Annotated[int, Query(ge=1)] = 1
+    limit: Annotated[int, Query(ge=1, le=100)] = 20
+
+    @property
+    def offset(self) -> int:
+        return (self.page - 1) * self.limit
+
+
+PageQuery = Annotated[Pagination, Depends()]

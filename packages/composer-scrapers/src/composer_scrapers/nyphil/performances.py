@@ -34,14 +34,15 @@ def _title(value: object) -> str:
     return _WS.sub(" ", text).strip()
 
 
-def _performance_record(  # noqa: PLR0913
-    program_id: str,
-    season: str,
+def _performance_record(
+    program: dict[str, Any],
     concert_idx: int,
     work_idx: int,
     concert: dict[str, Any],
     work: dict[str, Any],
 ) -> SourceWorkMention:
+    program_id = str(program["programID"])
+    season = program["season"]
     title = _title(work.get("workTitle"))
     composers = list(_names(work.get("composerName")))
     conductors = list(_names(work.get("conductorName")))
@@ -82,10 +83,8 @@ def _performances(programs: Iterable[dict[str, Any]]) -> Iterator[SourceWorkMent
     stable by counting intervals too); intermission/untitled entries are
     skipped."""
     for program in programs:
-        program_id = str(program["programID"])
-        season = program["season"]
         for concert_idx, concert in enumerate(program.get("concerts", ())):
             for work_idx, work in enumerate(program["works"]):
                 if not _title(work.get("workTitle")):
                     continue
-                yield _performance_record(program_id, season, concert_idx, work_idx, concert, work)
+                yield _performance_record(program, concert_idx, work_idx, concert, work)

@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from .dedupe import dedupe_persons
 from .extract import PersonName, parse_name
-from .match import AUTO_THRESHOLD, REVIEW_THRESHOLD, classify, score
+from .match import AUTO_THRESHOLD, REVIEW_THRESHOLD, PersonProfile, classify, score
 
 __all__ = [
     "AUTO_THRESHOLD",
     "REVIEW_THRESHOLD",
     "PersonName",
+    "PersonProfile",
     "classify",
     "dedupe_persons",
     "parse_name",

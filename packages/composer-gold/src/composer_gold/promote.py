@@ -25,7 +25,7 @@ from composer_warehouse.models import (
     Work,
     WorkTitle,
 )
-from sqlalchemy import create_engine, insert, select
+from sqlalchemy import Connection, create_engine, insert, select
 from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
@@ -151,27 +151,61 @@ def promote(silver: Session, gold_path: str | Path, config: PromoteConfig | None
     return stats
 
 
-def _build(  # noqa: C901, PLR0912, PLR0915
-    silver: Session, tmp_path: Path, config: PromoteConfig
-) -> PromoteStats:
-    tmp_path.unlink(missing_ok=True)
-    gold_engine = create_engine(f"sqlite:///{tmp_path}")
-    Base.metadata.create_all(gold_engine)
+def _entity_row(e: Entity) -> dict[str, Any]:
+    """An entity insert row with the canonical link resolved away."""
+    return {
+        "id": e.id,
+        "kind": e.kind,
+        "dedup_key": e.dedup_key,
+        "label": e.label,
+        "canonical_entity_id": None,
+        "created_at": e.created_at,
+        "first_ingested_at": e.first_ingested_at,
+        "last_ingested_at": e.last_ingested_at,
+        "last_edited_at": e.last_edited_at,
+    }
 
-    # --- rule 2 groundwork: duplicate clusters -----------------------------
-    # With the rule off, no links are resolved and every spelling stands on
-    # its own (including for rule 1's evidence check).
-    roots = _resolve_roots(silver) if config.collapse_duplicates else {}
 
-    def root(entity_id: uuid.UUID) -> uuid.UUID:
-        return roots.get(entity_id, entity_id)
+class _GoldBuild:
+    """One promotion run: the selection state and counters shared by the
+    copy phases driven from ``_build``."""
 
-    all_persons = set(silver.scalars(select(Entity.id).where(Entity.kind == "person")))
+    def __init__(self, silver: Session, config: PromoteConfig) -> None:
+        self.silver = silver
+        self.config = config
+        # --- rule 2 groundwork: duplicate clusters ------------------------
+        # With the rule off, no links are resolved and every spelling stands
+        # on its own (including for rule 1's evidence check).
+        self.roots = _resolve_roots(silver) if config.collapse_duplicates else {}
+        self.all_persons = set(silver.scalars(select(Entity.id).where(Entity.kind == "person")))
+        self.evidence_roots: set[uuid.UUID] = set()
+        self.sitelink_roots: set[uuid.UUID] = set()
+        self.kept_roots: set[uuid.UUID] = set()
+        self.kept_members: set[uuid.UUID] = set()
+        self.all_other: set[uuid.UUID] = set()
+        self.kept_other: set[uuid.UUID] = set()
+        self.claim_rows: list[dict[str, Any]] = []
+        self.record_count = 0
+        self.work_count = 0
+        self.title_count = 0
+        self.mention_count = 0
+        self.concert_count = 0
+        self.participant_links = 0
+        self.unresolved_names: set[str] = set()
 
-    if config.drop_unevidenced_persons:
-        # --- rule 1: persons with performance/work evidence ----------------
+    def root(self, entity_id: uuid.UUID) -> uuid.UUID:
+        return self.roots.get(entity_id, entity_id)
+
+    def select_persons(self) -> None:
+        """Rule 1: keep person clusters with performance/work evidence (or a
+        sitelink count clearing the configured threshold); with the rule off,
+        keep everyone."""
+        if not self.config.drop_unevidenced_persons:
+            self.kept_roots = {self.root(p) for p in self.all_persons}
+            self.kept_members = {p for p in self.all_persons if self.root(p) in self.kept_roots}
+            return
         mention_composers = set(
-            silver.scalars(
+            self.silver.scalars(
                 select(RawWorkMention.composer_entity_id)
                 .where(RawWorkMention.composer_entity_id.is_not(None))
                 .distinct()
@@ -179,33 +213,30 @@ def _build(  # noqa: C901, PLR0912, PLR0915
         )
         perf_sources = select(RawWorkMention.source_id).distinct().scalar_subquery()
         archive_reported = set(
-            silver.scalars(
+            self.silver.scalars(
                 select(EntityRecord.entity_id)
                 .where(EntityRecord.source_id.in_(perf_sources), EntityRecord.entity_id.is_not(None))
                 .distinct()
             )
         )
         evidence = mention_composers | archive_reported
-        evidence_roots = {root(p) for p in all_persons if p in evidence}
+        self.evidence_roots = {self.root(p) for p in self.all_persons if p in evidence}
 
         # --- extra signal: culturally significant persons by sitelink count -
         # Wikipedia sitelink count (from Wikidata) is a proxy for significance.
         # When a threshold is set, a person clearing it is promoted even without
         # the performance/work evidence above; this only ever adds persons,
         # never drops.
-        sitelink_roots = _sitelink_roots(silver, root, all_persons, config.min_sitelinks)
+        self.sitelink_roots = _sitelink_roots(
+            self.silver, self.root, self.all_persons, self.config.min_sitelinks
+        )
 
-        kept_roots = evidence_roots | sitelink_roots
-    else:
-        evidence_roots = set()
-        sitelink_roots = set()
-        kept_roots = {root(p) for p in all_persons}
+        self.kept_roots = self.evidence_roots | self.sitelink_roots
+        self.kept_members = {p for p in self.all_persons if self.root(p) in self.kept_roots}
 
-    kept_members = {p for p in all_persons if root(p) in kept_roots}
-
-    with gold_engine.begin() as gold:
-        # --- FK targets: sources and runs, wholesale -----------------------
-        for row in silver.execute(select(Source)).scalars():
+    def copy_sources_and_runs(self, gold: Connection) -> None:
+        """FK targets: sources and runs, wholesale."""
+        for row in self.silver.execute(select(Source)).scalars():
             gold.execute(
                 insert(Source).values(
                     id=row.id, name=row.name, base_url=row.base_url, created_at=row.created_at
@@ -222,49 +253,38 @@ def _build(  # noqa: C901, PLR0912, PLR0915
                 "records_new": r.records_new,
                 "error": r.error,
             }
-            for r in silver.execute(select(IngestRun)).scalars()
+            for r in self.silver.execute(select(IngestRun)).scalars()
         ]
         if run_rows:
             gold.execute(insert(IngestRun), run_rows)
 
-        # --- kept person representatives (canonical link resolved) ---------
-        def entity_row(e: Entity) -> dict[str, Any]:
-            return {
-                "id": e.id,
-                "kind": e.kind,
-                "dedup_key": e.dedup_key,
-                "label": e.label,
-                "canonical_entity_id": None,
-                "created_at": e.created_at,
-                "first_ingested_at": e.first_ingested_at,
-                "last_ingested_at": e.last_ingested_at,
-                "last_edited_at": e.last_edited_at,
-            }
-
-        for chunk in _chunked(sorted(kept_roots, key=str)):
+    def copy_entities(self, gold: Connection, ids: set[uuid.UUID]) -> None:
+        for chunk in _chunked(sorted(ids, key=str)):
             rows = [
-                entity_row(e) for e in silver.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
+                _entity_row(e)
+                for e in self.silver.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
             ]
             if rows:
                 gold.execute(insert(Entity), rows)
 
-        # --- claims of kept persons: re-point, dedupe ----------------------
-        claim_rows: list[dict[str, Any]] = []
+    def collect_person_claims(self) -> set[uuid.UUID]:
+        """Claims of kept persons: re-point, dedupe. Returns the non-kept
+        entities those claims reference (rule 3's seed)."""
         seen_claims: set[tuple[uuid.UUID, str, uuid.UUID | None, str | None, int]] = set()
         referenced: set[uuid.UUID] = set()
-        for chunk in _chunked(sorted(kept_members, key=str)):
-            for c in silver.execute(
+        for chunk in _chunked(sorted(self.kept_members, key=str)):
+            for c in self.silver.execute(
                 select(Claim).where(Claim.subject_id.in_(chunk)).order_by(Claim.id)
             ).scalars():
-                subject = root(c.subject_id)
-                obj = root(c.object_id) if c.object_id is not None else None
+                subject = self.root(c.subject_id)
+                obj = self.root(c.object_id) if c.object_id is not None else None
                 key = (subject, c.predicate, obj, c.value, c.source_id)
                 if key in seen_claims:
                     continue  # collapsing duplicates can align identical claims
                 seen_claims.add(key)
-                if obj is not None and obj not in kept_members:
+                if obj is not None and obj not in self.kept_members:
                     referenced.add(obj)
-                claim_rows.append(
+                self.claim_rows.append(
                     {
                         "subject_id": subject,
                         "predicate": c.predicate,
@@ -275,21 +295,23 @@ def _build(  # noqa: C901, PLR0912, PLR0915
                         "created_at": c.created_at,
                     }
                 )
+        return referenced
 
-        # --- rule 3: referenced non-person entities (to a fixpoint) --------
-        all_other = set(silver.scalars(select(Entity.id).where(Entity.kind != "person")))
-        kept_other: set[uuid.UUID] = set()
-        frontier = {r for r in referenced if r not in kept_roots}
+    def walk_referenced(self, referenced: set[uuid.UUID]) -> None:
+        """Rule 3: keep referenced non-person entities (to a fixpoint),
+        collecting the discovery-edge claims along the way."""
+        self.all_other = set(self.silver.scalars(select(Entity.id).where(Entity.kind != "person")))
+        frontier = {r for r in referenced if r not in self.kept_roots}
         while frontier:
-            kept_other |= frontier
+            self.kept_other |= frontier
             next_frontier: set[uuid.UUID] = set()
             for chunk in _chunked(sorted(frontier, key=str)):
-                for c in silver.execute(select(Claim).where(Claim.subject_id.in_(chunk))).scalars():
-                    obj = root(c.object_id) if c.object_id is not None else None
-                    if obj is None or obj in kept_roots or obj in kept_other:
+                for c in self.silver.execute(select(Claim).where(Claim.subject_id.in_(chunk))).scalars():
+                    obj = self.root(c.object_id) if c.object_id is not None else None
+                    if obj is None or obj in self.kept_roots or obj in self.kept_other:
                         continue
                     next_frontier.add(obj)
-                    claim_rows.append(
+                    self.claim_rows.append(
                         {
                             "subject_id": c.subject_id,
                             "predicate": c.predicate,
@@ -304,15 +326,17 @@ def _build(  # noqa: C901, PLR0912, PLR0915
         # With rule 3 off, unreferenced non-person entities are kept as well.
         # Joining after the walk (not seeding it) keeps the referenced part of
         # gold — including discovery-edge claims — identical to a curated run;
-        # the pass below picks up the extra entities' literal claims.
-        if not config.prune_unreferenced:
-            kept_other |= {root(e) for e in all_other} - kept_roots
-        # own claims of kept non-person entities (literals, e.g. mentioned_in)
-        for chunk in _chunked(sorted(kept_other, key=str)):
-            for c in silver.execute(
+        # the literal-claims pass picks up the extra entities' claims.
+        if not self.config.prune_unreferenced:
+            self.kept_other |= {self.root(e) for e in self.all_other} - self.kept_roots
+
+    def collect_other_literal_claims(self) -> None:
+        """Own claims of kept non-person entities (literals, e.g. mentioned_in)."""
+        for chunk in _chunked(sorted(self.kept_other, key=str)):
+            for c in self.silver.execute(
                 select(Claim).where(Claim.subject_id.in_(chunk), Claim.object_id.is_(None))
             ).scalars():
-                claim_rows.append(
+                self.claim_rows.append(
                     {
                         "subject_id": c.subject_id,
                         "predicate": c.predicate,
@@ -324,25 +348,19 @@ def _build(  # noqa: C901, PLR0912, PLR0915
                     }
                 )
 
-        for chunk in _chunked(sorted(kept_other, key=str)):
-            rows = [
-                entity_row(e) for e in silver.execute(select(Entity).where(Entity.id.in_(chunk))).scalars()
-            ]
-            if rows:
-                gold.execute(insert(Entity), rows)
+    def insert_claims(self, gold: Connection) -> None:
+        for i in range(0, len(self.claim_rows), INSERT_BATCH):
+            gold.execute(insert(Claim), self.claim_rows[i : i + INSERT_BATCH])
 
-        for i in range(0, len(claim_rows), INSERT_BATCH):
-            gold.execute(insert(Claim), claim_rows[i : i + INSERT_BATCH])
-
-        # --- entity records of everything kept, re-pointed ------------------
-        record_count = 0
-        record_owner_ids = sorted(kept_members | kept_other, key=str)
+    def copy_records(self, gold: Connection) -> None:
+        """Entity records of everything kept, re-pointed."""
+        record_owner_ids = sorted(self.kept_members | self.kept_other, key=str)
         for chunk in _chunked(record_owner_ids):
             rows = [
                 {
                     "id": r.id,
                     "source_id": r.source_id,
-                    "entity_id": root(r.entity_id) if r.entity_id is not None else None,
+                    "entity_id": self.root(r.entity_id) if r.entity_id is not None else None,
                     "external_id": r.external_id,
                     "name": r.name,
                     "url": r.url,
@@ -352,19 +370,20 @@ def _build(  # noqa: C901, PLR0912, PLR0915
                     "first_run_id": r.first_run_id,
                     "last_run_id": r.last_run_id,
                 }
-                for r in silver.execute(
+                for r in self.silver.execute(
                     select(EntityRecord).where(EntityRecord.entity_id.in_(chunk))
                 ).scalars()
             ]
             if rows:
                 gold.execute(insert(EntityRecord), rows)
-                record_count += len(rows)
+                self.record_count += len(rows)
 
-        # --- works, titles, mentions (composer ids remapped) ---------------
+    def copy_works_titles_mentions(self, gold: Connection) -> None:
+        """Works, titles, mentions — composer ids remapped."""
         work_rows = [
             {
                 "id": w.id,
-                "composer_entity_id": root(w.composer_entity_id) if w.composer_entity_id else None,
+                "composer_entity_id": self.root(w.composer_entity_id) if w.composer_entity_id else None,
                 "canonical_title": w.canonical_title,
                 "title_key": w.title_key,
                 "work_type": w.work_type,
@@ -377,10 +396,11 @@ def _build(  # noqa: C901, PLR0912, PLR0915
                 "first_ingested_at": w.first_ingested_at,
                 "last_ingested_at": w.last_ingested_at,
             }
-            for w in silver.execute(select(Work)).scalars()
+            for w in self.silver.execute(select(Work)).scalars()
         ]
         for i in range(0, len(work_rows), INSERT_BATCH):
             gold.execute(insert(Work), work_rows[i : i + INSERT_BATCH])
+        self.work_count = len(work_rows)
 
         title_rows = [
             {
@@ -391,44 +411,45 @@ def _build(  # noqa: C901, PLR0912, PLR0915
                 "source_id": t.source_id,
                 "first_seen_at": t.first_seen_at,
             }
-            for t in silver.execute(select(WorkTitle)).scalars()
+            for t in self.silver.execute(select(WorkTitle)).scalars()
         ]
         for i in range(0, len(title_rows), INSERT_BATCH):
             gold.execute(insert(WorkTitle), title_rows[i : i + INSERT_BATCH])
+        self.title_count = len(title_rows)
 
-        mention_count = 0
-        mention_rows: list[dict[str, Any]] = []
-        for m in silver.execute(select(RawWorkMention)).scalars():
-            mention_rows.append(
-                {
-                    "id": m.id,
-                    "source_id": m.source_id,
-                    "external_id": m.external_id,
-                    "raw_composer": m.raw_composer,
-                    "raw_title": m.raw_title,
-                    "raw": m.raw,
-                    "composer_entity_id": root(m.composer_entity_id) if m.composer_entity_id else None,
-                    "work_id": m.work_id,
-                    "match_status": m.match_status,
-                    "match_score": m.match_score,
-                    "match_method": m.match_method,
-                    "candidate_work_id": m.candidate_work_id,
-                    "first_seen_at": m.first_seen_at,
-                    "last_seen_at": m.last_seen_at,
-                    "first_run_id": m.first_run_id,
-                    "last_run_id": m.last_run_id,
-                }
-            )
-            mention_count += 1
+        mention_rows = [
+            {
+                "id": m.id,
+                "source_id": m.source_id,
+                "external_id": m.external_id,
+                "raw_composer": m.raw_composer,
+                "raw_title": m.raw_title,
+                "raw": m.raw,
+                "composer_entity_id": self.root(m.composer_entity_id) if m.composer_entity_id else None,
+                "work_id": m.work_id,
+                "match_status": m.match_status,
+                "match_score": m.match_score,
+                "match_method": m.match_method,
+                "candidate_work_id": m.candidate_work_id,
+                "first_seen_at": m.first_seen_at,
+                "last_seen_at": m.last_seen_at,
+                "first_run_id": m.first_run_id,
+                "last_run_id": m.last_run_id,
+            }
+            for m in self.silver.execute(select(RawWorkMention)).scalars()
+        ]
         for i in range(0, len(mention_rows), INSERT_BATCH):
             gold.execute(insert(RawWorkMention), mention_rows[i : i + INSERT_BATCH])
+        self.mention_count = len(mention_rows)
 
-        # --- concerts: copy the silver-derived tables, re-pointing people ---
-        # `derive_concerts` resolved participants against every person entity;
-        # here duplicates collapse to their canonical root, and links to
-        # persons that didn't make it into gold are nulled (the verbatim name
-        # is always kept).
-        gold_entities = kept_roots | kept_other
+    def copy_concerts(self, gold: Connection) -> None:
+        """Concerts: copy the silver-derived tables, re-pointing people.
+
+        ``derive_concerts`` resolved participants against every person entity;
+        here duplicates collapse to their canonical root, and links to persons
+        that didn't make it into gold are nulled (the verbatim name is always
+        kept)."""
+        gold_entities = self.kept_roots | self.kept_other
         concert_rows = [
             {
                 "id": c.id,
@@ -440,19 +461,17 @@ def _build(  # noqa: C901, PLR0912, PLR0915
                 "event_type": c.event_type,
                 "url": c.url,
             }
-            for c in silver.execute(select(Concert)).scalars()
+            for c in self.silver.execute(select(Concert)).scalars()
         ]
-        participant_links = 0
-        unresolved_names: set[str] = set()
         participant_rows: list[dict[str, Any]] = []
-        for p in silver.execute(select(ConcertParticipant)).scalars():
-            entity_id = root(p.entity_id) if p.entity_id is not None else None
+        for p in self.silver.execute(select(ConcertParticipant)).scalars():
+            entity_id = self.root(p.entity_id) if p.entity_id is not None else None
             if entity_id is not None and entity_id not in gold_entities:
                 entity_id = None
             if entity_id is not None:
-                participant_links += 1
+                self.participant_links += 1
             else:
-                unresolved_names.add(p.name)
+                self.unresolved_names.add(p.name)
             participant_rows.append(
                 {
                     "concert_id": p.concert_id,
@@ -464,7 +483,7 @@ def _build(  # noqa: C901, PLR0912, PLR0915
             )
         concert_work_rows = [
             {"concert_id": cw.concert_id, "mention_id": cw.mention_id}
-            for cw in silver.execute(select(ConcertWork)).scalars()
+            for cw in self.silver.execute(select(ConcertWork)).scalars()
         ]
 
         for i in range(0, len(concert_rows), INSERT_BATCH):
@@ -473,22 +492,45 @@ def _build(  # noqa: C901, PLR0912, PLR0915
             gold.execute(insert(ConcertParticipant), participant_rows[i : i + INSERT_BATCH])
         for i in range(0, len(concert_work_rows), INSERT_BATCH):
             gold.execute(insert(ConcertWork), concert_work_rows[i : i + INSERT_BATCH])
+        self.concert_count = len(concert_rows)
+
+    def stats(self) -> PromoteStats:
+        return PromoteStats(
+            persons_kept=len(self.kept_roots),
+            persons_dropped=len(self.all_persons) - len(self.kept_members),
+            persons_promoted_by_sitelinks=len(self.sitelink_roots - self.evidence_roots),
+            duplicates_collapsed=len(self.kept_members) - len(self.kept_roots),
+            entities_kept_other=len(self.kept_other),
+            entities_pruned=len(self.all_other - self.kept_other),
+            claims=len(self.claim_rows),
+            records=self.record_count,
+            works=self.work_count,
+            work_titles=self.title_count,
+            mentions=self.mention_count,
+            concerts=self.concert_count,
+            concert_participant_links=self.participant_links,
+            unresolved_participant_names=len(self.unresolved_names),
+        )
+
+
+def _build(silver: Session, tmp_path: Path, config: PromoteConfig) -> PromoteStats:
+    tmp_path.unlink(missing_ok=True)
+    gold_engine = create_engine(f"sqlite:///{tmp_path}")
+    Base.metadata.create_all(gold_engine)
+
+    build = _GoldBuild(silver, config)
+    build.select_persons()
+    with gold_engine.begin() as gold:
+        build.copy_sources_and_runs(gold)
+        build.copy_entities(gold, build.kept_roots)  # kept person representatives
+        referenced = build.collect_person_claims()
+        build.walk_referenced(referenced)
+        build.collect_other_literal_claims()
+        build.copy_entities(gold, build.kept_other)
+        build.insert_claims(gold)
+        build.copy_records(gold)
+        build.copy_works_titles_mentions(gold)
+        build.copy_concerts(gold)
 
     gold_engine.dispose()
-
-    return PromoteStats(
-        persons_kept=len(kept_roots),
-        persons_dropped=len(all_persons) - len(kept_members),
-        persons_promoted_by_sitelinks=len(sitelink_roots - evidence_roots),
-        duplicates_collapsed=len(kept_members) - len(kept_roots),
-        entities_kept_other=len(kept_other),
-        entities_pruned=len(all_other - kept_other),
-        claims=len(claim_rows),
-        records=record_count,
-        works=len(work_rows),
-        work_titles=len(title_rows),
-        mentions=mention_count,
-        concerts=len(concert_rows),
-        concert_participant_links=participant_links,
-        unresolved_participant_names=len(unresolved_names),
-    )
+    return build.stats()

@@ -81,18 +81,15 @@ def _normalize_key(letter: str, accidental: str | None, mode: str) -> str:
     return " ".join(parts)
 
 
-def extract_features(raw_title: str) -> WorkFeatures:  # noqa: C901
-    text = _strip_diacritics(raw_title).lower()
-    spans: list[tuple[int, int]] = []
-
-    catalogue_prefix = catalogue_number = None
+def _find_catalogue(text: str, spans: list[tuple[int, int]]) -> tuple[str | None, str | None]:
     for cat_m in _CATALOGUE.finditer(text):
         if any(c.isdigit() for c in cat_m.group(2)):
-            catalogue_prefix = cat_m.group(1).upper()
-            catalogue_number = cat_m.group(2).upper()
             spans.append(cat_m.span())
-            break
+            return cat_m.group(1).upper(), cat_m.group(2).upper()
+    return None, None
 
+
+def _find_opus_and_number(text: str, spans: list[tuple[int, int]]) -> tuple[str | None, int | None]:
     opus_number = None
     number = None
     opus_m = _OPUS.search(text)
@@ -107,17 +104,28 @@ def extract_features(raw_title: str) -> WorkFeatures:  # noqa: C901
         if num_m:
             number = int(num_m.group(1))
             spans.append(num_m.span())
+    return opus_number, number
 
-    musical_key = None
+
+def _find_key(text: str, spans: list[tuple[int, int]]) -> str | None:
     key_m = _KEY_EN.search(text)
     if key_m:
-        musical_key = _normalize_key(key_m.group(1), key_m.group(2), key_m.group(3))
         spans.append(key_m.span())
-    else:
-        key_m = _KEY_DE.search(text)
-        if key_m:
-            musical_key = _normalize_key(key_m.group(1), None, key_m.group(2))
-            spans.append(key_m.span())
+        return _normalize_key(key_m.group(1), key_m.group(2), key_m.group(3))
+    key_m = _KEY_DE.search(text)
+    if key_m:
+        spans.append(key_m.span())
+        return _normalize_key(key_m.group(1), None, key_m.group(2))
+    return None
+
+
+def extract_features(raw_title: str) -> WorkFeatures:
+    text = _strip_diacritics(raw_title).lower()
+    spans: list[tuple[int, int]] = []
+
+    catalogue_prefix, catalogue_number = _find_catalogue(text, spans)
+    opus_number, number = _find_opus_and_number(text, spans)
+    musical_key = _find_key(text, spans)
 
     normalized = normalize_title(raw_title)
     work_type = next((canon for canon, kws in _TYPES if any(kw in normalized for kw in kws)), None)

@@ -12,7 +12,7 @@ import pytest
 from composer_cli import main
 from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_review
-from composer_cli.query_cmds import cmd_claims, cmd_runs, cmd_stats, entity_claims
+from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
 from composer_schema import SourceClaim
 from composer_warehouse.db import get_engine, init_db
@@ -68,14 +68,14 @@ def test_entity_claims_attributes_each_value_to_its_source(session: Session) -> 
 def test_entity_claims_filters_by_predicate_and_source(session: Session) -> None:
     _ingest_two_sources_disagreeing(session)
 
-    ((_, rows),) = entity_claims(session, "Abert", predicate="born_on", source="wikidata")
+    ((_, rows),) = entity_claims(session, "Abert", ClaimFilters(predicate="born_on", source="wikidata"))
     assert [(r[0], r[1], r[3]) for r in rows] == [("born_on", "1832-09-20", "wikidata")]
 
 
 def test_entity_claims_carries_record_provenance(session: Session) -> None:
     _ingest_two_sources_disagreeing(session)
 
-    ((_, rows),) = entity_claims(session, "Abert", predicate="born_on")
+    ((_, rows),) = entity_claims(session, "Abert", ClaimFilters(predicate="born_on"))
     # every row points back to the raw record it was extracted from
     assert all(record_id is not None for *_rest, record_id in rows)
 
@@ -99,7 +99,7 @@ def test_entity_claims_collapses_identical_assertions_from_one_source(session: S
     )
     ingest_source(session, source)
 
-    ((_, rows),) = entity_claims(session, "Bach, Johann Sebastian", predicate="has_profession")
+    ((_, rows),) = entity_claims(session, "Bach, Johann Sebastian", ClaimFilters(predicate="has_profession"))
     assert len(rows) == 1
     predicate, _value, object_label, source_name, _rec = rows[0]
     assert (predicate, object_label, source_name) == ("has_profession", "composer", "wikidata")

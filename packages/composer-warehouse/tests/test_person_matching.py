@@ -1,11 +1,17 @@
 """Tests for scoring person-name pairs and classifying the result."""
 
 from composer_warehouse.persons.extract import parse_name
-from composer_warehouse.persons.match import AUTO_THRESHOLD, REVIEW_THRESHOLD, classify, score
+from composer_warehouse.persons.match import (
+    AUTO_THRESHOLD,
+    REVIEW_THRESHOLD,
+    PersonProfile,
+    classify,
+    score,
+)
 
 
 def _score(a: str, b: str, ya: int | None = None, yb: int | None = None) -> tuple[float, str]:
-    return score(parse_name(a), parse_name(b), ya, yb)
+    return score(PersonProfile(parse_name(a), ya), PersonProfile(parse_name(b), yb))
 
 
 def test_initials_compatible_auto_links() -> None:

@@ -35,8 +35,8 @@ class MatchResult:
     candidate_work_id: uuid.UUID | None  # best near-miss, for the reviewer
 
 
-def score(a: WorkFeatures, b: WorkFeatures) -> tuple[float, str]:  # noqa: C901
-    """Similarity of two works in [0, 1] with the method that decided it."""
+def _identifier_score(a: WorkFeatures, b: WorkFeatures) -> tuple[float, str] | None:
+    """The score decided by hard identifiers, or None when they don't settle it."""
     # Catalogue numbers are authoritative when both sides have one.
     if a.catalogue_prefix and b.catalogue_prefix:
         if (a.catalogue_prefix, a.catalogue_number) == (b.catalogue_prefix, b.catalogue_number):
@@ -50,6 +50,14 @@ def score(a: WorkFeatures, b: WorkFeatures) -> tuple[float, str]:  # noqa: C901
         if a.number is not None and b.number is not None and a.number != b.number:
             return 0.15, "opus_number_conflict"  # same opus, different work within it
         return 0.92, "opus"
+
+    return None
+
+
+def score(a: WorkFeatures, b: WorkFeatures) -> tuple[float, str]:
+    """Similarity of two works in [0, 1] with the method that decided it."""
+    if (identified := _identifier_score(a, b)) is not None:
+        return identified
 
     ratio = SequenceMatcher(None, a.core_title, b.core_title).ratio()
     # A differing explicit number/key is strong evidence of a different work.

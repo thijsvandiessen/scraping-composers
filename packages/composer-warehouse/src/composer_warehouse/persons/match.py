@@ -15,10 +15,22 @@ pass and the tests can call it directly.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .extract import PersonName
 
 AUTO_THRESHOLD = 0.90
 REVIEW_THRESHOLD = 0.70
+
+
+@dataclass(frozen=True)
+class PersonProfile:
+    """One side of a comparison: the parsed primary name plus whatever
+    corroborating facts are known about the person."""
+
+    name: PersonName
+    birth_year: int | None = None
+    aliases: tuple[PersonName, ...] = ()
 
 
 def _initials_compatible(a: tuple[str, ...], b: tuple[str, ...]) -> bool:
@@ -58,24 +70,14 @@ def _score_pair(
     return base, method
 
 
-def score(  # noqa: PLR0913
-    a: PersonName,
-    b: PersonName,
-    a_year: int | None = None,
-    b_year: int | None = None,
-    a_aliases: list[PersonName] | None = None,
-    b_aliases: list[PersonName] | None = None,
-) -> tuple[float, str]:
+def score(a: PersonProfile, b: PersonProfile) -> tuple[float, str]:
     """Similarity of two people in [0, 1] with the method that decided it."""
     best_score = -1.0
     best_method = ""
 
-    a_names = [a] + (a_aliases or [])
-    b_names = [b] + (b_aliases or [])
-
-    for an in a_names:
-        for bn in b_names:
-            val, meth = _score_pair(an, bn, a_year, b_year)
+    for an in (a.name, *a.aliases):
+        for bn in (b.name, *b.aliases):
+            val, meth = _score_pair(an, bn, a.birth_year, b.birth_year)
             if val > best_score:
                 best_score = val
                 best_method = meth

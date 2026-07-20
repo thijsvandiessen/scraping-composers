@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import argparse
 import logging
 import sys
+from typing import TYPE_CHECKING
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH
 from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS
@@ -12,16 +15,13 @@ from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
 
+if TYPE_CHECKING:
+    # What ArgumentParser.add_subparsers returns; argparse doesn't expose a
+    # public name for it (and the runtime class is not subscriptable).
+    _SubParsers = argparse._SubParsersAction[argparse.ArgumentParser]  # pyright: ignore[reportPrivateUsage]
 
-def main() -> None:  # noqa: PLR0915
-    parser = argparse.ArgumentParser(prog="composer-ingest", description="Ingest classical composer data")
-    parser.add_argument(
-        "--database-url",
-        help="SQLAlchemy URL (default: $DATABASE_URL or sqlite:///composers.db)",
-    )
-    parser.add_argument("-v", "--verbose", action="store_true")
-    sub = parser.add_subparsers(dest="command", required=True)
 
+def _add_query_parsers(sub: _SubParsers) -> None:
     p_stats = sub.add_parser("stats", help="show dataset counts")
     p_stats.set_defaults(func=cmd_stats)
 
@@ -39,6 +39,8 @@ def main() -> None:  # noqa: PLR0915
     p_runs.add_argument("--limit", type=int, default=20)
     p_runs.set_defaults(func=cmd_runs)
 
+
+def _add_work_parsers(sub: _SubParsers) -> None:
     p_works = sub.add_parser("works", help="search resolved works (by composer or title) and their aliases")
     p_works.add_argument("name", help="composer name or title substring")
     p_works.add_argument("--limit", type=int, default=20, help="max matching works to show")
@@ -60,6 +62,8 @@ def main() -> None:  # noqa: PLR0915
     )
     p_rematch.set_defaults(func=cmd_rematch)
 
+
+def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_fetch = sub.add_parser("fetch", help="fetch raw records from a source and store in the bucket")
     p_fetch.add_argument("source", choices=sorted(REGISTRY))
     p_fetch.add_argument("--max-pages", type=int, help="stop after N pages (for testing)")
@@ -131,6 +135,8 @@ def main() -> None:  # noqa: PLR0915
     )
     p_rebuild.set_defaults(func=cmd_rebuild_silver)
 
+
+def _add_person_parsers(sub: _SubParsers) -> None:
     p_dedupe = sub.add_parser(
         "dedupe-persons", help="link near-duplicate person entities (surname/initials/birth-year heuristics)"
     )
@@ -148,6 +154,20 @@ def main() -> None:  # noqa: PLR0915
     p_preview.add_argument("--accept", type=int, metavar="MATCH_ID", help="confirm a duplicate link")
     p_preview.add_argument("--reject", type=int, metavar="MATCH_ID", help="reject a proposed link")
     p_preview.set_defaults(func=cmd_person_review)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="composer-ingest", description="Ingest classical composer data")
+    parser.add_argument(
+        "--database-url",
+        help="SQLAlchemy URL (default: $DATABASE_URL or sqlite:///composers.db)",
+    )
+    parser.add_argument("-v", "--verbose", action="store_true")
+    sub = parser.add_subparsers(dest="command", required=True)
+    _add_query_parsers(sub)
+    _add_work_parsers(sub)
+    _add_pipeline_parsers(sub)
+    _add_person_parsers(sub)
 
     args = parser.parse_args()
     logging.basicConfig(
