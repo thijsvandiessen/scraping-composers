@@ -223,12 +223,17 @@ def test_form_keeps_input_and_shows_error_on_bad_number(
     _install(monkeypatch, stub)
     response = staff_client.post(
         "/admin/crawls/new/",
-        {"name": "archive", "seeds": "https://example.org/", "max_depth": "abc", "pagination_type": "none"},
+        {
+            "name": "archive",
+            "seeds": "https://example.org/kept-seed-marker",
+            "max_depth": "abc",
+            "pagination_type": "none",
+        },
     )
     assert response.status_code == 200  # re-rendered, not redirected
     page = response.content.decode()
     assert "numeric fields" in page
-    assert "https://example.org/" in page  # submitted seeds survive the error
+    assert "kept-seed-marker" in page  # submitted seeds survive the error
     assert stub.saved == []
 
 
@@ -245,7 +250,7 @@ def test_form_surfaces_api_validation_error(monkeypatch: pytest.MonkeyPatch, sta
 def test_edit_form_prefills_from_api(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     _install(monkeypatch, StubAPI(crawls=[CRAWL_PAYLOAD]))
     page = staff_client.get("/admin/crawls/archive/edit/").content.decode()
-    assert "https://example.org/archive" in page
+    assert ">https://example.org/archive</textarea>" in page  # seeds land in the textarea
     assert 'name="pagination_param" value="p"' in page
 
 
