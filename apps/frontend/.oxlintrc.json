@@ -1,0 +1,7 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["src/lib/generated"],
+  "rules": {
+    "max-lines": ["error", { "max": 300 }]
+  }
+}

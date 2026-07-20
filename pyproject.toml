@@ -20,6 +20,7 @@ dev = [
     "pytest-django>=4.8",
     "pyright>=1.1.390",
     "ruff>=0.4",
+    "pylint>=4.0.6",
 ]
 
 [tool.pytest.ini_options]
@@ -29,6 +30,24 @@ testpaths = ["packages", "apps"]
 # mirror them here so a workspace-root `uv run pytest` can import its tests too.
 pythonpath = ["apps/dashboard"]
 DJANGO_SETTINGS_MODULE = "config.settings"
+
+# Pylint runs scoped to a single rule: C0302 too-many-lines, capping files at 300
+# lines. Ruff (the main linter) has no equivalent rule. Legacy files over the limit
+# carry a `# pylint: disable=too-many-lines` pragma; remove it when splitting them,
+# and don't add it to new files.
+[tool.pylint.main]
+recursive = true
+ignore-paths = ["^.*/(\\.venv|node_modules|__pycache__)/.*$"]
+
+[tool.pylint."messages control"]
+disable = ["all"]
+enable = ["too-many-lines"]
+
+[tool.pylint.format]
+max-module-lines = 300
+
+[tool.pylint.reports]
+score = false
 
 [tool.ruff]
 line-length = 110
