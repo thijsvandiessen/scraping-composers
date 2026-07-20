@@ -27,7 +27,7 @@ def new_work(composer_id: uuid.UUID | None, title: str, features: WorkFeatures) 
     )
 
 
-def ingest_mention(
+def ingest_mention(  # noqa: PLR0913
     session: Session,
     mention: WorkMentionDocument,
     source_id: int,

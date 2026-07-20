@@ -65,7 +65,7 @@ def _canonical_and_duplicate(
     return (a, b) if str(a.id) < str(b.id) else (b, a)
 
 
-def dedupe_persons(session: Session) -> tuple[int, int]:
+def dedupe_persons(session: Session) -> tuple[int, int]:  # noqa: C901, PLR0912
     """Run the dedupe pass. Returns (auto-linked count, needs-review count)."""
     years = _birth_years(session)
     aliases = _aliases(session)

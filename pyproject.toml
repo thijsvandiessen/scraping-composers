@@ -54,7 +54,20 @@ line-length = 110
 src = ["packages", "apps"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+# C90/PLR091 cap function complexity at ruff's default thresholds (spelled out below
+# for reference). Legacy offenders carry a targeted `# noqa` pragma — remove it when
+# refactoring them, and don't add it to new code. Class-size rules (PLR0904 etc.) are
+# preview-only in ruff, and file length is enforced by pylint C0302 above.
+select = ["E", "F", "I", "UP", "B", "C90", "PLR091"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 12
+max-returns = 6
+max-statements = 50
 
 [tool.pyright]
 typeCheckingMode = "strict"

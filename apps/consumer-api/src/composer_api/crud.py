@@ -61,7 +61,7 @@ def profession_filter(prof_id: uuid.UUID) -> ColumnElement[bool]:
     )
 
 
-def list_people(
+def list_people(  # noqa: PLR0913
     db: Session,
     q: str | None,
     page: int,
@@ -219,7 +219,7 @@ def get_stats(db: Session) -> StatsOut:
     )
 
 
-def list_entities(
+def list_entities(  # noqa: PLR0913
     db: Session, q: str | None, kind: str | None, page: int, limit: int, order: str = "label"
 ) -> EntityPage:
     base = select(Entity)
@@ -480,7 +480,7 @@ def get_concert(db: Session, concert_id: int) -> ConcertDetail:
     )
 
 
-def list_works(
+def list_works(  # noqa: PLR0913
     db: Session, q: str | None, page: int, limit: int, performed_only: bool = False, sort: str = "label"
 ) -> WorkPage:
     composer = aliased(Entity)

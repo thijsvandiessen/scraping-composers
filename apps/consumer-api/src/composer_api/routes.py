@@ -38,7 +38,7 @@ def stats(db: DbSession) -> StatsOut:
 
 
 @v1.get("/entities", response_model=EntityPage)
-def entities(
+def entities(  # noqa: PLR0913
     db: DbSession,
     q: str | None = None,
     kind: str | None = None,
@@ -55,7 +55,7 @@ def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
 
 
 @v1.get("/works", response_model=WorkPage)
-def works(
+def works(  # noqa: PLR0913
     db: DbSession,
     q: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,

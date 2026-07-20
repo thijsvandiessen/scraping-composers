@@ -36,7 +36,7 @@ class IngestError(Exception):
         self.new = new
 
 
-def run_ingest_records(
+def run_ingest_records(  # noqa: C901, PLR0912, PLR0915
     session: Session,
     source: Source,
     run: IngestRun,

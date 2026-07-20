@@ -35,7 +35,7 @@ class MatchResult:
     candidate_work_id: uuid.UUID | None  # best near-miss, for the reviewer
 
 
-def score(a: WorkFeatures, b: WorkFeatures) -> tuple[float, str]:
+def score(a: WorkFeatures, b: WorkFeatures) -> tuple[float, str]:  # noqa: C901
     """Similarity of two works in [0, 1] with the method that decided it."""
     # Catalogue numbers are authoritative when both sides have one.
     if a.catalogue_prefix and b.catalogue_prefix:

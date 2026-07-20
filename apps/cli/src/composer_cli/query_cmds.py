@@ -66,7 +66,7 @@ def cmd_stats(args: argparse.Namespace) -> int:
 EntityClaims = list[tuple[Entity, list[tuple[str, str | None, str | None, str, int | None]]]]
 
 
-def entity_claims(
+def entity_claims(  # noqa: PLR0913
     session: Session,
     name: str,
     *,
