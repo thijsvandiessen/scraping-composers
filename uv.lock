@@ -245,6 +245,7 @@ source = { editable = "apps/admin-api" }
 dependencies = [
     { name = "composer-bronze" },
     { name = "composer-config" },
+    { name = "composer-crawler" },
     { name = "composer-gold" },
     { name = "composer-scrapers" },
     { name = "composer-warehouse" },
@@ -257,6 +258,7 @@ dependencies = [
 requires-dist = [
     { name = "composer-bronze", editable = "packages/composer-bronze" },
     { name = "composer-config", editable = "packages/composer-config" },
+    { name = "composer-crawler", editable = "packages/composer-crawler" },
     { name = "composer-gold", editable = "packages/composer-gold" },
     { name = "composer-scrapers", editable = "packages/composer-scrapers" },
     { name = "composer-warehouse", editable = "packages/composer-warehouse" },

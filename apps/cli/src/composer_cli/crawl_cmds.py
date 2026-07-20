@@ -1,13 +1,27 @@
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 from composer_bronze.bucket import LocalBucket
-from composer_crawler import CRAWL_REGISTRY, Crawler
+from composer_crawler import CRAWL_REGISTRY, CrawlConfig, Crawler, all_crawl_configs
+
+
+def crawl_choices() -> dict[str, CrawlConfig]:
+    """Code-registered plus stored crawl configs.
+
+    A corrupt configs file must not brick unrelated CLI commands, so it
+    degrades to the code registry with a warning.
+    """
+    try:
+        return all_crawl_configs()
+    except ValueError as exc:
+        print(f"warning: ignoring stored crawl configs: {exc}", file=sys.stderr)
+        return dict(CRAWL_REGISTRY)
 
 
 def cmd_crawl(args: argparse.Namespace) -> int:
-    config = CRAWL_REGISTRY[args.config]
+    config = crawl_choices()[args.config]
     bucket = LocalBucket(args.bucket_path)
     try:
         run_id = Crawler(config).crawl_to_bucket(bucket, max_pages=args.max_pages)

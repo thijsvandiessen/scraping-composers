@@ -1,0 +1,77 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% for message in messages %}
+  <div class="sc-banner {{ message.tags }}">{{ message }}</div>
+{% endfor %}
+
+<form method="post" style="display: flex; flex-direction: column; gap: 0.75rem; max-width: 44rem; font-size: 0.875rem;">
+  {% csrf_token %}
+
+  {% if is_edit %}
+  <div><strong>{{ values.name }}</strong></div>
+  {% else %}
+  <label>name
+    <input type="text" name="name" value="{{ values.name }}" required
+           pattern="[^/\\]+" style="width: 18rem;">
+    <span class="sc-muted">single path segment; becomes the bucket directory</span></label>
+  {% endif %}
+
+  <label style="display: flex; flex-direction: column; gap: 0.25rem;">seed URLs — one per line
+    <textarea name="seeds" rows="5" required spellcheck="false"
+              placeholder="https://example.org/archive">{{ values.seeds }}</textarea></label>
+
+  <label><input type="checkbox" name="follow_links" {% if values.follow_links %}checked{% endif %}>
+    follow links found on crawled pages</label>
+
+  <label style="display: flex; flex-direction: column; gap: 0.25rem;">allow patterns — one regex per line,
+    required when following links
+    <textarea name="allow_patterns" rows="3" spellcheck="false"
+              placeholder="https://example\.org/archive/">{{ values.allow_patterns }}</textarea></label>
+
+  <label>max depth
+    <input type="number" name="max_depth" value="{{ values.max_depth }}" min="0" style="width: 6rem;">
+    <span class="sc-muted">how many link hops from a seed</span></label>
+
+  <label>max pages
+    <input type="number" name="max_pages" value="{{ values.max_pages }}" min="1"
+           placeholder="unlimited" style="width: 6rem;">
+    <span class="sc-muted">total request budget per crawl</span></label>
+
+  <label>request delay
+    <input type="number" name="request_delay_s" value="{{ values.request_delay_s }}"
+           min="0" step="0.1" style="width: 6rem;"> seconds between requests</label>
+
+  <label><input type="checkbox" name="respect_robots" {% if values.respect_robots %}checked{% endif %}>
+    respect robots.txt</label>
+
+  <label>pagination
+    <select name="pagination_type">
+      <option value="none" {% if values.pagination_type == "none" %}selected{% endif %}>none</option>
+      <option value="page_param" {% if values.pagination_type == "page_param" %}selected{% endif %}>
+        page query parameter</option>
+      <option value="next_url_from_json" {% if values.pagination_type == "next_url_from_json" %}selected{% endif %}>
+        next URL from JSON</option>
+    </select></label>
+
+  <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
+    <label>param
+      <input type="text" name="pagination_param" value="{{ values.pagination_param }}" style="width: 7rem;">
+      <span class="sc-muted">page-parameter mode</span></label>
+    <label>start
+      <input type="number" name="pagination_start" value="{{ values.pagination_start }}" style="width: 5rem;">
+      <span class="sc-muted">page-parameter mode</span></label>
+    <label>pointer
+      <input type="text" name="pagination_pointer" value="{{ values.pagination_pointer }}"
+             placeholder="pagination.next" style="width: 11rem;">
+      <span class="sc-muted">JSON mode: dot-path to the next URL</span></label>
+  </div>
+
+  <div class="sc-toolbar">
+    <button type="submit" class="sc-btn sc-btn-primary">Save crawl</button>
+    <a href="{% url 'crawls_index' %}" class="sc-btn">Cancel</a>
+  </div>
+</form>
+{% endblock %}

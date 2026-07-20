@@ -8,6 +8,7 @@ it without knowing anything about the target site or API.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 
@@ -77,3 +78,8 @@ class CrawlConfig:
         if self.follow_links and not self.allow_patterns:
             # An unrestricted frontier would wander off the target host.
             raise ValueError(f"crawl {self.name!r}: follow_links requires at least one allow pattern")
+        for pattern in self.allow_patterns:
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(f"crawl {self.name!r}: invalid allow pattern {pattern!r}: {exc}") from exc
