@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
+import composer_admin.build_routes as build_routes
 import composer_admin.deps as admin_deps
 import composer_admin.routes as admin_routes
 import pytest
@@ -208,7 +209,7 @@ def test_unknown_run_404(client: TestClient) -> None:
 def test_gold_status_before_any_promote(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(admin_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
+    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
     data = client.get("/admin/v1/gold").json()
     assert data["exists"] is False
     assert data["status"] is None
@@ -218,7 +219,7 @@ def test_promote_builds_gold_and_reports_stats(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     gold_path = tmp_path / "gold.db"
-    monkeypatch.setattr(admin_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
+    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
     # seed silver through the API: fetch + process the fake source
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
     client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/process")
@@ -240,7 +241,7 @@ def test_promote_conflicts_while_running(
     from composer_warehouse.build import BuildManifest, write_build_manifest
 
     gold_path = tmp_path / "gold.db"
-    monkeypatch.setattr(admin_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
+    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
     write_build_manifest(gold_path, BuildManifest.start())
     assert client.post("/admin/v1/promote").status_code == 409
 
@@ -249,7 +250,7 @@ def test_promote_body_toggles_rules(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     gold_path = tmp_path / "gold.db"
-    monkeypatch.setattr(admin_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
+    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
     client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/process")
 
@@ -273,9 +274,9 @@ def test_promote_body_resolves_path_and_sitelinks(
         calls.append((str(gold_path), config))
         return PromoteStats()
 
-    monkeypatch.setattr(admin_routes, "promote", record_promote)
-    monkeypatch.setattr(admin_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
-    monkeypatch.setattr(admin_routes, "DEFAULT_MIN_SITELINKS", 50)
+    monkeypatch.setattr(build_routes, "promote", record_promote)
+    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
+    monkeypatch.setattr(build_routes, "DEFAULT_MIN_SITELINKS", 50)
 
     # bodiless: configured defaults, all rules on
     assert client.post("/admin/v1/promote").status_code == 202

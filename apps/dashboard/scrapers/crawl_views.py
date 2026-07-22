@@ -11,7 +11,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import redirect, render
 
 from .api import AdminAPI, AdminAPIError
-from .views import _is_running
+from .views.common import is_running
 
 PAGINATION_TYPES = ("none", "page_param", "next_url_from_json")
 
@@ -25,7 +25,7 @@ def crawls_index(request: HttpRequest) -> HttpResponse:
         crawls = api.list_crawls()
     except AdminAPIError as exc:
         error = str(exc)
-    refreshing = any(_is_running(c.get("last_snapshot")) for c in crawls)
+    refreshing = any(is_running(c.get("last_snapshot")) for c in crawls)
     context = {
         **admin.site.each_context(request),
         "title": "Crawls",

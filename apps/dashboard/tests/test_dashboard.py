@@ -182,7 +182,7 @@ class StubAPI:
 
 def _install(monkeypatch: pytest.MonkeyPatch, stub: StubAPI) -> None:
     fake = type("FakeAdminAPI", (), {"from_env": classmethod(lambda cls: stub)})
-    monkeypatch.setattr(views, "AdminAPI", fake)
+    monkeypatch.setattr(views.pipeline, "AdminAPI", fake)
 
 
 @pytest.fixture
@@ -563,7 +563,8 @@ def _install_data(monkeypatch: pytest.MonkeyPatch, stub: StubDataAPI) -> None:
         (),
         {"gold": classmethod(lambda cls: stub), "silver": classmethod(lambda cls: stub)},
     )
-    monkeypatch.setattr(views, "DataAPI", fake)
+    monkeypatch.setattr(views.data, "DataAPI", fake)
+    monkeypatch.setattr(views.gold, "DataAPI", fake)
 
 
 @pytest.mark.django_db
@@ -600,6 +601,15 @@ def test_entities_page_renders_rows_and_pagination(
     # arrow keys page through results: the handler targets the prev/next links
     assert 'id="sc-prev"' in page and 'id="sc-next"' in page
     assert "ArrowRight" in page and "ArrowLeft" in page
+
+
+def test_entities_page_tolerates_junk_page_param(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install_data(monkeypatch, StubDataAPI())
+    response = staff_client.get("/admin/data/entities/?page=abc")
+    assert response.status_code == 200
+    assert "page 1 of" in response.content.decode()
 
 
 def test_entity_detail_renders_claims_and_links(
