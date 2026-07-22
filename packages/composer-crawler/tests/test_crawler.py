@@ -1,146 +1,99 @@
-from collections.abc import Callable
+"""Crawler tests: discovery is stubbed and the crawl4ai crawler is a fake, so
+the scrape phase runs with no browser or network."""
 
-import httpx
+from __future__ import annotations
+
+from typing import Any
+
+import composer_crawler.crawler as crawler_mod
 import pytest
 from composer_crawler import CrawlConfig, Crawler
-
-Handler = Callable[[httpx.Request], httpx.Response]
-
-SITE = {
-    "/": '<a href="/a">a</a> <a href="/b">b</a> <a href="https://off.example/x">x</a> <a href="/a">dup</a>',
-    "/a": '<a href="/deep">deep</a>',
-    "/deep": "leaf",
-}
+from composer_crawler.testing import FakeResult, FakeWebCrawler, stub_discover, web_crawler_factory
 
 
-def _site_handler(request: httpx.Request) -> httpx.Response:
-    path = request.url.path
-    if path == "/robots.txt":
-        return httpx.Response(200, text="User-agent: *\nDisallow: /a\n")
-    if path == "/b":
-        return httpx.Response(404, text="gone", headers={"Content-Type": "text/html"})
-    if path in SITE:
-        return httpx.Response(200, text=SITE[path], headers={"Content-Type": "text/html"})
-    return httpx.Response(404, text="missing", headers={"Content-Type": "text/html"})
+def _config(**overrides: Any) -> CrawlConfig:
+    base: dict[str, Any] = {"name": "site", "seeds": ("https://example.org/",), "request_delay_s": 0.0}
+    base.update(overrides)
+    return CrawlConfig(**base)
 
 
-def _config(
+def _run(
+    config: CrawlConfig,
+    fake: FakeWebCrawler,
+    monkeypatch: pytest.MonkeyPatch,
     *,
-    follow_links: bool = True,
-    allow_patterns: tuple[str, ...] = (r"https://example\.org/",),
-    max_depth: int = 2,
-    respect_robots: bool = False,
-) -> CrawlConfig:
-    return CrawlConfig(
-        name="site",
-        seeds=("https://example.org/",),
-        follow_links=follow_links,
-        allow_patterns=allow_patterns,
-        max_depth=max_depth,
-        request_delay_s=0.0,
-        respect_robots=respect_robots,
+    discovered: list[str],
+    max_pages: int | None = None,
+) -> list[Any]:
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(discovered))
+    crawler = Crawler(config, web_crawler_factory=web_crawler_factory(fake))
+    return list(crawler.crawl(max_pages))
+
+
+def test_scrapes_discovered_urls_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls = ["https://example.org/a", "https://example.org/b", "https://example.org/c"]
+    fake = FakeWebCrawler()
+    records = _run(_config(), fake, monkeypatch, discovered=urls)
+    assert [r.url for r in records] == urls
+    assert all(r.depth == 0 for r in records)
+    assert fake.scraped_urls == urls
+
+
+def test_max_pages_caps_urls_scraped(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls = ["https://example.org/a", "https://example.org/b", "https://example.org/c"]
+    fake = FakeWebCrawler()
+    records = _run(_config(), fake, monkeypatch, discovered=urls, max_pages=2)
+    assert [r.url for r in records] == urls[:2]
+    assert fake.scraped_urls == urls[:2]  # the budget is applied before scraping
+
+
+def test_record_maps_crawl4ai_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = FakeResult(
+        url="https://example.org/x",
+        html="<p>hi</p>",
+        status_code=200,
+        response_headers={"Content-Type": "text/html; charset=utf-8", "ETag": '"abc"'},
+        redirected_url="https://example.org/x/final",
     )
-
-
-def _crawler(config: CrawlConfig, handler: Handler = _site_handler) -> Crawler:
-    return Crawler(config, client=httpx.Client(transport=httpx.MockTransport(handler)))
-
-
-def test_bfs_crawl_dedupes_and_filters_links() -> None:
-    records = list(_crawler(_config()).crawl())
-    assert [(r.url, r.depth) for r in records] == [
-        ("https://example.org/", 0),
-        ("https://example.org/a", 1),
-        ("https://example.org/b", 1),
-        ("https://example.org/deep", 2),
-    ]
-    # the off-pattern host was never fetched; the duplicate /a link was fetched once
-
-
-def test_max_pages_caps_total_requests() -> None:
-    records = list(_crawler(_config()).crawl(max_pages=2))
-    assert [r.url for r in records] == ["https://example.org/", "https://example.org/a"]
-
-
-def test_max_depth_stops_link_following() -> None:
-    records = list(_crawler(_config(max_depth=1)).crawl())
-    assert [r.url for r in records] == [
-        "https://example.org/",
-        "https://example.org/a",
-        "https://example.org/b",
-    ]
-
-
-def test_robots_disallow_skips_url() -> None:
-    records = list(_crawler(_config(respect_robots=True)).crawl())
-    # /a is disallowed by robots.txt, so /deep (only linked from /a) is never discovered
-    assert [r.url for r in records] == ["https://example.org/", "https://example.org/b"]
-
-
-def test_error_page_is_recorded_but_not_followed() -> None:
-    records = list(_crawler(_config()).crawl())
-    b = next(r for r in records if r.url.endswith("/b"))
-    assert b.status_code == 404
-    assert b.body == "gone"
-
-
-def test_seed_failure_propagates_after_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    import composer_crawler._http
-
-    monkeypatch.setattr(composer_crawler._http.time, "sleep", lambda _s: None)
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, text="boom")
-
-    with pytest.raises(httpx.HTTPStatusError):
-        list(_crawler(_config(), handler).crawl())
-
-
-def test_failed_discovered_link_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    import composer_crawler._http
-
-    monkeypatch.setattr(composer_crawler._http.time, "sleep", lambda _s: None)
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/a":
-            return httpx.Response(500, text="boom")
-        return _site_handler(request)
-
-    records = list(_crawler(_config(), handler).crawl())
-    # /a failed and was skipped, the crawl continued to /b; /deep was never discovered
-    assert [r.url for r in records] == ["https://example.org/", "https://example.org/b"]
-
-
-def test_non_text_body_is_skipped() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/a":
-            return httpx.Response(200, content=b"\x89PNG", headers={"Content-Type": "image/png"})
-        return _site_handler(request)
-
-    records = list(_crawler(_config(), handler).crawl())
-    assert "https://example.org/a" not in [r.url for r in records]
-
-
-def test_non_html_content_skips_link_extraction() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, text='{"href": "/a"} <a href="/a">a</a>', headers={"Content-Type": "application/json"}
-        )
-
-    records = list(_crawler(_config(), handler).crawl())
-    assert [r.url for r in records] == ["https://example.org/"]
-
-
-def test_record_metadata_captured() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            text="ok",
-            headers={"Content-Type": "text/html; charset=utf-8", "ETag": '"abc"'},
-        )
-
-    record = next(iter(_crawler(_config(follow_links=False, allow_patterns=()), handler).crawl()))
+    fake = FakeWebCrawler({result.url: result})
+    (record,) = _run(_config(), fake, monkeypatch, discovered=[result.url])
     assert record.content_type == "text/html"
-    assert record.headers["etag"] == '"abc"'
-    assert record.final_url == "https://example.org/"
+    assert record.headers["etag"] == '"abc"'  # header names are lowercased
+    assert record.final_url == "https://example.org/x/final"
+    assert record.body == "<p>hi</p>"
     assert record.fetched_at  # ISO timestamp present
+
+
+def test_hard_failure_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    good = "https://example.org/a"
+    dead = "https://example.org/dead"
+    fake = FakeWebCrawler({dead: FakeResult(dead, html="", success=False, error_message="boom")})
+    records = _run(_config(), fake, monkeypatch, discovered=[good, dead])
+    assert [r.url for r in records] == [good]
+
+
+def test_missing_status_code_becomes_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://example.org/a"
+    fake = FakeWebCrawler({url: FakeResult(url, status_code=None, html="x")})
+    (record,) = _run(_config(), fake, monkeypatch, discovered=[url])
+    assert record.status_code == 0
+
+
+def test_falls_back_to_seeds_and_deep_crawl_when_discovery_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _config(follow_links=True, allow_patterns=("*example.org*",))
+    fake = FakeWebCrawler()
+    records = _run(config, fake, monkeypatch, discovered=[])
+    assert fake.scraped_urls == list(config.seeds)
+    assert fake.run_config.deep_crawl_strategy is not None  # link-following enabled
+    assert [r.url for r in records] == list(config.seeds)
+
+
+def test_no_deep_crawl_when_discovery_yields_urls(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeWebCrawler()
+    _run(
+        _config(follow_links=True, allow_patterns=("*",)),
+        fake,
+        monkeypatch,
+        discovered=["https://example.org/a"],
+    )
+    assert fake.run_config.deep_crawl_strategy is None  # discovered URLs need no link-following

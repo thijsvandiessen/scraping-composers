@@ -13,8 +13,6 @@ from django.shortcuts import redirect, render
 from .api import AdminAPI, AdminAPIError
 from .views.common import is_running
 
-PAGINATION_TYPES = ("none", "page_param", "next_url_from_json")
-
 
 def crawls_index(request: HttpRequest) -> HttpResponse:
     """Crawls page: the configured crawl targets and their last runs."""
@@ -36,21 +34,45 @@ def crawls_index(request: HttpRequest) -> HttpResponse:
     return render(request, "scrapers/crawls.html", context)
 
 
+def _default_values(name: str | None) -> dict[str, Any]:
+    """A blank new-crawl form seeded with the CrawlConfig defaults."""
+    return {
+        "name": name or "",
+        "seeds": "",
+        "use_sitemap": True,
+        "use_common_crawl": False,
+        "allow_patterns": "",
+        "relevance_query": "",
+        "score_threshold": "0.0",
+        "follow_links": False,
+        "max_depth": "2",
+        "max_pages": "",
+        "request_delay_s": "0.5",
+        "respect_robots": True,
+    }
+
+
 def _form_values(request: HttpRequest, name: str | None) -> dict[str, Any]:
-    """The submitted form, echoed back so a failed save keeps the input."""
+    """The submitted form, echoed back so a failed save keeps the input.
+
+    A GET (the new-crawl page) starts from the defaults; only a POST reads the
+    checkboxes, whose unchecked state is simply absent from the body.
+    """
+    if request.method != "POST":
+        return _default_values(name)
     return {
         "name": name or request.POST.get("name", "").strip(),
         "seeds": request.POST.get("seeds", ""),
-        "follow_links": request.POST.get("follow_links") == "on",
+        "use_sitemap": request.POST.get("use_sitemap") == "on",
+        "use_common_crawl": request.POST.get("use_common_crawl") == "on",
         "allow_patterns": request.POST.get("allow_patterns", ""),
+        "relevance_query": request.POST.get("relevance_query", "").strip(),
+        "score_threshold": request.POST.get("score_threshold", "0.0"),
+        "follow_links": request.POST.get("follow_links") == "on",
         "max_depth": request.POST.get("max_depth", "2"),
         "max_pages": request.POST.get("max_pages", ""),
         "request_delay_s": request.POST.get("request_delay_s", "0.5"),
         "respect_robots": request.POST.get("respect_robots") == "on",
-        "pagination_type": request.POST.get("pagination_type", "none"),
-        "pagination_param": request.POST.get("pagination_param", "page"),
-        "pagination_start": request.POST.get("pagination_start", "1"),
-        "pagination_pointer": request.POST.get("pagination_pointer", ""),
     }
 
 
@@ -60,44 +82,36 @@ def _lines(raw: str) -> list[str]:
 
 def _crawl_payload(values: dict[str, Any]) -> dict[str, Any]:
     """The PUT body for the admin API; raises ValueError on non-numeric input."""
-    pagination: dict[str, Any] | None = None
-    if values["pagination_type"] == "page_param":
-        pagination = {
-            "type": "page_param",
-            "param": values["pagination_param"].strip() or "page",
-            "start": int(values["pagination_start"] or "1"),
-        }
-    elif values["pagination_type"] == "next_url_from_json":
-        pagination = {"type": "next_url_from_json", "pointer": values["pagination_pointer"].strip()}
-    payload: dict[str, Any] = {
+    return {
         "seeds": _lines(values["seeds"]),
-        "follow_links": values["follow_links"],
+        "use_sitemap": values["use_sitemap"],
+        "use_common_crawl": values["use_common_crawl"],
         "allow_patterns": _lines(values["allow_patterns"]),
+        "relevance_query": values["relevance_query"] or None,
+        "score_threshold": float(values["score_threshold"] or "0.0"),
+        "follow_links": values["follow_links"],
         "max_depth": int(values["max_depth"] or "2"),
         "max_pages": int(values["max_pages"]) if values["max_pages"].strip() else None,
-        "pagination": pagination,
         "request_delay_s": float(values["request_delay_s"] or "0.5"),
         "respect_robots": values["respect_robots"],
     }
-    return payload
 
 
 def _config_to_values(crawl: dict[str, Any]) -> dict[str, Any]:
     """A stored config as form values (textareas hold one item per line)."""
-    pagination = crawl.get("pagination") or {}
     return {
         "name": crawl["name"],
         "seeds": "\n".join(crawl["seeds"]),
-        "follow_links": crawl["follow_links"],
+        "use_sitemap": crawl["use_sitemap"],
+        "use_common_crawl": crawl["use_common_crawl"],
         "allow_patterns": "\n".join(crawl["allow_patterns"]),
+        "relevance_query": crawl.get("relevance_query") or "",
+        "score_threshold": str(crawl["score_threshold"]),
+        "follow_links": crawl["follow_links"],
         "max_depth": str(crawl["max_depth"]),
         "max_pages": "" if crawl["max_pages"] is None else str(crawl["max_pages"]),
         "request_delay_s": str(crawl["request_delay_s"]),
         "respect_robots": crawl["respect_robots"],
-        "pagination_type": pagination.get("type", "none"),
-        "pagination_param": pagination.get("param", "page"),
-        "pagination_start": str(pagination.get("start", 1)),
-        "pagination_pointer": pagination.get("pointer", ""),
     }
 
 

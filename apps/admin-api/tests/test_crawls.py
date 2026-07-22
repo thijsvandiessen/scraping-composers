@@ -10,11 +10,12 @@ from pathlib import Path
 
 import composer_admin.crawl_routes as crawl_routes
 import composer_admin.routes as admin_routes
-import httpx
+import composer_crawler.crawler as crawler_mod
 import pytest
 from composer_admin import admin_app
 from composer_bronze.bucket import LocalBucket, SnapshotManifest
 from composer_crawler import CrawlConfig, Crawler
+from composer_crawler.testing import FakeResult, FakeWebCrawler, stub_discover, web_crawler_factory
 from fastapi.testclient import TestClient
 
 CODE_CONFIG = CrawlConfig(name="code-crawl", seeds=("https://code.example/",))
@@ -22,9 +23,9 @@ CODE_CONFIG = CrawlConfig(name="code-crawl", seeds=("https://code.example/",))
 PAYLOAD = {
     "seeds": ["https://example.org/archive"],
     "follow_links": True,
-    "allow_patterns": [r"example\.org/archive"],
+    "allow_patterns": ["*example.org/archive*"],
     "max_depth": 1,
-    "pagination": {"type": "page_param", "param": "p", "start": 1},
+    "relevance_query": "composer",
 }
 
 
@@ -51,15 +52,16 @@ def test_crud_round_trip(client: TestClient) -> None:
     created = r.json()
     assert created["name"] == "archive"
     assert created["editable"] is True
-    assert created["pagination"] == {"type": "page_param", "param": "p", "start": 1}
+    assert created["use_sitemap"] is True
+    assert created["relevance_query"] == "composer"
     assert created["last_snapshot"] is None
 
     assert client.get("/admin/v1/crawls/archive").json() == created
 
-    update = {**PAYLOAD, "seeds": ["https://example.org/new"], "pagination": None}
+    update = {**PAYLOAD, "seeds": ["https://example.org/new"], "relevance_query": None}
     updated = client.put("/admin/v1/crawls/archive", json=update).json()
     assert updated["seeds"] == ["https://example.org/new"]
-    assert updated["pagination"] is None
+    assert updated["relevance_query"] is None
 
     assert client.delete("/admin/v1/crawls/archive").status_code == 204
     assert client.get("/admin/v1/crawls/archive").status_code == 404
@@ -91,8 +93,8 @@ def test_put_rejects_scraper_name_collision(client: TestClient) -> None:
     [
         {"seeds": []},  # empty seeds (pydantic min_length)
         {"seeds": ["https://x.example/"], "follow_links": True},  # no allow patterns
-        {"seeds": ["https://x.example/"], "follow_links": True, "allow_patterns": ["("]},  # bad regex
-        {"seeds": ["https://x.example/"], "pagination": {"type": "cursor"}},  # unknown pagination
+        {"seeds": ["https://x.example/"], "follow_links": True, "allow_patterns": [""]},  # empty glob
+        {"seeds": ["https://x.example/"], "score_threshold": -1},  # negative threshold (pydantic ge=0)
     ],
 )
 def test_put_rejects_invalid_config(client: TestClient, body: dict[str, object]) -> None:
@@ -116,14 +118,15 @@ def test_unknown_crawl_404(client: TestClient) -> None:
 def test_fetch_writes_snapshot_and_manifest(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, bucket_path: Path
 ) -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, html="<html><body>hello</body></html>")
-
-    transport = httpx.MockTransport(handler)
+    url = "https://example.org/"
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover([url]))
+    fake = FakeWebCrawler({url: FakeResult(url, html="<html><body>hello</body></html>")})
     monkeypatch.setattr(
-        crawl_routes, "_crawler", lambda config: Crawler(config, client=httpx.Client(transport=transport))
+        crawl_routes,
+        "_crawler",
+        lambda config: Crawler(config, web_crawler_factory=web_crawler_factory(fake)),
     )
-    client.put("/admin/v1/crawls/archive", json={"seeds": ["https://example.org/"], "respect_robots": False})
+    client.put("/admin/v1/crawls/archive", json={"seeds": [url], "respect_robots": False})
 
     r = client.post("/admin/v1/crawls/archive/fetch")
     assert r.status_code == 202
@@ -149,12 +152,12 @@ def test_fetch_conflicts_while_crawl_running(client: TestClient, bucket_path: Pa
 def test_failed_crawl_records_failed_manifest(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, bucket_path: Path
 ) -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        raise RuntimeError("connection torn down")
-
-    transport = httpx.MockTransport(handler)
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(["https://example.org/"]))
+    fake = FakeWebCrawler(fail=RuntimeError("connection torn down"))
     monkeypatch.setattr(
-        crawl_routes, "_crawler", lambda config: Crawler(config, client=httpx.Client(transport=transport))
+        crawl_routes,
+        "_crawler",
+        lambda config: Crawler(config, web_crawler_factory=web_crawler_factory(fake)),
     )
     client.put("/admin/v1/crawls/archive", json={"seeds": ["https://example.org/"], "respect_robots": False})
 

@@ -78,7 +78,11 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         "composer_crawler.CRAWL_REGISTRY and the dashboard-managed crawl configs file)",
     )
     p_crawl.add_argument("config", choices=sorted(crawl_choices()))
-    p_crawl.add_argument("--max-pages", type=int, help="total request budget (overrides the config)")
+    p_crawl.add_argument("--max-pages", type=int, help="cap on URLs scraped (overrides the config)")
+    p_crawl.add_argument(
+        "--query",
+        help="rank discovered URLs by relevance to this topic (overrides the config's relevance_query)",
+    )
     p_crawl.add_argument(
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
     )

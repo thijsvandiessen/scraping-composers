@@ -23,22 +23,39 @@
     <textarea name="seeds" rows="5" required spellcheck="false"
               placeholder="https://example.org/archive">{{ values.seeds }}</textarea></label>
 
-  <label><input type="checkbox" name="follow_links" {% if values.follow_links %}checked{% endif %}>
-    follow links found on crawled pages</label>
+  <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
+    <label><input type="checkbox" name="use_sitemap" {% if values.use_sitemap %}checked{% endif %}>
+      discover URLs from sitemap.xml</label>
+    <label><input type="checkbox" name="use_common_crawl" {% if values.use_common_crawl %}checked{% endif %}>
+      also discover from Common Crawl</label>
+  </div>
 
-  <label style="display: flex; flex-direction: column; gap: 0.25rem;">allow patterns — one regex per line,
-    required when following links
+  <label style="display: flex; flex-direction: column; gap: 0.25rem;">allow patterns — one glob per line
     <textarea name="allow_patterns" rows="3" spellcheck="false"
-              placeholder="https://example\.org/archive/">{{ values.allow_patterns }}</textarea></label>
+              placeholder="*/composer/*">{{ values.allow_patterns }}</textarea>
+    <span class="sc-muted">filters discovered URLs; required when following links</span></label>
+
+  <label style="display: flex; flex-direction: column; gap: 0.25rem;">relevance query
+    <input type="text" name="relevance_query" value="{{ values.relevance_query }}"
+           placeholder="composer biography works" style="width: 24rem;">
+    <span class="sc-muted">rank pages by BM25 relevance to this topic; blank keeps sitemap order</span></label>
+
+  <label>score threshold
+    <input type="number" name="score_threshold" value="{{ values.score_threshold }}"
+           min="0" step="0.1" style="width: 6rem;">
+    <span class="sc-muted">drop URLs scoring below this (needs a relevance query)</span></label>
+
+  <label><input type="checkbox" name="follow_links" {% if values.follow_links %}checked{% endif %}>
+    follow links from the seeds when discovery finds nothing</label>
 
   <label>max depth
     <input type="number" name="max_depth" value="{{ values.max_depth }}" min="0" style="width: 6rem;">
-    <span class="sc-muted">how many link hops from a seed</span></label>
+    <span class="sc-muted">how many link hops from a seed (link-following fallback)</span></label>
 
   <label>max pages
     <input type="number" name="max_pages" value="{{ values.max_pages }}" min="1"
            placeholder="unlimited" style="width: 6rem;">
-    <span class="sc-muted">total request budget per crawl</span></label>
+    <span class="sc-muted">cap on URLs scraped per crawl</span></label>
 
   <label>request delay
     <input type="number" name="request_delay_s" value="{{ values.request_delay_s }}"
@@ -46,28 +63,6 @@
 
   <label><input type="checkbox" name="respect_robots" {% if values.respect_robots %}checked{% endif %}>
     respect robots.txt</label>
-
-  <label>pagination
-    <select name="pagination_type">
-      <option value="none" {% if values.pagination_type == "none" %}selected{% endif %}>none</option>
-      <option value="page_param" {% if values.pagination_type == "page_param" %}selected{% endif %}>
-        page query parameter</option>
-      <option value="next_url_from_json" {% if values.pagination_type == "next_url_from_json" %}selected{% endif %}>
-        next URL from JSON</option>
-    </select></label>
-
-  <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
-    <label>param
-      <input type="text" name="pagination_param" value="{{ values.pagination_param }}" style="width: 7rem;">
-      <span class="sc-muted">page-parameter mode</span></label>
-    <label>start
-      <input type="number" name="pagination_start" value="{{ values.pagination_start }}" style="width: 5rem;">
-      <span class="sc-muted">page-parameter mode</span></label>
-    <label>pointer
-      <input type="text" name="pagination_pointer" value="{{ values.pagination_pointer }}"
-             placeholder="pagination.next" style="width: 11rem;">
-      <span class="sc-muted">JSON mode: dot-path to the next URL</span></label>
-  </div>
 
   <div class="sc-toolbar">
     <button type="submit" class="sc-btn sc-btn-primary">Save crawl</button>
