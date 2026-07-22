@@ -24,7 +24,7 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@hey-api/openapi-ts": "^0.99.0",
-    "@types/node": "^22.20.1",
+    "@types/node": "^26.1.1",
     "oxfmt": "^0.59.0",
     "oxlint": "^1.74.0",
     "typescript": "^6.0.3"
