@@ -19,7 +19,7 @@ from typing import Any
 
 from composer_config import settings
 
-from .config import CrawlConfig, NextUrlFromJson, PageParam, Pagination
+from .config import CrawlConfig
 from .registry import CRAWL_REGISTRY
 
 DEFAULT_CRAWL_CONFIGS_PATH = settings.crawl_configs_path
@@ -28,60 +28,44 @@ STORE_VERSION = 1
 
 log = logging.getLogger(__name__)
 
-
-def _pagination_to_dict(pagination: Pagination | None) -> dict[str, Any] | None:
-    match pagination:
-        case PageParam(param=param, start=start):
-            return {"type": "page_param", "param": param, "start": start}
-        case NextUrlFromJson(pointer=pointer):
-            return {"type": "next_url_from_json", "pointer": pointer}
-        case None:
-            return None
-
-
-def _pagination_from_dict(data: dict[str, Any] | None) -> Pagination | None:
-    if data is None:
-        return None
-    match data.get("type"):
-        case "page_param":
-            return PageParam(param=data["param"], start=data["start"])
-        case "next_url_from_json":
-            return NextUrlFromJson(pointer=data["pointer"])
-        case unknown:
-            raise ValueError(f"unknown pagination type {unknown!r}")
+# Scalar CrawlConfig fields carried through the store verbatim (name/seeds/
+# allow_patterns/headers need their own tuple handling and are excluded).
+_SCALAR_FIELDS = (
+    "use_sitemap",
+    "use_common_crawl",
+    "relevance_query",
+    "score_threshold",
+    "follow_links",
+    "max_depth",
+    "max_pages",
+    "request_delay_s",
+    "respect_robots",
+    "timeout_s",
+)
 
 
 def config_to_dict(config: CrawlConfig) -> dict[str, Any]:
     """Encode a config as JSON-ready primitives (tuples become lists)."""
-    return {
-        "name": config.name,
-        "seeds": list(config.seeds),
-        "follow_links": config.follow_links,
-        "allow_patterns": list(config.allow_patterns),
-        "max_depth": config.max_depth,
-        "max_pages": config.max_pages,
-        "pagination": _pagination_to_dict(config.pagination),
-        "request_delay_s": config.request_delay_s,
-        "headers": [list(header) for header in config.headers],
-        "respect_robots": config.respect_robots,
-        "timeout_s": config.timeout_s,
-    }
+    data: dict[str, Any] = {"name": config.name, "seeds": list(config.seeds)}
+    for field in _SCALAR_FIELDS:
+        data[field] = getattr(config, field)
+    data["allow_patterns"] = list(config.allow_patterns)
+    data["headers"] = [list(header) for header in config.headers]
+    return data
 
 
 def config_from_dict(data: dict[str, Any]) -> CrawlConfig:
     """Decode a config dict; ``CrawlConfig.__post_init__`` does the validating.
 
     Fields absent from the dict keep the dataclass defaults, so old files keep
-    loading when new optional fields appear.
+    loading when new optional fields appear (and drop ones that go away).
     """
     kwargs: dict[str, Any] = {"name": data["name"], "seeds": tuple(data["seeds"])}
-    for field in ("follow_links", "max_depth", "max_pages", "request_delay_s", "respect_robots", "timeout_s"):
+    for field in _SCALAR_FIELDS:
         if field in data:
             kwargs[field] = data[field]
     if "allow_patterns" in data:
         kwargs["allow_patterns"] = tuple(data["allow_patterns"])
-    if "pagination" in data:
-        kwargs["pagination"] = _pagination_from_dict(data["pagination"])
     if "headers" in data:
         kwargs["headers"] = tuple((key, value) for key, value in data["headers"])
     return CrawlConfig(**kwargs)

@@ -26,11 +26,14 @@ SNAPSHOT_PAYLOAD = {
 CRAWL_PAYLOAD = {
     "name": "archive",
     "seeds": ["https://example.org/archive"],
+    "use_sitemap": True,
+    "use_common_crawl": False,
+    "allow_patterns": ["*example.org/archive*"],
+    "relevance_query": "composer biography",
+    "score_threshold": 0.0,
     "follow_links": True,
-    "allow_patterns": [r"example\.org/archive"],
     "max_depth": 2,
     "max_pages": None,
-    "pagination": {"type": "page_param", "param": "p", "start": 1},
     "request_delay_s": 0.5,
     "respect_robots": True,
     "editable": True,
@@ -42,7 +45,6 @@ CODE_CRAWL_PAYLOAD = {
     "name": "code-crawl",
     "editable": False,
     "last_snapshot": None,
-    "pagination": None,
 }
 
 
@@ -189,14 +191,14 @@ def test_new_crawl_form_posts_expected_payload(monkeypatch: pytest.MonkeyPatch, 
         {
             "name": "archive",
             "seeds": "https://example.org/a\n\n  https://example.org/b  \n",
+            "use_sitemap": "on",
+            "allow_patterns": "*example.org*",
+            "relevance_query": "composer works",
+            "score_threshold": "0.3",
             "follow_links": "on",
-            "allow_patterns": r"example\.org/",
             "max_depth": "1",
             "max_pages": "",
             "request_delay_s": "1.5",
-            "pagination_type": "page_param",
-            "pagination_param": "p",
-            "pagination_start": "0",
         },
         follow=True,
     )
@@ -206,11 +208,14 @@ def test_new_crawl_form_posts_expected_payload(monkeypatch: pytest.MonkeyPatch, 
     assert name == "archive"
     assert payload == {
         "seeds": ["https://example.org/a", "https://example.org/b"],
+        "use_sitemap": True,
+        "use_common_crawl": False,  # unchecked checkbox is absent from the POST
+        "allow_patterns": ["*example.org*"],
+        "relevance_query": "composer works",
+        "score_threshold": 0.3,
         "follow_links": True,
-        "allow_patterns": [r"example\.org/"],
         "max_depth": 1,
         "max_pages": None,
-        "pagination": {"type": "page_param", "param": "p", "start": 0},
         "request_delay_s": 1.5,
         "respect_robots": False,  # unchecked checkbox is absent from the POST
     }
@@ -227,7 +232,6 @@ def test_form_keeps_input_and_shows_error_on_bad_number(
             "name": "archive",
             "seeds": "https://example.org/kept-seed-marker",
             "max_depth": "abc",
-            "pagination_type": "none",
         },
     )
     assert response.status_code == 200  # re-rendered, not redirected
@@ -238,20 +242,20 @@ def test_form_keeps_input_and_shows_error_on_bad_number(
 
 
 def test_form_surfaces_api_validation_error(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
-    _install(monkeypatch, StubAPI(error="API returned 422: invalid allow pattern '('"))
+    _install(monkeypatch, StubAPI(error="API returned 422: follow_links requires at least one allow pattern"))
     response = staff_client.post(
         "/admin/crawls/new/",
-        {"name": "bad", "seeds": "https://example.org/", "pagination_type": "none"},
+        {"name": "bad", "seeds": "https://example.org/", "follow_links": "on"},
     )
     assert response.status_code == 200
-    assert "invalid allow pattern" in response.content.decode()
+    assert "at least one allow pattern" in response.content.decode()
 
 
 def test_edit_form_prefills_from_api(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     _install(monkeypatch, StubAPI(crawls=[CRAWL_PAYLOAD]))
     page = staff_client.get("/admin/crawls/archive/edit/").content.decode()
     assert ">https://example.org/archive</textarea>" in page  # seeds land in the textarea
-    assert 'name="pagination_param" value="p"' in page
+    assert 'name="relevance_query" value="composer biography"' in page
 
 
 def test_edit_code_registered_redirects_with_error(

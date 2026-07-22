@@ -1,13 +1,16 @@
-"""Generic crawler for web pages and API endpoints.
+"""Generic crawler for web pages, powered by crawl4ai.
 
 Separate from the per-source adapters in ``composer_scrapers``: a crawl is
-described declaratively by a :class:`CrawlConfig` (seeds, pagination,
-link-following rules) and executed by the generic :class:`Crawler`, which
-stores raw responses in the bronze bucket without any parsing.
+described declaratively by a :class:`CrawlConfig` (seeds, discovery and
+relevance-ranking rules) and executed by the generic :class:`Crawler`, which
+discovers URLs (sitemap.xml first), scrapes them most-relevant-first in a
+headless browser, and stores the raw responses in the bronze bucket without any
+parsing.
 """
 
-from .config import CrawlConfig, NextUrlFromJson, PageParam, Pagination
+from .config import CrawlConfig
 from .crawler import Crawler
+from .discovery import discover_urls
 from .records import CrawlRecord, iter_crawl_records
 from .registry import CRAWL_REGISTRY
 from .store import CrawlConfigStore, all_crawl_configs, config_from_dict, config_to_dict
@@ -18,11 +21,9 @@ __all__ = [
     "CrawlConfigStore",
     "CrawlRecord",
     "Crawler",
-    "NextUrlFromJson",
-    "PageParam",
-    "Pagination",
     "all_crawl_configs",
     "config_from_dict",
     "config_to_dict",
+    "discover_urls",
     "iter_crawl_records",
 ]

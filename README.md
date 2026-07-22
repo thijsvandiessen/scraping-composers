@@ -10,6 +10,10 @@ ingest run produced it.
 ```sh
 uv sync
 
+# the generic crawler (composer-ingest crawl) renders pages with crawl4ai in a
+# headless browser; install its Chromium once after syncing
+uv run crawl4ai-setup
+
 # scrapers identify themselves (User-Agent) to the sites they crawl; a
 # reachable contact email is required before fetching
 export SCRAPER_CONTACT_EMAIL="you@example.com"

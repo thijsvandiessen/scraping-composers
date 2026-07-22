@@ -1,41 +1,16 @@
-"""Crawl configuration: what to fetch and how to discover more of it.
+"""Crawl configuration: what to discover and how to rank it for scraping.
 
-A :class:`CrawlConfig` declares seed URLs plus optional pagination and
-link-following rules; the :class:`~composer_crawler.crawler.Crawler` executes
-it without knowing anything about the target site or API.
+A :class:`CrawlConfig` declares seed URLs plus discovery and relevance-ranking
+rules; the :class:`~composer_crawler.crawler.Crawler` executes it with crawl4ai
+without knowing anything about the target site. Discovery finds URLs (primarily
+from ``sitemap.xml``); ranking orders them by relevance to ``relevance_query``
+so the most important pages are scraped first.
 """
 
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class NextUrlFromJson:
-    """API pagination: follow the URL found at a dot-path in the JSON body.
-
-    ``pointer`` is a dot-separated path of object keys, e.g. ``"pagination.next"``;
-    a missing key or a null/non-string value ends the pagination.
-    """
-
-    pointer: str
-
-
-@dataclass(frozen=True)
-class PageParam:
-    """Pagination by incrementing a query parameter (``?page=1``, ``?page=2``, ...).
-
-    Stops when a page yields an empty body, a body identical to the previous
-    page's, or an empty top-level JSON array.
-    """
-
-    param: str = "page"
-    start: int = 1
-
-
-Pagination = NextUrlFromJson | PageParam
 
 
 def _validate_source_name(value: str) -> None:
@@ -57,15 +32,30 @@ def _validate_source_name(value: str) -> None:
 
 @dataclass(frozen=True)
 class CrawlConfig:
-    """Declarative description of one crawl target (a site or an API)."""
+    """Declarative description of one crawl target.
+
+    The crawl runs in two phases: *discovery* collects candidate URLs (from the
+    site's ``sitemap.xml`` by default, optionally Common Crawl), and *scraping*
+    fetches them, rendered in a headless browser, in descending order of
+    relevance to ``relevance_query``. When no query is set, URLs keep their
+    discovery order.
+    """
 
     name: str
     seeds: tuple[str, ...]
-    follow_links: bool = False
+    # Discovery: sitemap.xml (and optionally Common Crawl) seeded from each seed's host.
+    use_sitemap: bool = True
+    use_common_crawl: bool = False
+    # A glob (crawl4ai URL-seeder syntax) restricting which discovered URLs are kept.
     allow_patterns: tuple[str, ...] = ()
+    # Ranking: BM25 over each URL's head metadata against this query; None keeps discovery order.
+    relevance_query: str | None = None
+    score_threshold: float = 0.0
+    # When discovery yields nothing, follow links from the seeds up to this depth instead.
+    follow_links: bool = False
     max_depth: int = 2
+    # Cap on the number of URLs scraped (None: no cap).
     max_pages: int | None = None
-    pagination: Pagination | None = None
     request_delay_s: float = 0.5
     headers: tuple[tuple[str, str], ...] = ()
     respect_robots: bool = True
@@ -76,10 +66,9 @@ class CrawlConfig:
         if not self.seeds:
             raise ValueError(f"crawl {self.name!r}: seeds must not be empty")
         if self.follow_links and not self.allow_patterns:
-            # An unrestricted frontier would wander off the target host.
+            # An unrestricted link-following crawl would wander off the target host.
             raise ValueError(f"crawl {self.name!r}: follow_links requires at least one allow pattern")
+        # allow_patterns are globs (crawl4ai URL-seeder / URLPatternFilter syntax), not regexes.
         for pattern in self.allow_patterns:
-            try:
-                re.compile(pattern)
-            except re.error as exc:
-                raise ValueError(f"crawl {self.name!r}: invalid allow pattern {pattern!r}: {exc}") from exc
+            if not pattern:
+                raise ValueError(f"crawl {self.name!r}: allow patterns must be non-empty globs")

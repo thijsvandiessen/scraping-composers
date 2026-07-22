@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -34,38 +33,23 @@ class ScraperOut(BaseModel):
     last_snapshot: SnapshotOut | None
 
 
-class PageParamIn(BaseModel):
-    """Pagination by incrementing a query parameter."""
-
-    type: Literal["page_param"] = "page_param"
-    param: str = "page"
-    start: int = 1
-
-
-class NextUrlFromJsonIn(BaseModel):
-    """API pagination following a URL at a dot-path in the JSON body."""
-
-    type: Literal["next_url_from_json"] = "next_url_from_json"
-    pointer: str
-
-
-PaginationIn = Annotated[PageParamIn | NextUrlFromJsonIn, Field(discriminator="type")]
-
-
 class CrawlConfigIn(BaseModel):
     """A crawl config as edited in the dashboard; the name comes from the URL.
 
     ``headers`` and ``timeout_s`` are not editable here and keep the
     ``CrawlConfig`` defaults; cross-field rules (follow_links needs an allow
-    pattern, patterns must compile) are enforced by ``CrawlConfig`` itself.
+    pattern) are enforced by ``CrawlConfig`` itself.
     """
 
     seeds: list[str] = Field(min_length=1)
-    follow_links: bool = False
+    use_sitemap: bool = True
+    use_common_crawl: bool = False
     allow_patterns: list[str] = []
+    relevance_query: str | None = None
+    score_threshold: float = Field(default=0.0, ge=0)
+    follow_links: bool = False
     max_depth: int = Field(default=2, ge=0)
     max_pages: int | None = Field(default=None, ge=1)
-    pagination: PaginationIn | None = None
     request_delay_s: float = Field(default=0.5, ge=0)
     respect_robots: bool = True
 
@@ -73,11 +57,14 @@ class CrawlConfigIn(BaseModel):
 class CrawlOut(BaseModel):
     name: str
     seeds: list[str]
-    follow_links: bool
+    use_sitemap: bool
+    use_common_crawl: bool
     allow_patterns: list[str]
+    relevance_query: str | None
+    score_threshold: float
+    follow_links: bool
     max_depth: int
     max_pages: int | None
-    pagination: PaginationIn | None
     request_delay_s: float
     respect_robots: bool
     editable: bool  # False for code-registered configs (edit those in the source tree)

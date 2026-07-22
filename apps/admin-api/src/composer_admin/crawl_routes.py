@@ -17,9 +17,6 @@ from composer_crawler import (
     CrawlConfig,
     CrawlConfigStore,
     Crawler,
-    NextUrlFromJson,
-    PageParam,
-    Pagination,
     config_to_dict,
 )
 from composer_crawler.store import DEFAULT_CRAWL_CONFIGS_PATH
@@ -53,21 +50,18 @@ def _crawl_out(config: CrawlConfig) -> CrawlOut:
 
 
 def _to_config(name: str, body: CrawlConfigIn) -> CrawlConfig:
-    pagination: Pagination | None = None
-    if body.pagination is not None:
-        if body.pagination.type == "page_param":
-            pagination = PageParam(param=body.pagination.param, start=body.pagination.start)
-        else:
-            pagination = NextUrlFromJson(pointer=body.pagination.pointer)
     try:
         return CrawlConfig(
             name=name,
             seeds=tuple(body.seeds),
-            follow_links=body.follow_links,
+            use_sitemap=body.use_sitemap,
+            use_common_crawl=body.use_common_crawl,
             allow_patterns=tuple(body.allow_patterns),
+            relevance_query=body.relevance_query,
+            score_threshold=body.score_threshold,
+            follow_links=body.follow_links,
             max_depth=body.max_depth,
             max_pages=body.max_pages,
-            pagination=pagination,
             request_delay_s=body.request_delay_s,
             respect_robots=body.respect_robots,
         )

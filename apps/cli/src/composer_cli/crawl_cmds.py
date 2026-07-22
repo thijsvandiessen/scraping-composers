@@ -1,4 +1,5 @@
 import argparse
+import dataclasses
 import logging
 import sys
 from pathlib import Path
@@ -22,6 +23,8 @@ def crawl_choices() -> dict[str, CrawlConfig]:
 
 def cmd_crawl(args: argparse.Namespace) -> int:
     config = crawl_choices()[args.config]
+    if args.query:
+        config = dataclasses.replace(config, relevance_query=args.query)
     bucket = LocalBucket(args.bucket_path)
     try:
         run_id = Crawler(config).crawl_to_bucket(bucket, max_pages=args.max_pages)

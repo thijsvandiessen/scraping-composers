@@ -29,8 +29,9 @@
     </td>
     <td>{{ crawl.seeds|length }} URL{{ crawl.seeds|length|pluralize }}</td>
     <td class="sc-muted">
-      {% if crawl.follow_links %}follow links · depth {{ crawl.max_depth }}{% else %}seeds only{% endif %}
-      {% if crawl.pagination %} · {{ crawl.pagination.type }}{% endif %}
+      {% if crawl.use_sitemap %}sitemap{% if crawl.use_common_crawl %}+cc{% endif %}{% elif crawl.use_common_crawl %}common crawl{% else %}seeds only{% endif %}
+      {% if crawl.relevance_query %} · ranked{% endif %}
+      {% if crawl.follow_links %} · follow links{% endif %}
       {% if crawl.max_pages %} · max {{ crawl.max_pages }} pages{% endif %}
     </td>
     {% with snapshot=crawl.last_snapshot %}

@@ -5,8 +5,6 @@ import pytest
 from composer_crawler import (
     CrawlConfig,
     CrawlConfigStore,
-    NextUrlFromJson,
-    PageParam,
     all_crawl_configs,
     config_from_dict,
     config_to_dict,
@@ -17,11 +15,14 @@ def full_config() -> CrawlConfig:
     return CrawlConfig(
         name="example",
         seeds=("https://example.org/a", "https://example.org/b"),
+        use_sitemap=True,
+        use_common_crawl=True,
         follow_links=True,
-        allow_patterns=(r"example\.org/archive",),
+        allow_patterns=("*/composer/*",),
+        relevance_query="composer biography works",
+        score_threshold=0.3,
         max_depth=3,
         max_pages=50,
-        pagination=PageParam(param="p", start=0),
         request_delay_s=1.5,
         headers=(("Accept", "application/json"),),
         respect_robots=False,
@@ -33,7 +34,7 @@ def full_config() -> CrawlConfig:
     "config",
     [
         full_config(),
-        CrawlConfig(name="api", seeds=("https://api.example.org/v1",), pagination=NextUrlFromJson("next")),
+        CrawlConfig(name="api", seeds=("https://api.example.org/v1",), use_common_crawl=True),
         CrawlConfig(name="plain", seeds=("https://example.org/",)),
     ],
 )
@@ -46,11 +47,12 @@ def test_from_dict_defaults_missing_fields() -> None:
     assert config == CrawlConfig(name="example", seeds=("https://example.org/",))
 
 
-def test_from_dict_rejects_unknown_pagination_type() -> None:
-    with pytest.raises(ValueError, match="unknown pagination type"):
-        config_from_dict(
-            {"name": "example", "seeds": ["https://example.org/"], "pagination": {"type": "cursor"}}
-        )
+def test_from_dict_ignores_legacy_pagination_key() -> None:
+    # Pre-crawl4ai configs carried a `pagination` field; it must load, not raise.
+    config = config_from_dict(
+        {"name": "example", "seeds": ["https://example.org/"], "pagination": {"type": "page_param"}}
+    )
+    assert config == CrawlConfig(name="example", seeds=("https://example.org/",))
 
 
 def test_load_missing_file_is_empty(tmp_path: Path) -> None:
