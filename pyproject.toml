@@ -9,6 +9,7 @@ composer-schema = { workspace = true }
 composer-bronze = { workspace = true }
 composer-scrapers = { workspace = true }
 composer-crawler = { workspace = true }
+composer-extract = { workspace = true }
 composer-warehouse = { workspace = true }
 composer-gold = { workspace = true }
 composer-config = { workspace = true }
@@ -83,6 +84,8 @@ extraPaths = [
     "packages/composer-scrapers/tests",
     "packages/composer-crawler/src",
     "packages/composer-crawler/tests",
+    "packages/composer-extract/src",
+    "packages/composer-extract/tests",
     "packages/composer-warehouse/src",
     "packages/composer-warehouse/tests",
     "packages/composer-gold/src",

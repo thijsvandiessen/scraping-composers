@@ -117,6 +117,24 @@ def _berlinphil_fields(raw: dict[str, Any]) -> _ConcertFields | None:
     )
 
 
+def _llm_fields(raw: dict[str, Any]) -> _ConcertFields | None:
+    """Concert fields from an LLM-extracted mention (composer_extract writes a
+    normalized, source-independent payload marked ``_source: "llm"``)."""
+    key = raw.get("concert_key")
+    if not key:
+        return None
+    return _ConcertFields(
+        external_key=str(key),
+        date=raw.get("date"),
+        venue=raw.get("venue"),
+        season=raw.get("season"),
+        event_type=raw.get("event_type"),
+        url=raw.get("url"),
+        conductors=tuple(raw.get("conductors") or ()),
+        soloists=_soloists(raw),
+    )
+
+
 # Each performance source encodes concert identity differently; sources not
 # listed here yield no concerts.
 _SOURCE_FIELDS = {
@@ -130,7 +148,13 @@ def _concert_fields(source_name: str, raw: dict[str, Any]) -> _ConcertFields | N
     """Concert identity and fields for one mention's payload, or None for
     unknown sources / payloads without a usable concert identity."""
     parse = _SOURCE_FIELDS.get(source_name)
-    return parse(raw) if parse else None
+    if parse:
+        return parse(raw)
+    # LLM-extracted mentions carry a normalized payload regardless of the site
+    # they were crawled from, so they resolve by marker rather than source name.
+    if raw.get("_source") == "llm":
+        return _llm_fields(raw)
+    return None
 
 
 @dataclass(frozen=True)

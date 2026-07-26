@@ -1,7 +1,7 @@
 import logging
 from collections.abc import Iterator
 
-from composer_schema import EntityDocument, SourceAdapter, WorkMentionDocument
+from composer_schema import EntityDocument, WorkMentionDocument
 from sqlalchemy.orm import Session
 
 from ..models import IngestRun, utcnow
@@ -11,14 +11,16 @@ from .entities import get_or_create_source
 log = logging.getLogger(__name__)
 
 
-def create_run(session: Session, adapter: SourceAdapter) -> IngestRun:
+def create_run(session: Session, source_name: str, base_url: str) -> IngestRun:
     """Register a source and open a ``running`` IngestRun, returning it committed.
 
-    Split out from :func:`ingest_documents` so a caller (e.g. the admin API) can
-    record the run and learn its id up front, then drive :func:`execute_run` in
-    the background on its own session.
+    Takes ``source_name``/``base_url`` rather than a ``SourceAdapter`` so the
+    admin API can open a run for a crawl config (which has no adapter) too.
+    Split out from :func:`ingest_documents` so a caller can record the run and
+    learn its id up front, then drive :func:`execute_run` in the background on
+    its own session.
     """
-    source = get_or_create_source(session, adapter.name, adapter.base_url)
+    source = get_or_create_source(session, source_name, base_url)
     run = IngestRun(source_id=source.id)
     session.add(run)
     session.commit()

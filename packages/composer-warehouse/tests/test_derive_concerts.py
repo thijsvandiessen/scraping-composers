@@ -120,6 +120,46 @@ def test_derive_concerts_groups_and_resolves(session: Session) -> None:
     assert stats.unresolved_participant_names == 1
 
 
+def _llm_raw(title_key: str) -> dict[str, object]:
+    """The normalized, source-independent payload composer_extract writes."""
+    return {
+        "_source": "llm",
+        "concert_key": "https://lso.co.uk/beethoven",
+        "url": "https://lso.co.uk/beethoven",
+        "date": "2024-05-01",
+        "venue": "Barbican",
+        "conductors": ["Simon Rattle"],
+        "soloists": [{"name": "Janine Jansen", "discipline": "violin"}],
+        "title": title_key,
+    }
+
+
+def test_derive_concerts_handles_llm_source(session: Session) -> None:
+    lso = FakeSource(
+        records=(
+            perf_mention("https://lso.co.uk/beethoven#w0", "Symphony No. 5", "Beethoven", _llm_raw("sym5")),
+            perf_mention("https://lso.co.uk/beethoven#w1", "Violin Concerto", "Brahms", _llm_raw("vc")),
+            person("Simon Rattle", external_id="lso:rattle"),
+            person("Janine Jansen", external_id="lso:jansen"),
+        ),
+        name="lso",
+        base_url="https://lso.co.uk",
+    )
+    ingest_source(session, lso)
+
+    stats = derive_concerts(session)
+
+    concert = session.scalars(select(Concert)).one()  # both mentions grouped by concert_key
+    assert concert.external_key == "https://lso.co.uk/beethoven"
+    assert (concert.date, concert.venue) == ("2024-05-01", "Barbican")
+    assert len(concert.works) == 2
+    by_role = {(p.role, p.name): p for p in concert.participants}
+    assert ("conductor", "Simon Rattle") in by_role
+    assert by_role[("soloist", "Janine Jansen")].discipline == "violin"
+    assert all(p.entity_id is not None for p in concert.participants)  # verbatim names resolve
+    assert (stats.concerts, stats.participant_links) == (1, 2)
+
+
 def test_derive_concerts_is_rerunnable(session: Session) -> None:
     _seed_performances(session)
     first = derive_concerts(session)

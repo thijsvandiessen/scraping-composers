@@ -170,7 +170,9 @@ def test_snapshots_lists_newest_first_and_legacy_as_unknown(client: TestClient, 
     snapshots = client.get("/admin/v1/snapshots").json()
     assert [s["source"] for s in snapshots] == ["fake", "archive"]  # newest first
     assert snapshots[0]["status"] == "completed"
+    assert snapshots[0]["kind"] == "documents"  # entity docs are loadable
     assert snapshots[1]["status"] == "unknown"
+    assert snapshots[1]["kind"] == "pages"  # legacy record has no document _type
     assert snapshots[1]["size_bytes"] > 0
 
 
@@ -198,7 +200,7 @@ def test_process_conflicts_while_ingest_running(client: TestClient, factory) -> 
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
     # Seed an in-progress run that we never execute, so the source looks busy.
     with factory() as session:
-        create_run(session, _FakeSource())
+        create_run(session, "fake", "https://fake.example")
     assert client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/process").status_code == 409
 
 

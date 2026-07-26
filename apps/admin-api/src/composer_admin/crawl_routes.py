@@ -11,7 +11,8 @@ import logging
 from pathlib import Path
 from typing import Annotated, Any
 
-from composer_bronze.scraper import new_snapshot_id
+from composer_bronze.bucket import latest_document_run_id, latest_loadable_run_id
+from composer_bronze.scraper import new_snapshot_id, write_documents
 from composer_crawler import (
     CRAWL_REGISTRY,
     CrawlConfig,
@@ -19,13 +20,17 @@ from composer_crawler import (
     Crawler,
     config_to_dict,
 )
+from composer_crawler.records import iter_crawl_records
 from composer_crawler.store import DEFAULT_CRAWL_CONFIGS_PATH
+from composer_extract import OllamaExtractor, extract_documents
 from composer_scrapers import REGISTRY
+from composer_warehouse.ingestion import create_run
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
 
-from .deps import require_admin_key
-from .routes import _bucket, _has_running_fetch, _last_snapshot, _snapshot_out
-from .schemas import CrawlConfigIn, CrawlOut, FetchStarted
+from .crud import has_running
+from .deps import DbSession, require_admin_key
+from .routes import _bucket, _has_running_fetch, _last_snapshot, _process_in_background, _snapshot_out
+from .schemas import CrawlConfigIn, CrawlOut, FetchStarted, RunStarted
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +67,7 @@ def _to_config(name: str, body: CrawlConfigIn) -> CrawlConfig:
             follow_links=body.follow_links,
             max_depth=body.max_depth,
             max_pages=body.max_pages,
+            excluded_selector=body.excluded_selector,
             request_delay_s=body.request_delay_s,
             respect_robots=body.respect_robots,
         )
@@ -88,6 +94,23 @@ def _crawl_in_background(config: CrawlConfig, snapshot_id: str, max_pages: int |
     except Exception:
         # Recorded as a failed manifest by crawl_to_bucket; log for the console.
         log.exception("background crawl failed for %s/%s", config.name, snapshot_id)
+
+
+def _extractor() -> OllamaExtractor:
+    """The LLM extractor; a seam for tests to inject a fake model."""
+    return OllamaExtractor.from_settings()
+
+
+def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str) -> None:
+    """Run the model over a crawl snapshot, writing documents to a new snapshot."""
+    bucket = _bucket()
+    try:
+        records = iter_crawl_records(name, crawl_run_id, bucket)
+        docs = extract_documents(records, source_name=name, extractor=_extractor())
+        write_documents(bucket, name, docs, run_id=snapshot_id)
+    except Exception:
+        # Recorded as a failed manifest by write_documents; log for the console.
+        log.exception("background extract failed for %s/%s", name, snapshot_id)
 
 
 @crawls.get("/crawls", response_model=list[CrawlOut])
@@ -139,3 +162,48 @@ def fetch_crawl(
     snapshot_id = new_snapshot_id()
     background.add_task(_crawl_in_background, config, snapshot_id, max_pages)
     return FetchStarted(source=name, snapshot_id=snapshot_id, status="running")
+
+
+@crawls.post("/crawls/{name}/extract", status_code=status.HTTP_202_ACCEPTED, response_model=FetchStarted)
+def extract_crawl(name: str, background: BackgroundTasks) -> FetchStarted:
+    """Start a background LLM extraction over the crawl's latest snapshot.
+
+    Reads the pages a crawl already stored and writes work-mention/entity
+    documents to a new snapshot under the same source name, which ``process``
+    then ingests like any other.
+    """
+    if name not in _merged():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
+    bucket = _bucket()
+    if _has_running_fetch(bucket, name):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"a run for {name!r} is already in progress")
+    crawl_run_id = latest_loadable_run_id(bucket, name)
+    if crawl_run_id is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"crawl {name!r} has no completed snapshot to extract")
+    snapshot_id = new_snapshot_id()
+    background.add_task(_extract_in_background, name, crawl_run_id, snapshot_id)
+    return FetchStarted(source=name, snapshot_id=snapshot_id, status="running")
+
+
+@crawls.post("/crawls/{name}/process", status_code=status.HTTP_202_ACCEPTED, response_model=RunStarted)
+def process_crawl(name: str, db: DbSession, background: BackgroundTasks) -> RunStarted:
+    """Load the crawl's latest LLM-extracted ``documents`` snapshot into the DB.
+
+    The per-crawl counterpart to ``/snapshots/{source}/{id}/process``: it
+    resolves the newest extracted snapshot server-side (skipping raw-page
+    crawls), so the dashboard can drive Crawl → Extract → Load from one row.
+    """
+    config = _merged().get(name)
+    if config is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
+    if has_running(db, name):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"a run for {name!r} is already in progress")
+    run_id = latest_document_run_id(_bucket(), name)
+    if run_id is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"crawl {name!r} has no extracted snapshot; run extract first"
+        )
+    base_url = config.seeds[0] if config.seeds else ""
+    run = create_run(db, name, base_url)
+    background.add_task(_process_in_background, name, run_id, run.id)
+    return RunStarted(run_id=run.id, source=name, status=run.status)

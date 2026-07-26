@@ -18,6 +18,7 @@ class SnapshotOut(BaseModel):
     source: str
     id: str  # bucket run_id, e.g. "2026-07-02T09:52:30-3086f07d"
     status: str  # running | completed | failed | unknown (pre-manifest snapshot)
+    kind: str  # documents (loadable) | pages (raw crawl, extract first)
     started_at: str
     finished_at: str | None
     record_count: int | None
@@ -50,6 +51,7 @@ class CrawlConfigIn(BaseModel):
     follow_links: bool = False
     max_depth: int = Field(default=2, ge=0)
     max_pages: int | None = Field(default=None, ge=1)
+    excluded_selector: str | None = None  # extra CSS to drop before markdown generation
     request_delay_s: float = Field(default=0.5, ge=0)
     respect_robots: bool = True
 
@@ -65,6 +67,7 @@ class CrawlOut(BaseModel):
     follow_links: bool
     max_depth: int
     max_pages: int | None
+    excluded_selector: str | None
     request_delay_s: float
     respect_robots: bool
     editable: bool  # False for code-registered configs (edit those in the source tree)

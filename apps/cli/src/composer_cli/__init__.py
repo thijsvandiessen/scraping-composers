@@ -10,6 +10,7 @@ from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS
 from composer_scrapers import REGISTRY
 
 from .crawl_cmds import cmd_crawl, crawl_choices
+from .extract_cmds import cmd_extract
 from .ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_promote, cmd_rebuild_silver
 from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
@@ -88,10 +89,24 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     )
     p_crawl.set_defaults(func=cmd_crawl)
 
+    p_extract = sub.add_parser(
+        "extract",
+        help="LLM-extract concerts/performers from a crawl snapshot into the bucket "
+        "(local Ollama model; runs between crawl and process)",
+    )
+    p_extract.add_argument("config", choices=sorted(crawl_choices()))
+    p_extract.add_argument("--crawl-run-id", help="crawl run to read (default: latest completed)")
+    p_extract.add_argument("--model", help="Ollama model to use (overrides $OLLAMA_MODEL / the default)")
+    p_extract.add_argument("--max-pages", type=int, help="stop after N crawled pages (for testing)")
+    p_extract.add_argument(
+        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
+    )
+    p_extract.set_defaults(func=cmd_extract)
+
     p_process = sub.add_parser(
         "process", help="ingest previously fetched records from the bucket into the DB"
     )
-    p_process.add_argument("source", choices=sorted(REGISTRY))
+    p_process.add_argument("source", choices=sorted(set(REGISTRY) | set(crawl_choices())))
     p_process.add_argument("--run-id", help="bucket run_id to process (default: latest)")
     p_process.add_argument(
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"

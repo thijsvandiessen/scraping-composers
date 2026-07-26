@@ -38,6 +38,7 @@ _SCALAR_FIELDS = (
     "follow_links",
     "max_depth",
     "max_pages",
+    "excluded_selector",
     "request_delay_s",
     "respect_robots",
     "timeout_s",

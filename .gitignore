@@ -1,6 +1,7 @@
 composers.db
 gold.db*
 raw-data/
+crawl_configs.json
 apps/dashboard/dashboard.sqlite3
 node_modules/
 apps/frontend/dist/

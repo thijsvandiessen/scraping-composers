@@ -107,6 +107,15 @@ class AdminAPI(_BaseAPI):
         started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/fetch")
         return started
 
+    def start_extract(self, name: str) -> dict[str, Any]:
+        started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/extract")
+        return started
+
+    def load_crawl(self, name: str) -> dict[str, Any]:
+        """Load the crawl's latest extracted snapshot into the database."""
+        started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/process")
+        return started
+
 
 @dataclass
 class DataAPI(_BaseAPI):

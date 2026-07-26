@@ -56,6 +56,10 @@ class CrawlConfig:
     max_depth: int = 2
     # Cap on the number of URLs scraped (None: no cap).
     max_pages: int | None = None
+    # CSS selector for elements dropped before markdown generation, added to the
+    # consent-dialog selector every crawl already applies. Consent banners are dense
+    # prose that survives the pruning filter and can dwarf a page's real content.
+    excluded_selector: str | None = None
     request_delay_s: float = 0.5
     headers: tuple[tuple[str, str], ...] = ()
     respect_robots: bool = True

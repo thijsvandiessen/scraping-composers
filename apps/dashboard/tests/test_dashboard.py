@@ -20,6 +20,7 @@ SNAPSHOT_PAYLOAD = {
     "source": "wikidata",
     "id": "2026-07-02T09:52:31-e8533a60",
     "status": "completed",
+    "kind": "documents",
     "started_at": "2026-07-02T09:52:31+00:00",
     "finished_at": "2026-07-02T11:00:40+00:00",
     "record_count": 59301,
@@ -255,11 +256,13 @@ def test_load_page_lists_snapshots_with_load_button(
     monkeypatch: pytest.MonkeyPatch, staff_client: Client
 ) -> None:
     failed = {**SNAPSHOT_PAYLOAD, "id": "snap-bad", "status": "failed", "error": "boom"}
-    _install(monkeypatch, StubAPI(snapshots=[SNAPSHOT_PAYLOAD, failed]))
+    pages = {**SNAPSHOT_PAYLOAD, "id": "snap-pages", "kind": "pages"}
+    _install(monkeypatch, StubAPI(snapshots=[SNAPSHOT_PAYLOAD, failed, pages]))
     page = staff_client.get("/admin/load/").content.decode()
     assert SNAPSHOT_PAYLOAD["id"] in page
-    assert page.count("Load into DB") == 1  # only the completed snapshot is loadable
+    assert page.count("Load into DB") == 1  # only the completed documents snapshot is loadable
     assert "boom" in page  # failed snapshot's error shown
+    assert "snap-pages" in page and "extract first" in page  # raw pages are gated, not loadable
 
 
 def test_process_snapshot_redirects_with_message(

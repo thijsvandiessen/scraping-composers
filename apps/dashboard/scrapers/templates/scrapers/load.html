@@ -17,13 +17,14 @@
 
 <table class="sc-table">
   <tr>
-    <th>source</th><th>snapshot</th><th>status</th>
+    <th>source</th><th>snapshot</th><th>kind</th><th>status</th>
     <th class="sc-num">records</th><th class="sc-num">size</th><th></th>
   </tr>
   {% for snapshot in snapshots %}
   <tr>
     <td><strong>{{ snapshot.source }}</strong></td>
     <td>{{ snapshot.id }}</td>
+    <td><span class="sc-badge sc-{{ snapshot.kind }}">{{ snapshot.kind }}</span></td>
     <td>
       <span class="sc-badge sc-{{ snapshot.status }}">{{ snapshot.status }}</span>
       {% if snapshot.error %}<div class="sc-error-text">{{ snapshot.error }}</div>{% endif %}
@@ -31,16 +32,20 @@
     <td class="sc-num">{{ snapshot.record_count|default_if_none:"—" }}</td>
     <td class="sc-num">{{ snapshot.size_bytes|filesizeformat }}</td>
     <td>
-      {% if snapshot.status == "completed" or snapshot.status == "unknown" %}
-      <form method="post" action="{% url 'process_snapshot' snapshot.source snapshot.id %}">
-        {% csrf_token %}
-        <button type="submit" class="sc-btn">Load into DB</button>
-      </form>
+      {% if snapshot.kind == "documents" %}
+        {% if snapshot.status == "completed" or snapshot.status == "unknown" %}
+        <form method="post" action="{% url 'process_snapshot' snapshot.source snapshot.id %}">
+          {% csrf_token %}
+          <button type="submit" class="sc-btn">Load into DB</button>
+        </form>
+        {% endif %}
+      {% elif snapshot.kind == "pages" %}
+      <span class="sc-muted">extract first</span>
       {% endif %}
     </td>
   </tr>
   {% empty %}
-  <tr><td colspan="6" class="sc-muted">no snapshots in the bucket — fetch a scraper first</td></tr>
+  <tr><td colspan="7" class="sc-muted">no snapshots in the bucket — fetch a scraper first</td></tr>
   {% endfor %}
 </table>
 

@@ -18,9 +18,11 @@ from crawl4ai import (
     BrowserConfig,
     CacheMode,
     CrawlerRunConfig,
+    DefaultMarkdownGenerator,
     FilterChain,
     KeywordRelevanceScorer,
     MemoryAdaptiveDispatcher,
+    PruningContentFilter,
     RateLimiter,
     URLPatternFilter,
 )
@@ -54,12 +56,37 @@ def _deep_crawl_strategy(config: CrawlConfig, budget: int | None) -> BestFirstCr
     return BestFirstCrawlingStrategy(**kwargs)
 
 
+def _markdown_generator() -> DefaultMarkdownGenerator:
+    """Generate main-content markdown: a pruning filter drops boilerplate so the
+    result's ``fit_markdown`` is the compact input the LLM extraction step reads."""
+    return DefaultMarkdownGenerator(content_filter=PruningContentFilter())
+
+
+# Containers of the common consent-management platforms. Their dialogs are dense
+# prose, so the pruning filter keeps them and they can outweigh the page itself
+# (on lso.co.uk: 24 KB of banner around 5 KB of concert).
+_CONSENT_SELECTOR = (
+    "#CybotCookiebotDialog, #CookiebotWidget, #onetrust-consent-sdk, "
+    "#usercentrics-root, #didomi-host, .qc-cmp2-container"
+)
+
+
+def _excluded_selector(config: CrawlConfig) -> str:
+    """The consent-dialog selector plus the config's own additions."""
+    if not config.excluded_selector:
+        return _CONSENT_SELECTOR
+    return f"{_CONSENT_SELECTOR}, {config.excluded_selector}"
+
+
 def run_config(config: CrawlConfig, *, deep_crawl: bool, budget: int | None) -> CrawlerRunConfig:
     return CrawlerRunConfig(
         check_robots_txt=config.respect_robots,
         mean_delay=config.request_delay_s,
         page_timeout=int(config.timeout_s * 1000),
         cache_mode=CacheMode.BYPASS,
+        markdown_generator=_markdown_generator(),
+        excluded_selector=_excluded_selector(config),
+        remove_overlay_elements=True,
         deep_crawl_strategy=_deep_crawl_strategy(config, budget) if deep_crawl else None,
         verbose=False,
     )
@@ -82,6 +109,33 @@ def _content_type(headers: dict[str, str]) -> str:
     return raw.split(";", 1)[0].strip().lower() or "text/html"
 
 
+def _markdown(result: Any) -> str:
+    """The result's pruned main-content markdown, as a plain :class:`str`.
+
+    crawl4ai hands back a ``StringCompatibleMarkdown``: a ``str`` subclass whose
+    *string value* is the unfiltered ``raw_markdown``, with the pruned
+    ``fit_markdown`` reachable only as an attribute. So the attributes are tried
+    first — an ``isinstance(str)`` shortcut would silently store the ~10x larger
+    unpruned text. The result is coerced to a plain ``str`` because
+    ``dataclasses.asdict`` deep-copies that subclass back into a
+    ``MarkdownGenerationResult``, which is not JSON-serializable.
+    """
+    md = getattr(result, "markdown", None)
+    if md is None:
+        return ""
+    for attribute in ("fit_markdown", "raw_markdown"):
+        value = getattr(md, attribute, None)
+        if value:
+            return str(value)
+    return str(md) if isinstance(md, str) else ""
+
+
+def _page_metadata(metadata: dict[str, Any]) -> dict[str, str]:
+    """Page metadata (title, description, og:*, ...) as strings; ``depth`` is
+    crawl bookkeeping, not page metadata, so it is left out."""
+    return {str(k): str(v) for k, v in metadata.items() if k != "depth" and v is not None}
+
+
 def record_from_result(result: Any) -> CrawlRecord | None:
     """A bronze CrawlRecord for a crawl4ai result, or None for a hard failure."""
     if not result.success and not result.html:
@@ -96,6 +150,7 @@ def record_from_result(result: Any) -> CrawlRecord | None:
         content_type=_content_type(headers),
         fetched_at=datetime.now(UTC).isoformat(),
         depth=int(metadata.get("depth", 0)),
-        body=result.html,
         headers=kept_headers(headers),
+        markdown=_markdown(result),
+        metadata=_page_metadata(metadata),
     )
