@@ -12,6 +12,8 @@ from composer_bronze.bucket import (
     LocalBucket,
     Snapshot,
     SnapshotManifest,
+    latest_document_run_id,
+    latest_loadable_run_id,
 )
 
 
@@ -99,6 +101,41 @@ def test_list_snapshots_reports_manifest_and_size(tmp_path: Path) -> None:
     assert isinstance(snap, Snapshot)
     assert snap.manifest == manifest
     assert snap.size_bytes > 0
+
+
+def _complete(bucket: LocalBucket, source: str, run_id: str, record: dict[str, object]) -> None:
+    bucket.write_records(source, run_id, [record])
+    bucket.write_manifest(SnapshotManifest.start(source, run_id).completed(record_count=1))
+
+
+def test_list_snapshots_classifies_kind_by_first_record(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    _complete(bucket, "lso", "run-pages", {"_type": "crawl", "url": "https://x"})
+    _complete(bucket, "lso", "run-docs", {"_type": "entity", "id": "person:x"})
+    _complete(bucket, "lso", "run-empty", {})  # no _type -> not loadable
+
+    kinds = {s.manifest.run_id: s.kind for s in bucket.list_snapshots("lso")}
+    assert kinds == {"run-pages": "pages", "run-docs": "documents", "run-empty": "pages"}
+
+
+def test_list_sources_enumerates_bucket_dirs(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    bucket.write_records("wikidata", "r1", [{"x": 1}])
+    bucket.write_records("lso", "r1", [{"x": 1}])
+    (tmp_path / "not-a-dir.txt").write_text("ignored")
+    assert bucket.list_sources() == ["lso", "wikidata"]
+    assert LocalBucket(tmp_path / "missing").list_sources() == []
+
+
+def test_latest_document_run_id_skips_pages(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    _complete(bucket, "lso", "2026-01-01T00:00:00-docs", {"_type": "work_mention", "title": "x"})
+    _complete(bucket, "lso", "2026-02-01T00:00:00-pages", {"_type": "crawl", "url": "https://x"})
+
+    # The pages crawl is the newest loadable snapshot, but not a documents one.
+    assert latest_loadable_run_id(bucket, "lso") == "2026-02-01T00:00:00-pages"
+    assert latest_document_run_id(bucket, "lso") == "2026-01-01T00:00:00-docs"
+    assert latest_document_run_id(bucket, "missing") is None
 
 
 def test_list_snapshots_synthesizes_manifest_for_legacy_dir(tmp_path: Path) -> None:

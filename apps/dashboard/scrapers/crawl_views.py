@@ -47,6 +47,7 @@ def _default_values(name: str | None) -> dict[str, Any]:
         "follow_links": False,
         "max_depth": "2",
         "max_pages": "",
+        "excluded_selector": "",
         "request_delay_s": "0.5",
         "respect_robots": True,
     }
@@ -71,6 +72,7 @@ def _form_values(request: HttpRequest, name: str | None) -> dict[str, Any]:
         "follow_links": request.POST.get("follow_links") == "on",
         "max_depth": request.POST.get("max_depth", "2"),
         "max_pages": request.POST.get("max_pages", ""),
+        "excluded_selector": request.POST.get("excluded_selector", "").strip(),
         "request_delay_s": request.POST.get("request_delay_s", "0.5"),
         "respect_robots": request.POST.get("respect_robots") == "on",
     }
@@ -92,6 +94,7 @@ def _crawl_payload(values: dict[str, Any]) -> dict[str, Any]:
         "follow_links": values["follow_links"],
         "max_depth": int(values["max_depth"] or "2"),
         "max_pages": int(values["max_pages"]) if values["max_pages"].strip() else None,
+        "excluded_selector": values["excluded_selector"] or None,
         "request_delay_s": float(values["request_delay_s"] or "0.5"),
         "respect_robots": values["respect_robots"],
     }
@@ -110,6 +113,7 @@ def _config_to_values(crawl: dict[str, Any]) -> dict[str, Any]:
         "follow_links": crawl["follow_links"],
         "max_depth": str(crawl["max_depth"]),
         "max_pages": "" if crawl["max_pages"] is None else str(crawl["max_pages"]),
+        "excluded_selector": crawl.get("excluded_selector") or "",
         "request_delay_s": str(crawl["request_delay_s"]),
         "respect_robots": crawl["respect_robots"],
     }
@@ -179,4 +183,32 @@ def start_crawl(request: HttpRequest, name: str) -> HttpResponse:
         messages.error(request, str(exc))
     else:
         messages.success(request, f"crawling {started['source']} → snapshot {started['snapshot_id']}")
+    return redirect("crawls_index")
+
+
+def start_extract(request: HttpRequest, name: str) -> HttpResponse:
+    """Run the LLM over the crawl's latest snapshot, into a new one."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    api = AdminAPI.from_env()
+    try:
+        started = api.start_extract(name)
+    except AdminAPIError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"extracting {started['source']} → snapshot {started['snapshot_id']}")
+    return redirect("crawls_index")
+
+
+def start_load(request: HttpRequest, name: str) -> HttpResponse:
+    """Load the crawl's latest extracted snapshot into the database."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    api = AdminAPI.from_env()
+    try:
+        started = api.load_crawl(name)
+    except AdminAPIError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"loading {started['source']} into the database (run {started['run_id']})")
     return redirect("crawls_index")

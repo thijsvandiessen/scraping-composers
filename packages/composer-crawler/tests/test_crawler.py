@@ -3,12 +3,20 @@ the scrape phase runs with no browser or network."""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import composer_crawler.crawler as crawler_mod
 import pytest
-from composer_crawler import CrawlConfig, Crawler
-from composer_crawler.testing import FakeResult, FakeWebCrawler, stub_discover, web_crawler_factory
+from composer_crawler import CrawlConfig, Crawler, CrawlRecord
+from composer_crawler.testing import (
+    FakeMarkdown,
+    FakeResult,
+    FakeStringCompatibleMarkdown,
+    FakeWebCrawler,
+    stub_discover,
+    web_crawler_factory,
+)
 
 
 def _config(**overrides: Any) -> CrawlConfig:
@@ -54,14 +62,61 @@ def test_record_maps_crawl4ai_fields(monkeypatch: pytest.MonkeyPatch) -> None:
         status_code=200,
         response_headers={"Content-Type": "text/html; charset=utf-8", "ETag": '"abc"'},
         redirected_url="https://example.org/x/final",
+        markdown=FakeMarkdown(raw_markdown="# hi", fit_markdown="hi"),
+        metadata={"title": "Concert", "description": "programme", "depth": 0},
     )
     fake = FakeWebCrawler({result.url: result})
     (record,) = _run(_config(), fake, monkeypatch, discovered=[result.url])
     assert record.content_type == "text/html"
     assert record.headers["etag"] == '"abc"'  # header names are lowercased
     assert record.final_url == "https://example.org/x/final"
-    assert record.body == "<p>hi</p>"
+    assert record.markdown == "hi"  # prefers fit_markdown over raw_markdown
+    assert record.metadata == {"title": "Concert", "description": "programme"}  # depth dropped
     assert record.fetched_at  # ISO timestamp present
+
+
+def test_record_markdown_falls_back_to_raw_when_no_fit(monkeypatch: pytest.MonkeyPatch) -> None:
+    result = FakeResult(url="https://example.org/y", markdown=FakeMarkdown(raw_markdown="# raw"))
+    fake = FakeWebCrawler({result.url: result})
+    (record,) = _run(_config(), fake, monkeypatch, discovered=[result.url])
+    assert record.markdown == "# raw"
+    assert record.metadata == {}  # no page metadata present
+
+
+def test_markdown_prefers_fit_over_the_str_value_of_crawl4ais_wrapper(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """crawl4ai's wrapper *is* a str whose value is the unpruned raw_markdown.
+
+    Reading it as a string would store the far larger unpruned text, and the
+    wrapper does not survive ``asdict`` — so the record must hold a plain str.
+    """
+    markdown = FakeStringCompatibleMarkdown(FakeMarkdown(raw_markdown="# raw " * 100, fit_markdown="fit"))
+    result = FakeResult(url="https://example.org/z", markdown=markdown)
+    fake = FakeWebCrawler({result.url: result})
+    (record,) = _run(_config(), fake, monkeypatch, discovered=[result.url])
+    assert record.markdown == "fit"
+    assert type(record.markdown) is str
+    json.dumps(record.to_dict())  # the bucket writes NDJSON; must not raise
+
+
+def test_legacy_record_with_html_body_still_loads() -> None:
+    """Snapshots crawled before records dropped ``body`` must not break loading."""
+    record = CrawlRecord.from_dict(
+        {
+            "_type": "crawl",
+            "url": "https://example.org/x",
+            "final_url": "https://example.org/x",
+            "status_code": 200,
+            "content_type": "text/html",
+            "fetched_at": "2024-01-01T00:00:00+00:00",
+            "depth": 0,
+            "headers": {},
+            "body": "<p>dropped</p>",
+        }
+    )
+    assert record.url == "https://example.org/x"
+    assert record.markdown == ""
 
 
 def test_hard_failure_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -3,7 +3,7 @@ import logging
 from dataclasses import asdict
 from pathlib import Path
 
-from composer_bronze.bucket import LOADABLE_STATUSES, LocalBucket
+from composer_bronze.bucket import LocalBucket, latest_loadable_run_id
 from composer_bronze.scraper import Scraper, iter_from_bucket
 from composer_gold import PromoteConfig, promote
 from composer_scrapers import REGISTRY
@@ -11,6 +11,8 @@ from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import get_engine, init_db
 from composer_warehouse.ingestion import ingest_documents
 from composer_warehouse.rebuild import rebuild_silver
+
+from .crawl_cmds import crawl_choices
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
@@ -79,25 +81,30 @@ def cmd_rebuild_silver(args: argparse.Namespace) -> int:
     return 0
 
 
+def _source_identity(source: str) -> tuple[str, str]:
+    """(name, base_url) for a bucket source: a registered scraper, or a crawl
+    config (whose LLM-extracted docs the ``extract`` step wrote under its name)."""
+    adapter = REGISTRY.get(source)
+    if adapter is not None:
+        return adapter.name, adapter.base_url
+    config = crawl_choices().get(source)
+    base_url = config.seeds[0] if config and config.seeds else ""
+    return source, base_url
+
+
 def cmd_process(args: argparse.Namespace) -> int:
-    adapter = REGISTRY[args.source]
+    source_name, base_url = _source_identity(args.source)
     bucket = LocalBucket(args.bucket_path)
     run_id = args.run_id
     if run_id is None:
-        # Latest loadable snapshot: skip fetches that are still running or crashed.
-        loadable = [
-            s.manifest.run_id
-            for s in bucket.list_snapshots(args.source)
-            if s.manifest.status in LOADABLE_STATUSES
-        ]
-        if not loadable:
-            print(f"no complete snapshots found for source '{args.source}' in {args.bucket_path}")
+        run_id = latest_loadable_run_id(bucket, source_name)
+        if run_id is None:
+            print(f"no complete snapshots found for source '{source_name}' in {args.bucket_path}")
             return 1
-        run_id = loadable[-1]
         print(f"using latest run: {run_id}")
     engine = get_engine(args.database_url)
     session_factory = init_db(engine)
     with session_factory() as session:
-        records = iter_from_bucket(args.source, run_id, bucket)
-        run = ingest_documents(session, adapter.name, adapter.base_url, records)
+        records = iter_from_bucket(source_name, run_id, bucket)
+        run = ingest_documents(session, source_name, base_url, records)
     return 0 if run.status == "completed" else 1

@@ -57,6 +57,12 @@
            placeholder="unlimited" style="width: 6rem;">
     <span class="sc-muted">cap on URLs scraped per crawl</span></label>
 
+  <label>excluded selector
+    <input type="text" name="excluded_selector" value="{{ values.excluded_selector }}"
+           placeholder="#some-overlay, .newsletter-modal">
+    <span class="sc-muted">extra CSS selectors to drop before the page is turned into markdown —
+      the common cookie-consent dialogs are already excluded on every crawl</span></label>
+
   <label>request delay
     <input type="number" name="request_delay_s" value="{{ values.request_delay_s }}"
            min="0" step="0.1" style="width: 6rem;"> seconds between requests</label>

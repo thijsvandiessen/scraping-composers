@@ -9,7 +9,13 @@ import composer_crawler.crawler as crawler_mod
 import pytest
 from composer_bronze.bucket import LocalBucket
 from composer_crawler import CrawlConfig, Crawler, iter_crawl_records
-from composer_crawler.testing import FakeResult, FakeWebCrawler, stub_discover, web_crawler_factory
+from composer_crawler.testing import (
+    FakeMarkdown,
+    FakeResult,
+    FakeWebCrawler,
+    stub_discover,
+    web_crawler_factory,
+)
 
 
 def _config() -> CrawlConfig:
@@ -20,7 +26,12 @@ def test_crawl_to_bucket_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     urls = ["https://example.org/", "https://example.org/a"]
     monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(urls))
     results = {
-        url: FakeResult(url, html=f"<p>{url}</p>", response_headers={"Content-Type": "text/html"})
+        url: FakeResult(
+            url,
+            html=f"<p>{url}</p>",
+            markdown=FakeMarkdown(fit_markdown=f"page {url}"),
+            response_headers={"Content-Type": "text/html"},
+        )
         for url in urls
     }
     fake = FakeWebCrawler(results)
@@ -38,7 +49,8 @@ def test_crawl_to_bucket_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     records = list(iter_crawl_records("roundtrip", run_id, bucket))
     assert [r.url for r in records] == urls  # stored in discovery (relevance) order
-    assert records[0].body == "<p>https://example.org/</p>"
+    assert records[0].markdown == "page https://example.org/"  # markdown, not the source HTML
+    assert "body" not in raw[0]
 
 
 def test_failed_crawl_writes_failed_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

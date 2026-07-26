@@ -15,7 +15,14 @@ import pytest
 from composer_admin import admin_app
 from composer_bronze.bucket import LocalBucket, SnapshotManifest
 from composer_crawler import CrawlConfig, Crawler
-from composer_crawler.testing import FakeResult, FakeWebCrawler, stub_discover, web_crawler_factory
+from composer_crawler.testing import (
+    FakeMarkdown,
+    FakeResult,
+    FakeWebCrawler,
+    stub_discover,
+    web_crawler_factory,
+)
+from composer_extract import ExtractedConcert, ExtractedWork, PageExtraction
 from fastapi.testclient import TestClient
 
 CODE_CONFIG = CrawlConfig(name="code-crawl", seeds=("https://code.example/",))
@@ -164,6 +171,101 @@ def test_failed_crawl_records_failed_manifest(
     snapshot_id = client.post("/admin/v1/crawls/archive/fetch").json()["snapshot_id"]
     manifest = json.loads((bucket_path / "archive" / snapshot_id / "manifest.json").read_text())
     assert manifest["status"] == "failed"
+
+
+def _seed_crawl_snapshot(client: TestClient, monkeypatch: pytest.MonkeyPatch, markdown: str) -> str:
+    """Create the 'archive' crawl and run it once, so a snapshot exists to extract."""
+    url = "https://example.org/"
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover([url]))
+    fake = FakeWebCrawler(
+        {url: FakeResult(url, html="<p>x</p>", markdown=FakeMarkdown(fit_markdown=markdown))}
+    )
+    monkeypatch.setattr(
+        crawl_routes,
+        "_crawler",
+        lambda config: Crawler(config, web_crawler_factory=web_crawler_factory(fake)),
+    )
+    client.put("/admin/v1/crawls/archive", json={"seeds": [url], "respect_robots": False})
+    return str(client.post("/admin/v1/crawls/archive/fetch").json()["snapshot_id"])
+
+
+class FakeExtractor:
+    """Stands in for the Ollama model: one concert, regardless of the markdown."""
+
+    def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
+        return PageExtraction(
+            concerts=[
+                ExtractedConcert(
+                    date="2026-03-01",
+                    venue="Barbican",
+                    conductors=["Tarmo Peltokoski"],
+                    works=[ExtractedWork(title="Piano Concerto No 1", composer="Rautavaara")],
+                )
+            ]
+        )
+
+
+def test_extract_writes_documents_from_the_latest_crawl(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, bucket_path: Path
+) -> None:
+    _seed_crawl_snapshot(client, monkeypatch, "# Rautavaara and Wagner")
+    monkeypatch.setattr(crawl_routes, "_extractor", FakeExtractor)
+
+    r = client.post("/admin/v1/crawls/archive/extract")
+    assert r.status_code == 202
+    snapshot_id = r.json()["snapshot_id"]
+
+    ndjson = bucket_path / "archive" / snapshot_id / "records.ndjson"
+    docs = [json.loads(line) for line in ndjson.read_text().strip().splitlines()]
+    assert {d["name"] for d in docs if d["_type"] == "entity"} == {"Tarmo Peltokoski", "Rautavaara"}
+    (mention,) = [d for d in docs if d["_type"] == "work_mention"]
+    assert mention["title"] == "Piano Concerto No 1"
+    assert mention["raw"]["_source"] == "llm"  # derive_concerts reads it by this marker
+
+    manifest = json.loads((ndjson.parent / "manifest.json").read_text())
+    assert manifest["status"] == "completed"
+
+
+def test_extract_without_a_crawl_snapshot_conflicts(client: TestClient) -> None:
+    client.put("/admin/v1/crawls/archive", json=PAYLOAD)
+    r = client.post("/admin/v1/crawls/archive/extract")
+    assert r.status_code == 409
+    assert "no completed snapshot" in r.json()["detail"]
+
+
+def test_extract_unknown_crawl_404(client: TestClient) -> None:
+    assert client.post("/admin/v1/crawls/nope/extract").status_code == 404
+
+
+def test_extract_conflicts_while_a_run_is_active(client: TestClient, bucket_path: Path) -> None:
+    client.put("/admin/v1/crawls/archive", json=PAYLOAD)
+    LocalBucket(bucket_path).write_manifest(SnapshotManifest.start("archive", "2026-01-01T00:00:00-abc"))
+    assert client.post("/admin/v1/crawls/archive/extract").status_code == 409
+
+
+def test_failed_extract_records_failed_manifest(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, bucket_path: Path
+) -> None:
+    _seed_crawl_snapshot(client, monkeypatch, "# page")
+
+    class Boom:
+        def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
+            raise RuntimeError("ollama is not running")
+
+    monkeypatch.setattr(crawl_routes, "_extractor", Boom)
+
+    snapshot_id = client.post("/admin/v1/crawls/archive/extract").json()["snapshot_id"]
+    manifest = json.loads((bucket_path / "archive" / snapshot_id / "manifest.json").read_text())
+    assert manifest["status"] == "failed"
+    assert "ollama is not running" in manifest["error"]
+
+
+def test_excluded_selector_round_trips(client: TestClient) -> None:
+    created = client.put(
+        "/admin/v1/crawls/archive", json={**PAYLOAD, "excluded_selector": "#banner, .modal"}
+    ).json()
+    assert created["excluded_selector"] == "#banner, .modal"
+    assert client.get("/admin/v1/crawls/archive").json()["excluded_selector"] == "#banner, .modal"
 
 
 def test_admin_key_guard(client: TestClient) -> None:

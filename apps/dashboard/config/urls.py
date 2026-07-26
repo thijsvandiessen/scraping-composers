@@ -26,6 +26,16 @@ urlpatterns = [
         admin.site.admin_view(crawl_views.start_crawl),
         name="start_crawl",
     ),
+    path(
+        "admin/crawls/<str:name>/extract",
+        admin.site.admin_view(crawl_views.start_extract),
+        name="start_extract",
+    ),
+    path(
+        "admin/crawls/<str:name>/load",
+        admin.site.admin_view(crawl_views.start_load),
+        name="load_crawl",
+    ),
     path("admin/load/", admin.site.admin_view(views.load_index), name="load_index"),
     path("admin/promote/", admin.site.admin_view(views.promote_page), name="promote"),
     path("admin/promote/start", admin.site.admin_view(views.start_promote), name="start_promote"),

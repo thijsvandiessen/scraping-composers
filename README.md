@@ -26,6 +26,16 @@ uv run composer-ingest process imslp
 # quick test run
 uv run composer-ingest fetch imslp --max-pages 1
 
+# extract concerts + performers from crawled pages with a local Ollama model:
+# crawl a site, run the model over each page's markdown (stored at crawl time),
+# then process the extracted docs like any other snapshot. Needs Ollama running
+# (e.g. `ollama pull qwen2.5`); set OLLAMA_MODEL/OLLAMA_BASE_URL to override.
+# The same crawl → extract steps are buttons on the dashboard's Crawls page.
+uv run composer-ingest crawl lso
+uv run composer-ingest extract lso                       # → work-mention + person docs; prints run_id
+uv run composer-ingest process lso --run-id <run_id>     # load the extract snapshot
+uv run composer-ingest derive-concerts                   # group the mentions into concerts
+
 # inspect the dataset and the collection log
 uv run composer-ingest stats
 uv run composer-ingest runs

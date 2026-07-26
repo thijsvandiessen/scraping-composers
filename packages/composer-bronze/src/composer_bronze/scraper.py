@@ -23,6 +23,40 @@ def new_snapshot_id() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S") + "-" + uuid.uuid4().hex[:8]
 
 
+def write_documents(
+    bucket: Bucket,
+    source_name: str,
+    docs: Iterator[EntityDocument | WorkMentionDocument],
+    run_id: str | None = None,
+) -> str:
+    """Serialize *docs* into a bucket snapshot with a manifest, returning the run_id.
+
+    Shared by :meth:`Scraper.fetch_to_bucket` and callers that already hold built
+    documents (e.g. the LLM ``extract`` step, which writes documents derived from
+    crawled pages). The manifest is ``running`` while the stream writes, then
+    finalized to ``completed`` with the count, or ``failed`` (re-raising).
+    """
+    if run_id is None:
+        run_id = new_snapshot_id()
+    manifest = SnapshotManifest.start(source_name, run_id)
+    bucket.write_manifest(manifest)
+    count = 0
+
+    def counted() -> Iterator[dict[str, Any]]:
+        nonlocal count
+        for doc in docs:
+            yield _serialize(doc)
+            count += 1
+
+    try:
+        bucket.write_records(source_name, run_id, counted())
+    except Exception as exc:
+        bucket.write_manifest(manifest.failed(f"{type(exc).__name__}: {exc}", record_count=count))
+        raise
+    bucket.write_manifest(manifest.completed(record_count=count))
+    return run_id
+
+
 def _serialize(doc: EntityDocument | WorkMentionDocument) -> dict[str, Any]:
     # asdict recursively converts nested dataclasses (including SourceClaim) to dicts
     d = dataclasses.asdict(doc)
@@ -63,25 +97,7 @@ class Scraper:
         ``process`` CLI command; pass ``run_id`` explicitly to know it up
         front (e.g. to report it before a background fetch finishes).
         """
-        if run_id is None:
-            run_id = new_snapshot_id()
-        manifest = SnapshotManifest.start(self.adapter.name, run_id)
-        bucket.write_manifest(manifest)
-        count = 0
-
-        def counted() -> Iterator[dict[str, Any]]:
-            nonlocal count
-            for doc in self.adapter.fetch(max_pages):
-                yield _serialize(doc)
-                count += 1
-
-        try:
-            bucket.write_records(self.adapter.name, run_id, counted())
-        except Exception as exc:
-            bucket.write_manifest(manifest.failed(f"{type(exc).__name__}: {exc}", record_count=count))
-            raise
-        bucket.write_manifest(manifest.completed(record_count=count))
-        return run_id
+        return write_documents(bucket, self.adapter.name, self.adapter.fetch(max_pages), run_id=run_id)
 
 
 def iter_from_bucket(

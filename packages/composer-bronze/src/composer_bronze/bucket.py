@@ -33,6 +33,12 @@ MANIFEST_FILENAME = "manifest.json"
 # snapshot dirs that predate the manifest.
 LOADABLE_STATUSES = ("completed", "unknown")
 
+# Record ``_type`` values that make a snapshot loadable into the warehouse.
+# A crawl source's dir mixes these "documents" snapshots (written by scrape or
+# the LLM ``extract`` step) with raw "pages" snapshots (``_type: "crawl"``);
+# only the former can be ingested — see ``Snapshot.kind``.
+DOCUMENT_RECORD_TYPES = frozenset({"entity", "work_mention"})
+
 
 def _validated_segment(value: str, field: str) -> str:
     """Require *value* to be a single path segment, guarding against traversal (CWE-22).
@@ -96,12 +102,14 @@ class Snapshot:
 
     manifest: SnapshotManifest
     size_bytes: int
+    kind: str  # "documents" (loadable) | "pages" (raw crawl, extract first)
 
 
 class Bucket(Protocol):
     def write_records(self, source: str, run_id: str, records: Iterable[dict[str, Any]]) -> None: ...
     def read_records(self, source: str, run_id: str) -> Iterator[dict[str, Any]]: ...
     def list_runs(self, source: str) -> list[str]: ...
+    def list_sources(self) -> list[str]: ...
     def write_manifest(self, manifest: SnapshotManifest) -> None: ...
     def read_manifest(self, source: str, run_id: str) -> SnapshotManifest | None: ...
     def list_snapshots(self, source: str) -> list[Snapshot]: ...
@@ -152,6 +160,16 @@ class LocalBucket:
             return []
         return sorted(p.name for p in source_dir_path.iterdir() if p.is_dir())
 
+    def list_sources(self) -> list[str]:
+        """Every source with data in the bucket (each a top-level dir), sorted.
+
+        Enumerating the bucket itself — rather than a registry — surfaces
+        crawl-config sources and even sources whose config was later deleted.
+        """
+        if not self.root.is_dir():
+            return []
+        return sorted(p.name for p in self.root.iterdir() if p.is_dir())
+
     def write_manifest(self, manifest: SnapshotManifest) -> None:
         run_dir = self._run_dir(manifest.source, manifest.run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -177,11 +195,55 @@ class LocalBucket:
             finished_at=mtime.isoformat() if mtime else None,
         )
 
+    def _snapshot_kind(self, source: str, run_id: str) -> str:
+        """Classify a snapshot by peeking its first record's ``_type``.
+
+        Cheap — reads a single line. An empty or unreadable snapshot (and any
+        raw-page snapshot) is "pages": not loadable, so nothing is lost by the
+        default.
+        """
+        try:
+            first = next(self.read_records(source, run_id), None)
+        except (OSError, ValueError):
+            return "pages"
+        if first is not None and first.get("_type") in DOCUMENT_RECORD_TYPES:
+            return "documents"
+        return "pages"
+
     def list_snapshots(self, source: str) -> list[Snapshot]:
         snapshots = []
         for run_id in self.list_runs(source):
             manifest = self.read_manifest(source, run_id) or self._fallback_manifest(source, run_id)
             ndjson = self._ndjson_path(source, run_id)
             size = ndjson.stat().st_size if ndjson.exists() else 0
-            snapshots.append(Snapshot(manifest=manifest, size_bytes=size))
+            kind = self._snapshot_kind(source, run_id)
+            snapshots.append(Snapshot(manifest=manifest, size_bytes=size, kind=kind))
         return snapshots
+
+
+def latest_loadable_run_id(bucket: Bucket, source: str) -> str | None:
+    """The most recent snapshot of *source* worth reading, or None if there is none.
+
+    Skips fetches that are still running or crashed, so callers defaulting to "the
+    latest snapshot" never pick up a half-written one.
+    """
+    loadable = [
+        snapshot.manifest.run_id
+        for snapshot in bucket.list_snapshots(source)
+        if snapshot.manifest.status in LOADABLE_STATUSES
+    ]
+    return loadable[-1] if loadable else None
+
+
+def latest_document_run_id(bucket: Bucket, source: str) -> str | None:
+    """The most recent loadable *documents* snapshot of *source*, or None.
+
+    Like :func:`latest_loadable_run_id` but skips raw-page crawl snapshots, so a
+    crawl re-run after an extract never shadows the extracted documents.
+    """
+    documents = [
+        snapshot.manifest.run_id
+        for snapshot in bucket.list_snapshots(source)
+        if snapshot.manifest.status in LOADABLE_STATUSES and snapshot.kind == "documents"
+    ]
+    return documents[-1] if documents else None

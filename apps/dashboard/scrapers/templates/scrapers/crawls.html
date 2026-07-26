@@ -52,6 +52,14 @@
           {% csrf_token %}
           <button type="submit" class="sc-btn">Crawl</button>
         </form>
+        <form method="post" action="{% url 'start_extract' crawl.name %}">
+          {% csrf_token %}
+          <button type="submit" class="sc-btn" title="Run the local LLM over the latest crawl snapshot">Extract</button>
+        </form>
+        <form method="post" action="{% url 'load_crawl' crawl.name %}">
+          {% csrf_token %}
+          <button type="submit" class="sc-btn" title="Load the latest extracted snapshot into the database">Load</button>
+        </form>
         {% if crawl.editable %}
         <a href="{% url 'crawl_edit' crawl.name %}" class="sc-btn">Edit</a>
         <form method="post" action="{% url 'crawl_delete' crawl.name %}"

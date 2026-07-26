@@ -15,6 +15,32 @@ from typing import Any
 
 
 @dataclass
+class FakeMarkdown:
+    """Stand-in for crawl4ai's ``MarkdownGenerationResult`` (the fields the mapper reads)."""
+
+    raw_markdown: str = ""
+    fit_markdown: str | None = None
+
+
+class FakeStringCompatibleMarkdown(str):
+    """Stand-in for what ``CrawlResult.markdown`` actually returns.
+
+    crawl4ai wraps the generation result in a ``str`` subclass whose string value
+    is the *unpruned* ``raw_markdown``, exposing ``fit_markdown`` as an attribute.
+    The mapper must not mistake it for a plain string.
+    """
+
+    def __new__(cls, markdown: FakeMarkdown) -> FakeStringCompatibleMarkdown:
+        return super().__new__(cls, markdown.raw_markdown)
+
+    def __init__(self, markdown: FakeMarkdown) -> None:
+        self._markdown = markdown
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._markdown, name)
+
+
+@dataclass
 class FakeResult:
     """Stand-in for a crawl4ai ``CrawlResult`` (only the fields the mapper reads)."""
 
@@ -25,6 +51,7 @@ class FakeResult:
     response_headers: dict[str, str] | None = None
     redirected_url: str | None = None
     metadata: dict[str, Any] | None = None
+    markdown: FakeMarkdown | str | None = None
     error_message: str | None = None
 
 

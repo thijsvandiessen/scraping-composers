@@ -4,6 +4,7 @@ from typing import Annotated
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH, LOADABLE_STATUSES, LocalBucket, Snapshot
 from composer_bronze.scraper import Scraper, iter_from_bucket, new_snapshot_id
+from composer_crawler import all_crawl_configs
 from composer_scrapers import REGISTRY, SourceAdapter, is_due
 from composer_warehouse.ingestion import create_run, execute_run
 from composer_warehouse.models import IngestRun, utcnow
@@ -28,12 +29,24 @@ def _snapshot_out(snapshot: Snapshot) -> SnapshotOut:
         source=m.source,
         id=m.run_id,
         status=m.status,
+        kind=snapshot.kind,
         started_at=m.started_at,
         finished_at=m.finished_at,
         record_count=m.record_count,
         size_bytes=snapshot.size_bytes,
         error=m.error,
     )
+
+
+def _source_base_url(source: str) -> str:
+    """Base URL for a bucket source: a registered scraper, or a crawl config's
+    first seed. Mirrors the CLI's ``_source_identity`` so crawl-config sources
+    (whose LLM ``extract`` docs live under their name) can open an IngestRun."""
+    adapter = REGISTRY.get(source)
+    if adapter is not None:
+        return adapter.base_url
+    config = all_crawl_configs().get(source)
+    return config.seeds[0] if config and config.seeds else ""
 
 
 def _last_snapshot(bucket: LocalBucket, source: str) -> Snapshot | None:
@@ -56,12 +69,15 @@ def _fetch_in_background(source_name: str, snapshot_id: str, max_pages: int | No
 
 
 def _process_in_background(source_name: str, snapshot_id: str, run_id: int) -> None:
-    """Load a bucket snapshot into the DB for an already-created run."""
-    adapter = REGISTRY[source_name]
+    """Load a bucket snapshot into the DB for an already-created run.
+
+    ``source_name`` may be a scraper or a crawl config — the bucket records are
+    the same ``entity``/``work_mention`` documents either way.
+    """
     with session_scope() as session:
         run = session.get(IngestRun, run_id)
         if run is not None:
-            execute_run(session, run, iter_from_bucket(adapter.name, snapshot_id, _bucket()))
+            execute_run(session, run, iter_from_bucket(source_name, snapshot_id, _bucket()))
 
 
 def _start_fetch(background: BackgroundTasks, adapter: SourceAdapter, max_pages: int | None) -> FetchStarted:
@@ -131,9 +147,13 @@ def fetch_scraper(
 
 @admin.get("/snapshots", response_model=list[SnapshotOut])
 def list_snapshots() -> list[SnapshotOut]:
-    """Every raw snapshot in the bucket, newest first."""
+    """Every snapshot in the bucket, newest first.
+
+    Enumerates the bucket's own sources (not just ``REGISTRY``), so crawl-config
+    sources and their LLM-extracted ``documents`` snapshots show up too.
+    """
     bucket = _bucket()
-    snapshots = [_snapshot_out(s) for name in REGISTRY for s in bucket.list_snapshots(name)]
+    snapshots = [_snapshot_out(s) for name in bucket.list_sources() for s in bucket.list_snapshots(name)]
     return sorted(snapshots, key=lambda s: s.id, reverse=True)
 
 
@@ -143,10 +163,11 @@ def list_snapshots() -> list[SnapshotOut]:
     response_model=RunStarted,
 )
 def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: BackgroundTasks) -> RunStarted:
-    """Load a raw snapshot from the bucket into the database (background)."""
-    adapter = REGISTRY.get(source)
-    if adapter is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown scraper {source!r}")
+    """Load a snapshot's documents from the bucket into the database (background).
+
+    Works for scraper and crawl-config sources alike; the latter's loadable
+    snapshots are the ``documents`` the LLM ``extract`` step wrote.
+    """
     bucket = _bucket()
     snapshot = next((s for s in bucket.list_snapshots(source) if s.manifest.run_id == snapshot_id), None)
     if snapshot is None:
@@ -156,9 +177,14 @@ def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: B
             status.HTTP_409_CONFLICT,
             f"snapshot {source}/{snapshot_id} is not loadable (status: {snapshot.manifest.status})",
         )
+    if snapshot.kind != "documents":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"snapshot {source}/{snapshot_id} holds crawled pages, not documents; run extract first",
+        )
     if has_running(db, source):
         raise HTTPException(status.HTTP_409_CONFLICT, f"a run for {source!r} is already in progress")
-    run = create_run(db, adapter)
+    run = create_run(db, source, _source_base_url(source))
     background.add_task(_process_in_background, source, snapshot_id, run.id)
     return RunStarted(run_id=run.id, source=source, status=run.status)
 

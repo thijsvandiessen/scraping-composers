@@ -1,16 +1,16 @@
-"""Crawls dashboard tests: the client methods against a mock transport, and
-the views against a stubbed client — no network access."""
+"""Crawls dashboard views against a stubbed API client — no network access.
+
+The ``AdminAPI`` client methods these views call are covered in test_crawls_api.py.
+"""
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-import httpx
 import pytest
 import scrapers.crawl_views as crawl_views
 from django.test import Client
-from scrapers.api import AdminAPI, AdminAPIError
+from scrapers.api import AdminAPIError
 
 SNAPSHOT_PAYLOAD = {
     "source": "archive",
@@ -34,6 +34,7 @@ CRAWL_PAYLOAD = {
     "follow_links": True,
     "max_depth": 2,
     "max_pages": None,
+    "excluded_selector": None,
     "request_delay_s": 0.5,
     "respect_robots": True,
     "editable": True,
@@ -48,61 +49,14 @@ CODE_CRAWL_PAYLOAD = {
 }
 
 
-# ---------------------------------------------------------------------------
-# AdminAPI client
-# ---------------------------------------------------------------------------
-
-
-def _api(handler: Any) -> AdminAPI:
-    return AdminAPI(base_url="http://testserver", transport=httpx.MockTransport(handler))
-
-
-def test_client_crawl_methods_hit_expected_endpoints() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        if (request.method, request.url.path) == ("GET", "/admin/v1/crawls"):
-            return httpx.Response(200, json=[CRAWL_PAYLOAD])
-        if (request.method, request.url.path) == ("GET", "/admin/v1/crawls/archive"):
-            return httpx.Response(200, json=CRAWL_PAYLOAD)
-        if (request.method, request.url.path) == ("PUT", "/admin/v1/crawls/archive"):
-            assert json.loads(request.content)["seeds"] == ["https://example.org/archive"]
-            return httpx.Response(200, json=CRAWL_PAYLOAD)
-        assert (request.method, request.url.path) == ("POST", "/admin/v1/crawls/archive/fetch")
-        return httpx.Response(202, json={"source": "archive", "snapshot_id": "snap-1", "status": "running"})
-
-    api = _api(handler)
-    assert api.list_crawls() == [CRAWL_PAYLOAD]
-    assert api.get_crawl("archive") == CRAWL_PAYLOAD
-    assert api.put_crawl("archive", {"seeds": ["https://example.org/archive"]}) == CRAWL_PAYLOAD
-    assert api.start_crawl("archive")["snapshot_id"] == "snap-1"
-
-
-def test_client_delete_crawl_handles_204() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert (request.method, request.url.path) == ("DELETE", "/admin/v1/crawls/archive")
-        return httpx.Response(204)
-
-    assert _api(handler).delete_crawl("archive") is None
-
-
-def test_client_delete_crawl_surfaces_conflict() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(409, json={"detail": "crawl 'x' is code-registered"})
-
-    with pytest.raises(AdminAPIError, match="code-registered"):
-        _api(handler).delete_crawl("x")
-
-
-# ---------------------------------------------------------------------------
-# Views (stubbed client)
-# ---------------------------------------------------------------------------
-
-
 class StubAPI:
     def __init__(self, crawls: list[dict[str, Any]] | None = None, error: str | None = None) -> None:
         self._crawls = crawls or []
         self._error = error
         self.saved: list[tuple[str, dict[str, Any]]] = []
         self.deleted: list[str] = []
+        self.extracted: list[str] = []
+        self.loaded: list[str] = []
 
     def _maybe_fail(self) -> None:
         if self._error:
@@ -131,6 +85,16 @@ class StubAPI:
     def start_crawl(self, name: str) -> dict[str, Any]:
         self._maybe_fail()
         return {"source": name, "snapshot_id": "snap-1", "status": "running"}
+
+    def start_extract(self, name: str) -> dict[str, Any]:
+        self._maybe_fail()
+        self.extracted.append(name)
+        return {"source": name, "snapshot_id": "snap-2", "status": "running"}
+
+    def load_crawl(self, name: str) -> dict[str, Any]:
+        self._maybe_fail()
+        self.loaded.append(name)
+        return {"source": name, "run_id": 7, "status": "running"}
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, stub: StubAPI) -> None:
@@ -198,6 +162,7 @@ def test_new_crawl_form_posts_expected_payload(monkeypatch: pytest.MonkeyPatch, 
             "follow_links": "on",
             "max_depth": "1",
             "max_pages": "",
+            "excluded_selector": "#cookie-banner",
             "request_delay_s": "1.5",
         },
         follow=True,
@@ -216,9 +181,52 @@ def test_new_crawl_form_posts_expected_payload(monkeypatch: pytest.MonkeyPatch, 
         "follow_links": True,
         "max_depth": 1,
         "max_pages": None,
+        "excluded_selector": "#cookie-banner",
         "request_delay_s": 1.5,
         "respect_robots": False,  # unchecked checkbox is absent from the POST
     }
+
+
+def test_blank_excluded_selector_posts_null(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    """An empty box means "no extra selectors", not an empty-string selector."""
+    stub = StubAPI()
+    _install(monkeypatch, stub)
+    staff_client.post(
+        "/admin/crawls/new/",
+        {"name": "archive", "seeds": "https://example.org/a", "excluded_selector": "  "},
+    )
+    assert stub.saved[0][1]["excluded_selector"] is None
+
+
+def test_extract_button_starts_a_run(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    stub = StubAPI(crawls=[CRAWL_PAYLOAD])
+    _install(monkeypatch, stub)
+    response = staff_client.post("/admin/crawls/archive/extract", follow=True)
+    assert response.redirect_chain[0] == ("/admin/crawls/", 302)
+    assert stub.extracted == ["archive"]
+    assert "extracting archive → snapshot snap-2" in response.content.decode()
+
+
+def test_extract_surfaces_api_error(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    _install(monkeypatch, StubAPI(error="API returned 409: crawl 'archive' has no completed snapshot"))
+    response = staff_client.post("/admin/crawls/archive/extract", follow=True)
+    assert "no completed snapshot" in response.content.decode()
+
+
+def test_extract_rejects_get(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    _install(monkeypatch, StubAPI())
+    assert staff_client.get("/admin/crawls/archive/extract").status_code == 405
+
+
+def test_load_button_loads_latest_extract(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    # start_load mirrors start_extract; its AdminAPIError path is covered by the extract twin.
+    stub = StubAPI(crawls=[CRAWL_PAYLOAD])
+    _install(monkeypatch, stub)
+    response = staff_client.post("/admin/crawls/archive/load", follow=True)
+    assert response.redirect_chain[0] == ("/admin/crawls/", 302)
+    assert stub.loaded == ["archive"]
+    assert "loading archive into the database (run 7)" in response.content.decode()
+    assert staff_client.get("/admin/crawls/archive/load").status_code == 405  # GET is not allowed
 
 
 def test_form_keeps_input_and_shows_error_on_bad_number(
