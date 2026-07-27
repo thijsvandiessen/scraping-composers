@@ -16,6 +16,7 @@ that quietly extracts nothing is worse than one that fails loudly.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import TypeVar
@@ -63,9 +64,16 @@ def _brief(exc: Exception) -> str:
     return text if len(text) <= _MAX_ERROR_CHARS else text[:_MAX_ERROR_CHARS] + "…"
 
 
-def _log_unusable(url: str, exc: Exception, action: str) -> None:
+def _log_unusable(url: str, exc: Exception, action: str, chars: int) -> None:
+    """Report a chunk the model could not answer usably. The chunk size is part of
+    the line because an oversized chunk is the usual reason."""
     log.warning(
-        "extract %s: unusable model output (%s: %s); %s", url, type(exc).__name__, _brief(exc), action
+        "extract %s: unusable model output for %d chars (%s: %s); %s",
+        url,
+        chars,
+        type(exc).__name__,
+        _brief(exc),
+        action,
     )
 
 
@@ -89,13 +97,14 @@ def _extract_halves(
         stats.failed += 1
         return []
     stats.retried += 1
+    log.debug("extract %s: retrying on %d half/halves", url, len(pieces))
     results: list[_M] = []
     for piece in pieces:
         try:
             results.append(call(piece, metadata))
         except ValueError as exc:
             stats.failed += 1
-            _log_unusable(url, exc, "skipping")
+            _log_unusable(url, exc, "skipping", len(piece))
     return results
 
 
@@ -112,8 +121,20 @@ def _extract_one(
         return [call(chunk, metadata)]
     except ValueError as exc:
         pieces = _halves(chunk)
-        _log_unusable(url, exc, "retrying on halves" if pieces else "skipping")
+        _log_unusable(url, exc, "retrying on halves" if pieces else "skipping", len(chunk))
         return _extract_halves(pieces, call, metadata, url=url, stats=stats)
+
+
+def _note_streak(stats: ExtractStats, limit: int, url: str) -> None:
+    """Say so while a run is degrading, not only once it has already given up: a
+    streak halfway to the limit is the moment to go and look at the model."""
+    if limit > 0 and stats.consecutive_failures == max(limit // 2, 1):
+        log.warning(
+            "extract %s: %d chunk(s) in a row unusable; the run aborts at %d",
+            url,
+            stats.consecutive_failures,
+            limit,
+        )
 
 
 def extract_chunks(
@@ -130,10 +151,20 @@ def extract_chunks(
     chunks in a row have yielded nothing usable (0 disables the check).
     """
     limit = settings.extract_max_consecutive_failures
-    for chunk in chunks:
+    for index, chunk in enumerate(chunks, start=1):
         stats.chunks += 1
+        log.debug("extract %s: chunk %d (%d chars)", url, index, len(chunk))
+        started = time.monotonic()
         results = _extract_one(chunk, call, metadata, url=url, stats=stats)
+        log.debug(
+            "extract %s: chunk %d yielded %d extraction(s) in %.1fs",
+            url,
+            index,
+            len(results),
+            time.monotonic() - started,
+        )
         stats.consecutive_failures = 0 if results else stats.consecutive_failures + 1
+        _note_streak(stats, limit, url)
         if limit > 0 and stats.consecutive_failures >= limit:
             raise ExtractAborted(
                 f"{stats.consecutive_failures} chunks in a row produced unusable output "

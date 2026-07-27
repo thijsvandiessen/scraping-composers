@@ -138,3 +138,30 @@ def test_error_text_in_the_log_is_bounded(caplog: pytest.LogCaptureFixture) -> N
     message = caplog.records[0].getMessage()
     assert URL in message
     assert len(message) < 500
+
+
+def test_every_chunk_is_timed_at_debug(caplog: pytest.LogCaptureFixture) -> None:
+    """One page can be many model calls; per-chunk timing is what shows where the
+    hours in a long extract are actually going."""
+    with caplog.at_level("DEBUG", logger="composer_extract.resilience"):
+        _chunks(["# A\nbody", "# B\nbody"], FailingExtractor(fails_over=1000), ExtractStats())
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("chunk 1" in m and "chars" in m for m in messages)
+    assert any("chunk 2 yielded 1 extraction(s)" in m for m in messages)
+
+
+def test_a_degrading_run_warns_before_it_gives_up(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The abort is the last word, not the first warning: a streak halfway to the
+    limit is the point at which it is still worth going to look at the model."""
+    from composer_config import settings
+
+    monkeypatch.setattr(settings, "extract_max_consecutive_failures", 4)
+
+    with caplog.at_level("WARNING", logger="composer_extract.resilience"):
+        _chunks(["a", "b"], FailingExtractor(fails_over=0), ExtractStats())
+
+    warnings = [r.getMessage() for r in caplog.records if "in a row" in r.getMessage()]
+    assert warnings == [f"extract {URL}: 2 chunk(s) in a row unusable; the run aborts at 4"]

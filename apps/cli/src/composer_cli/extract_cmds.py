@@ -34,6 +34,12 @@ def cmd_extract(args: argparse.Namespace) -> int:
         print(f"no crawl snapshots found for '{config.name}' in {args.bucket_path}")
         return 1
 
+    log.info(
+        "extract %s: reading crawl snapshot %s%s",
+        config.name,
+        crawl_run_id,
+        f" (first {args.max_pages} page(s))" if args.max_pages is not None else "",
+    )
     records = iter_crawl_records(config.name, crawl_run_id, bucket)
     if args.max_pages is not None:
         records = itertools.islice(records, args.max_pages)
@@ -45,7 +51,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
     try:
         run_id = write_documents(bucket, config.name, docs)
     except Exception as exc:
-        log.error("extract failed: %s: %s", type(exc).__name__, exc)
+        log.error("extract failed after %s: %s: %s", options.stats.summary(), type(exc).__name__, exc)
         return 1
 
     ndjson = Path(args.bucket_path) / config.name / run_id / "records.ndjson"

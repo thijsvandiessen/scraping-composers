@@ -7,6 +7,8 @@ from pathlib import Path
 from composer_bronze.bucket import LocalBucket
 from composer_crawler import CRAWL_REGISTRY, CrawlConfig, Crawler, all_crawl_configs
 
+log = logging.getLogger(__name__)
+
 
 def crawl_choices() -> dict[str, CrawlConfig]:
     """Code-registered plus stored crawl configs.
@@ -25,11 +27,12 @@ def cmd_crawl(args: argparse.Namespace) -> int:
     config = crawl_choices()[args.config]
     if args.query:
         config = dataclasses.replace(config, relevance_query=args.query)
+    log.debug("crawl %r: resolved config %r", config.name, config)
     bucket = LocalBucket(args.bucket_path)
     try:
         run_id = Crawler(config).crawl_to_bucket(bucket, max_pages=args.max_pages)
     except Exception as exc:
-        logging.getLogger(__name__).error("crawl failed: %s: %s", type(exc).__name__, exc)
+        log.error("crawl failed: %s: %s", type(exc).__name__, exc)
         return 1
     ndjson = Path(args.bucket_path) / config.name / run_id / "records.ndjson"
     print(f"crawled {args.config} → {ndjson}")

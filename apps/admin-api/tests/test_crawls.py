@@ -6,6 +6,7 @@ synchronously, so a started crawl has already finished when the POST returns.
 """
 
 import json
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -325,6 +326,28 @@ def test_extract_survives_a_page_the_model_mangles(
     manifest = json.loads((bucket_path / "archive" / snapshot_id / "manifest.json").read_text())
     assert manifest["status"] == "completed"
     assert manifest["record_count"] == 0
+
+
+def test_a_background_extract_reports_what_the_model_dropped(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The stats are the only account of what an unattended extract skipped; this
+    path used to compute them and throw them away."""
+    _seed_crawl_snapshot(client, monkeypatch, "# page")
+
+    class Truncated:
+        def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
+            return PageExtraction.model_validate_json('{"concerts": [{"date": "2026-03-01')
+
+    monkeypatch.setattr(crawl_routes, "_extractor", Truncated)
+
+    with caplog.at_level(logging.INFO, logger="composer_admin.crawl_routes"):
+        client.post("/admin/v1/crawls/archive/extract")
+
+    finished = [r.getMessage() for r in caplog.records if "extract finished" in r.getMessage()]
+    assert finished, "the stage must report its tally, not just its failures"
+    # The one chunk was retried on its halves, and both halves failed too.
+    assert "1 pages, 1 chunks, 1 retried, 2 failed" in finished[0]
 
 
 def test_excluded_selector_round_trips(client: TestClient) -> None:

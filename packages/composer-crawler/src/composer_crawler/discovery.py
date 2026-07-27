@@ -82,24 +82,45 @@ async def discover_urls(config: CrawlConfig) -> list[str]:
     """
     source = _source(config)
     if source is None:
+        log.debug("crawl %r: discovery disabled (no sitemap, no common crawl)", config.name)
         return []
     seeding = _seeding_config(config, source)
+    hosts = _hosts(config.seeds)
+    log.debug(
+        "crawl %r: seeding %d host(s) via %s (pattern=%r, query=%r, threshold=%s, max_urls=%s)",
+        config.name,
+        len(hosts),
+        source,
+        seeding.pattern,
+        config.relevance_query,
+        seeding.score_threshold,
+        seeding.max_urls,
+    )
     async with AsyncUrlSeeder() as seeder:
-        by_host = await seeder.many_urls(_hosts(config.seeds), seeding)
+        by_host = await seeder.many_urls(hosts, seeding)
 
     entries: list[dict[str, Any]] = [entry for results in by_host.values() for entry in results]
+    log.debug("crawl %r: seeder returned %d raw entrie(s)", config.name, len(entries))
     if config.relevance_query:
         # Per-host results are ranked; a global sort re-merges them across hosts.
         entries.sort(key=lambda entry: entry.get("relevance_score", 0.0), reverse=True)
 
     urls: list[str] = []
     seen: set[str] = set()
+    dropped = 0
     for entry in entries:
         url = entry.get("url")
         if not url or url in seen or not _matches(url, config.allow_patterns):
+            dropped += 1
             continue
         seen.add(url)
         urls.append(url)
+    log.debug(
+        "crawl %r: %d entrie(s) dropped as duplicates or off-pattern (%s)",
+        config.name,
+        dropped,
+        ", ".join(config.allow_patterns) or "no allow_patterns",
+    )
     if config.max_pages is not None:
         urls = urls[: config.max_pages]
     log.info("crawl %r: discovered %d URL(s)", config.name, len(urls))

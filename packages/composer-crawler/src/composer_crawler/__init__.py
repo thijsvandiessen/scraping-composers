@@ -11,6 +11,7 @@ parsing.
 from .config import CrawlConfig
 from .crawler import Crawler
 from .discovery import discover_urls
+from .progress import CrawlProgress, CrawlStats
 from .records import CrawlRecord, iter_crawl_records
 from .registry import CRAWL_REGISTRY
 from .store import CrawlConfigStore, all_crawl_configs, config_from_dict, config_to_dict
@@ -19,7 +20,9 @@ __all__ = [
     "CRAWL_REGISTRY",
     "CrawlConfig",
     "CrawlConfigStore",
+    "CrawlProgress",
     "CrawlRecord",
+    "CrawlStats",
     "Crawler",
     "all_crawl_configs",
     "config_from_dict",

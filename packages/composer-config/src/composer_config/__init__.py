@@ -12,6 +12,10 @@ class Settings(BaseSettings):
 
     admin_api_key: str | None = None
 
+    # Log level for the CLI and the admin API. The crawl and extract stages narrate
+    # themselves at INFO; DEBUG adds a line per page, per chunk and per model call.
+    log_level: str = "INFO"
+
     # Local LLM (Ollama) extraction of concerts/performers from crawled pages.
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5"

@@ -36,6 +36,14 @@ uv run composer-ingest extract lso                       # → work-mention + pe
 uv run composer-ingest process lso --run-id <run_id>     # load the extract snapshot
 uv run composer-ingest derive-concerts                   # group the mentions into concerts
 
+# crawl and extract are slow and unattended, so they narrate themselves on stderr:
+# discovery, a periodic page count, and what each run dropped. DEBUG adds a line
+# per crawled page, per markdown chunk and per model call (with its latency and
+# token counts). Global flags come before the subcommand.
+uv run composer-ingest -v crawl lso              # DEBUG, crawl4ai and ollama included
+uv run composer-ingest --log-level warning run lso
+# LOG_LEVEL in .env sets the default for the CLI and the admin API alike
+
 # inspect the dataset and the collection log
 uv run composer-ingest stats
 uv run composer-ingest runs

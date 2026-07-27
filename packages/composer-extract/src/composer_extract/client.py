@@ -8,6 +8,8 @@ running model.
 
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -19,22 +21,58 @@ from pydantic import BaseModel
 from .prompt import RECORDING_SYSTEM_PROMPT, SYSTEM_PROMPT, build_user_prompt
 from .schema import PageExtraction, PageRecordingExtraction
 
+log = logging.getLogger(__name__)
+
 ChatFn = Callable[..., Any]
 
 _M = TypeVar("_M", bound=BaseModel)
 
+#: ``done_reason`` when the model was cut off at ``num_predict`` rather than
+#: finishing its answer. Truncated JSON can only fail validation, so it is worth
+#: naming the cause here instead of leaving the generic "unusable output" warning
+#: that :mod:`.resilience` emits downstream as the only clue.
+_TRUNCATED = "length"
+
+
+def _field(response: Any, name: str) -> Any:
+    """One field of an ollama response, which is an object or a mapping."""
+    value = getattr(response, name, None)
+    if value is None and isinstance(response, dict):
+        value = response.get(name)
+    return value
+
 
 def _response_content(response: Any) -> str:
     """The assistant text from an ollama ChatResponse (object or mapping)."""
-    message = getattr(response, "message", None)
-    if message is None and isinstance(response, dict):
-        message = response.get("message")
+    message = _field(response, "message")
     content = getattr(message, "content", None)
     if content is None and isinstance(message, dict):
         content = message.get("content")
     if not content:
         raise ValueError("ollama response had no message content")
     return content
+
+
+def _log_response(model: str, response: Any, chars: int, seconds: float) -> None:
+    """Report what the model did with one chunk: how long, how many tokens, and
+    whether it actually finished."""
+    done_reason = _field(response, "done_reason")
+    log.debug(
+        "extract: %s answered in %.1fs (%d chars, prompt_eval=%s, eval=%s, done_reason=%s)",
+        model,
+        seconds,
+        chars,
+        _field(response, "prompt_eval_count"),
+        _field(response, "eval_count"),
+        done_reason,
+    )
+    if done_reason == _TRUNCATED:
+        log.warning(
+            "extract: %s hit the num_predict cap after %s token(s); the answer is truncated "
+            "and cannot validate",
+            model,
+            _field(response, "eval_count"),
+        )
 
 
 @dataclass(frozen=True)
@@ -77,8 +115,17 @@ class OllamaExtractor:
 
     @classmethod
     def from_settings(cls, *, model: str | None = None, chat: ChatFn | None = None) -> OllamaExtractor:
+        resolved = model or settings.ollama_model
+        log.info(
+            "extract: using ollama model %s at %s (num_ctx=%s, num_predict=%s, timeout=%.0fs)",
+            resolved,
+            settings.ollama_base_url,
+            settings.ollama_num_ctx,
+            settings.ollama_num_predict,
+            settings.ollama_timeout_s,
+        )
         return cls(
-            model=model or settings.ollama_model,
+            model=resolved,
             host=settings.ollama_base_url,
             tuning=OllamaTuning(num_ctx=settings.ollama_num_ctx, num_predict=settings.ollama_num_predict),
             timeout_s=settings.ollama_timeout_s,
@@ -86,6 +133,14 @@ class OllamaExtractor:
         )
 
     def _extract(self, markdown: str, metadata: dict[str, str], system_prompt: str, schema: type[_M]) -> _M:
+        log.debug(
+            "extract: asking %s for %s from %d chars of markdown (%d metadata key(s))",
+            self._model,
+            schema.__name__,
+            len(markdown),
+            len(metadata),
+        )
+        started = time.monotonic()
         response = self._chat(
             model=self._model,
             messages=[
@@ -95,7 +150,9 @@ class OllamaExtractor:
             format=schema.model_json_schema(),
             options=self._tuning.options(),
         )
-        return schema.model_validate_json(_response_content(response))
+        content = _response_content(response)
+        _log_response(self._model, response, len(content), time.monotonic() - started)
+        return schema.model_validate_json(content)
 
     def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
         return self._extract(markdown, metadata, SYSTEM_PROMPT, PageExtraction)

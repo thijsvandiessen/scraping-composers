@@ -9,6 +9,7 @@ the bronze bucket already stores.
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -88,8 +89,28 @@ def run_config(config: CrawlConfig, *, deep_crawl: bool, budget: int | None) -> 
         excluded_selector=_excluded_selector(config),
         remove_overlay_elements=True,
         deep_crawl_strategy=_deep_crawl_strategy(config, budget) if deep_crawl else None,
+        # Hand back each page as it finishes instead of one list at the end, so a
+        # long crawl can report progress while it is still running.
+        stream=True,
         verbose=False,
     )
+
+
+async def aiter_results(results: Any) -> AsyncGenerator[Any, None]:
+    """Iterate crawl4ai's results whether they stream or arrive as one batch.
+
+    ``arun_many`` returns an async generator under ``stream=True`` and a plain
+    container otherwise; both shapes are worth supporting, so neither the
+    streaming switch nor a test double that returns a list has to care. Typed as
+    a generator rather than an iterator because the caller closes it explicitly
+    when the page budget cuts a stream short.
+    """
+    if hasattr(results, "__aiter__"):
+        async for result in results:
+            yield result
+        return
+    for result in results:
+        yield result
 
 
 def dispatcher(config: CrawlConfig) -> MemoryAdaptiveDispatcher:
