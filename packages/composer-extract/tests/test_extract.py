@@ -5,8 +5,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from composer_crawler.records import CrawlRecord
-from composer_extract import extract_documents
-from composer_extract.schema import ExtractedConcert, ExtractedSoloist, ExtractedWork, PageExtraction
+from composer_extract import extract_documents, extract_recording_documents
+from composer_extract.schema import (
+    ExtractedArtist,
+    ExtractedConcert,
+    ExtractedRecording,
+    ExtractedSoloist,
+    ExtractedWork,
+    PageExtraction,
+    PageRecordingExtraction,
+)
 from composer_schema import EntityDocument, WorkMentionDocument
 
 NOW = datetime(2024, 5, 1, tzinfo=UTC)
@@ -148,6 +156,84 @@ def test_page_without_concerts_yields_nothing() -> None:
         extract_documents([record], source_name="lso", extractor=FakeExtractor(PageExtraction()), now=NOW)
     )
     assert docs == []
+
+
+class FakeRecordingExtractor:
+    """Returns queued recording extractions (one per chunk), or the last repeatedly."""
+
+    def __init__(self, *pages: PageRecordingExtraction) -> None:
+        self._pages = list(pages)
+        self.calls: list[tuple[str, dict[str, str]]] = []
+
+    def extract_recording_page(self, markdown: str, metadata: dict[str, str]) -> PageRecordingExtraction:
+        self.calls.append((markdown, metadata))
+        if len(self._pages) > 1:
+            return self._pages.pop(0)
+        return self._pages[0]
+
+
+_RECORDING = ExtractedRecording(
+    title="Beethoven: Symphony No. 9",
+    release_date="2024-03-15",
+    label="Deutsche Grammophon",
+    catalogue_number="486 1234",
+    format="CD",
+    artists=[
+        ExtractedArtist(name="Simon Rattle", role="conductor"),
+        ExtractedArtist(name="Janine Jansen", role="soloist", discipline="violin"),
+    ],
+    works=[ExtractedWork(title="Symphony No. 9", composer="Beethoven")],
+)
+
+
+def _recording_docs(*recordings: ExtractedRecording) -> list[object]:
+    record = _record("# album", url="https://www.deutschegrammophon.com/en/album")
+    return list(
+        extract_recording_documents(
+            [record],
+            source_name="deutschegrammophon",
+            extractor=FakeRecordingExtractor(PageRecordingExtraction(recordings=list(recordings))),
+            now=NOW,
+        )
+    )
+
+
+def test_recording_work_mentions_carry_release_context() -> None:
+    mentions, _ = _split(_recording_docs(_RECORDING))
+    assert {m.title for m in mentions} == {"Symphony No. 9"}
+    raw = mentions[0].raw
+    assert raw["_source"] == "llm"
+    assert raw["_kind"] == "recording"
+    assert raw["record_key"] == "https://www.deutschegrammophon.com/en/album#486 1234"
+    assert raw["title"] == "Beethoven: Symphony No. 9"
+    assert raw["release_date"] == "2024-03-15"
+    assert raw["label"] == "Deutsche Grammophon"
+    assert raw["catalogue_number"] == "486 1234"
+    assert raw["format"] == "CD"
+    assert raw["artists"] == [
+        {"name": "Simon Rattle", "role": "conductor", "discipline": None},
+        {"name": "Janine Jansen", "role": "soloist", "discipline": "violin"},
+    ]
+
+
+def test_recording_entities_created_for_artists_and_composers() -> None:
+    _, entities = _split(_recording_docs(_RECORDING))
+    by_name = {e.name: e for e in entities}
+    assert set(by_name) == {"Beethoven", "Simon Rattle", "Janine Jansen"}
+    assert all(e.kind == "person" for e in entities)
+
+    def professions(name: str) -> set[str | None]:
+        return {c.object_label for c in by_name[name].claims if c.predicate == "has_profession"}
+
+    assert professions("Simon Rattle") == {"conductor"}
+    assert professions("Janine Jansen") == {"soloist"}
+    assert professions("Beethoven") == {"composer"}
+
+
+def test_recording_key_falls_back_to_url_without_catalogue() -> None:
+    recording = ExtractedRecording(title="Untitled", works=[ExtractedWork(title="A")])
+    mentions, _ = _split(_recording_docs(recording))
+    assert mentions[0].raw["record_key"] == "https://www.deutschegrammophon.com/en/album"
 
 
 def test_concerts_merge_across_markdown_chunks() -> None:

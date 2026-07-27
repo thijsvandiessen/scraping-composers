@@ -1,0 +1,47 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<div class="sc-toolbar">
+  {% if role %}
+  <a class="sc-btn" href="{% url 'people' role %}">← {{ role }}</a>
+  {% else %}
+  <a class="sc-btn" href="{% url 'entity_detail' person_id %}">← entity</a>
+  {% endif %}
+  {% if person_label %}
+  <span><strong>{{ person_label }}</strong> —
+    <a href="{% url 'entity_detail' person_id %}">entity</a></span>
+  {% endif %}
+  <span class="sc-muted">{{ total }} recording{{ total|pluralize }} — page {{ page }} of {{ pages }}</span>
+</div>
+
+<table class="sc-table">
+  <tr><th>title</th><th>released</th><th>label</th><th>role</th><th>works</th><th>source</th></tr>
+  {% for recording in items %}
+  <tr>
+    <td>
+      <a href="{% url 'recording_detail' recording.id %}"><strong>{{ recording.title|default:"untitled" }}</strong></a>
+    </td>
+    <td style="white-space: nowrap;">{{ recording.release_date|default:"—" }}</td>
+    <td>{{ recording.label|default:"—" }}</td>
+    <td>{{ recording.role }}</td>
+    <td>
+      {% for title in recording.works %}
+      <div style="font-size: 0.85rem;">{{ title }}</div>
+      {% endfor %}
+    </td>
+    <td>
+      {% if recording.url %}<a href="{{ recording.url }}">{{ recording.source }}</a>
+      {% else %}{{ recording.source }}{% endif %}
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6" class="sc-muted">no recordings recorded for this person</td></tr>
+  {% endfor %}
+</table>
+
+{% include "scrapers/pagination.html" %}
+{% endblock %}

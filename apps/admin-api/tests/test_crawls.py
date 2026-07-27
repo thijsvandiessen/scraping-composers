@@ -1,3 +1,4 @@
+# pylint: disable=too-many-lines
 """Crawl-config endpoint tests: a tmp_path store and bucket, no network.
 
 Like the scraper tests, the Starlette TestClient runs background tasks
@@ -22,7 +23,14 @@ from composer_crawler.testing import (
     stub_discover,
     web_crawler_factory,
 )
-from composer_extract import ExtractedConcert, ExtractedWork, PageExtraction
+from composer_extract import (
+    ExtractedArtist,
+    ExtractedConcert,
+    ExtractedRecording,
+    ExtractedWork,
+    PageExtraction,
+    PageRecordingExtraction,
+)
 from fastapi.testclient import TestClient
 
 CODE_CONFIG = CrawlConfig(name="code-crawl", seeds=("https://code.example/",))
@@ -173,7 +181,9 @@ def test_failed_crawl_records_failed_manifest(
     assert manifest["status"] == "failed"
 
 
-def _seed_crawl_snapshot(client: TestClient, monkeypatch: pytest.MonkeyPatch, markdown: str) -> str:
+def _seed_crawl_snapshot(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, markdown: str, extract_kind: str = "concerts"
+) -> str:
     """Create the 'archive' crawl and run it once, so a snapshot exists to extract."""
     url = "https://example.org/"
     monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover([url]))
@@ -185,7 +195,10 @@ def _seed_crawl_snapshot(client: TestClient, monkeypatch: pytest.MonkeyPatch, ma
         "_crawler",
         lambda config: Crawler(config, web_crawler_factory=web_crawler_factory(fake)),
     )
-    client.put("/admin/v1/crawls/archive", json={"seeds": [url], "respect_robots": False})
+    client.put(
+        "/admin/v1/crawls/archive",
+        json={"seeds": [url], "respect_robots": False, "extract_kind": extract_kind},
+    )
     return str(client.post("/admin/v1/crawls/archive/fetch").json()["snapshot_id"])
 
 
@@ -224,6 +237,42 @@ def test_extract_writes_documents_from_the_latest_crawl(
 
     manifest = json.loads((ndjson.parent / "manifest.json").read_text())
     assert manifest["status"] == "completed"
+
+
+class FakeRecordingExtractor:
+    """Stands in for the Ollama model in recordings mode: one album per page."""
+
+    def extract_recording_page(self, markdown: str, metadata: dict[str, str]) -> PageRecordingExtraction:
+        return PageRecordingExtraction(
+            recordings=[
+                ExtractedRecording(
+                    title="Sibelius: Symphonies",
+                    label="Deutsche Grammophon",
+                    catalogue_number="486 9999",
+                    format="CD",
+                    artists=[ExtractedArtist(name="Tarmo Peltokoski", role="conductor")],
+                    works=[ExtractedWork(title="Symphony No 2", composer="Sibelius")],
+                )
+            ]
+        )
+
+
+def test_extract_uses_recordings_schema_for_recording_crawls(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, bucket_path: Path
+) -> None:
+    _seed_crawl_snapshot(client, monkeypatch, "# Sibelius", extract_kind="recordings")
+    monkeypatch.setattr(crawl_routes, "_extractor", FakeRecordingExtractor)
+
+    r = client.post("/admin/v1/crawls/archive/extract")
+    assert r.status_code == 202
+    snapshot_id = r.json()["snapshot_id"]
+
+    ndjson = bucket_path / "archive" / snapshot_id / "records.ndjson"
+    docs = [json.loads(line) for line in ndjson.read_text().strip().splitlines()]
+    (mention,) = [d for d in docs if d["_type"] == "work_mention"]
+    assert mention["raw"]["_source"] == "llm"
+    assert mention["raw"]["_kind"] == "recording"  # derive_recordings reads it by this marker
+    assert mention["raw"]["catalogue_number"] == "486 9999"
 
 
 def test_extract_without_a_crawl_snapshot_conflicts(client: TestClient) -> None:

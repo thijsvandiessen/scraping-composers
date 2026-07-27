@@ -92,6 +92,9 @@ class GoldBuild:
         self.concert_count = 0
         self.participant_links = 0
         self.unresolved_names: set[str] = set()
+        self.recording_count = 0
+        self.recording_participant_links = 0
+        self.recording_unresolved_names: set[str] = set()
 
     def root(self, entity_id: uuid.UUID) -> uuid.UUID:
         return self.roots.get(entity_id, entity_id)

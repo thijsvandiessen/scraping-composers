@@ -163,6 +163,11 @@ UNFOLD = {
                         "icon": "event",
                         "link": reverse_lazy("concerts_list"),
                     },
+                    {
+                        "title": "Recordings",
+                        "icon": "album",
+                        "link": reverse_lazy("recordings_list"),
+                    },
                 ],
             },
         ],

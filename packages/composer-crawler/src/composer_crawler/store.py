@@ -42,6 +42,7 @@ _SCALAR_FIELDS = (
     "request_delay_s",
     "respect_robots",
     "timeout_s",
+    "extract_kind",
 )
 
 

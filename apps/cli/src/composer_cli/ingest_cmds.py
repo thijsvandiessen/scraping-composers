@@ -11,6 +11,7 @@ from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import get_engine, init_db
 from composer_warehouse.ingestion import ingest_documents
 from composer_warehouse.rebuild import rebuild_silver
+from composer_warehouse.recordings import derive_recordings
 
 from .crawl_cmds import crawl_choices
 
@@ -40,14 +41,27 @@ def cmd_derive_concerts(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_derive_recordings(args: argparse.Namespace) -> int:
+    engine = get_engine(args.database_url)
+    session_factory = init_db(engine)
+    with session_factory() as session:
+        stats = derive_recordings(session)
+    print(f"derived {stats.recordings} recordings")
+    print(f"  participant links      {stats.participant_links}")
+    print(f"  unresolved names       {stats.unresolved_participant_names}")
+    return 0
+
+
 def cmd_promote(args: argparse.Namespace) -> int:
     engine = get_engine(args.database_url)
     session_factory = init_db(engine)
     with session_factory() as session:
         try:
-            # Concerts are silver-derived state the gold build copies; refresh
-            # them first so promote-after-load never publishes stale concerts.
+            # Concerts and recordings are silver-derived state the gold build
+            # copies; refresh them first so promote-after-load never publishes
+            # stale derivations.
             derive_concerts(session)
+            derive_recordings(session)
             config = PromoteConfig(
                 min_sitelinks=args.min_sitelinks,
                 drop_unevidenced_persons=args.drop_unevidenced_persons,

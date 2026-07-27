@@ -1,6 +1,6 @@
-"""Prompt construction for the concert/performer extraction call.
+"""Prompt construction for the concert/recording extraction calls.
 
-The system prompt pins the model to faithful extraction (no invention); the user
+The system prompts pin the model to faithful extraction (no invention); the user
 prompt carries the page's title/description as context followed by its markdown.
 """
 
@@ -15,6 +15,19 @@ SYSTEM_PROMPT = (
     "the venue/hall (else null); the conductor name(s); the soloists with their instrument or "
     "voice when stated; and the works performed, each with its composer when stated. Use names "
     "exactly as written on the page. Do not translate or reformat names."
+)
+
+RECORDING_SYSTEM_PROMPT = (
+    "You extract classical-music recording/album releases from the text of a single web page. "
+    "Return only recordings that are actually described on the page. Do not invent recordings, "
+    "works, performers, labels, dates, or catalogue numbers. If the page describes no recording, "
+    "return an empty list.\n\n"
+    "For each recording capture: the album/recording title; the release date as ISO-8601 "
+    "(YYYY-MM-DD) when derivable (else null); the record label (else null); the label's catalogue "
+    "number (else null); the format such as CD/Vinyl/Digital (else null); the artists, each with "
+    "their role ('conductor', 'soloist', or 'ensemble') and, for soloists, their instrument or "
+    "voice when stated; and the works on the recording, each with its composer when stated. Use "
+    "names exactly as written on the page. Do not translate or reformat names."
 )
 
 # Metadata keys worth surfacing to the model as page context.

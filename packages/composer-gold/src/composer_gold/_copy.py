@@ -14,6 +14,9 @@ from composer_warehouse.models import (
     EntityRecord,
     IngestRun,
     RawWorkMention,
+    Recording,
+    RecordingParticipant,
+    RecordingWork,
     Source,
     Work,
     WorkTitle,
@@ -222,3 +225,57 @@ def copy_concerts(build: GoldBuild, gold: Connection) -> None:
     for i in range(0, len(concert_work_rows), INSERT_BATCH):
         gold.execute(insert(ConcertWork), concert_work_rows[i : i + INSERT_BATCH])
     build.concert_count = len(concert_rows)
+
+
+def copy_recordings(build: GoldBuild, gold: Connection) -> None:
+    """Recordings: copy the silver-derived tables, re-pointing people.
+
+    The album counterpart to ``copy_concerts``: ``derive_recordings`` resolved
+    participants against every person entity; here duplicates collapse to their
+    canonical root, and links to persons that didn't make it into gold are
+    nulled (the verbatim name is always kept)."""
+    gold_entities = build.kept_roots | build.kept_other
+    recording_rows = [
+        {
+            "id": r.id,
+            "source_id": r.source_id,
+            "external_key": r.external_key,
+            "title": r.title,
+            "release_date": r.release_date,
+            "label": r.label,
+            "catalogue_number": r.catalogue_number,
+            "format": r.format,
+            "url": r.url,
+        }
+        for r in build.silver.execute(select(Recording)).scalars()
+    ]
+    participant_rows: list[dict[str, Any]] = []
+    for p in build.silver.execute(select(RecordingParticipant)).scalars():
+        entity_id = build.root(p.entity_id) if p.entity_id is not None else None
+        if entity_id is not None and entity_id not in gold_entities:
+            entity_id = None
+        if entity_id is not None:
+            build.recording_participant_links += 1
+        else:
+            build.recording_unresolved_names.add(p.name)
+        participant_rows.append(
+            {
+                "recording_id": p.recording_id,
+                "role": p.role,
+                "name": p.name,
+                "discipline": p.discipline,
+                "entity_id": entity_id,
+            }
+        )
+    recording_work_rows = [
+        {"recording_id": rw.recording_id, "mention_id": rw.mention_id}
+        for rw in build.silver.execute(select(RecordingWork)).scalars()
+    ]
+
+    for i in range(0, len(recording_rows), INSERT_BATCH):
+        gold.execute(insert(Recording), recording_rows[i : i + INSERT_BATCH])
+    for i in range(0, len(participant_rows), INSERT_BATCH):
+        gold.execute(insert(RecordingParticipant), participant_rows[i : i + INSERT_BATCH])
+    for i in range(0, len(recording_work_rows), INSERT_BATCH):
+        gold.execute(insert(RecordingWork), recording_work_rows[i : i + INSERT_BATCH])
+    build.recording_count = len(recording_rows)

@@ -1,0 +1,51 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+{% if recording %}
+<div class="sc-toolbar">
+  <a class="sc-btn" href="{% url 'recordings_list' %}">← recordings</a>
+  <span><strong>{{ recording.title|default:"untitled" }}</strong>
+    {% if recording.release_date %} — {{ recording.release_date }}{% endif %}</span>
+  {% if recording.label %}<span class="sc-badge sc-unknown">{{ recording.label }}</span>{% endif %}
+  {% if recording.catalogue_number %}<span class="sc-badge sc-unknown">{{ recording.catalogue_number }}</span>{% endif %}
+  {% if recording.format %}<span class="sc-badge sc-unknown">{{ recording.format }}</span>{% endif %}
+  {% if recording.url %}<a class="sc-btn" href="{{ recording.url }}">view at {{ recording.source }}</a>
+  {% else %}<span class="sc-muted">source: {{ recording.source }}</span>{% endif %}
+</div>
+
+<h2 class="sc-heading">Artists</h2>
+<table class="sc-table" style="max-width: 46rem;">
+  <tr><th>role</th><th>name</th><th>discipline</th></tr>
+  {% for p in recording.participants %}
+  <tr>
+    <td>{{ p.role }}</td>
+    <td>
+      {% if p.entity_id %}
+      <a href="{% url 'entity_detail' p.entity_id %}"><strong>{{ p.name }}</strong></a>
+      {% else %}{{ p.name }}{% endif %}
+    </td>
+    <td>{{ p.discipline|default:"—" }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="3" class="sc-muted">no artists recorded</td></tr>
+  {% endfor %}
+</table>
+
+<h2 class="sc-heading">Works</h2>
+<table class="sc-table" style="max-width: 46rem;">
+  <tr><th>work</th><th>composer</th></tr>
+  {% for work in recording.works %}
+  <tr>
+    <td>{{ work.title }}</td>
+    <td>{{ work.composer|default:"—" }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="2" class="sc-muted">no works recorded</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

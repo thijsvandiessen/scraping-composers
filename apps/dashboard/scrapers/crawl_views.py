@@ -50,6 +50,7 @@ def _default_values(name: str | None) -> dict[str, Any]:
         "excluded_selector": "",
         "request_delay_s": "0.5",
         "respect_robots": True,
+        "extract_kind": "concerts",
     }
 
 
@@ -75,6 +76,7 @@ def _form_values(request: HttpRequest, name: str | None) -> dict[str, Any]:
         "excluded_selector": request.POST.get("excluded_selector", "").strip(),
         "request_delay_s": request.POST.get("request_delay_s", "0.5"),
         "respect_robots": request.POST.get("respect_robots") == "on",
+        "extract_kind": request.POST.get("extract_kind", "concerts"),
     }
 
 
@@ -97,6 +99,7 @@ def _crawl_payload(values: dict[str, Any]) -> dict[str, Any]:
         "excluded_selector": values["excluded_selector"] or None,
         "request_delay_s": float(values["request_delay_s"] or "0.5"),
         "respect_robots": values["respect_robots"],
+        "extract_kind": values["extract_kind"],
     }
 
 
@@ -116,6 +119,7 @@ def _config_to_values(crawl: dict[str, Any]) -> dict[str, Any]:
         "excluded_selector": crawl.get("excluded_selector") or "",
         "request_delay_s": str(crawl["request_delay_s"]),
         "respect_robots": crawl["respect_robots"],
+        "extract_kind": crawl.get("extract_kind") or "concerts",
     }
 
 

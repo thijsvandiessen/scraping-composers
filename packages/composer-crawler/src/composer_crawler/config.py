@@ -64,11 +64,19 @@ class CrawlConfig:
     headers: tuple[tuple[str, str], ...] = ()
     respect_robots: bool = True
     timeout_s: float = 30.0
+    # Which LLM schema the `extract` step applies to this crawl's pages:
+    # "concerts" (default) or "recordings" (album/release listings).
+    extract_kind: str = "concerts"
 
     def __post_init__(self) -> None:
         _validate_source_name(self.name)
         if not self.seeds:
             raise ValueError(f"crawl {self.name!r}: seeds must not be empty")
+        if self.extract_kind not in ("concerts", "recordings"):
+            raise ValueError(
+                f"crawl {self.name!r}: extract_kind must be 'concerts' or 'recordings', "
+                f"got {self.extract_kind!r}"
+            )
         if self.follow_links and not self.allow_patterns:
             # An unrestricted link-following crawl would wander off the target host.
             raise ValueError(f"crawl {self.name!r}: follow_links requires at least one allow pattern")

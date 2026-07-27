@@ -54,6 +54,7 @@ class CrawlConfigIn(BaseModel):
     excluded_selector: str | None = None  # extra CSS to drop before markdown generation
     request_delay_s: float = Field(default=0.5, ge=0)
     respect_robots: bool = True
+    extract_kind: str = "concerts"  # which LLM schema `extract` applies: concerts | recordings
 
 
 class CrawlOut(BaseModel):
@@ -70,6 +71,7 @@ class CrawlOut(BaseModel):
     excluded_selector: str | None
     request_delay_s: float
     respect_robots: bool
+    extract_kind: str  # which LLM schema `extract` applies: concerts | recordings
     editable: bool  # False for code-registered configs (edit those in the source tree)
     last_snapshot: SnapshotOut | None  # crawl runs are bucket snapshots
 

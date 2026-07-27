@@ -11,7 +11,14 @@ from composer_scrapers import REGISTRY
 
 from .crawl_cmds import cmd_crawl, crawl_choices
 from .extract_cmds import cmd_extract
-from .ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_promote, cmd_rebuild_silver
+from .ingest_cmds import (
+    cmd_derive_concerts,
+    cmd_derive_recordings,
+    cmd_fetch,
+    cmd_process,
+    cmd_promote,
+    cmd_rebuild_silver,
+)
 from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
@@ -165,6 +172,11 @@ def _add_person_parsers(sub: _SubParsers) -> None:
         "derive-concerts", help="rebuild the concert tables from the work mentions' performance context"
     )
     p_concerts.set_defaults(func=cmd_derive_concerts)
+
+    p_recordings = sub.add_parser(
+        "derive-recordings", help="rebuild the recording tables from the work mentions' release context"
+    )
+    p_recordings.set_defaults(func=cmd_derive_recordings)
 
     p_preview = sub.add_parser(
         "person-review", help="list (or resolve) person duplicate pairs flagged for review"

@@ -66,6 +66,12 @@ urlpatterns = [
         admin.site.admin_view(views.concert_detail),
         name="concert_detail",
     ),
+    path("admin/data/recordings/", admin.site.admin_view(views.recordings_list), name="recordings_list"),
+    path(
+        "admin/data/recordings/<int:recording_id>/",
+        admin.site.admin_view(views.recording_detail),
+        name="recording_detail",
+    ),
     path("admin/data/people/<str:role>/", admin.site.admin_view(views.people), name="people"),
     path(
         "admin/data/people/<str:role>/<uuid:person_id>/concerts",
@@ -77,6 +83,17 @@ urlpatterns = [
         "admin/data/people/<uuid:person_id>/concerts",
         admin.site.admin_view(views.person_concerts),
         name="person_concerts_any",
+    ),
+    path(
+        "admin/data/people/<str:role>/<uuid:person_id>/recordings",
+        admin.site.admin_view(views.person_recordings),
+        name="person_recordings",
+    ),
+    # role-less variant, linked from entity detail pages
+    path(
+        "admin/data/people/<uuid:person_id>/recordings",
+        admin.site.admin_view(views.person_recordings),
+        name="person_recordings_any",
     ),
     path("admin/", admin.site.urls),
     path("", RedirectView.as_view(url="/admin/scrapers/", permanent=False)),

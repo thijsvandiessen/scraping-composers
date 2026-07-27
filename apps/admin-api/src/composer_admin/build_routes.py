@@ -13,6 +13,7 @@ from composer_gold import (
 from composer_warehouse.build import read_build_manifest
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.rebuild import rebuild_silver, sqlite_db_path
+from composer_warehouse.recordings import derive_recordings
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from . import routes
@@ -28,9 +29,11 @@ def _promote_in_background(gold_path: str, config: PromoteConfig) -> None:
     """Rebuild the gold database; status lives in the gold manifest."""
     with session_scope() as session:
         try:
-            # Concerts are silver-derived state the gold build copies; refresh
-            # them first so the Promote button never publishes stale concerts.
+            # Concerts and recordings are silver-derived state the gold build
+            # copies; refresh them first so the Promote button never publishes
+            # stale derivations.
             derive_concerts(session)
+            derive_recordings(session)
             promote(session, gold_path, config)
         except Exception:
             # Recorded as a failed manifest by promote; log for the server console.

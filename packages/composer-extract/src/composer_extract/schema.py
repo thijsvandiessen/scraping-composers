@@ -43,3 +43,45 @@ class PageExtraction(BaseModel):
     """Every concert found on one page (empty when the page has none)."""
 
     concerts: list[ExtractedConcert] = Field(default_factory=list)
+
+
+class ExtractedArtist(BaseModel):
+    """A performer credited on a recording, with their role and (for soloists)
+    instrument/voice when stated."""
+
+    name: str
+    role: str | None = Field(
+        default=None,
+        description="Role on the recording: 'conductor', 'soloist', or 'ensemble'; null if unclear.",
+    )
+    discipline: str | None = Field(
+        default=None,
+        description="Instrument or voice for a soloist, e.g. 'piano', 'soprano'; null if unknown.",
+    )
+
+
+class ExtractedRecording(BaseModel):
+    """A single recording/album release: its title, publishing details, who
+    performs on it, and the works it contains."""
+
+    title: str = Field(description="Album/recording title as written on the page.")
+    release_date: str | None = Field(
+        default=None, description="Release date as ISO-8601 (YYYY-MM-DD) when derivable; null if unknown."
+    )
+    label: str | None = Field(
+        default=None, description="Record label, e.g. 'Deutsche Grammophon'; null if unknown."
+    )
+    catalogue_number: str | None = Field(
+        default=None, description="Label catalogue number of the release; null if unknown."
+    )
+    format: str | None = Field(
+        default=None, description="Format, e.g. 'CD', 'Vinyl', 'Digital'; null if unknown."
+    )
+    artists: list[ExtractedArtist] = Field(default_factory=list)
+    works: list[ExtractedWork] = Field(default_factory=list)
+
+
+class PageRecordingExtraction(BaseModel):
+    """Every recording/album found on one page (empty when the page has none)."""
+
+    recordings: list[ExtractedRecording] = Field(default_factory=list)

@@ -184,6 +184,7 @@ def test_new_crawl_form_posts_expected_payload(monkeypatch: pytest.MonkeyPatch, 
         "excluded_selector": "#cookie-banner",
         "request_delay_s": 1.5,
         "respect_robots": False,  # unchecked checkbox is absent from the POST
+        "extract_kind": "concerts",  # defaults when the select is absent from the POST
     }
 
 

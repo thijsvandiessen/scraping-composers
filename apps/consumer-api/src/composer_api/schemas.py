@@ -192,3 +192,71 @@ class ConcertDetail(BaseModel):
     url: str | None
     participants: list[ConcertParticipantOut]
     works: list[ConcertWorkOut]
+
+
+class RecordingOut(BaseModel):
+    id: int
+    source: str
+    title: str | None
+    release_date: str | None
+    label: str | None
+    catalogue_number: str | None
+    format: str | None
+    url: str | None
+    role: str  # how the person is credited (conductor, soloist, ensemble)
+    works: list[str]
+
+
+class RecordingPage(BaseModel):
+    person_id: uuid.UUID
+    person_label: str
+    items: list[RecordingOut]
+    total: int
+    page: int
+    limit: int
+
+
+class RecordingSummary(BaseModel):
+    id: int
+    source: str
+    title: str | None
+    release_date: str | None
+    label: str | None
+    catalogue_number: str | None
+    format: str | None
+    url: str | None
+    conductors: list[str]
+    performer_count: int  # soloists + ensembles
+    work_count: int
+
+
+class RecordingListPage(BaseModel):
+    items: list[RecordingSummary]
+    total: int
+    page: int
+    limit: int
+
+
+class RecordingParticipantOut(BaseModel):
+    role: str
+    name: str
+    discipline: str | None
+    entity_id: uuid.UUID | None
+
+
+class RecordingWorkOut(BaseModel):
+    title: str
+    composer: str | None
+
+
+class RecordingDetail(BaseModel):
+    id: int
+    source: str
+    title: str | None
+    release_date: str | None
+    label: str | None
+    catalogue_number: str | None
+    format: str | None
+    url: str | None
+    participants: list[RecordingParticipantOut]
+    works: list[RecordingWorkOut]
