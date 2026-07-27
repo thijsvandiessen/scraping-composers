@@ -12,6 +12,7 @@ from composer_gold import promote
 from composer_schema import EntityDocument, SourceAdapter, SourceClaim
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import init_db
+from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -611,6 +612,104 @@ def test_concert_detail_404(concerts_client: TestClient) -> None:
 def test_person_concerts_404_and_invalid_sort(concerts_client: TestClient) -> None:
     assert concerts_client.get("/v1/people/00000000-0000-0000-0000-000000000000/concerts").status_code == 404
     assert concerts_client.get("/v1/conductors?sort=nope").status_code == 422
+
+
+def _recording_raw(catalogue: str, works_title: str) -> dict[str, object]:
+    return {
+        "_source": "llm",
+        "_kind": "recording",
+        "record_key": f"https://dg.example/{catalogue}",
+        "url": f"https://dg.example/{catalogue}",
+        "title": f"Album {works_title}",
+        "release_date": "2024-03-15" if catalogue == "a1" else "2020-01-01",
+        "label": "Deutsche Grammophon",
+        "catalogue_number": catalogue,
+        "format": "CD",
+        "artists": [
+            {"name": "Rattle, Simon", "role": "conductor", "discipline": None},
+            {"name": "Jansen, Janine", "role": "soloist", "discipline": "violin"},
+        ],
+    }
+
+
+@pytest.fixture
+def recordings_client(tmp_path: Path) -> Iterator[TestClient]:
+    """Gold client over a dataset with derived recordings."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    factory = init_db(engine)
+    dg = FakeSource(
+        records=(
+            perf_mention("r:a1#w0", "Symphony No. 9", "Beethoven", _recording_raw("a1", "Beethoven")),
+            perf_mention("r:a2#w0", "The Four Seasons", "Vivaldi", _recording_raw("a2", "Vivaldi")),
+            _person("Rattle, Simon", SourceClaim("has_profession", "profession", "conductor")),
+            _person("Jansen, Janine", SourceClaim("has_profession", "profession", "soloist")),
+        ),
+        name="deutschegrammophon",
+        base_url="https://dg.example",
+    )
+    with factory() as s:
+        ingest_source(s, dg)
+        derive_recordings(s)
+        gold_path = tmp_path / "gold.db"
+        promote(s, gold_path)
+    gold_factory = init_db(create_engine(f"sqlite:///{gold_path}"))
+    yield TestClient(create_app("test-gold-recordings", lambda: gold_factory))
+
+
+def test_recordings_list_newest_first_with_summaries(recordings_client: TestClient) -> None:
+    data = recordings_client.get("/v1/recordings").json()
+    assert data["total"] == 2
+    assert [r["release_date"] for r in data["items"]] == ["2024-03-15", "2020-01-01"]  # newest first
+    top = data["items"][0]
+    assert top["title"] == "Album Beethoven"
+    assert top["label"] == "Deutsche Grammophon"
+    assert top["catalogue_number"] == "a1"
+    assert top["conductors"] == ["Rattle, Simon"]
+    assert top["performer_count"] == 1  # the violinist
+    assert top["work_count"] == 1
+    assert top["source"] == "deutschegrammophon"
+
+
+def test_recordings_list_search_by_participant_and_source(recordings_client: TestClient) -> None:
+    assert recordings_client.get("/v1/recordings?q=Beethoven").json()["total"] == 1  # title match
+    assert recordings_client.get("/v1/recordings?q=Jansen").json()["total"] == 2  # artist on both
+    assert recordings_client.get("/v1/recordings?source=deutschegrammophon").json()["total"] == 2
+    assert recordings_client.get("/v1/recordings?source=nyphil").json()["total"] == 0
+
+
+def test_recording_detail_has_artists_and_works(recordings_client: TestClient) -> None:
+    recording_id = recordings_client.get("/v1/recordings?q=Beethoven").json()["items"][0]["id"]
+    data = recordings_client.get(f"/v1/recordings/{recording_id}").json()
+    assert data["catalogue_number"] == "a1"
+    assert data["format"] == "CD"
+    by_role = {p["role"]: p for p in data["participants"]}
+    assert by_role["conductor"]["name"] == "Rattle, Simon"
+    assert by_role["conductor"]["entity_id"] is not None
+    assert by_role["soloist"]["discipline"] == "violin"
+    assert data["works"] == [{"title": "Symphony No. 9", "composer": "Beethoven"}]
+
+
+def test_recording_detail_404(recordings_client: TestClient) -> None:
+    assert recordings_client.get("/v1/recordings/999").status_code == 404
+
+
+def test_person_recordings_lists_credits(recordings_client: TestClient) -> None:
+    rattle = recordings_client.get("/v1/conductors?q=Rattle").json()["items"][0]
+    data = recordings_client.get(f"/v1/people/{rattle['id']}/recordings").json()
+    assert data["person_label"] == "Rattle, Simon"
+    assert data["total"] == 2
+    assert [r["release_date"] for r in data["items"]] == ["2024-03-15", "2020-01-01"]  # newest first
+    assert data["items"][0]["role"] == "conductor"
+    assert data["items"][0]["works"] == ["Symphony No. 9"]
+
+
+def test_person_recordings_404_for_missing(recordings_client: TestClient) -> None:
+    missing = "00000000-0000-0000-0000-000000000000"
+    assert recordings_client.get(f"/v1/people/{missing}/recordings").status_code == 404
 
 
 def test_person_concerts_on_silver(tmp_path: Path) -> None:

@@ -111,6 +111,76 @@ def concert_detail(request: HttpRequest, concert_id: int) -> HttpResponse:
     return render(request, "scrapers/concert_detail.html", context)
 
 
+def person_recordings(request: HttpRequest, person_id: uuid.UUID, role: str | None = None) -> HttpResponse:
+    """The recordings one person is credited on, from gold.
+
+    Reachable with a role segment (back-link to that role's page) or without
+    (linked from the entity detail page; back-link to the entity).
+    """
+    if role is not None and role not in PEOPLE_ROLES:
+        raise Http404(f"unknown role {role!r}")
+    api = DataAPI.gold()
+    page = page_number(request)
+    result: dict[str, object] = {}
+    error: str | None = None
+    try:
+        result = api.person_recordings(str(person_id), page=page)
+    except AdminAPIError as exc:
+        error = str(exc)
+    context = {
+        **admin.site.each_context(request),
+        "title": f"Recordings — {result.get('person_label', '')}",
+        "person_label": result.get("person_label"),
+        "person_id": person_id,
+        "role": role,
+        "items": result.get("items", []),
+        "error": error,
+        **page_context(result, request.path, {}),
+    }
+    return render(request, "scrapers/recordings.html", context)
+
+
+def recordings_list(request: HttpRequest) -> HttpResponse:
+    """Browse the derived recordings in gold, newest first."""
+    api = DataAPI.gold()
+    q = request.GET.get("q", "").strip()
+    page = page_number(request)
+    result: dict[str, object] = {}
+    error: str | None = None
+    try:
+        result = api.list_recordings(q=q or None, page=page)
+    except AdminAPIError as exc:
+        error = f"{exc} — is the gold API running, and has the gold database been promoted?"
+    params = {"q": q} if q else {}
+    context = {
+        **admin.site.each_context(request),
+        "title": "Recordings",
+        "items": result.get("items", []),
+        "q": q,
+        "error": error,
+        **page_context(result, request.path, params),
+    }
+    return render(request, "scrapers/recordings_list.html", context)
+
+
+def recording_detail(request: HttpRequest, recording_id: int) -> HttpResponse:
+    """One recording: its credited artists and the works on it, from gold."""
+    api = DataAPI.gold()
+    recording: dict[str, object] | None = None
+    error: str | None = None
+    try:
+        recording = api.get_recording(recording_id)
+    except AdminAPIError as exc:
+        error = str(exc)
+    context = {
+        **admin.site.each_context(request),
+        "title": f"Recording {recording_id}",
+        "recording": recording,
+        "error": error,
+    }
+    return render(request, "scrapers/recording_detail.html", context)
+
+
 def gold_works(request: HttpRequest) -> HttpResponse:
     """Performed works from the curated gold database."""
     api = DataAPI.gold()

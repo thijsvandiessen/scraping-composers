@@ -152,7 +152,8 @@ def _concert_fields(source_name: str, raw: dict[str, Any]) -> _ConcertFields | N
         return parse(raw)
     # LLM-extracted mentions carry a normalized payload regardless of the site
     # they were crawled from, so they resolve by marker rather than source name.
-    if raw.get("_source") == "llm":
+    # Recording payloads share the "llm" marker but belong to derive_recordings.
+    if raw.get("_source") == "llm" and raw.get("_kind") != "recording":
         return _llm_fields(raw)
     return None
 

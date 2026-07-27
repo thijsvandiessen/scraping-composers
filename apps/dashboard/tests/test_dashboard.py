@@ -540,6 +540,70 @@ class StubDataAPI:
             "works": [{"title": "LUISA MILLER", "composer": "Verdi, Giuseppe"}],
         }
 
+    def person_recordings(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
+        self._maybe_fail()
+        items = [
+            {
+                "id": 1,
+                "source": "deutschegrammophon",
+                "title": "Beethoven: Symphony No. 9",
+                "release_date": "2024-03-15",
+                "label": "Deutsche Grammophon",
+                "catalogue_number": "486 1234",
+                "format": "CD",
+                "url": "https://dg.example/album",
+                "role": "conductor",
+                "works": ["Symphony No. 9"],
+            }
+        ]
+        return {
+            "person_id": person_id,
+            "person_label": "Bach, Johann Sebastian",
+            "items": items,
+            "total": 1,
+            "page": page,
+            "limit": limit,
+        }
+
+    def list_recordings(
+        self, q: str | None = None, source: str | None = None, page: int = 1, limit: int = 20
+    ) -> dict[str, Any]:
+        self._maybe_fail()
+        items = [
+            {
+                "id": 3,
+                "source": "deutschegrammophon",
+                "title": "Beethoven: Symphony No. 9",
+                "release_date": "2024-03-15",
+                "label": "Deutsche Grammophon",
+                "catalogue_number": "486 1234",
+                "format": "CD",
+                "url": "https://dg.example/album",
+                "conductors": ["Rattle, Simon"],
+                "performer_count": 1,
+                "work_count": 3,
+            }
+        ]
+        return {"items": items, "total": 1, "page": page, "limit": limit}
+
+    def get_recording(self, recording_id: int) -> dict[str, Any]:
+        self._maybe_fail()
+        return {
+            "id": recording_id,
+            "source": "deutschegrammophon",
+            "title": "Beethoven: Symphony No. 9",
+            "release_date": "2024-03-15",
+            "label": "Deutsche Grammophon",
+            "catalogue_number": "486 1234",
+            "format": "CD",
+            "url": "https://dg.example/album",
+            "participants": [
+                {"role": "conductor", "name": "Rattle, Simon", "discipline": None, "entity_id": ENTITY_ID},
+                {"role": "soloist", "name": "Jansen, Janine", "discipline": "violin", "entity_id": None},
+            ],
+            "works": [{"title": "Symphony No. 9", "composer": "Beethoven"}],
+        }
+
     def list_mentions(self, status: str | None = None, page: int = 1, limit: int = 20) -> dict[str, Any]:
         self._maybe_fail()
         items = [
@@ -795,6 +859,31 @@ def test_concert_detail_page_renders(monkeypatch: pytest.MonkeyPatch, staff_clie
 @pytest.mark.django_db
 def test_concert_pages_require_login() -> None:
     for url in ("/admin/data/concerts/", "/admin/data/concerts/7/"):
+        response = Client().get(url)
+        assert response.status_code == 302
+        assert response["Location"].startswith("/admin/login/")
+
+
+def test_recordings_list_page_renders(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    _install_data(monkeypatch, StubDataAPI())
+    page = staff_client.get("/admin/data/recordings/").content.decode()
+    assert "Beethoven: Symphony No. 9" in page and "Deutsche Grammophon" in page
+    assert "486 1234" in page and "Rattle, Simon" in page
+    assert "/admin/data/recordings/3/" in page  # row links to detail
+
+
+def test_recording_detail_page_renders(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    _install_data(monkeypatch, StubDataAPI())
+    page = staff_client.get("/admin/data/recordings/3/").content.decode()
+    assert "Beethoven: Symphony No. 9" in page and "CD" in page
+    assert f"/admin/data/entities/{ENTITY_ID}/" in page  # resolved artist links to entity
+    assert "Jansen, Janine" in page and "violin" in page  # unresolved shown as plain text
+    assert "Symphony No. 9" in page and "Beethoven" in page  # works
+
+
+@pytest.mark.django_db
+def test_recording_pages_require_login() -> None:
+    for url in ("/admin/data/recordings/", "/admin/data/recordings/3/"):
         response = Client().get(url)
         assert response.status_code == 302
         assert response["Location"].startswith("/admin/login/")

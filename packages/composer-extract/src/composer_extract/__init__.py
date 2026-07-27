@@ -9,23 +9,36 @@ emits the warehouse's :class:`~composer_schema.WorkMentionDocument` and
 from __future__ import annotations
 
 from .client import OllamaExtractor
-from .extract import PageExtractor, extract_documents
+from .extract import (
+    PageExtractor,
+    RecordingPageExtractor,
+    extract_documents,
+    extract_recording_documents,
+)
 from .markdown import chunk_markdown, record_markdown
 from .schema import (
+    ExtractedArtist,
     ExtractedConcert,
+    ExtractedRecording,
     ExtractedSoloist,
     ExtractedWork,
     PageExtraction,
+    PageRecordingExtraction,
 )
 
 __all__ = [
+    "ExtractedArtist",
     "ExtractedConcert",
+    "ExtractedRecording",
     "ExtractedSoloist",
     "ExtractedWork",
     "OllamaExtractor",
     "PageExtraction",
     "PageExtractor",
+    "PageRecordingExtraction",
+    "RecordingPageExtractor",
     "chunk_markdown",
     "extract_documents",
+    "extract_recording_documents",
     "record_markdown",
 ]

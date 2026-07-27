@@ -69,16 +69,23 @@ def entity_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpResponse:
     except AdminAPIError as exc:
         error = str(exc)
     concert_total: int | None = None
+    recording_total: int | None = None
     if entity is not None and entity.get("kind") == "person":
+        gold = DataAPI.gold()
         try:
-            concert_total = int(DataAPI.gold().person_concerts(str(entity_id), limit=1)["total"])
+            concert_total = int(gold.person_concerts(str(entity_id), limit=1)["total"])
         except (AdminAPIError, KeyError, TypeError, ValueError):
             pass  # silver page must render even when gold is down or unpromoted
+        try:
+            recording_total = int(gold.person_recordings(str(entity_id), limit=1)["total"])
+        except (AdminAPIError, KeyError, TypeError, ValueError):
+            pass
     context = {
         **admin.site.each_context(request),
         "title": str(entity["label"]) if entity else "Entity",
         "entity": entity,
         "concert_total": concert_total,
+        "recording_total": recording_total,
         "error": error,
     }
     return render(request, "scrapers/entity_detail.html", context)

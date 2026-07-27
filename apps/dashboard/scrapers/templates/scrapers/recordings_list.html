@@ -1,0 +1,41 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<form method="get" action="" class="sc-toolbar">
+  <input type="text" name="q" value="{{ q }}" placeholder="search by title or artist…" class="sc-btn" style="cursor: text; min-width: 22rem;">
+  <button type="submit" class="sc-btn sc-btn-primary">Search</button>
+  <span class="sc-muted">{{ total }} recording{{ total|pluralize }} — page {{ page }} of {{ pages }}</span>
+</form>
+
+<table class="sc-table">
+  <tr>
+    <th>title</th><th>released</th><th>label</th><th>cat. no.</th><th>conductor(s)</th>
+    <th class="sc-num">artists</th><th class="sc-num">works</th><th>source</th>
+  </tr>
+  {% for recording in items %}
+  <tr>
+    <td>
+      <a href="{% url 'recording_detail' recording.id %}"><strong>{{ recording.title|default:"untitled" }}</strong></a>
+    </td>
+    <td style="white-space: nowrap;">{{ recording.release_date|default:"—" }}</td>
+    <td>{{ recording.label|default:"—" }}</td>
+    <td>{{ recording.catalogue_number|default:"—" }}</td>
+    <td>{{ recording.conductors|join:", "|default:"—" }}</td>
+    <td class="sc-num">{{ recording.performer_count }}</td>
+    <td class="sc-num">{{ recording.work_count }}</td>
+    <td>
+      {% if recording.url %}<a href="{{ recording.url }}">{{ recording.source }}</a>
+      {% else %}{{ recording.source }}{% endif %}
+    </td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="8" class="sc-muted">no recordings match — promoted yet?</td></tr>
+  {% endfor %}
+</table>
+
+{% include "scrapers/pagination.html" %}
+{% endblock %}

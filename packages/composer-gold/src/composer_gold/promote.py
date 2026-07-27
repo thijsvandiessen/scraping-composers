@@ -15,6 +15,7 @@ from ._claims import collect_other_literal_claims, collect_person_claims, insert
 from ._copy import (
     copy_concerts,
     copy_entities,
+    copy_recordings,
     copy_records,
     copy_sources_and_runs,
     copy_works_titles_mentions,
@@ -40,6 +41,9 @@ class PromoteStats:
     concerts: int = 0
     concert_participant_links: int = 0
     unresolved_participant_names: int = 0
+    recordings: int = 0
+    recording_participant_links: int = 0
+    unresolved_recording_participant_names: int = 0
 
 
 @dataclass(frozen=True)
@@ -99,6 +103,9 @@ def _stats(build: GoldBuild) -> PromoteStats:
         concerts=build.concert_count,
         concert_participant_links=build.participant_links,
         unresolved_participant_names=len(build.unresolved_names),
+        recordings=build.recording_count,
+        recording_participant_links=build.recording_participant_links,
+        unresolved_recording_participant_names=len(build.recording_unresolved_names),
     )
 
 
@@ -120,6 +127,7 @@ def _build(silver: Session, tmp_path: Path, config: PromoteConfig) -> PromoteSta
         copy_records(build, gold)
         copy_works_titles_mentions(build, gold)
         copy_concerts(build, gold)
+        copy_recordings(build, gold)
 
     gold_engine.dispose()
     return _stats(build)

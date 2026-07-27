@@ -9,15 +9,18 @@ running model.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeVar
 
 import ollama
 from composer_config import settings
+from pydantic import BaseModel
 
-from .prompt import SYSTEM_PROMPT, build_user_prompt
-from .schema import PageExtraction
+from .prompt import RECORDING_SYSTEM_PROMPT, SYSTEM_PROMPT, build_user_prompt
+from .schema import PageExtraction, PageRecordingExtraction
 
 ChatFn = Callable[..., Any]
+
+_M = TypeVar("_M", bound=BaseModel)
 
 
 def _response_content(response: Any) -> str:
@@ -34,7 +37,7 @@ def _response_content(response: Any) -> str:
 
 
 class OllamaExtractor:
-    """Extract a page's concerts with a local Ollama model."""
+    """Extract a page's concerts or recordings with a local Ollama model."""
 
     def __init__(
         self,
@@ -63,14 +66,20 @@ class OllamaExtractor:
             options["num_ctx"] = self._num_ctx
         return options
 
-    def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
+    def _extract(self, markdown: str, metadata: dict[str, str], system_prompt: str, schema: type[_M]) -> _M:
         response = self._chat(
             model=self._model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": build_user_prompt(markdown, metadata)},
             ],
-            format=PageExtraction.model_json_schema(),
+            format=schema.model_json_schema(),
             options=self._options(),
         )
-        return PageExtraction.model_validate_json(_response_content(response))
+        return schema.model_validate_json(_response_content(response))
+
+    def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
+        return self._extract(markdown, metadata, SYSTEM_PROMPT, PageExtraction)
+
+    def extract_recording_page(self, markdown: str, metadata: dict[str, str]) -> PageRecordingExtraction:
+        return self._extract(markdown, metadata, RECORDING_SYSTEM_PROMPT, PageRecordingExtraction)

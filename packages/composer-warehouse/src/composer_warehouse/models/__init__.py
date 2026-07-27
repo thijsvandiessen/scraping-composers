@@ -5,6 +5,7 @@ from .concerts import Concert, ConcertParticipant, ConcertWork
 from .core import IngestRun, Source
 from .entities import Claim, Entity, EntityRecord
 from .persons import PersonMatch
+from .recordings import Recording, RecordingParticipant, RecordingWork
 from .works import RawWorkMention, Work, WorkTitle
 
 __all__ = [
@@ -18,6 +19,9 @@ __all__ = [
     "IngestRun",
     "PersonMatch",
     "RawWorkMention",
+    "Recording",
+    "RecordingParticipant",
+    "RecordingWork",
     "Source",
     "Work",
     "WorkTitle",

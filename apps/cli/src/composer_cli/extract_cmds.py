@@ -14,7 +14,7 @@ from pathlib import Path
 from composer_bronze.bucket import LocalBucket, latest_loadable_run_id
 from composer_bronze.scraper import write_documents
 from composer_crawler.records import iter_crawl_records
-from composer_extract import OllamaExtractor, extract_documents
+from composer_extract import OllamaExtractor, extract_documents, extract_recording_documents
 
 from .crawl_cmds import crawl_choices
 
@@ -33,7 +33,8 @@ def cmd_extract(args: argparse.Namespace) -> int:
     if args.max_pages is not None:
         records = itertools.islice(records, args.max_pages)
     extractor = OllamaExtractor.from_settings(model=args.model)
-    docs = extract_documents(records, source_name=config.name, extractor=extractor)
+    extract = extract_recording_documents if config.extract_kind == "recordings" else extract_documents
+    docs = extract(records, source_name=config.name, extractor=extractor)
 
     try:
         run_id = write_documents(bucket, config.name, docs)

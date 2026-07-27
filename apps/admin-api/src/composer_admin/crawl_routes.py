@@ -22,7 +22,7 @@ from composer_crawler import (
 )
 from composer_crawler.records import iter_crawl_records
 from composer_crawler.store import DEFAULT_CRAWL_CONFIGS_PATH
-from composer_extract import OllamaExtractor, extract_documents
+from composer_extract import OllamaExtractor, extract_documents, extract_recording_documents
 from composer_scrapers import REGISTRY
 from composer_warehouse.ingestion import create_run
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
@@ -70,6 +70,7 @@ def _to_config(name: str, body: CrawlConfigIn) -> CrawlConfig:
             excluded_selector=body.excluded_selector,
             request_delay_s=body.request_delay_s,
             respect_robots=body.respect_robots,
+            extract_kind=body.extract_kind,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
@@ -101,12 +102,13 @@ def _extractor() -> OllamaExtractor:
     return OllamaExtractor.from_settings()
 
 
-def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str) -> None:
+def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str, extract_kind: str) -> None:
     """Run the model over a crawl snapshot, writing documents to a new snapshot."""
     bucket = _bucket()
     try:
         records = iter_crawl_records(name, crawl_run_id, bucket)
-        docs = extract_documents(records, source_name=name, extractor=_extractor())
+        extract = extract_recording_documents if extract_kind == "recordings" else extract_documents
+        docs = extract(records, source_name=name, extractor=_extractor())
         write_documents(bucket, name, docs, run_id=snapshot_id)
     except Exception:
         # Recorded as a failed manifest by write_documents; log for the console.
@@ -172,7 +174,8 @@ def extract_crawl(name: str, background: BackgroundTasks) -> FetchStarted:
     documents to a new snapshot under the same source name, which ``process``
     then ingests like any other.
     """
-    if name not in _merged():
+    config = _merged().get(name)
+    if config is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
     bucket = _bucket()
     if _has_running_fetch(bucket, name):
@@ -181,7 +184,7 @@ def extract_crawl(name: str, background: BackgroundTasks) -> FetchStarted:
     if crawl_run_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"crawl {name!r} has no completed snapshot to extract")
     snapshot_id = new_snapshot_id()
-    background.add_task(_extract_in_background, name, crawl_run_id, snapshot_id)
+    background.add_task(_extract_in_background, name, crawl_run_id, snapshot_id, config.extract_kind)
     return FetchStarted(source=name, snapshot_id=snapshot_id, status="running")
 
 

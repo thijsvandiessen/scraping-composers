@@ -16,6 +16,7 @@
   {% if entity.kind == "person" %}
   <a class="sc-btn" href="{% url 'works' %}?q={{ entity.label|urlencode }}">works by this person</a>
   <a class="sc-btn" href="{% url 'person_concerts_any' entity.id %}">concerts by this person{% if concert_total is not None %} ({{ concert_total }}){% endif %}</a>
+  <a class="sc-btn" href="{% url 'person_recordings_any' entity.id %}">recordings by this person{% if recording_total is not None %} ({{ recording_total }}){% endif %}</a>
   {% endif %}
   <span class="sc-muted">id {{ entity.id }}</span>
 </div>

@@ -7,13 +7,16 @@ from .crud import (
     get_concert,
     get_entity,
     get_person,
+    get_recording,
     get_stats,
     list_concerts,
     list_entities,
     list_mentions,
     list_people,
+    list_recordings,
     list_works,
     person_concerts,
+    person_recordings,
 )
 from .deps import DbSession, PageQuery
 from .schemas import (
@@ -25,6 +28,9 @@ from .schemas import (
     EntityDetail,
     EntityPage,
     MentionPage,
+    RecordingDetail,
+    RecordingListPage,
+    RecordingPage,
     StatsOut,
     WorkPage,
 )
@@ -101,6 +107,35 @@ def get_person_concerts(
 ) -> ConcertPage:
     """Concerts the person took part in (derived into gold by promote)."""
     return person_concerts(db, person_id, page, limit)
+
+
+@v1.get("/recordings", response_model=RecordingListPage)
+def recordings(
+    db: DbSession,
+    q: str | None = None,
+    source: str | None = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> RecordingListPage:
+    """Browse recordings (derived into gold by promote), newest first."""
+    return list_recordings(db, q, source, page, limit)
+
+
+@v1.get("/recordings/{recording_id}", response_model=RecordingDetail)
+def recording_detail(recording_id: int, db: DbSession) -> RecordingDetail:
+    """One recording: its credited artists and the works on it."""
+    return get_recording(db, recording_id)
+
+
+@v1.get("/people/{person_id}/recordings", response_model=RecordingPage)
+def get_person_recordings(
+    person_id: uuid.UUID,
+    db: DbSession,
+    page: Annotated[int, Query(ge=1)] = 1,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> RecordingPage:
+    """Recordings the person is credited on (derived into gold by promote)."""
+    return person_recordings(db, person_id, page, limit)
 
 
 @v1.get("/composers", response_model=ComposerPage)

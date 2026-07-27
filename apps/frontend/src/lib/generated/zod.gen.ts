@@ -203,6 +203,95 @@ export const zMentionPage = z.object({
 });
 
 /**
+ * RecordingOut
+ */
+export const zRecordingOut = z.object({
+    catalogue_number: z.string().nullable(),
+    format: z.string().nullable(),
+    id: z.int(),
+    label: z.string().nullable(),
+    release_date: z.string().nullable(),
+    role: z.string(),
+    source: z.string(),
+    title: z.string().nullable(),
+    url: z.string().nullable(),
+    works: z.array(z.string())
+});
+
+/**
+ * RecordingPage
+ */
+export const zRecordingPage = z.object({
+    items: z.array(zRecordingOut),
+    limit: z.int(),
+    page: z.int(),
+    person_id: z.uuid(),
+    person_label: z.string(),
+    total: z.int()
+});
+
+/**
+ * RecordingParticipantOut
+ */
+export const zRecordingParticipantOut = z.object({
+    discipline: z.string().nullable(),
+    entity_id: z.uuid().nullable(),
+    name: z.string(),
+    role: z.string()
+});
+
+/**
+ * RecordingSummary
+ */
+export const zRecordingSummary = z.object({
+    catalogue_number: z.string().nullable(),
+    conductors: z.array(z.string()),
+    format: z.string().nullable(),
+    id: z.int(),
+    label: z.string().nullable(),
+    performer_count: z.int(),
+    release_date: z.string().nullable(),
+    source: z.string(),
+    title: z.string().nullable(),
+    url: z.string().nullable(),
+    work_count: z.int()
+});
+
+/**
+ * RecordingListPage
+ */
+export const zRecordingListPage = z.object({
+    items: z.array(zRecordingSummary),
+    limit: z.int(),
+    page: z.int(),
+    total: z.int()
+});
+
+/**
+ * RecordingWorkOut
+ */
+export const zRecordingWorkOut = z.object({
+    composer: z.string().nullable(),
+    title: z.string()
+});
+
+/**
+ * RecordingDetail
+ */
+export const zRecordingDetail = z.object({
+    catalogue_number: z.string().nullable(),
+    format: z.string().nullable(),
+    id: z.int(),
+    label: z.string().nullable(),
+    participants: z.array(zRecordingParticipantOut),
+    release_date: z.string().nullable(),
+    source: z.string(),
+    title: z.string().nullable(),
+    url: z.string().nullable(),
+    works: z.array(zRecordingWorkOut)
+});
+
+/**
  * StatsOut
  */
 export const zStatsOut = z.object({
@@ -266,9 +355,9 @@ export const zWorkPage = z.object({
 
 export const zListComposersV1ComposersGetQuery = z.object({
     q: z.string().nullish(),
+    sort: z.string().regex(/^(label|concerts)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20),
-    sort: z.string().regex(/^(label|concerts)$/).optional().default('label')
+    limit: z.int().gte(1).lte(100).optional().default(20)
 });
 
 /**
@@ -308,9 +397,9 @@ export const zConcertDetailV1ConcertsConcertIdGetResponse = zConcertDetail;
 
 export const zListConductorsV1ConductorsGetQuery = z.object({
     q: z.string().nullish(),
+    sort: z.string().regex(/^(label|concerts)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20),
-    sort: z.string().regex(/^(label|concerts)$/).optional().default('label')
+    limit: z.int().gte(1).lte(100).optional().default(20)
 });
 
 /**
@@ -330,9 +419,9 @@ export const zGetConductorV1ConductorsConductorIdGetResponse = zComposerDetail;
 export const zEntitiesV1EntitiesGetQuery = z.object({
     q: z.string().nullish(),
     kind: z.string().nullish(),
+    order: z.string().regex(/^(label|random)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20),
-    order: z.string().regex(/^(label|random)$/).optional().default('label')
+    limit: z.int().gte(1).lte(100).optional().default(20)
 });
 
 /**
@@ -374,11 +463,46 @@ export const zGetPersonConcertsV1PeoplePersonIdConcertsGetQuery = z.object({
  */
 export const zGetPersonConcertsV1PeoplePersonIdConcertsGetResponse = zConcertPage;
 
+export const zGetPersonRecordingsV1PeoplePersonIdRecordingsGetPath = z.object({
+    person_id: z.uuid()
+});
+
+export const zGetPersonRecordingsV1PeoplePersonIdRecordingsGetQuery = z.object({
+    page: z.int().gte(1).optional().default(1),
+    limit: z.int().gte(1).lte(100).optional().default(20)
+});
+
+/**
+ * Successful Response
+ */
+export const zGetPersonRecordingsV1PeoplePersonIdRecordingsGetResponse = zRecordingPage;
+
+export const zRecordingsV1RecordingsGetQuery = z.object({
+    q: z.string().nullish(),
+    source: z.string().nullish(),
+    page: z.int().gte(1).optional().default(1),
+    limit: z.int().gte(1).lte(100).optional().default(20)
+});
+
+/**
+ * Successful Response
+ */
+export const zRecordingsV1RecordingsGetResponse = zRecordingListPage;
+
+export const zRecordingDetailV1RecordingsRecordingIdGetPath = z.object({
+    recording_id: z.int()
+});
+
+/**
+ * Successful Response
+ */
+export const zRecordingDetailV1RecordingsRecordingIdGetResponse = zRecordingDetail;
+
 export const zListSoloistsV1SoloistsGetQuery = z.object({
     q: z.string().nullish(),
+    sort: z.string().regex(/^(label|concerts)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20),
-    sort: z.string().regex(/^(label|concerts)$/).optional().default('label')
+    limit: z.int().gte(1).lte(100).optional().default(20)
 });
 
 /**
@@ -402,10 +526,10 @@ export const zStatsV1StatsGetResponse = zStatsOut;
 
 export const zWorksV1WorksGetQuery = z.object({
     q: z.string().nullish(),
-    page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20),
     performed: z.boolean().optional().default(false),
-    sort: z.string().regex(/^(label|mentions)$/).optional().default('label')
+    sort: z.string().regex(/^(label|mentions)$/).optional().default('label'),
+    page: z.int().gte(1).optional().default(1),
+    limit: z.int().gte(1).lte(100).optional().default(20)
 });
 
 /**

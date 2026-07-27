@@ -13,8 +13,10 @@ from composer_warehouse.models import (
     ConcertParticipant,
     Entity,
     RawWorkMention,
+    Recording,
     Work,
 )
+from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -221,6 +223,68 @@ def test_promote_copies_silver_derived_concerts(session: Session, tmp_path: Path
     assert stats.concerts == 4
     assert stats.concert_participant_links == 4  # Beinum, Mengelberg, Rattle, Matthews
     assert stats.unresolved_participant_names == 1
+
+
+def _recording_raw() -> dict[str, object]:
+    return {
+        "_source": "llm",
+        "_kind": "recording",
+        "record_key": "https://dg.example/album#486 1234",
+        "url": "https://dg.example/album",
+        "title": "Beethoven: Symphony No. 9",
+        "release_date": "2024-03-15",
+        "label": "Deutsche Grammophon",
+        "catalogue_number": "486 1234",
+        "format": "CD",
+        "artists": [
+            {"name": "Simon Rattle", "role": "conductor", "discipline": None},
+            {"name": "Janine Jansen", "role": "soloist", "discipline": "violin"},
+        ],
+    }
+
+
+def _seed_recording_silver(session: Session) -> None:
+    raw = _recording_raw()
+    dg = FakeSource(
+        records=(
+            perf_mention(f"{raw['record_key']}#w0", "Symphony No. 9", "Beethoven", raw),
+            perf_mention(f"{raw['record_key']}#w1", "Coriolan Overture", "Beethoven", raw),
+            person("Simon Rattle", external_id="dg:rattle"),
+            person("Janine Jansen", external_id="dg:jansen"),
+        ),
+        name="deutschegrammophon",
+        base_url="https://dg.example",
+    )
+    ingest_source(session, dg)
+
+
+def test_promote_copies_silver_derived_recordings(session: Session, tmp_path: Path) -> None:
+    _seed_recording_silver(session)
+    derive_recordings(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path)
+
+    with _gold_session(gold_path) as gold:
+        recording = gold.scalars(select(Recording)).one()
+        assert recording.title == "Beethoven: Symphony No. 9"
+        assert recording.catalogue_number == "486 1234"
+        assert recording.label == "Deutsche Grammophon"
+        assert len(recording.works) == 2  # both mentions grouped by record_key
+
+        rattle = gold.scalars(select(Entity).where(Entity.label == "Simon Rattle")).one()
+        by_role = {p.role: p for p in recording.participants}
+        assert by_role["conductor"].entity_id == rattle.id  # participant re-pointed to canonical
+        assert by_role["soloist"].discipline == "violin"
+
+    assert stats.recordings == 1
+    assert stats.recording_participant_links == 2  # Rattle, Jansen
+    assert stats.unresolved_recording_participant_names == 0
+
+
+def test_promote_over_underived_silver_yields_no_recordings(session: Session, tmp_path: Path) -> None:
+    _seed_recording_silver(session)  # deliberately no derive_recordings
+    stats = promote(session, tmp_path / "gold.db")
+    assert stats.recordings == 0
 
 
 def test_promote_over_underived_silver_yields_no_concerts(session: Session, tmp_path: Path) -> None:

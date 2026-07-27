@@ -42,6 +42,7 @@ from .db import init_db
 from .ingestion import ingest_documents, new_work
 from .models import Entity, PersonMatch, RawWorkMention, Source, Work
 from .persons import dedupe_persons
+from .recordings import derive_recordings
 from .works import add_alias, extract_features
 
 log = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class RebuildStats:
     work_decisions_applied: int = 0
     work_decisions_dropped: int = 0
     concerts: int = 0
+    recordings: int = 0
 
 
 @dataclass(frozen=True)
@@ -237,6 +239,7 @@ def rebuild_silver(
             auto_linked, _needs_review = dedupe_persons(session)
             work_applied, work_dropped = _apply_work_decisions(session, work_decisions)
             concert_stats = derive_concerts(session)
+            recording_stats = derive_recordings(session)
         engine.dispose()
         return RebuildStats(
             sources_replayed=replayed,
@@ -248,6 +251,7 @@ def rebuild_silver(
             work_decisions_applied=work_applied,
             work_decisions_dropped=work_dropped,
             concerts=concert_stats.concerts,
+            recordings=recording_stats.recordings,
         )
 
     stats = run_build(db_path, _build)
