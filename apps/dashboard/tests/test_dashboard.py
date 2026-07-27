@@ -913,6 +913,7 @@ def test_promote_page_renders_config_fields(monkeypatch: pytest.MonkeyPatch, sta
     for field in ("drop_unevidenced_persons", "collapse_duplicates", "prune_unreferenced"):
         assert f'name="{field}" checked' in page
     assert 'name="min_sitelinks"' in page
+    assert 'name="min_referrers"' in page
     assert 'name="gold_path"' in page
 
 
@@ -927,6 +928,7 @@ def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, st
             "drop_unevidenced_persons": "on",
             "collapse_duplicates": "on",
             "min_sitelinks": "150",
+            "min_referrers": "2",
             "gold_path": "/data/gold-alt.db",
         },
         follow=True,
@@ -935,6 +937,7 @@ def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, st
     assert stub.promote_options == {
         "prune_unreferenced": False,
         "min_sitelinks": 150,
+        "min_referrers": 2,
         "gold_path": "/data/gold-alt.db",
     }
 
@@ -948,6 +951,7 @@ def test_promote_form_defaults_send_no_options(monkeypatch: pytest.MonkeyPatch, 
         "collapse_duplicates": "on",
         "prune_unreferenced": "on",
         "min_sitelinks": "",
+        "min_referrers": "",
         "gold_path": "",
     }
     staff_client.post("/admin/promote/start", fields, follow=True)
@@ -963,7 +967,7 @@ def test_promote_form_rejects_non_numeric_sitelinks(
         "/admin/promote/start", {"options_form": "1", "min_sitelinks": "many"}, follow=True
     )
     assert response.redirect_chain[0] == ("/admin/promote/", 302)
-    assert "min sitelinks must be a whole number" in response.content.decode()
+    assert "min sitelinks and min referrers must be whole numbers" in response.content.decode()
     assert not hasattr(stub, "promote_options")  # the API was never called
 
 

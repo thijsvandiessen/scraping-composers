@@ -11,7 +11,13 @@ from composer_warehouse.models import Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from ._claims import collect_other_literal_claims, collect_person_claims, insert_claims, walk_referenced
+from ._claims import (
+    collect_other_literal_claims,
+    collect_person_claims,
+    drop_pruned_object_claims,
+    insert_claims,
+    walk_referenced,
+)
 from ._copy import (
     copy_concerts,
     copy_entities,
@@ -52,10 +58,14 @@ class PromoteConfig:
 
     Every rule defaults to on; the two-argument ``promote(silver, gold_path)``
     call is the fully curated build. ``min_sitelinks`` only matters while
-    rule 1 is on — with rule 1 off every person is kept anyway.
+    rule 1 is on — with rule 1 off every person is kept anyway. ``min_referrers``
+    only matters while rule 3 is on — with rule 3 off every entity is kept; at
+    its default of 1 it reproduces the historical "keep anything referenced"
+    behaviour.
     """
 
     min_sitelinks: int | None = None
+    min_referrers: int = 1  # rule 3 threshold: keep entities with >= N distinct referrers
     drop_unevidenced_persons: bool = True  # rule 1
     collapse_duplicates: bool = True  # rule 2
     prune_unreferenced: bool = True  # rule 3
@@ -123,6 +133,7 @@ def _build(silver: Session, tmp_path: Path, config: PromoteConfig) -> PromoteSta
         walk_referenced(build, referenced)
         collect_other_literal_claims(build)
         copy_entities(build, gold, build.kept_other)
+        drop_pruned_object_claims(build)
         insert_claims(build, gold)
         copy_records(build, gold)
         copy_works_titles_mentions(build, gold)

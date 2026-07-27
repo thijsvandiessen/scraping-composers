@@ -488,6 +488,74 @@ def test_rule3_off_keeps_unreferenced_entities(session: Session, tmp_path: Path)
     assert stats.persons_dropped == 1
 
 
+def _seed_referrers_silver(session: Session) -> None:
+    """Silver exercising rule 3's referrer threshold. All persons are kept
+    (reported by a performance source), and they reference three places:
+
+    - Popularville: two distinct persons refer to it (2 referrers),
+    - Lonelyton: a single person refers to it (1 referrer),
+    - Twiceville: one person refers to it via two claims (still 1 referrer).
+    """
+    archive = FakeSource(
+        records=(
+            mention("Symphony No. 5, Op. 67", "Composer, Evidence", "m1"),  # makes archive a perf source
+            person("Popular, One", SourceClaim("born_in", "place", "Popularville"), external_id="a:one"),
+            person("Popular, Two", SourceClaim("born_in", "place", "Popularville"), external_id="a:two"),
+            person("Lonely, Composer", SourceClaim("born_in", "place", "Lonelyton"), external_id="a:lonely"),
+            person(
+                "Double, Claimer",
+                SourceClaim("born_in", "place", "Twiceville"),
+                SourceClaim("died_in", "place", "Twiceville"),
+                external_id="a:double",
+            ),
+        ),
+        name="archive",
+        base_url="https://archive.example",
+    )
+    ingest_source(session, archive)
+
+
+def test_min_referrers_default_keeps_single_referrer(session: Session, tmp_path: Path) -> None:
+    _seed_referrers_silver(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path)  # default min_referrers=1
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert {"Popularville", "Lonelyton", "Twiceville"} <= labels  # one referrer suffices
+    assert stats.entities_pruned == 0
+
+
+def test_min_referrers_prunes_weakly_referenced(session: Session, tmp_path: Path) -> None:
+    _seed_referrers_silver(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path, PromoteConfig(min_referrers=2))
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Popularville" in labels  # two distinct persons refer to it
+        assert "Lonelyton" not in labels  # only one referrer
+        assert "Twiceville" not in labels  # two claims but a single referrer
+        # pruning an entity also drops the claims that pointed at it
+        entity_ids = set(gold.scalars(select(Entity.id)))
+        objects = set(gold.scalars(select(Claim.object_id).where(Claim.object_id.is_not(None))))
+        assert objects <= entity_ids  # no claim points at a pruned row
+    assert stats.entities_pruned >= 2  # Lonelyton + Twiceville
+
+
+def test_min_referrers_keeps_shared_referrer_with_its_claims(session: Session, tmp_path: Path) -> None:
+    _seed_referrers_silver(session)
+    gold_path = tmp_path / "gold.db"
+    promote(session, gold_path, PromoteConfig(min_referrers=2))
+
+    with _gold_session(gold_path) as gold:
+        popularville = gold.scalars(select(Entity).where(Entity.label == "Popularville")).one()
+        claims = gold.scalars(
+            select(Claim).where(Claim.object_id == popularville.id, Claim.predicate == "born_in")
+        ).all()
+        assert len(claims) == 2  # both referrers' claims ride along
+
+
 def test_promote_writes_manifest_and_is_rerunnable(session: Session, tmp_path: Path) -> None:
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
