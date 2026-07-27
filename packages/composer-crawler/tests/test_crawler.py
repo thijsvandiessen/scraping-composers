@@ -4,6 +4,7 @@ the scrape phase runs with no browser or network."""
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 import composer_crawler.crawler as crawler_mod
@@ -14,6 +15,7 @@ from composer_crawler.testing import (
     FakeResult,
     FakeStringCompatibleMarkdown,
     FakeWebCrawler,
+    StreamingFakeWebCrawler,
     stub_discover,
     web_crawler_factory,
 )
@@ -152,3 +154,59 @@ def test_no_deep_crawl_when_discovery_yields_urls(monkeypatch: pytest.MonkeyPatc
         discovered=["https://example.org/a"],
     )
     assert fake.run_config.deep_crawl_strategy is None  # discovered URLs need no link-following
+
+
+def test_pages_are_asked_for_as_a_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Progress reporting is only worth anything if the pages arrive one at a time
+    rather than as one batch once the whole crawl has already finished."""
+    fake = FakeWebCrawler()
+    _run(_config(), fake, monkeypatch, discovered=["https://example.org/a"])
+    assert fake.run_config.stream is True
+
+
+def test_a_streamed_crawl_yields_the_same_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls = ["https://example.org/a", "https://example.org/b"]
+    fake = StreamingFakeWebCrawler()
+    records = _run(_config(), fake, monkeypatch, discovered=urls)
+    assert [r.url for r in records] == urls
+    assert fake.streamed == 2
+
+
+def test_a_streamed_crawl_is_closed_when_the_budget_cuts_it_short(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Breaking out of the stream leaves the generator suspended mid-crawl unless
+    it is closed, which would hold the browser session open."""
+    urls = ["https://example.org/a", "https://example.org/b", "https://example.org/c"]
+    fake = StreamingFakeWebCrawler()
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(urls))
+    crawler = Crawler(_config(max_pages=None), web_crawler_factory=web_crawler_factory(fake))
+
+    records = list(crawler.crawl(2))
+
+    assert len(records) == 2
+    assert fake.closed is True
+
+
+def test_the_crawl_reports_progress_and_a_summary(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    fake = FakeWebCrawler()
+    with caplog.at_level(logging.INFO, logger="composer_crawler"):
+        _run(_config(), fake, monkeypatch, discovered=["https://example.org/a"])
+
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("starting from 1 seed(s)" in m for m in messages)
+    assert any("finished" in m and "1 pages" in m for m in messages)
+
+
+def test_falling_back_to_the_seeds_is_reported(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Discovery finding nothing is the most confusing way for a crawl to come back
+    near-empty, so it must not be silent."""
+    fake = FakeWebCrawler()
+    with caplog.at_level(logging.INFO, logger="composer_crawler.crawler"):
+        _run(_config(follow_links=True, allow_patterns=("*",)), fake, monkeypatch, discovered=[])
+
+    assert any("falling back to the seeds" in r.getMessage() for r in caplog.records)

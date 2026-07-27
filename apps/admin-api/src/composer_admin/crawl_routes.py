@@ -22,7 +22,7 @@ from composer_crawler import (
 )
 from composer_crawler.records import iter_crawl_records
 from composer_crawler.store import DEFAULT_CRAWL_CONFIGS_PATH
-from composer_extract import OllamaExtractor, extract_documents, extract_recording_documents
+from composer_extract import ExtractOptions, OllamaExtractor, extract_documents, extract_recording_documents
 from composer_scrapers import REGISTRY
 from composer_warehouse.ingestion import create_run
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
@@ -95,12 +95,14 @@ def _crawl_in_background(config: CrawlConfig, snapshot_id: str, max_pages: int |
     Returns whether the stage succeeded, so the pipeline knows not to extract
     from a snapshot that was never finished.
     """
+    log.info("background crawl starting for %s/%s (max_pages=%s)", config.name, snapshot_id, max_pages)
     try:
         _crawler(config).crawl_to_bucket(_bucket(), max_pages=max_pages, run_id=snapshot_id)
     except Exception:
         # Recorded as a failed manifest by crawl_to_bucket; log for the console.
         log.exception("background crawl failed for %s/%s", config.name, snapshot_id)
         return False
+    log.info("background crawl finished for %s/%s", config.name, snapshot_id)
     return True
 
 
@@ -114,18 +116,26 @@ def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str, extra
 
     Pages whose output the model mangles are skipped by ``extract_documents``
     itself; only a wholesale failure (Ollama unreachable, or nothing usable at
-    all) gets here. Returns whether the stage succeeded.
+    all) gets here. The ``ExtractOptions`` is held on to rather than defaulted
+    inside the call, because its stats are the only account of what the model
+    dropped — without it this path silently discards them. Returns whether the
+    stage succeeded.
     """
     bucket = _bucket()
+    options = ExtractOptions()
+    log.info("background extract starting for %s/%s (from crawl %s)", name, snapshot_id, crawl_run_id)
     try:
         records = iter_crawl_records(name, crawl_run_id, bucket)
         extract = extract_recording_documents if extract_kind == "recordings" else extract_documents
-        docs = extract(records, source_name=name, extractor=_extractor())
+        docs = extract(records, source_name=name, extractor=_extractor(), options=options)
         write_documents(bucket, name, docs, run_id=snapshot_id)
     except Exception:
         # Recorded as a failed manifest by write_documents; log for the console.
-        log.exception("background extract failed for %s/%s", name, snapshot_id)
+        log.exception(
+            "background extract failed for %s/%s after %s", name, snapshot_id, options.stats.summary()
+        )
         return False
+    log.info("background extract finished for %s/%s: %s", name, snapshot_id, options.stats.summary())
     return True
 
 

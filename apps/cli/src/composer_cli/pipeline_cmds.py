@@ -8,12 +8,15 @@ crawl just wrote.
 """
 
 import argparse
+import logging
 
 from composer_bronze.bucket import LocalBucket, latest_document_run_id
 
 from .crawl_cmds import cmd_crawl
 from .extract_cmds import cmd_extract
 from .ingest_cmds import cmd_process
+
+log = logging.getLogger(__name__)
 
 
 def _crawl_args(args: argparse.Namespace) -> argparse.Namespace:
@@ -46,21 +49,33 @@ def _process_args(args: argparse.Namespace, run_id: str) -> argparse.Namespace:
     )
 
 
-def _stopped(step: str) -> int:
+def _stopped(config: str, step: str) -> int:
+    log.warning("pipeline %s: stopped at %s", config, step)
     print(f"pipeline stopped at {step}")
     return 1
 
 
+def _stage(config: str, label: str) -> None:
+    """Announce a stage, so a cron'd chain leaves a readable trail. Mirrors the
+    admin API's ``pipeline._stage`` — the same three steps, the same log lines."""
+    log.info("pipeline %s: %s", config, label)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
+    config = args.config
+    _stage(config, "crawl")
     if cmd_crawl(_crawl_args(args)) != 0:
-        return _stopped("crawl")
+        return _stopped(config, "crawl")
+    _stage(config, "extract")
     if cmd_extract(_extract_args(args)) != 0:
-        return _stopped("extract")
-    run_id = latest_document_run_id(LocalBucket(args.bucket_path), args.config)
+        return _stopped(config, "extract")
+    run_id = latest_document_run_id(LocalBucket(args.bucket_path), config)
     if run_id is None:
-        print(f"no extracted snapshot for '{args.config}' to load")
-        return _stopped("extract")
+        print(f"no extracted snapshot for '{config}' to load")
+        return _stopped(config, "extract")
+    _stage(config, "load")
     if cmd_process(_process_args(args, run_id)) != 0:
-        return _stopped("load")
-    print(f"pipeline complete for {args.config}")
+        return _stopped(config, "load")
+    log.info("pipeline %s: complete", config)
+    print(f"pipeline complete for {config}")
     return 0

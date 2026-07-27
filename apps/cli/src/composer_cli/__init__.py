@@ -6,6 +6,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH
+from composer_config import settings
 from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_REFERRERS, DEFAULT_MIN_SITELINKS
 from composer_scrapers import REGISTRY
 
@@ -212,13 +213,40 @@ def _add_person_parsers(sub: _SubParsers) -> None:
     p_preview.set_defaults(func=cmd_person_review)
 
 
+_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+
+def _log_level(args: argparse.Namespace) -> int:
+    """The level to configure: ``-v`` wins, then ``--log-level``, then $LOG_LEVEL.
+
+    ``-v`` deliberately turns the root logger up rather than only our packages, so
+    crawl4ai's and ollama's own chatter is there when a crawl or an extract is
+    behaving strangely. Dial individual runs back down with ``--log-level``.
+    """
+    if args.verbose:
+        return logging.DEBUG
+    name = (args.log_level or settings.log_level).upper()
+    return getattr(logging, name, logging.INFO)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="composer-ingest", description="Ingest classical composer data")
     parser.add_argument(
         "--database-url",
         help="SQLAlchemy URL (default: $DATABASE_URL or sqlite:///composers.db)",
     )
-    parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="everything at DEBUG, third-party libraries included (shorthand for --log-level DEBUG)",
+    )
+    parser.add_argument(
+        "--log-level",
+        choices=[level.lower() for level in _LOG_LEVELS],
+        type=str.lower,
+        help=f"log level for this run (default: $LOG_LEVEL or {settings.log_level.lower()})",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     _add_query_parsers(sub)
     _add_work_parsers(sub)
@@ -227,7 +255,7 @@ def main() -> None:
 
     args = parser.parse_args()
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=_log_level(args),
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
         stream=sys.stderr,
     )

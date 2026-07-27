@@ -9,6 +9,7 @@ proceeds and is the only account of what the model failed to produce.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -43,22 +44,48 @@ class ExtractRun:
     max_chars: int
     now: datetime
     stats: ExtractStats
+    started: float = field(default_factory=time.monotonic)
 
     @classmethod
     def start(cls, source_name: str, options: ExtractOptions | None) -> ExtractRun:
         opts = options if options is not None else ExtractOptions()
+        max_chars = opts.max_chars if opts.max_chars is not None else settings.extract_max_chars
+        log.info("extract %s: starting (max_chars=%d)", source_name, max_chars)
         return cls(
             source_name=source_name,
-            max_chars=opts.max_chars if opts.max_chars is not None else settings.extract_max_chars,
+            max_chars=max_chars,
             now=opts.now or datetime.now(UTC),
             stats=opts.stats,
         )
 
-    def mark_page(self) -> None:
-        """Count a finished page and, now and then, say so."""
+    @property
+    def elapsed(self) -> float:
+        return time.monotonic() - self.started
+
+    def _rate(self) -> float:
+        """Pages per minute so far — what tells you whether an overnight run will
+        actually finish. Measured over at least a second, so a run short enough to
+        divide by ~zero reports a dull number rather than an absurd one."""
+        return self.stats.pages * 60.0 / max(self.elapsed, 1.0)
+
+    def mark_page(self, url: str, documents: int) -> None:
+        """Count a finished page and, now and then, say how the run is going."""
         self.stats.pages += 1
+        log.debug("extract %s: %s -> %d document(s)", self.source_name, url, documents)
         if self.stats.pages % _PROGRESS_EVERY == 0:
-            log.info("extract %s: %s", self.source_name, self.stats.summary())
+            log.info(
+                "extract %s: %s in %.0fs (%.1f pages/min)",
+                self.source_name,
+                self.stats.summary(),
+                self.elapsed,
+                self._rate(),
+            )
 
     def finish(self) -> None:
-        log.info("extract %s finished: %s", self.source_name, self.stats.summary())
+        log.info(
+            "extract %s finished in %.0fs: %s (%.1f pages/min)",
+            self.source_name,
+            self.elapsed,
+            self.stats.summary(),
+            self._rate(),
+        )

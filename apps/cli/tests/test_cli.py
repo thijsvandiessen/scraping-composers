@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
 import pytest
-from composer_cli import main
+from composer_cli import _log_level, main
 from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_review
 from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
@@ -544,6 +545,33 @@ def test_cmd_runs_shows_run_log(tmp_path: Path, capsys: pytest.CaptureFixture[st
 # ---------------------------------------------------------------------------
 # main() argument parsing
 # ---------------------------------------------------------------------------
+
+
+def test_verbose_means_debug_everywhere() -> None:
+    """``-v`` turns the root logger up rather than only our packages, so crawl4ai's
+    and ollama's own output is there when a crawl or extract misbehaves."""
+    assert _log_level(_ns(verbose=True, log_level=None)) == logging.DEBUG
+
+
+def test_log_level_flag_overrides_the_configured_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    from composer_config import settings
+
+    monkeypatch.setattr(settings, "log_level", "INFO")
+    assert _log_level(_ns(verbose=False, log_level="warning")) == logging.WARNING
+
+
+def test_log_level_falls_back_to_the_setting(monkeypatch: pytest.MonkeyPatch) -> None:
+    from composer_config import settings
+
+    monkeypatch.setattr(settings, "log_level", "DEBUG")
+    assert _log_level(_ns(verbose=False, log_level=None)) == logging.DEBUG
+
+
+def test_an_unparseable_log_level_setting_does_not_break_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    from composer_config import settings
+
+    monkeypatch.setattr(settings, "log_level", "chatty")
+    assert _log_level(_ns(verbose=False, log_level=None)) == logging.INFO
 
 
 def test_main_exits_nonzero_without_subcommand(monkeypatch: pytest.MonkeyPatch) -> None:

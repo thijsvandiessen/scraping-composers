@@ -12,7 +12,8 @@ their entities.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+import logging
+from collections.abc import Callable, Iterable, Iterator
 from datetime import datetime
 from typing import Protocol
 
@@ -24,8 +25,15 @@ from .resilience import extract_chunks
 from .run import ExtractOptions, ExtractRun
 from .schema import ExtractedConcert, ExtractedRecording, PageExtraction, PageRecordingExtraction
 
+log = logging.getLogger(__name__)
+
 _LLM_SOURCE_MARKER = "llm"
 _RECORDING_KIND = "recording"
+
+#: What one page contributes to the output stream.
+Document = EntityDocument | WorkMentionDocument
+#: A mode's per-page emitter, bound to its extractor by the entry points below.
+Emitter = Callable[[CrawlRecord, ExtractRun], Iterator[Document]]
 
 
 class PageExtractor(Protocol):
@@ -118,7 +126,9 @@ def _concert_roles(concerts: Iterable[ExtractedConcert]) -> dict[str, set[str]]:
 
 
 def _page_concerts(record: CrawlRecord, extractor: PageExtractor, run: ExtractRun) -> list[ExtractedConcert]:
-    chunks = chunk_markdown(record_markdown(record), run.max_chars)
+    markdown = record_markdown(record)
+    chunks = chunk_markdown(markdown, run.max_chars)
+    log.debug("extract %s: %d chunk(s) from %d chars", record.final_url, len(chunks), len(markdown))
     pages = extract_chunks(
         chunks, extractor.extract_page, record.metadata, url=record.final_url, stats=run.stats
     )
@@ -208,7 +218,9 @@ def _recording_roles(recordings: Iterable[ExtractedRecording]) -> dict[str, set[
 def _page_recordings(
     record: CrawlRecord, extractor: RecordingPageExtractor, run: ExtractRun
 ) -> list[ExtractedRecording]:
-    chunks = chunk_markdown(record_markdown(record), run.max_chars)
+    markdown = record_markdown(record)
+    chunks = chunk_markdown(markdown, run.max_chars)
+    log.debug("extract %s: %d chunk(s) from %d chars", record.final_url, len(chunks), len(markdown))
     pages = extract_chunks(
         chunks, extractor.extract_recording_page, record.metadata, url=record.final_url, stats=run.stats
     )
@@ -228,19 +240,32 @@ def _emit_recordings(
         yield from _recording_work_mentions(recording, key, url, run.source_name, run.now)
 
 
+def _emit_pages(records: Iterable[CrawlRecord], emit: Emitter, run: ExtractRun) -> Iterator[Document]:
+    """Drive *emit* over every record, counting what each page produced.
+
+    The count is tallied while the documents are handed on rather than by
+    collecting them, so the whole extract stays lazy: nothing is held in memory
+    just to be able to report it.
+    """
+    for record in records:
+        emitted = 0
+        for document in emit(record, run):
+            emitted += 1
+            yield document
+        run.mark_page(record.final_url, emitted)
+    run.finish()
+
+
 def extract_documents(
     records: Iterable[CrawlRecord],
     *,
     source_name: str,
     extractor: PageExtractor,
     options: ExtractOptions | None = None,
-) -> Iterator[EntityDocument | WorkMentionDocument]:
+) -> Iterator[Document]:
     """Yield entity/work-mention documents from crawled *records* (concert mode)."""
     run = ExtractRun.start(source_name, options)
-    for record in records:
-        yield from _emit_concerts(record, extractor, run)
-        run.mark_page()
-    run.finish()
+    yield from _emit_pages(records, lambda record, r: _emit_concerts(record, extractor, r), run)
 
 
 def extract_recording_documents(
@@ -249,10 +274,7 @@ def extract_recording_documents(
     source_name: str,
     extractor: RecordingPageExtractor,
     options: ExtractOptions | None = None,
-) -> Iterator[EntityDocument | WorkMentionDocument]:
+) -> Iterator[Document]:
     """Yield entity/work-mention documents from crawled *records* (recording mode)."""
     run = ExtractRun.start(source_name, options)
-    for record in records:
-        yield from _emit_recordings(record, extractor, run)
-        run.mark_page()
-    run.finish()
+    yield from _emit_pages(records, lambda record, r: _emit_recordings(record, extractor, r), run)

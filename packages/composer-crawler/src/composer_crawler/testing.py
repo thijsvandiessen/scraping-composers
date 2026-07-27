@@ -9,7 +9,7 @@ replaces :func:`composer_crawler.discovery.discover_urls` with a fixed URL list.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Coroutine
+from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
@@ -84,6 +84,42 @@ class FakeWebCrawler:
         self.scraped_urls = list(urls)
         self.run_config = config
         return [self._results.get(url, FakeResult(url)) for url in urls]
+
+
+class StreamingFakeWebCrawler(FakeWebCrawler):
+    """A fake whose ``arun_many`` streams, the way crawl4ai does under ``stream=True``.
+
+    :class:`FakeWebCrawler` returns a list, which is the *other* shape the crawler
+    has to cope with; this one exercises the async-generator path, including
+    being closed early when the page budget is reached. ``streamed`` records how
+    many results were actually pulled, so a test can tell a real stream from a
+    list that was merely iterated.
+    """
+
+    def __init__(
+        self, results: dict[str, FakeResult] | None = None, *, fail: Exception | None = None
+    ) -> None:
+        super().__init__(results, fail=fail)
+        self.streamed = 0
+        self.closed = False
+
+    async def arun_many(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, urls: list[str], config: Any = None, dispatcher: Any = None
+    ) -> AsyncGenerator[FakeResult, None]:
+        if self._fail is not None:
+            raise self._fail
+        self.scraped_urls = list(urls)
+        self.run_config = config
+
+        async def _stream() -> AsyncGenerator[FakeResult, None]:
+            try:
+                for url in urls:
+                    self.streamed += 1
+                    yield self._results.get(url, FakeResult(url))
+            finally:
+                self.closed = True
+
+        return _stream()
 
 
 def web_crawler_factory(crawler: FakeWebCrawler) -> Callable[[Any], FakeWebCrawler]:
