@@ -22,6 +22,11 @@ urlpatterns = [
         name="crawl_delete",
     ),
     path(
+        "admin/crawls/<str:name>/run",
+        admin.site.admin_view(crawl_views.run_crawl_pipeline),
+        name="run_crawl_pipeline",
+    ),
+    path(
         "admin/crawls/<str:name>/crawl",
         admin.site.admin_view(crawl_views.start_crawl),
         name="start_crawl",

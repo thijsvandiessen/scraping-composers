@@ -116,6 +116,11 @@ class AdminAPI(_BaseAPI):
         started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/process")
         return started
 
+    def run_crawl_pipeline(self, name: str) -> dict[str, Any]:
+        """Crawl, extract and load the crawl in one unattended chain."""
+        started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/run")
+        return started
+
 
 @dataclass
 class DataAPI(_BaseAPI):
