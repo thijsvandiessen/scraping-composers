@@ -818,7 +818,7 @@ requires-dist = [
     { name = "composer-config", editable = "packages/composer-config" },
     { name = "composer-schema", editable = "packages/composer-schema" },
     { name = "composer-schema", extras = ["testing"], marker = "extra == 'testing'", editable = "packages/composer-schema" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.3.4" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=9.1.1" },
     { name = "sqlalchemy", specifier = ">=2.0.51" },
 ]
