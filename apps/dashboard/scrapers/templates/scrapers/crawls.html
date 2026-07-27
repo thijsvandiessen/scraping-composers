@@ -11,8 +11,9 @@
 
 <div class="sc-toolbar">
   <a href="{% url 'crawl_new' %}" class="sc-btn sc-btn-primary">New crawl</a>
-  <span class="sc-muted">generic crawls fetch raw pages into the bucket, without parsing —
-    configs marked <em>code</em> are registered in the source tree and read-only here</span>
+  <span class="sc-muted"><em>Run</em> chains crawl → extract → load; the individual steps stay
+    available for re-running one on its own — configs marked <em>code</em> are registered in the
+    source tree and read-only here</span>
   {% if refreshing %}<span class="sc-muted">a crawl is in progress — refreshing every 5 s…</span>{% endif %}
 </div>
 
@@ -48,6 +49,11 @@
     {% endwith %}
     <td>
       <div style="display: flex; gap: 0.375rem; align-items: center;">
+        <form method="post" action="{% url 'run_crawl_pipeline' crawl.name %}">
+          {% csrf_token %}
+          <button type="submit" class="sc-btn sc-btn-primary"
+                  title="Crawl, extract and load in one go">Run</button>
+        </form>
         <form method="post" action="{% url 'start_crawl' crawl.name %}">
           {% csrf_token %}
           <button type="submit" class="sc-btn">Crawl</button>

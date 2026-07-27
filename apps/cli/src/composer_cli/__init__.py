@@ -20,6 +20,7 @@ from .ingest_cmds import (
     cmd_rebuild_silver,
 )
 from .person_cmds import cmd_dedupe_persons, cmd_person_review
+from .pipeline_cmds import cmd_run
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
 
@@ -109,6 +110,23 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
     )
     p_extract.set_defaults(func=cmd_extract)
+
+    p_run = sub.add_parser(
+        "run",
+        help="crawl, extract and load one crawl config in a single unattended chain "
+        "(the same three steps, run back to back)",
+    )
+    p_run.add_argument("config", choices=sorted(crawl_choices()))
+    p_run.add_argument("--max-pages", type=int, help="cap on URLs crawled (overrides the config)")
+    p_run.add_argument(
+        "--query",
+        help="rank discovered URLs by relevance to this topic (overrides the config's relevance_query)",
+    )
+    p_run.add_argument("--model", help="Ollama model to use (overrides $OLLAMA_MODEL / the default)")
+    p_run.add_argument(
+        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
+    )
+    p_run.set_defaults(func=cmd_run)
 
     p_process = sub.add_parser(
         "process", help="ingest previously fetched records from the bucket into the DB"

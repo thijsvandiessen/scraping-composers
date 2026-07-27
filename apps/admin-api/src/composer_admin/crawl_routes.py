@@ -29,6 +29,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 
 from .crud import has_running
 from .deps import DbSession, require_admin_key
+from .pipeline import run_pipeline
 from .routes import _bucket, _has_running_fetch, _last_snapshot, _process_in_background, _snapshot_out
 from .schemas import CrawlConfigIn, CrawlOut, FetchStarted, RunStarted
 
@@ -88,13 +89,19 @@ def _crawler(config: CrawlConfig) -> Crawler:
     return Crawler(config)
 
 
-def _crawl_in_background(config: CrawlConfig, snapshot_id: str, max_pages: int | None) -> None:
-    """Run a crawl to the bucket; status lives in the snapshot's manifest."""
+def _crawl_in_background(config: CrawlConfig, snapshot_id: str, max_pages: int | None) -> bool:
+    """Run a crawl to the bucket; status lives in the snapshot's manifest.
+
+    Returns whether the stage succeeded, so the pipeline knows not to extract
+    from a snapshot that was never finished.
+    """
     try:
         _crawler(config).crawl_to_bucket(_bucket(), max_pages=max_pages, run_id=snapshot_id)
     except Exception:
         # Recorded as a failed manifest by crawl_to_bucket; log for the console.
         log.exception("background crawl failed for %s/%s", config.name, snapshot_id)
+        return False
+    return True
 
 
 def _extractor() -> OllamaExtractor:
@@ -102,8 +109,13 @@ def _extractor() -> OllamaExtractor:
     return OllamaExtractor.from_settings()
 
 
-def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str, extract_kind: str) -> None:
-    """Run the model over a crawl snapshot, writing documents to a new snapshot."""
+def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str, extract_kind: str) -> bool:
+    """Run the model over a crawl snapshot, writing documents to a new snapshot.
+
+    Pages whose output the model mangles are skipped by ``extract_documents``
+    itself; only a wholesale failure (Ollama unreachable, or nothing usable at
+    all) gets here. Returns whether the stage succeeded.
+    """
     bucket = _bucket()
     try:
         records = iter_crawl_records(name, crawl_run_id, bucket)
@@ -113,6 +125,14 @@ def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str, extra
     except Exception:
         # Recorded as a failed manifest by write_documents; log for the console.
         log.exception("background extract failed for %s/%s", name, snapshot_id)
+        return False
+    return True
+
+
+def _pipeline_in_background(config: CrawlConfig, crawl_id: str) -> None:
+    """Drive the whole chain, handing it the stages this module owns so the test
+    seams above still apply to a pipeline run."""
+    run_pipeline(config, crawl_id, _crawl_in_background, _extract_in_background)
 
 
 @crawls.get("/crawls", response_model=list[CrawlOut])
@@ -185,6 +205,24 @@ def extract_crawl(name: str, background: BackgroundTasks) -> FetchStarted:
         raise HTTPException(status.HTTP_409_CONFLICT, f"crawl {name!r} has no completed snapshot to extract")
     snapshot_id = new_snapshot_id()
     background.add_task(_extract_in_background, name, crawl_run_id, snapshot_id, config.extract_kind)
+    return FetchStarted(source=name, snapshot_id=snapshot_id, status="running")
+
+
+@crawls.post("/crawls/{name}/run", status_code=status.HTTP_202_ACCEPTED, response_model=FetchStarted)
+def run_crawl_pipeline(name: str, db: DbSession, background: BackgroundTasks) -> FetchStarted:
+    """Crawl, extract and load in one go — the unattended path.
+
+    Nothing about the three stages changes; they simply run back to back, each
+    still recording its own snapshot or run, and the chain stops at the first
+    failure. Returns the crawl snapshot, which is what starts immediately.
+    """
+    config = _merged().get(name)
+    if config is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
+    if _has_running_fetch(_bucket(), name) or has_running(db, name):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"a run for {name!r} is already in progress")
+    snapshot_id = new_snapshot_id()
+    background.add_task(_pipeline_in_background, config, snapshot_id)
     return FetchStarted(source=name, snapshot_id=snapshot_id, status="running")
 
 

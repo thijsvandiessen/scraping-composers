@@ -190,6 +190,23 @@ def start_crawl(request: HttpRequest, name: str) -> HttpResponse:
     return redirect("crawls_index")
 
 
+def run_crawl_pipeline(request: HttpRequest, name: str) -> HttpResponse:
+    """Crawl, extract and load in one go, so the chain needs no babysitting."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    api = AdminAPI.from_env()
+    try:
+        started = api.run_crawl_pipeline(name)
+    except AdminAPIError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            f"running {started['source']}: crawl → extract → load (snapshot {started['snapshot_id']})",
+        )
+    return redirect("crawls_index")
+
+
 def start_extract(request: HttpRequest, name: str) -> HttpResponse:
     """Run the LLM over the crawl's latest snapshot, into a new one."""
     if request.method != "POST":
