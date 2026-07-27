@@ -9,6 +9,7 @@ running model.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 import ollama
@@ -36,6 +37,28 @@ def _response_content(response: Any) -> str:
     return content
 
 
+@dataclass(frozen=True)
+class OllamaTuning:
+    """Bounds on a single model call.
+
+    ``num_ctx`` has to fit a whole chunk plus its answer or Ollama truncates the
+    prompt server-side — a truncated page is what sends a model into the
+    repetition loop that produces unparseable JSON. ``num_predict`` then caps how
+    far such a loop can get before the call returns.
+    """
+
+    num_ctx: int | None = None
+    num_predict: int | None = None
+
+    def options(self) -> dict[str, Any]:
+        options: dict[str, Any] = {"temperature": 0}
+        if self.num_ctx is not None:
+            options["num_ctx"] = self.num_ctx
+        if self.num_predict is not None:
+            options["num_predict"] = self.num_predict
+        return options
+
+
 class OllamaExtractor:
     """Extract a page's concerts or recordings with a local Ollama model."""
 
@@ -44,27 +67,23 @@ class OllamaExtractor:
         *,
         model: str,
         host: str | None = None,
-        num_ctx: int | None = None,
+        tuning: OllamaTuning | None = None,
+        timeout_s: float | None = None,
         chat: ChatFn | None = None,
     ) -> None:
         self._model = model
-        self._num_ctx = num_ctx
-        self._chat: ChatFn = chat if chat is not None else ollama.Client(host=host).chat
+        self._tuning = tuning if tuning is not None else OllamaTuning()
+        self._chat: ChatFn = chat if chat is not None else ollama.Client(host=host, timeout=timeout_s).chat
 
     @classmethod
     def from_settings(cls, *, model: str | None = None, chat: ChatFn | None = None) -> OllamaExtractor:
         return cls(
             model=model or settings.ollama_model,
             host=settings.ollama_base_url,
-            num_ctx=settings.ollama_num_ctx,
+            tuning=OllamaTuning(num_ctx=settings.ollama_num_ctx, num_predict=settings.ollama_num_predict),
+            timeout_s=settings.ollama_timeout_s,
             chat=chat,
         )
-
-    def _options(self) -> dict[str, Any]:
-        options: dict[str, Any] = {"temperature": 0}
-        if self._num_ctx is not None:
-            options["num_ctx"] = self._num_ctx
-        return options
 
     def _extract(self, markdown: str, metadata: dict[str, str], system_prompt: str, schema: type[_M]) -> _M:
         response = self._chat(
@@ -74,7 +93,7 @@ class OllamaExtractor:
                 {"role": "user", "content": build_user_prompt(markdown, metadata)},
             ],
             format=schema.model_json_schema(),
-            options=self._options(),
+            options=self._tuning.options(),
         )
         return schema.model_validate_json(_response_content(response))
 

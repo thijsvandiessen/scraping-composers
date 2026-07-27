@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from composer_crawler.records import CrawlRecord
-from composer_extract import extract_documents, extract_recording_documents
+from composer_extract import ExtractOptions, extract_documents, extract_recording_documents
 from composer_extract.schema import (
     ExtractedArtist,
     ExtractedConcert,
@@ -74,7 +74,7 @@ def test_work_mentions_carry_concert_context() -> None:
                 [record],
                 source_name="lso",
                 extractor=FakeExtractor(PageExtraction(concerts=[_CONCERT])),
-                now=NOW,
+                options=ExtractOptions(now=NOW),
             )
         )
     )
@@ -98,7 +98,7 @@ def test_person_entities_created_for_every_role() -> None:
                 [record],
                 source_name="lso",
                 extractor=FakeExtractor(PageExtraction(concerts=[_CONCERT])),
-                now=NOW,
+                options=ExtractOptions(now=NOW),
             )
         )
     )
@@ -126,7 +126,7 @@ def test_person_in_multiple_roles_gets_one_entity_with_both_professions() -> Non
                 [record],
                 source_name="lso",
                 extractor=FakeExtractor(PageExtraction(concerts=[concert])),
-                now=NOW,
+                options=ExtractOptions(now=NOW),
             )
         )
     )
@@ -144,7 +144,11 @@ def test_multiple_concerts_get_distinct_concert_keys() -> None:
     )
     record = _record("# season")
     mentions, _ = _split(
-        list(extract_documents([record], source_name="lso", extractor=FakeExtractor(page), now=NOW))
+        list(
+            extract_documents(
+                [record], source_name="lso", extractor=FakeExtractor(page), options=ExtractOptions(now=NOW)
+            )
+        )
     )
     keys = {m.raw["concert_key"] for m in mentions}
     assert keys == {f"{record.final_url}#2024-05-01", f"{record.final_url}#2024-05-02"}
@@ -153,7 +157,12 @@ def test_multiple_concerts_get_distinct_concert_keys() -> None:
 def test_page_without_concerts_yields_nothing() -> None:
     record = _record("# about us")
     docs = list(
-        extract_documents([record], source_name="lso", extractor=FakeExtractor(PageExtraction()), now=NOW)
+        extract_documents(
+            [record],
+            source_name="lso",
+            extractor=FakeExtractor(PageExtraction()),
+            options=ExtractOptions(now=NOW),
+        )
     )
     assert docs == []
 
@@ -193,7 +202,7 @@ def _recording_docs(*recordings: ExtractedRecording) -> list[object]:
             [record],
             source_name="deutschegrammophon",
             extractor=FakeRecordingExtractor(PageRecordingExtraction(recordings=list(recordings))),
-            now=NOW,
+            options=ExtractOptions(now=NOW),
         )
     )
 
@@ -244,7 +253,14 @@ def test_concerts_merge_across_markdown_chunks() -> None:
     record = _record(markdown)
     extractor = FakeExtractor(first, second)
     mentions, _ = _split(
-        list(extract_documents([record], source_name="lso", extractor=extractor, max_chars=50, now=NOW))
+        list(
+            extract_documents(
+                [record],
+                source_name="lso",
+                extractor=extractor,
+                options=ExtractOptions(max_chars=50, now=NOW),
+            )
+        )
     )
     assert {m.title for m in mentions} == {"A", "B"}
     assert len(extractor.calls) == 2

@@ -13,14 +13,15 @@ their entities.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Protocol
 
-from composer_config import settings
 from composer_crawler.records import CrawlRecord
 from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 
 from .markdown import chunk_markdown, record_markdown
+from .resilience import extract_chunks
+from .run import ExtractOptions, ExtractRun
 from .schema import ExtractedConcert, ExtractedRecording, PageExtraction, PageRecordingExtraction
 
 _LLM_SOURCE_MARKER = "llm"
@@ -116,25 +117,25 @@ def _concert_roles(concerts: Iterable[ExtractedConcert]) -> dict[str, set[str]]:
     return roles
 
 
-def _page_concerts(record: CrawlRecord, extractor: PageExtractor, max_chars: int) -> list[ExtractedConcert]:
-    markdown = record_markdown(record)
-    concerts: list[ExtractedConcert] = []
-    for chunk in chunk_markdown(markdown, max_chars):
-        concerts.extend(extractor.extract_page(chunk, record.metadata).concerts)
-    return concerts
+def _page_concerts(record: CrawlRecord, extractor: PageExtractor, run: ExtractRun) -> list[ExtractedConcert]:
+    chunks = chunk_markdown(record_markdown(record), run.max_chars)
+    pages = extract_chunks(
+        chunks, extractor.extract_page, record.metadata, url=record.final_url, stats=run.stats
+    )
+    return [concert for page in pages for concert in page.concerts]
 
 
 def _emit_concerts(
-    record: CrawlRecord, extractor: PageExtractor, max_chars: int, source_name: str, now: datetime
+    record: CrawlRecord, extractor: PageExtractor, run: ExtractRun
 ) -> Iterator[EntityDocument | WorkMentionDocument]:
-    concerts = _page_concerts(record, extractor, max_chars)
+    concerts = _page_concerts(record, extractor, run)
     if not concerts:
         return
     url = record.final_url
-    yield from _person_docs(_concert_roles(concerts), url, source_name, now)
+    yield from _person_docs(_concert_roles(concerts), url, run.source_name, run.now)
     for index, concert in enumerate(concerts):
         key = _concert_key(url, concert, index, len(concerts))
-        yield from _work_mentions(concert, key, url, source_name, now)
+        yield from _work_mentions(concert, key, url, run.source_name, run.now)
 
 
 # --- recordings -------------------------------------------------------------
@@ -205,26 +206,26 @@ def _recording_roles(recordings: Iterable[ExtractedRecording]) -> dict[str, set[
 
 
 def _page_recordings(
-    record: CrawlRecord, extractor: RecordingPageExtractor, max_chars: int
+    record: CrawlRecord, extractor: RecordingPageExtractor, run: ExtractRun
 ) -> list[ExtractedRecording]:
-    markdown = record_markdown(record)
-    recordings: list[ExtractedRecording] = []
-    for chunk in chunk_markdown(markdown, max_chars):
-        recordings.extend(extractor.extract_recording_page(chunk, record.metadata).recordings)
-    return recordings
+    chunks = chunk_markdown(record_markdown(record), run.max_chars)
+    pages = extract_chunks(
+        chunks, extractor.extract_recording_page, record.metadata, url=record.final_url, stats=run.stats
+    )
+    return [recording for page in pages for recording in page.recordings]
 
 
 def _emit_recordings(
-    record: CrawlRecord, extractor: RecordingPageExtractor, max_chars: int, source_name: str, now: datetime
+    record: CrawlRecord, extractor: RecordingPageExtractor, run: ExtractRun
 ) -> Iterator[EntityDocument | WorkMentionDocument]:
-    recordings = _page_recordings(record, extractor, max_chars)
+    recordings = _page_recordings(record, extractor, run)
     if not recordings:
         return
     url = record.final_url
-    yield from _person_docs(_recording_roles(recordings), url, source_name, now)
+    yield from _person_docs(_recording_roles(recordings), url, run.source_name, run.now)
     for index, recording in enumerate(recordings):
         key = _recording_key(url, recording, index, len(recordings))
-        yield from _recording_work_mentions(recording, key, url, source_name, now)
+        yield from _recording_work_mentions(recording, key, url, run.source_name, run.now)
 
 
 def extract_documents(
@@ -232,14 +233,14 @@ def extract_documents(
     *,
     source_name: str,
     extractor: PageExtractor,
-    max_chars: int | None = None,
-    now: datetime | None = None,
+    options: ExtractOptions | None = None,
 ) -> Iterator[EntityDocument | WorkMentionDocument]:
     """Yield entity/work-mention documents from crawled *records* (concert mode)."""
-    chars = max_chars if max_chars is not None else settings.extract_max_chars
-    stamp = now or datetime.now(UTC)
+    run = ExtractRun.start(source_name, options)
     for record in records:
-        yield from _emit_concerts(record, extractor, chars, source_name, stamp)
+        yield from _emit_concerts(record, extractor, run)
+        run.mark_page()
+    run.finish()
 
 
 def extract_recording_documents(
@@ -247,11 +248,11 @@ def extract_recording_documents(
     *,
     source_name: str,
     extractor: RecordingPageExtractor,
-    max_chars: int | None = None,
-    now: datetime | None = None,
+    options: ExtractOptions | None = None,
 ) -> Iterator[EntityDocument | WorkMentionDocument]:
     """Yield entity/work-mention documents from crawled *records* (recording mode)."""
-    chars = max_chars if max_chars is not None else settings.extract_max_chars
-    stamp = now or datetime.now(UTC)
+    run = ExtractRun.start(source_name, options)
     for record in records:
-        yield from _emit_recordings(record, extractor, chars, source_name, stamp)
+        yield from _emit_recordings(record, extractor, run)
+        run.mark_page()
+    run.finish()

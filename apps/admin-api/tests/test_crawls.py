@@ -309,6 +309,24 @@ def test_failed_extract_records_failed_manifest(
     assert "ollama is not running" in manifest["error"]
 
 
+def test_extract_survives_a_page_the_model_mangles(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, bucket_path: Path
+) -> None:
+    """Output that will not validate costs that page, not the whole snapshot."""
+    _seed_crawl_snapshot(client, monkeypatch, "# page")
+
+    class Truncated:
+        def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
+            return PageExtraction.model_validate_json('{"concerts": [{"date": "2026-03-01')
+
+    monkeypatch.setattr(crawl_routes, "_extractor", Truncated)
+
+    snapshot_id = client.post("/admin/v1/crawls/archive/extract").json()["snapshot_id"]
+    manifest = json.loads((bucket_path / "archive" / snapshot_id / "manifest.json").read_text())
+    assert manifest["status"] == "completed"
+    assert manifest["record_count"] == 0
+
+
 def test_excluded_selector_round_trips(client: TestClient) -> None:
     created = client.put(
         "/admin/v1/crawls/archive", json={**PAYLOAD, "excluded_selector": "#banner, .modal"}

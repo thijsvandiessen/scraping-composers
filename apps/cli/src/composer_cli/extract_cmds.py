@@ -14,7 +14,12 @@ from pathlib import Path
 from composer_bronze.bucket import LocalBucket, latest_loadable_run_id
 from composer_bronze.scraper import write_documents
 from composer_crawler.records import iter_crawl_records
-from composer_extract import OllamaExtractor, extract_documents, extract_recording_documents
+from composer_extract import (
+    ExtractOptions,
+    OllamaExtractor,
+    extract_documents,
+    extract_recording_documents,
+)
 
 from .crawl_cmds import crawl_choices
 
@@ -34,7 +39,8 @@ def cmd_extract(args: argparse.Namespace) -> int:
         records = itertools.islice(records, args.max_pages)
     extractor = OllamaExtractor.from_settings(model=args.model)
     extract = extract_recording_documents if config.extract_kind == "recordings" else extract_documents
-    docs = extract(records, source_name=config.name, extractor=extractor)
+    options = ExtractOptions()
+    docs = extract(records, source_name=config.name, extractor=extractor, options=options)
 
     try:
         run_id = write_documents(bucket, config.name, docs)
@@ -44,6 +50,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
     ndjson = Path(args.bucket_path) / config.name / run_id / "records.ndjson"
     print(f"extracted {args.config} (from crawl run {crawl_run_id}) → {ndjson}")
+    print(f"  {options.stats.summary()}")
     print(f"run_id: {run_id}")
     print(f"next: composer-ingest process {config.name} --run-id {run_id}")
     return 0
