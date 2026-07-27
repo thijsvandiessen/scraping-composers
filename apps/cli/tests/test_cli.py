@@ -600,3 +600,36 @@ def test_get_engine_reads_database_url_env_var(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(settings, "database_url", db_url)
     engine = get_engine()  # no explicit URL — falls back to env var
     assert str(engine.url) == db_url
+
+
+def test_promote_cli_passes_min_referrers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from composer_cli import ingest_cmds
+    from composer_gold import PromoteConfig, PromoteStats
+
+    captured: list[PromoteConfig] = []
+
+    def fake_promote(session: object, gold_path: str, config: PromoteConfig) -> PromoteStats:
+        captured.append(config)
+        return PromoteStats()
+
+    monkeypatch.setattr(ingest_cmds, "promote", fake_promote)
+    db_url = f"sqlite:///{tmp_path}/silver.db"
+    init_db(get_engine(db_url))  # empty silver: derive_* and promote run over it
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "composer-ingest",
+            "--database-url",
+            db_url,
+            "promote",
+            "--gold-path",
+            str(tmp_path / "gold.db"),
+            "--min-referrers",
+            "3",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    assert captured[0].min_referrers == 3

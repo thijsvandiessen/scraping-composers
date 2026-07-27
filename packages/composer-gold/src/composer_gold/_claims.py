@@ -12,10 +12,11 @@ from ._selection import GoldBuild
 
 
 def collect_person_claims(build: GoldBuild) -> set[uuid.UUID]:
-    """Claims of kept persons: re-point, dedupe. Returns the non-kept
-    entities those claims reference (rule 3's seed)."""
+    """Claims of kept persons: re-point, dedupe. Returns rule 3's seed — the
+    non-kept entities those claims reference by at least ``min_referrers``
+    distinct kept persons (all of them when the rule is off)."""
     seen_claims: set[tuple[uuid.UUID, str, uuid.UUID | None, str | None, int]] = set()
-    referenced: set[uuid.UUID] = set()
+    referrers: dict[uuid.UUID, set[uuid.UUID]] = {}
     for chunk in chunked(sorted(build.kept_members, key=str)):
         for c in build.silver.execute(
             select(Claim).where(Claim.subject_id.in_(chunk)).order_by(Claim.id)
@@ -27,7 +28,7 @@ def collect_person_claims(build: GoldBuild) -> set[uuid.UUID]:
                 continue  # collapsing duplicates can align identical claims
             seen_claims.add(key)
             if obj is not None and obj not in build.kept_members:
-                referenced.add(obj)
+                referrers.setdefault(obj, set()).add(subject)
             build.claim_rows.append(
                 {
                     "subject_id": subject,
@@ -39,7 +40,10 @@ def collect_person_claims(build: GoldBuild) -> set[uuid.UUID]:
                     "created_at": c.created_at,
                 }
             )
-    return referenced
+    # With the rule off the walk keeps everything anyway; a threshold of 1 then
+    # seeds it exactly as an unfiltered run so the referenced part is identical.
+    threshold = build.config.min_referrers if build.config.prune_unreferenced else 1
+    return {obj for obj, subjects in referrers.items() if len(subjects) >= threshold}
 
 
 def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
@@ -93,6 +97,19 @@ def collect_other_literal_claims(build: GoldBuild) -> None:
                     "created_at": c.created_at,
                 }
             )
+
+
+def drop_pruned_object_claims(build: GoldBuild) -> None:
+    """Drop claim rows whose object entity did not survive rule 3.
+
+    A kept person can reference an entity that the ``min_referrers`` threshold
+    then prunes (its only other referrers fell short). Those claims would point
+    at a row gold never copies, so remove them. With the threshold at its
+    default of 1 every referenced object is kept, so this is a no-op."""
+    kept = build.kept_roots | build.kept_other
+    build.claim_rows = [
+        row for row in build.claim_rows if row["object_id"] is None or row["object_id"] in kept
+    ]
 
 
 def insert_claims(build: GoldBuild, gold: Connection) -> None:

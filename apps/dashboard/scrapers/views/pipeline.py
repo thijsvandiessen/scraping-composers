@@ -133,6 +133,9 @@ def _promote_options(request: HttpRequest) -> dict[str, object]:
     raw_sitelinks = request.POST.get("min_sitelinks", "").strip()
     if raw_sitelinks:
         options["min_sitelinks"] = int(raw_sitelinks)  # ValueError handled by the view
+    raw_referrers = request.POST.get("min_referrers", "").strip()
+    if raw_referrers:
+        options["min_referrers"] = int(raw_referrers)  # ValueError handled by the view
     gold_path = request.POST.get("gold_path", "").strip()
     if gold_path:
         options["gold_path"] = gold_path
@@ -145,7 +148,7 @@ def start_promote(request: HttpRequest) -> HttpResponse:
     try:
         options = _promote_options(request)
     except ValueError:
-        messages.error(request, "min sitelinks must be a whole number")
+        messages.error(request, "min sitelinks and min referrers must be whole numbers")
         return redirect("promote")
     api = AdminAPI.from_env()
     try:

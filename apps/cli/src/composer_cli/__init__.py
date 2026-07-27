@@ -6,7 +6,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH
-from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_SITELINKS
+from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_REFERRERS, DEFAULT_MIN_SITELINKS
 from composer_scrapers import REGISTRY
 
 from .crawl_cmds import cmd_crawl, crawl_choices
@@ -148,6 +148,13 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="rule 3: prune entities left unreferenced by the other rules",
+    )
+    p_promote.add_argument(
+        "--min-referrers",
+        type=int,
+        default=DEFAULT_MIN_REFERRERS,
+        help="rule 3: keep entities referenced by at least N distinct persons "
+        "(default: $GOLD_MIN_REFERRERS or 1)",
     )
     p_promote.set_defaults(func=cmd_promote)
 
