@@ -10,7 +10,7 @@ dependencies = [
     "composer-scrapers",
     "composer-warehouse",
     "composer-gold",
-    "fastapi>=0.139.2",
+    "fastapi>=0.141.1",
     "uvicorn[standard]>=0.52.0",
     "python-dotenv>=1.2.2",
     "composer-config",
