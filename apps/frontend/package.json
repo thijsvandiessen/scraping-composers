@@ -26,7 +26,7 @@
     "@hey-api/openapi-ts": "^0.99.0",
     "@types/node": "^26.1.1",
     "oxfmt": "^0.60.0",
-    "oxlint": "^1.75.0",
+    "oxlint": "^1.76.0",
     "typescript": "^6.0.3"
   }
 }
