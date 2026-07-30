@@ -20,7 +20,7 @@ dev = [
     "pytest-cov>=5",
     "pytest-django>=4.8",
     "pyright>=1.1.390",
-    "ruff>=0.15.22",
+    "ruff>=0.16.0",
     "pylint>=4.0.6",
 ]
 
