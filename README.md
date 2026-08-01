@@ -400,8 +400,12 @@ Create a package `packages/composer-scrapers/src/composer_scrapers/<name>/` and 
 from datetime import UTC, datetime
 from collections.abc import Iterator
 from composer_scrapers import (
-    EntityDocument, SourceAdapter, SourceClaim, WorkMentionDocument,
+    EntityDocument,
+    SourceAdapter,
+    SourceClaim,
+    WorkMentionDocument,
 )
+
 
 class MyAdapter(SourceAdapter):
     name = "mysource"
