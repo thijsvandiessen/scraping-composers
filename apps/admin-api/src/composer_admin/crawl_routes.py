@@ -37,8 +37,15 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, R
 from .crud import has_running
 from .deps import DbSession, require_admin_key
 from .pipeline import run_pipeline
-from .routes import _bucket, _has_running_fetch, _last_snapshot, _process_in_background, _snapshot_out
 from .schemas import CrawlConfigIn, CrawlOut, FetchStarted, RunStarted
+from .snapshots import (
+    bucket,
+    has_running_fetch,
+    last_snapshot,
+    process_in_background,
+    running_conflict,
+    snapshot_out,
+)
 
 log = logging.getLogger(__name__)
 
@@ -57,9 +64,26 @@ def _merged() -> dict[str, CrawlConfig]:
 def _crawl_out(config: CrawlConfig) -> CrawlOut:
     data: dict[str, Any] = config_to_dict(config)
     data["editable"] = config.name not in CRAWL_REGISTRY
-    last = _last_snapshot(_bucket(), config.name)
-    data["last_snapshot"] = _snapshot_out(last) if last is not None else None
+    last = last_snapshot(bucket(), config.name)
+    data["last_snapshot"] = snapshot_out(last) if last is not None else None
     return CrawlOut.model_validate(data)
+
+
+def _crawl_or_404(name: str) -> CrawlConfig:
+    """The stored or code-registered config for *name*, or a 404.
+
+    A dependency rather than a helper call so the five endpoints that act on a
+    crawl declare it in their signature. The router's ``require_admin_key``
+    still runs first, so an unauthenticated request to an unknown crawl is
+    rejected before this reveals whether it exists.
+    """
+    config = _merged().get(name)
+    if config is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
+    return config
+
+
+CrawlDep = Annotated[CrawlConfig, Depends(_crawl_or_404)]
 
 
 def _to_config(name: str, body: CrawlConfigIn) -> CrawlConfig:
@@ -104,7 +128,7 @@ def _crawl_in_background(config: CrawlConfig, snapshot_id: str, max_pages: int |
     """
     log.info("background crawl starting for %s/%s (max_pages=%s)", config.name, snapshot_id, max_pages)
     try:
-        _crawler(config).crawl_to_bucket(_bucket(), max_pages=max_pages, run_id=snapshot_id)
+        _crawler(config).crawl_to_bucket(bucket(), max_pages=max_pages, run_id=snapshot_id)
     except Exception:
         # Recorded as a failed manifest by crawl_to_bucket; log for the console.
         log.exception("background crawl failed for %s/%s", config.name, snapshot_id)
@@ -133,14 +157,14 @@ def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str, extra
     dropped — without it this path silently discards them. Returns whether the
     stage succeeded.
     """
-    bucket = _bucket()
+    store = bucket()
     options = ExtractOptions()
     log.info("background extract starting for %s/%s (from crawl %s)", name, snapshot_id, crawl_run_id)
     try:
-        records = iter_crawl_records(name, crawl_run_id, bucket)
+        records = iter_crawl_records(name, crawl_run_id, store)
         extract = extract_recording_documents if extract_kind == "recordings" else extract_documents
         docs = extract(records, source_name=name, extractor=_extractor(), options=options)
-        write_documents(bucket, name, docs, run_id=snapshot_id)
+        write_documents(store, name, docs, run_id=snapshot_id)
     except Exception:
         # Recorded as a failed manifest by write_documents; log for the console.
         log.exception(
@@ -164,10 +188,7 @@ def list_crawls() -> list[CrawlOut]:
 
 
 @crawls.get("/crawls/{name}", response_model=CrawlOut)
-def get_crawl(name: str) -> CrawlOut:
-    config = _merged().get(name)
-    if config is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
+def get_crawl(config: CrawlDep) -> CrawlOut:
     return _crawl_out(config)
 
 
@@ -194,14 +215,12 @@ def delete_crawl(name: str) -> Response:
 @crawls.post("/crawls/{name}/fetch", status_code=status.HTTP_202_ACCEPTED, response_model=FetchStarted)
 def fetch_crawl(
     name: str,
+    config: CrawlDep,
     background: BackgroundTasks,
     max_pages: Annotated[int | None, Query(ge=1)] = None,
 ) -> FetchStarted:
     """Start a background crawl for a config, into a new bucket snapshot."""
-    config = _merged().get(name)
-    if config is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
-    if _has_running_fetch(_bucket(), name):
+    if has_running_fetch(bucket(), name):
         raise HTTPException(status.HTTP_409_CONFLICT, f"a crawl for {name!r} is already in progress")
     snapshot_id = new_snapshot_id()
     background.add_task(_crawl_in_background, config, snapshot_id, max_pages)
@@ -209,20 +228,17 @@ def fetch_crawl(
 
 
 @crawls.post("/crawls/{name}/extract", status_code=status.HTTP_202_ACCEPTED, response_model=FetchStarted)
-def extract_crawl(name: str, background: BackgroundTasks) -> FetchStarted:
+def extract_crawl(name: str, config: CrawlDep, background: BackgroundTasks) -> FetchStarted:
     """Start a background LLM extraction over the crawl's latest snapshot.
 
     Reads the pages a crawl already stored and writes work-mention/entity
     documents to a new snapshot under the same source name, which ``process``
     then ingests like any other.
     """
-    config = _merged().get(name)
-    if config is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
-    bucket = _bucket()
-    if _has_running_fetch(bucket, name):
-        raise HTTPException(status.HTTP_409_CONFLICT, f"a run for {name!r} is already in progress")
-    crawl_run_id = latest_loadable_run_id(bucket, name)
+    store = bucket()
+    if has_running_fetch(store, name):
+        raise running_conflict(name)
+    crawl_run_id = latest_loadable_run_id(store, name)
     if crawl_run_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"crawl {name!r} has no completed snapshot to extract")
     snapshot_id = new_snapshot_id()
@@ -231,42 +247,38 @@ def extract_crawl(name: str, background: BackgroundTasks) -> FetchStarted:
 
 
 @crawls.post("/crawls/{name}/run", status_code=status.HTTP_202_ACCEPTED, response_model=FetchStarted)
-def run_crawl_pipeline(name: str, db: DbSession, background: BackgroundTasks) -> FetchStarted:
+def run_crawl_pipeline(
+    name: str, config: CrawlDep, db: DbSession, background: BackgroundTasks
+) -> FetchStarted:
     """Crawl, extract and load in one go — the unattended path.
 
     Nothing about the three stages changes; they simply run back to back, each
     still recording its own snapshot or run, and the chain stops at the first
     failure. Returns the crawl snapshot, which is what starts immediately.
     """
-    config = _merged().get(name)
-    if config is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
-    if _has_running_fetch(_bucket(), name) or has_running(db, name):
-        raise HTTPException(status.HTTP_409_CONFLICT, f"a run for {name!r} is already in progress")
+    if has_running_fetch(bucket(), name) or has_running(db, name):
+        raise running_conflict(name)
     snapshot_id = new_snapshot_id()
     background.add_task(_pipeline_in_background, config, snapshot_id)
     return FetchStarted(source=name, snapshot_id=snapshot_id, status="running")
 
 
 @crawls.post("/crawls/{name}/process", status_code=status.HTTP_202_ACCEPTED, response_model=RunStarted)
-def process_crawl(name: str, db: DbSession, background: BackgroundTasks) -> RunStarted:
+def process_crawl(name: str, config: CrawlDep, db: DbSession, background: BackgroundTasks) -> RunStarted:
     """Load the crawl's latest LLM-extracted ``documents`` snapshot into the DB.
 
     The per-crawl counterpart to ``/snapshots/{source}/{id}/process``: it
     resolves the newest extracted snapshot server-side (skipping raw-page
     crawls), so the dashboard can drive Crawl → Extract → Load from one row.
     """
-    config = _merged().get(name)
-    if config is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown crawl {name!r}")
     if has_running(db, name):
-        raise HTTPException(status.HTTP_409_CONFLICT, f"a run for {name!r} is already in progress")
-    run_id = latest_document_run_id(_bucket(), name)
+        raise running_conflict(name)
+    run_id = latest_document_run_id(bucket(), name)
     if run_id is None:
         raise HTTPException(
             status.HTTP_409_CONFLICT, f"crawl {name!r} has no extracted snapshot; run extract first"
         )
     base_url = config.seeds[0] if config.seeds else ""
     run = create_run(db, name, base_url)
-    background.add_task(_process_in_background, name, run_id, run.id)
+    background.add_task(process_in_background, name, run_id, run.id)
     return RunStarted(run_id=run.id, source=name, status=run.status)

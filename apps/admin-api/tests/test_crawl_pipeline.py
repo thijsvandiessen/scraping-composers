@@ -13,6 +13,7 @@ from pathlib import Path
 import composer_admin.crawl_routes as crawl_routes
 import composer_admin.deps as admin_deps
 import composer_admin.routes as admin_routes
+import composer_admin.snapshots as admin_snapshots
 import composer_crawler.crawler as crawler_mod
 import pytest
 from composer_admin import admin_app
@@ -55,8 +56,9 @@ def client(
     factory: sessionmaker[Session],
 ) -> Iterator[TestClient]:
     monkeypatch.setattr(admin_deps, "_session_factory", factory)
-    monkeypatch.setattr(admin_routes, "DEFAULT_BUCKET_PATH", str(bucket_path))
+    monkeypatch.setattr(admin_snapshots, "DEFAULT_BUCKET_PATH", str(bucket_path))
     monkeypatch.setattr(admin_routes, "REGISTRY", {})
+    monkeypatch.setattr(admin_snapshots, "REGISTRY", {})
     monkeypatch.setattr(crawl_routes, "DEFAULT_CRAWL_CONFIGS_PATH", str(tmp_path / "crawl_configs.json"))
     monkeypatch.setattr(crawl_routes, "CRAWL_REGISTRY", {})
     monkeypatch.setattr(crawl_routes, "REGISTRY", {})

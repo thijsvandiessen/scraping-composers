@@ -17,7 +17,7 @@ from composer_warehouse.rebuild import rebuild_silver, sqlite_db_path
 from composer_warehouse.recordings import derive_recordings
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
-from . import routes
+from . import snapshots
 from .deps import dispose_db, require_admin_key, session_scope
 from .schemas import GoldStatus, PromoteOptions, SilverStatus
 
@@ -110,11 +110,11 @@ def _silver_db_path() -> Path | None:
 
 def _rebuild_silver_in_background() -> None:
     """Rebuild silver from the bucket; status lives in the silver manifest."""
-    # Registry and bucket are read through the routes module so tests (and
-    # future config) can swap them in one place.
-    sources = [(adapter.name, adapter.base_url) for adapter in routes.REGISTRY.values()]
+    # Registry and bucket are read through the modules that own them, rather
+    # than imported by name, so tests (and future config) can swap them.
+    sources = [(adapter.name, adapter.base_url) for adapter in snapshots.REGISTRY.values()]
     try:
-        rebuild_silver(routes._bucket(), sources)
+        rebuild_silver(snapshots.bucket(), sources)
     except Exception:
         # Recorded as a failed manifest by rebuild_silver; log for the console.
         log.exception("background silver rebuild failed")

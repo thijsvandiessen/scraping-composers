@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import composer_admin.crawl_routes as crawl_routes
-import composer_admin.routes as admin_routes
+import composer_admin.snapshots as admin_snapshots
 import composer_crawler.crawler as crawler_mod
 import pytest
 from composer_admin import admin_app
@@ -52,7 +52,7 @@ def bucket_path(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bucket_path: Path) -> Iterator[TestClient]:
-    monkeypatch.setattr(admin_routes, "DEFAULT_BUCKET_PATH", str(bucket_path))
+    monkeypatch.setattr(admin_snapshots, "DEFAULT_BUCKET_PATH", str(bucket_path))
     monkeypatch.setattr(crawl_routes, "DEFAULT_CRAWL_CONFIGS_PATH", str(tmp_path / "crawl_configs.json"))
     monkeypatch.setattr(crawl_routes, "CRAWL_REGISTRY", {"code-crawl": CODE_CONFIG})
     monkeypatch.setattr(crawl_routes, "REGISTRY", {"imslp": object()})
