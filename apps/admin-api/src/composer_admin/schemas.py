@@ -93,12 +93,13 @@ class PromoteOptions(BaseModel):
 
     ``min_sitelinks`` distinguishes omitted (use the server's configured
     default) from an explicit ``null`` (turn the sitelink signal off) via
-    ``model_fields_set``; ``min_referrers`` falls back to the server default
-    the same way when omitted.
+    ``model_fields_set``; ``min_appearances`` and ``min_referrers`` fall back to
+    the server default the same way when omitted.
     """
 
     gold_path: str | None = None  # None: the server's configured gold path
     min_sitelinks: int | None = Field(default=None, ge=0)
+    min_appearances: int = Field(default=1, ge=1)  # rule 1 threshold
     min_referrers: int = Field(default=1, ge=1)  # rule 3 threshold
     drop_unevidenced_persons: bool = True  # rule 1
     collapse_duplicates: bool = True  # rule 2

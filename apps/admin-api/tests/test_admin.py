@@ -369,11 +369,33 @@ def test_promote_body_resolves_min_referrers(
     assert [c.min_referrers for c in configs] == [3, 2]
 
 
+def test_promote_body_resolves_min_appearances(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from composer_gold import PromoteConfig, PromoteStats
+
+    configs: list[PromoteConfig] = []
+
+    def record_promote(session: object, gold_path: str, config: PromoteConfig) -> PromoteStats:
+        configs.append(config)
+        return PromoteStats()
+
+    monkeypatch.setattr(build_routes, "promote", record_promote)
+    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
+    monkeypatch.setattr(build_routes, "DEFAULT_MIN_APPEARANCES", 2)
+
+    # omitted: the configured server default; explicit value wins over it
+    assert client.post("/admin/v1/promote").status_code == 202
+    assert client.post("/admin/v1/promote", json={"min_appearances": 5}).status_code == 202
+    assert [c.min_appearances for c in configs] == [2, 5]
+
+
 def test_promote_rejects_invalid_body(client: TestClient) -> None:
     assert client.post("/admin/v1/promote", json={"min_sitelinks": "abc"}).status_code == 422
     assert client.post("/admin/v1/promote", json={"min_sitelinks": -1}).status_code == 422
     assert client.post("/admin/v1/promote", json={"min_referrers": 0}).status_code == 422
     assert client.post("/admin/v1/promote", json={"min_referrers": "abc"}).status_code == 422
+    assert client.post("/admin/v1/promote", json={"min_appearances": 0}).status_code == 422
 
 
 def test_silver_status_before_any_rebuild(

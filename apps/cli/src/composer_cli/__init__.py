@@ -7,7 +7,12 @@ from typing import TYPE_CHECKING
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH
 from composer_config import settings
-from composer_gold import DEFAULT_GOLD_DB_PATH, DEFAULT_MIN_REFERRERS, DEFAULT_MIN_SITELINKS
+from composer_gold import (
+    DEFAULT_GOLD_DB_PATH,
+    DEFAULT_MIN_APPEARANCES,
+    DEFAULT_MIN_REFERRERS,
+    DEFAULT_MIN_SITELINKS,
+)
 from composer_scrapers import REGISTRY
 
 from .crawl_cmds import cmd_crawl, crawl_choices
@@ -161,10 +166,17 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         "even without concert/work evidence (default: $GOLD_MIN_SITELINKS or off)",
     )
     p_promote.add_argument(
+        "--min-appearances",
+        type=int,
+        default=DEFAULT_MIN_APPEARANCES,
+        help="rule 1: keep people and ensembles credited on at least N concerts/recordings "
+        "(default: $GOLD_MIN_APPEARANCES or 1)",
+    )
+    p_promote.add_argument(
         "--drop-unevidenced-persons",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="rule 1: drop persons without concert/work evidence",
+        help="rule 1: drop people and ensembles without concert/recording/work evidence",
     )
     p_promote.add_argument(
         "--collapse-duplicates",

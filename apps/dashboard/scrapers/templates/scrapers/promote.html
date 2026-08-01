@@ -22,7 +22,7 @@
   </div>
   <div style="display: flex; flex-direction: column; gap: 0.375rem; margin: 0.75rem 0; font-size: 0.875rem;">
     <label><input type="checkbox" name="drop_unevidenced_persons" checked>
-      drop persons without concert/work evidence (rule 1)</label>
+      drop people and ensembles without concert/recording/work evidence (rule 1)</label>
     <label><input type="checkbox" name="collapse_duplicates" checked>
       collapse duplicate persons into their canonical row (rule 2)</label>
     <label><input type="checkbox" name="prune_unreferenced" checked>
@@ -30,6 +30,9 @@
     <label>min sitelinks
       <input type="number" name="min_sitelinks" min="0" placeholder="server default" style="width: 9rem;">
       <span class="sc-muted">also promote persons with at least this many Wikipedia sitelinks</span></label>
+    <label>min appearances
+      <input type="number" name="min_appearances" min="1" placeholder="server default" style="width: 9rem;">
+      <span class="sc-muted">rule 1: keep people and ensembles credited on at least this many concerts/recordings</span></label>
     <label>min referrers
       <input type="number" name="min_referrers" min="1" placeholder="server default" style="width: 9rem;">
       <span class="sc-muted">rule 3: keep entities referenced by at least this many distinct persons</span></label>

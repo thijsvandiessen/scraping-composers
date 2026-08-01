@@ -5,6 +5,7 @@ from pathlib import Path
 
 from composer_gold import (
     DEFAULT_GOLD_DB_PATH,
+    DEFAULT_MIN_APPEARANCES,
     DEFAULT_MIN_REFERRERS,
     DEFAULT_MIN_SITELINKS,
     PromoteConfig,
@@ -44,16 +45,20 @@ def _promote_in_background(gold_path: str, config: PromoteConfig) -> None:
 def _promote_config(options: PromoteOptions | None) -> tuple[str, PromoteConfig]:
     """Resolve the request body (or its absence) into a gold path and config.
 
-    ``min_sitelinks`` and ``min_referrers`` left out of the body fall back to
-    the configured defaults; an explicit ``null`` switches the sitelink signal
-    off.
+    ``min_sitelinks``, ``min_appearances`` and ``min_referrers`` left out of the
+    body fall back to the configured defaults; an explicit ``null`` switches the
+    sitelink signal off.
     """
     opts = options or PromoteOptions()
     gold_path = opts.gold_path or DEFAULT_GOLD_DB_PATH
     min_sitelinks = opts.min_sitelinks if "min_sitelinks" in opts.model_fields_set else DEFAULT_MIN_SITELINKS
+    min_appearances = (
+        opts.min_appearances if "min_appearances" in opts.model_fields_set else DEFAULT_MIN_APPEARANCES
+    )
     min_referrers = opts.min_referrers if "min_referrers" in opts.model_fields_set else DEFAULT_MIN_REFERRERS
     config = PromoteConfig(
         min_sitelinks=min_sitelinks,
+        min_appearances=min_appearances,
         min_referrers=min_referrers,
         drop_unevidenced_persons=opts.drop_unevidenced_persons,
         collapse_duplicates=opts.collapse_duplicates,

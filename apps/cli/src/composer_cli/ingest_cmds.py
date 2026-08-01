@@ -64,6 +64,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
             derive_recordings(session)
             config = PromoteConfig(
                 min_sitelinks=args.min_sitelinks,
+                min_appearances=args.min_appearances,
                 min_referrers=args.min_referrers,
                 drop_unevidenced_persons=args.drop_unevidenced_persons,
                 collapse_duplicates=args.collapse_duplicates,

@@ -3,7 +3,7 @@
 Members re-export the ``session`` fixture from this module in their
 ``tests/conftest.py`` (a plain import, since ``pytest_plugins`` is only legal
 in the rootdir conftest); test modules import the factories below directly. The document/adapter factories
-(``person``, ``mention``, ``perf_mention``, ``FakeSource``) come from
+(``person``, ``ensemble``, ``mention``, ``perf_mention``, ``FakeSource``) come from
 :mod:`composer_schema.testing` and are re-exported here for convenience.
 """
 
@@ -13,6 +13,9 @@ import pytest
 from composer_schema import SourceAdapter
 from composer_schema.testing import (
     FakeSource as FakeSource,
+)
+from composer_schema.testing import (
+    ensemble as ensemble,
 )
 from composer_schema.testing import (
     mention as mention,
