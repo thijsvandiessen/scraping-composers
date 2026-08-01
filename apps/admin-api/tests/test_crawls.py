@@ -139,6 +139,17 @@ def test_put_rejects_a_name_carrying_a_newline(client: TestClient) -> None:
     assert not any("\n" in name for name in stored)
 
 
+def test_a_malformed_snapshot_source_is_a_bad_request_not_a_crash(client: TestClient) -> None:
+    """The segment guard raises on a name it refuses; the endpoints that look a
+    snapshot up turn that into 422 rather than letting it surface as a 500.
+    """
+    for path in (
+        "/admin/v1/snapshots/evil%0Ax/run-1/abandon",
+        "/admin/v1/snapshots/evil%0Ax/run-1/process",
+    ):
+        assert client.post(path).status_code == 422, path
+
+
 def test_unknown_crawl_404(client: TestClient) -> None:
     assert client.get("/admin/v1/crawls/nope").status_code == 404
     assert client.delete("/admin/v1/crawls/nope").status_code == 404

@@ -60,6 +60,26 @@ def _has_running_fetch(bucket: LocalBucket, source: str) -> bool:
     return any(s.manifest.status == "running" for s in bucket.list_snapshots(source))
 
 
+def _snapshot_or_404(bucket: LocalBucket, source: str, snapshot_id: str) -> Snapshot:
+    """One snapshot by source and run_id, as the endpoints that act on it need it.
+
+    ``list_snapshots`` raises when the bucket's segment guard refuses *source*
+    (traversal, control characters). That is a malformed identifier, so it answers
+    422 like ``put_crawl`` does rather than the 500 an unhandled ValueError gives.
+    """
+    try:
+        snapshots = bucket.list_snapshots(source)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    snapshot = next((s for s in snapshots if s.manifest.run_id == snapshot_id), None)
+    if snapshot is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"unknown snapshot {safe_for_log(source)}/{safe_for_log(snapshot_id)}",
+        )
+    return snapshot
+
+
 def _fetch_in_background(source_name: str, snapshot_id: str, max_pages: int | None) -> None:
     """Fetch a source to the bucket; status lives in the snapshot's manifest."""
     adapter = REGISTRY[source_name]
@@ -174,9 +194,7 @@ def abandon_snapshot(source: str, snapshot_id: str) -> SnapshotOut:
     still going will carry on writing to a snapshot now marked failed.
     """
     bucket = _bucket()
-    snapshot = next((s for s in bucket.list_snapshots(source) if s.manifest.run_id == snapshot_id), None)
-    if snapshot is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown snapshot {source}/{snapshot_id}")
+    snapshot = _snapshot_or_404(bucket, source, snapshot_id)
     if snapshot.manifest.status != "running":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -206,9 +224,7 @@ def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: B
     snapshots are the ``documents`` the LLM ``extract`` step wrote.
     """
     bucket = _bucket()
-    snapshot = next((s for s in bucket.list_snapshots(source) if s.manifest.run_id == snapshot_id), None)
-    if snapshot is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown snapshot {source}/{snapshot_id}")
+    snapshot = _snapshot_or_404(bucket, source, snapshot_id)
     if snapshot.manifest.status not in LOADABLE_STATUSES:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
