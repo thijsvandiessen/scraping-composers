@@ -1,7 +1,6 @@
 import argparse
 import dataclasses
 import logging
-import sys
 from pathlib import Path
 
 from composer_bronze.bucket import LocalBucket
@@ -19,7 +18,7 @@ def crawl_choices() -> dict[str, CrawlConfig]:
     try:
         return all_crawl_configs()
     except ValueError as exc:
-        print(f"warning: ignoring stored crawl configs: {exc}", file=sys.stderr)
+        log.warning("ignoring stored crawl configs: %s", exc)
         return dict(CRAWL_REGISTRY)
 
 
@@ -31,8 +30,8 @@ def cmd_crawl(args: argparse.Namespace) -> int:
     bucket = LocalBucket(args.bucket_path)
     try:
         run_id = Crawler(config).crawl_to_bucket(bucket, max_pages=args.max_pages)
-    except Exception as exc:
-        log.error("crawl failed: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        log.exception("crawl failed")
         return 1
     ndjson = Path(args.bucket_path) / config.name / run_id / "records.ndjson"
     print(f"crawled {args.config} → {ndjson}")

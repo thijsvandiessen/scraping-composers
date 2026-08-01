@@ -15,14 +15,16 @@ from composer_warehouse.recordings import derive_recordings
 
 from .crawl_cmds import crawl_choices
 
+log = logging.getLogger(__name__)
+
 
 def cmd_fetch(args: argparse.Namespace) -> int:
     adapter = REGISTRY[args.source]
     bucket = LocalBucket(args.bucket_path)
     try:
         run_id = Scraper(adapter).fetch_to_bucket(bucket, max_pages=args.max_pages)
-    except Exception as exc:
-        logging.getLogger(__name__).error("fetch failed: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        log.exception("fetch failed")
         return 1
     ndjson = Path(args.bucket_path) / args.source / run_id / "records.ndjson"
     print(f"fetched {args.source} → {ndjson}")
@@ -70,8 +72,8 @@ def cmd_promote(args: argparse.Namespace) -> int:
                 prune_unreferenced=args.prune_unreferenced,
             )
             stats = promote(session, args.gold_path, config)
-        except Exception as exc:
-            logging.getLogger(__name__).error("promote failed: %s: %s", type(exc).__name__, exc)
+        except Exception:
+            log.exception("promote failed")
             return 1
     print(f"gold rebuilt at {args.gold_path}")
     for key, value in asdict(stats).items():
@@ -87,8 +89,8 @@ def cmd_rebuild_silver(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(exc)
         return 1
-    except Exception as exc:
-        logging.getLogger(__name__).error("rebuild-silver failed: %s: %s", type(exc).__name__, exc)
+    except Exception:
+        log.exception("rebuild-silver failed")
         return 1
     print("silver rebuilt from the bucket")
     for key, value in asdict(stats).items():
