@@ -18,6 +18,26 @@ def test_rejects_non_segment_names(name: str) -> None:
         CrawlConfig(name=name, seeds=("https://example.org/",))
 
 
+@pytest.mark.parametrize(
+    "name", ["evil\nINFO forged entry", "evil\r\nINFO forged", "a\tb", "a\x1b[31mb", "a\x7fb"]
+)
+def test_rejects_names_carrying_control_characters(name: str) -> None:
+    """A crawl name becomes a bucket directory and is then echoed into log lines.
+    A newline in it is enough to forge a log entry, and ESC to start a terminal
+    escape sequence, so the name never gets to hold one (CWE-117).
+    """
+    with pytest.raises(ValueError, match="single path segment"):
+        CrawlConfig(name=name, seeds=("https://example.org/",))
+
+
+@pytest.mark.parametrize(
+    "name", ["lso", "concertgebouw_archive", "classicalcomposersposter", "a-b.c", "Source1"]
+)
+def test_accepts_the_names_actually_in_use(name: str) -> None:
+    """The guard tightened to an allowlist; every name already on disk must survive it."""
+    assert CrawlConfig(name=name, seeds=("https://example.org/",)).name == name
+
+
 def test_rejects_empty_seeds() -> None:
     with pytest.raises(ValueError, match="seeds"):
         CrawlConfig(name="example", seeds=())

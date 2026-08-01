@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 
 from .crud import get_run, has_running, list_runs
 from .deps import DbSession, require_admin_key, session_scope
+from .logconfig import safe_for_log
 from .schemas import FetchStarted, RunOut, RunStarted, ScraperOut, SnapshotOut
 
 log = logging.getLogger(__name__)
@@ -184,7 +185,12 @@ def abandon_snapshot(source: str, snapshot_id: str) -> SnapshotOut:
     on_disk = sum(1 for _ in bucket.read_records(source, snapshot_id))
     manifest = snapshot.manifest.failed("abandoned: the run was not finished by its process", on_disk)
     bucket.write_manifest(manifest)
-    log.info("abandoned stale snapshot %s/%s (%d record(s) on disk)", source, snapshot_id, on_disk)
+    log.info(
+        "abandoned stale snapshot %s/%s (%d record(s) on disk)",
+        safe_for_log(source),
+        safe_for_log(snapshot_id),
+        on_disk,
+    )
     return _snapshot_out(replace(snapshot, manifest=manifest))
 
 

@@ -23,6 +23,18 @@ from composer_config import settings
 FORMAT = "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
 
 
+def safe_for_log(value: str) -> str:
+    """A request-supplied value with its line breaks removed (CWE-117).
+
+    :data:`FORMAT` writes one unstructured line per record, so a newline inside an
+    interpolated value forges a second entry. The validators this value passes
+    upstream (``_validated_segment``, ``_validate_source_name``) already reject
+    control characters, which is the actual fix; this is the same barrier spelled
+    the way a static analyser can follow it, at the point of use.
+    """
+    return value.replace("\r\n", "").replace("\n", "").replace("\r", "")
+
+
 def configure_logging() -> None:
     """Attach a stderr handler at ``$LOG_LEVEL`` to the root logger, once.
 

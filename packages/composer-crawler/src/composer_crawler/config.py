@@ -9,25 +9,28 @@ so the most important pages are scraped first.
 
 from __future__ import annotations
 
-import os
+import re
 from dataclasses import dataclass
+
+#: A crawl name is ours to constrain, so it is an allowlist rather than a list of
+#: things to reject. It keeps the name a single path segment (CWE-22: ``name``
+#: becomes a directory under the bucket root) and, because the name travels from
+#: there into log lines and terminals, keeps control characters out of it — a
+#: newline in a name is enough to forge a log entry (CWE-117).
+_SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 def _validate_source_name(value: str) -> None:
-    """Require a single path segment, matching the bucket's own guard (CWE-22).
+    """Require a plain, single-path-segment crawl name.
 
-    ``name`` becomes a directory under the bucket root; anything resembling
-    traversal must be rejected before a crawl starts, not when it first writes.
+    Rejected before a crawl starts rather than when it first writes, so a name
+    that could escape the bucket or forge a log line never reaches either.
     """
-    if (
-        not value
-        or value in (".", "..")
-        or "/" in value
-        or "\\" in value
-        or "\x00" in value
-        or os.path.basename(value) != value
-    ):
-        raise ValueError(f"invalid crawl name {value!r}: must be a single path segment")
+    if value in (".", "..") or not _SAFE_NAME.match(value):
+        raise ValueError(
+            f"invalid crawl name {value!r}: must be a single path segment "
+            "of letters, digits, dot, dash or underscore"
+        )
 
 
 @dataclass(frozen=True)
