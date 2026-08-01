@@ -32,7 +32,7 @@ from . import fetch
 from .config import CrawlConfig
 from .discovery import discover_urls
 from .progress import CrawlProgress
-from .records import CrawlRecord
+from .records import CrawlRecord, prior_content_hashes
 
 log = logging.getLogger(__name__)
 
@@ -43,9 +43,18 @@ WebCrawlerFactory = Callable[[CrawlConfig], Any]
 class Crawler:
     """Discover a target's URLs (sitemap-first), then scrape them most-important-first."""
 
-    def __init__(self, config: CrawlConfig, web_crawler_factory: WebCrawlerFactory | None = None) -> None:
+    def __init__(
+        self,
+        config: CrawlConfig,
+        web_crawler_factory: WebCrawlerFactory | None = None,
+        previous_hashes: dict[str, str] | None = None,
+    ) -> None:
         self.config = config
         self._new_web_crawler = web_crawler_factory or fetch.new_web_crawler
+        # final_url -> content digest from the last snapshot; lets the crawl report
+        # how much of the site actually changed. crawl_to_bucket fills this in from
+        # the bucket when the caller has not.
+        self._previous_hashes = previous_hashes or {}
 
     def crawl(self, max_pages: int | None = None) -> Generator[CrawlRecord, None, None]:
         """Discover and scrape, yielding raw records ranked by relevance.
@@ -116,7 +125,8 @@ class Crawler:
                             progress.mark_skipped(result.url)
                             continue
                         scraped += 1
-                        progress.mark_page(record)
+                        previous = self._previous_hashes.get(record.final_url)
+                        progress.mark_page(record, unchanged=previous == record.content_sha256)
                         yield record
                         if budget is not None and scraped >= budget:
                             break
@@ -138,6 +148,15 @@ class Crawler:
         """
         if run_id is None:
             run_id = new_snapshot_id()
+        if not self._previous_hashes:
+            # Read before the new snapshot's manifest is written, so "the latest
+            # complete snapshot" is still the previous crawl and not this one.
+            self._previous_hashes = prior_content_hashes(self.config.name, bucket)
+            log.info(
+                "crawl %r: comparing against %d page(s) from the previous snapshot",
+                self.config.name,
+                len(self._previous_hashes),
+            )
         log.info("crawl %r: writing snapshot %s", self.config.name, run_id)
         manifest = SnapshotManifest.start(self.config.name, run_id)
         bucket.write_manifest(manifest)

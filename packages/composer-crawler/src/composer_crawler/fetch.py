@@ -30,7 +30,7 @@ from crawl4ai import (
 
 from ._http import user_agent
 from .config import CrawlConfig
-from .records import CrawlRecord, kept_headers
+from .records import CrawlRecord, content_hash, kept_headers
 
 log = logging.getLogger(__name__)
 
@@ -164,6 +164,7 @@ def record_from_result(result: Any) -> CrawlRecord | None:
         return None
     headers = {name.lower(): value for name, value in (result.response_headers or {}).items()}
     metadata = result.metadata or {}
+    markdown = _markdown(result)
     return CrawlRecord(
         url=result.url,
         final_url=result.redirected_url or result.url,
@@ -172,6 +173,7 @@ def record_from_result(result: Any) -> CrawlRecord | None:
         fetched_at=datetime.now(UTC).isoformat(),
         depth=int(metadata.get("depth", 0)),
         headers=kept_headers(headers),
-        markdown=_markdown(result),
+        markdown=markdown,
         metadata=_page_metadata(metadata),
+        content_sha256=content_hash(markdown),
     )

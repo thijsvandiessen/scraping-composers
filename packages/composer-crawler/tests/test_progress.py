@@ -72,7 +72,18 @@ def test_summary_counts_pages_skips_and_empties() -> None:
     progress.mark_page(_record("https://example.org/b", markdown=""))
     progress.mark_skipped("https://example.org/c")
 
-    assert progress.stats.summary() == "2 pages, 1 skipped, 1 without markdown"
+    assert progress.stats.summary() == "2 pages, 1 skipped, 1 without markdown, 0 unchanged"
+
+
+def test_summary_counts_pages_that_did_not_change() -> None:
+    """How much of a re-crawl was worth doing: unchanged pages cost a render but
+    no model call, because the extract stage serves them from its cache."""
+    progress = CrawlProgress("site", total=2)
+    progress.mark_page(_record("https://example.org/a"), unchanged=True)
+    progress.mark_page(_record("https://example.org/b"))
+
+    assert progress.stats.unchanged == 1
+    assert "1 unchanged" in progress.stats.summary()
 
 
 def test_finish_reports_the_tally(caplog: pytest.LogCaptureFixture) -> None:
@@ -82,4 +93,4 @@ def test_finish_reports_the_tally(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.INFO, logger=_LOGGER):
         progress.finish()
 
-    assert "1 pages, 0 skipped, 0 without markdown" in caplog.records[-1].getMessage()
+    assert "1 pages, 0 skipped, 0 without markdown, 0 unchanged" in caplog.records[-1].getMessage()

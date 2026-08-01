@@ -93,3 +93,54 @@ def test_a_crawl_that_dies_partway_keeps_the_pages_it_fetched(
     assert manifest is not None
     assert manifest.status == "failed"
     assert manifest.record_count == 3  # the manifest agrees with what is on disk
+
+
+def test_a_re_crawl_reports_which_pages_did_not_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Crawling a site again writes a fresh snapshot, but most of it is usually
+    the same text. The tally is what says how much of the run was worth doing —
+    and unchanged pages are exactly the ones the extract cache will serve free.
+    """
+    urls = ["https://example.org/a", "https://example.org/b"]
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(urls))
+    bucket = LocalBucket(tmp_path)
+
+    def crawler_for(body_b: str) -> Crawler:
+        results = {
+            "https://example.org/a": FakeResult(
+                "https://example.org/a", html="<p>a</p>", markdown=FakeMarkdown(fit_markdown="page a")
+            ),
+            "https://example.org/b": FakeResult(
+                "https://example.org/b", html="<p>b</p>", markdown=FakeMarkdown(fit_markdown=body_b)
+            ),
+        }
+        return Crawler(_config(), web_crawler_factory=web_crawler_factory(FakeWebCrawler(results)))
+
+    crawler_for("page b").crawl_to_bucket(bucket, run_id="run-1")
+    second = crawler_for("page b, revised")
+    second.crawl_to_bucket(bucket, run_id="run-2")
+
+    first_records = {r.final_url: r for r in iter_crawl_records("roundtrip", "run-1", bucket)}
+    second_records = {r.final_url: r for r in iter_crawl_records("roundtrip", "run-2", bucket)}
+    assert first_records["https://example.org/a"].content_sha256 == (
+        second_records["https://example.org/a"].content_sha256
+    )
+    assert first_records["https://example.org/b"].content_sha256 != (
+        second_records["https://example.org/b"].content_sha256
+    )
+
+
+def test_the_first_crawl_of_a_source_has_nothing_to_compare_against(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(["https://example.org/a"]))
+    bucket = LocalBucket(tmp_path)
+
+    Crawler(_config(), web_crawler_factory=web_crawler_factory(StreamingFakeWebCrawler())).crawl_to_bucket(
+        bucket, run_id="run-1"
+    )
+
+    records = list(iter_crawl_records("roundtrip", "run-1", bucket))
+    assert len(records) == 1
+    assert records[0].content_sha256 != ""

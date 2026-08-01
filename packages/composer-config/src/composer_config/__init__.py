@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     # Give up on a run after this many chunks in a row yield unusable output:
     # quietly extracting nothing is worse than failing loudly.
     extract_max_consecutive_failures: int = 25
+    # Past model answers, keyed by a fingerprint of the request that produced them,
+    # so re-extracting a crawl never re-analyses text the model has already read.
+    # Deleting the file is the hard reset; `extract --no-cache` bypasses it once.
+    extract_cache_path: str = "./extract-cache.db"
+    extract_cache_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

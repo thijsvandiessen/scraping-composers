@@ -108,6 +108,11 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_extract.add_argument("--model", help="Ollama model to use (overrides $OLLAMA_MODEL / the default)")
     p_extract.add_argument("--max-pages", type=int, help="stop after N crawled pages (for testing)")
     p_extract.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="re-ask the model for every page instead of reusing cached answers",
+    )
+    p_extract.add_argument(
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
     )
     p_extract.set_defaults(func=cmd_extract)
@@ -124,6 +129,11 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         help="rank discovered URLs by relevance to this topic (overrides the config's relevance_query)",
     )
     p_run.add_argument("--model", help="Ollama model to use (overrides $OLLAMA_MODEL / the default)")
+    p_run.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="re-ask the model for every page instead of reusing cached answers",
+    )
     p_run.add_argument(
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
     )

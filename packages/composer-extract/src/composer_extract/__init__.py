@@ -8,6 +8,7 @@ emits the warehouse's :class:`~composer_schema.WorkMentionDocument` and
 
 from __future__ import annotations
 
+from .cache import ExtractCache, open_cache, request_key
 from .client import OllamaExtractor, OllamaTuning
 from .extract import (
     PageExtractor,
@@ -30,6 +31,7 @@ from .schema import (
 
 __all__ = [
     "ExtractAborted",
+    "ExtractCache",
     "ExtractOptions",
     "ExtractStats",
     "ExtractedArtist",
@@ -46,5 +48,7 @@ __all__ = [
     "chunk_markdown",
     "extract_documents",
     "extract_recording_documents",
+    "open_cache",
     "record_markdown",
+    "request_key",
 ]

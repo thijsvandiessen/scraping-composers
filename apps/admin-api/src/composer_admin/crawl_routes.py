@@ -13,6 +13,7 @@ from typing import Annotated, Any
 
 from composer_bronze.bucket import latest_document_run_id, latest_loadable_run_id
 from composer_bronze.scraper import new_snapshot_id, write_documents
+from composer_config import settings
 from composer_crawler import (
     CRAWL_REGISTRY,
     CrawlConfig,
@@ -22,7 +23,13 @@ from composer_crawler import (
 )
 from composer_crawler.records import iter_crawl_records
 from composer_crawler.store import DEFAULT_CRAWL_CONFIGS_PATH
-from composer_extract import ExtractOptions, OllamaExtractor, extract_documents, extract_recording_documents
+from composer_extract import (
+    ExtractOptions,
+    OllamaExtractor,
+    extract_documents,
+    extract_recording_documents,
+    open_cache,
+)
 from composer_scrapers import REGISTRY
 from composer_warehouse.ingestion import create_run
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
@@ -107,8 +114,13 @@ def _crawl_in_background(config: CrawlConfig, snapshot_id: str, max_pages: int |
 
 
 def _extractor() -> OllamaExtractor:
-    """The LLM extractor; a seam for tests to inject a fake model."""
-    return OllamaExtractor.from_settings()
+    """The LLM extractor; a seam for tests to inject a fake model.
+
+    Cached like the CLI's, so re-running an extract from the dashboard does not
+    re-analyse pages the model has already read.
+    """
+    cache = open_cache(settings.extract_cache_path, enabled=settings.extract_cache_enabled)
+    return OllamaExtractor.from_settings(cache=cache)
 
 
 def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str, extract_kind: str) -> bool:

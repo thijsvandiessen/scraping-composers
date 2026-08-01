@@ -28,14 +28,22 @@ class CrawlStats:
     ``empty`` counts pages that were fetched successfully but carry no markdown:
     they cost a page render and give the extract stage nothing to read, which is
     otherwise invisible until the extract produces no documents.
+
+    ``unchanged`` counts pages whose text is identical to the previous snapshot's.
+    Those cost a render but no model call — the extract stage serves them from its
+    cache — so the number says how much of a re-crawl was worth doing.
     """
 
     pages: int = 0
     skipped: int = 0
     empty: int = 0
+    unchanged: int = 0
 
     def summary(self) -> str:
-        return f"{self.pages} pages, {self.skipped} skipped, {self.empty} without markdown"
+        return (
+            f"{self.pages} pages, {self.skipped} skipped, "
+            f"{self.empty} without markdown, {self.unchanged} unchanged"
+        )
 
 
 @dataclass
@@ -51,9 +59,11 @@ class CrawlProgress:
     def elapsed(self) -> float:
         return time.monotonic() - self.started
 
-    def mark_page(self, record: CrawlRecord) -> None:
+    def mark_page(self, record: CrawlRecord, unchanged: bool = False) -> None:
         """Count a scraped page and, now and then, say how far along the crawl is."""
         self.stats.pages += 1
+        if unchanged:
+            self.stats.unchanged += 1
         chars = len(record.markdown)
         log.debug(
             "crawl %r: %s -> %d %s, %d chars markdown, depth %d",
