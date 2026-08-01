@@ -9,7 +9,7 @@ replaces :func:`composer_crawler.discovery.discover_urls` with a fixed URL list.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -94,12 +94,21 @@ class StreamingFakeWebCrawler(FakeWebCrawler):
     being closed early when the page budget is reached. ``streamed`` records how
     many results were actually pulled, so a test can tell a real stream from a
     list that was merely iterated.
+
+    ``fail_after`` breaks the stream once that many results have been handed
+    out, standing in for a crawl that dies partway — the case where everything
+    fetched up to that point has to have survived.
     """
 
     def __init__(
-        self, results: dict[str, FakeResult] | None = None, *, fail: Exception | None = None
+        self,
+        results: dict[str, FakeResult] | None = None,
+        *,
+        fail: Exception | None = None,
+        fail_after: int | None = None,
     ) -> None:
         super().__init__(results, fail=fail)
+        self._fail_after = fail_after
         self.streamed = 0
         self.closed = False
 
@@ -114,6 +123,8 @@ class StreamingFakeWebCrawler(FakeWebCrawler):
         async def _stream() -> AsyncGenerator[FakeResult, None]:
             try:
                 for url in urls:
+                    if self._fail_after is not None and self.streamed >= self._fail_after:
+                        raise RuntimeError("crawl torn down mid-stream")
                     self.streamed += 1
                     yield self._results.get(url, FakeResult(url))
             finally:
@@ -127,10 +138,16 @@ def web_crawler_factory(crawler: FakeWebCrawler) -> Callable[[Any], FakeWebCrawl
     return lambda _config: crawler
 
 
-def stub_discover(urls: list[str]) -> Callable[[Any], Coroutine[Any, Any, list[str]]]:
-    """An async ``discover_urls`` replacement returning a fixed URL list."""
+def stub_discover(urls: list[str], budgets: list[int | None] | None = None) -> Callable[..., Any]:
+    """An async ``discover_urls`` replacement returning a fixed URL list.
 
-    async def _discover(_config: Any) -> list[str]:
+    Pass *budgets* to capture the page budget each call was made with — the
+    crawl's cap has to reach discovery, not just the list it returns.
+    """
+
+    async def _discover(_config: Any, budget: int | None = None) -> list[str]:
+        if budgets is not None:
+            budgets.append(budget)
         return list(urls)
 
     return _discover

@@ -58,6 +58,7 @@ class StubAPI:
         self.extracted: list[str] = []
         self.loaded: list[str] = []
         self.piped: list[str] = []
+        self.abandoned: list[tuple[str, str]] = []
 
     def _maybe_fail(self) -> None:
         if self._error:
@@ -101,6 +102,11 @@ class StubAPI:
         self._maybe_fail()
         self.piped.append(name)
         return {"source": name, "snapshot_id": "snap-3", "status": "running"}
+
+    def abandon_snapshot(self, source: str, snapshot_id: str) -> dict[str, Any]:
+        self._maybe_fail()
+        self.abandoned.append((source, snapshot_id))
+        return {**SNAPSHOT_PAYLOAD, "id": snapshot_id, "status": "failed", "record_count": 12}
 
 
 def install(monkeypatch: pytest.MonkeyPatch, stub: StubAPI) -> None:

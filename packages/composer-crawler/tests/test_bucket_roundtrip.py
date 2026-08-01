@@ -13,6 +13,7 @@ from composer_crawler.testing import (
     FakeMarkdown,
     FakeResult,
     FakeWebCrawler,
+    StreamingFakeWebCrawler,
     stub_discover,
     web_crawler_factory,
 )
@@ -68,3 +69,27 @@ def test_failed_crawl_writes_failed_manifest(tmp_path: Path, monkeypatch: pytest
     assert manifest.status == "failed"
     assert manifest.error is not None and "RuntimeError" in manifest.error
     assert manifest.record_count == 0
+
+
+def test_a_crawl_that_dies_partway_keeps_the_pages_it_fetched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reason records stream to the bucket: an unattended crawl of a large
+    site used to lose every page it had fetched when it was interrupted."""
+    urls = [f"https://example.org/{n}" for n in range(5)]
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(urls))
+    fake = StreamingFakeWebCrawler(fail_after=3)
+    bucket = LocalBucket(tmp_path)
+
+    with pytest.raises(RuntimeError):
+        Crawler(_config(), web_crawler_factory=web_crawler_factory(fake)).crawl_to_bucket(
+            bucket, run_id="run-2"
+        )
+
+    records = list(iter_crawl_records("roundtrip", "run-2", bucket))
+    assert [r.url for r in records] == urls[:3]
+
+    manifest = bucket.read_manifest("roundtrip", "run-2")
+    assert manifest is not None
+    assert manifest.status == "failed"
+    assert manifest.record_count == 3  # the manifest agrees with what is on disk

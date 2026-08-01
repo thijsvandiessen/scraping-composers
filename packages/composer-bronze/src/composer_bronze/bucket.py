@@ -140,6 +140,11 @@ class LocalBucket:
             for record in records:
                 fh.write(json.dumps(record, ensure_ascii=False))
                 fh.write("\n")
+                # Flushed per record because *records* is usually a generator
+                # driving a live fetch or crawl: a run killed outright (SIGTERM
+                # unwinds nothing) would otherwise lose whatever sat in the
+                # buffer. One small write per record, against a network fetch.
+                fh.flush()
 
     def read_records(self, source: str, run_id: str) -> Iterator[dict[str, Any]]:
         path = self._ndjson_path(source, run_id)

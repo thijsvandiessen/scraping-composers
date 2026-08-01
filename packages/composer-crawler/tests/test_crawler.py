@@ -57,6 +57,30 @@ def test_max_pages_caps_urls_scraped(monkeypatch: pytest.MonkeyPatch) -> None:
     assert fake.scraped_urls == urls[:2]  # the budget is applied before scraping
 
 
+def test_the_page_budget_reaches_discovery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Discovery has to know the cap, or it enumerates the whole site first —
+    minutes of silence and an empty snapshot before the first page is fetched."""
+    budgets: list[int | None] = []
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(["https://example.org/a"], budgets))
+    crawler = Crawler(_config(max_pages=500), web_crawler_factory=web_crawler_factory(FakeWebCrawler()))
+
+    list(crawler.crawl(2))
+
+    assert budgets == [2]  # the run's cap, not the config's
+
+
+def test_an_unbudgeted_crawl_passes_the_configs_max_pages_to_discovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    budgets: list[int | None] = []
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(["https://example.org/a"], budgets))
+    crawler = Crawler(_config(max_pages=7), web_crawler_factory=web_crawler_factory(FakeWebCrawler()))
+
+    list(crawler.crawl())
+
+    assert budgets == [7]
+
+
 def test_record_maps_crawl4ai_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     result = FakeResult(
         url="https://example.org/x",
@@ -185,6 +209,39 @@ def test_a_streamed_crawl_is_closed_when_the_budget_cuts_it_short(
     records = list(crawler.crawl(2))
 
     assert len(records) == 2
+    assert fake.closed is True
+
+
+def test_records_are_yielded_while_the_crawl_is_still_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The point of the streaming surface: a caller can write page 1 out before
+    page 3 has been fetched, so a killed crawl keeps what it already had."""
+    urls = ["https://example.org/a", "https://example.org/b", "https://example.org/c"]
+    fake = StreamingFakeWebCrawler()
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(urls))
+    crawler = Crawler(_config(), web_crawler_factory=web_crawler_factory(fake))
+
+    records = crawler.crawl()
+    first = next(records)
+
+    assert first.url == urls[0]
+    assert fake.streamed == 1  # the rest of the crawl has not happened yet
+    records.close()
+
+
+def test_abandoning_the_stream_closes_the_browser_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A consumer that stops early (an error while writing) must not strand the
+    crawl4ai stream and its headless browser."""
+    urls = ["https://example.org/a", "https://example.org/b"]
+    fake = StreamingFakeWebCrawler()
+    monkeypatch.setattr(crawler_mod, "discover_urls", stub_discover(urls))
+    crawler = Crawler(_config(), web_crawler_factory=web_crawler_factory(fake))
+
+    records = crawler.crawl()
+    next(records)
+    records.close()
+
     assert fake.closed is True
 
 

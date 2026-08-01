@@ -212,7 +212,16 @@ The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
 - `POST /admin/v1/scrapers/fetch-due` — fetch every scraper whose raw data is stale
 - `GET  /admin/v1/snapshots` — every raw snapshot in the bucket with its status, record count, and size
 - `POST /admin/v1/snapshots/{source}/{snapshot_id}/process` — load a snapshot into the database (background, returns a `run_id`)
+- `POST /admin/v1/snapshots/{source}/{snapshot_id}/abandon` — give up on a snapshot stuck on `running`
 - `GET  /admin/v1/runs` / `GET /admin/v1/runs/{run_id}` — load history and status
+
+A fetch or crawl that is killed outright never finalizes its manifest, so it
+stays `running` for good: the dashboard keeps showing it as live and no new run
+for that source can start. **Abandon** is the way out — it marks the snapshot
+failed and corrects its record count to what is on disk, deleting nothing (a
+crawl streams its pages to the bucket as it goes, so an interrupted one keeps
+everything it had fetched). The Crawls page grows an **Abandon** button on any
+row whose last snapshot is `running`.
 
 Fetch status lives in the snapshot's manifest on disk; loads are recorded in
 `ingest_runs` (the same log the CLI `runs` command shows). `ADMIN_API_KEY` is

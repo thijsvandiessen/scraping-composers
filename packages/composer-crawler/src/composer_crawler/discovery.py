@@ -10,6 +10,7 @@ pages before its budget runs out.
 from __future__ import annotations
 
 import logging
+import time
 from fnmatch import fnmatch
 from typing import Any
 from urllib.parse import urlsplit
@@ -37,15 +38,17 @@ def _hits_per_sec(delay: float) -> int:
     return max(1, round(1.0 / delay)) if delay > 0 else 5
 
 
-def _seeding_config(config: CrawlConfig, source: str) -> SeedingConfig:
+def _seeding_config(config: CrawlConfig, source: str, budget: int | None) -> SeedingConfig:
     has_query = bool(config.relevance_query)
     # A single glob is pushed into the seeder; multiple are applied locally below.
     pattern = config.allow_patterns[0] if len(config.allow_patterns) == 1 else "*"
     # With a query we must rank the whole candidate set, then cap to max_pages
     # afterwards; capping here (max_urls) would truncate before ranking and drop
     # the most-relevant pages. Without a query the sitemap order stands, so the
-    # cap can be pushed down to save head fetches.
-    max_urls = -1 if has_query else (config.max_pages or -1)
+    # cap can be pushed down — and it is the difference between seeding a few
+    # dozen URLs and enumerating a 700k-URL site before a single page is fetched,
+    # because the seeder stops its producer as soon as max_urls is reached.
+    max_urls = -1 if has_query else (budget or -1)
     return SeedingConfig(
         source=source,
         pattern=pattern,
@@ -71,7 +74,7 @@ def _matches(url: str, patterns: tuple[str, ...]) -> bool:
     return not patterns or any(fnmatch(url, pattern) for pattern in patterns)
 
 
-async def discover_urls(config: CrawlConfig) -> list[str]:
+async def discover_urls(config: CrawlConfig, budget: int | None = None) -> list[str]:
     """Candidate URLs for *config*, ordered most-relevant first.
 
     Seeds each seed host's sitemap.xml (and optionally Common Crawl) through the
@@ -79,22 +82,37 @@ async def discover_urls(config: CrawlConfig) -> list[str]:
     by BM25; otherwise they keep sitemap order. Returns an empty list when
     discovery is disabled or finds nothing, so the caller can fall back to the
     seeds themselves.
+
+    *budget* is how many pages the crawl will actually scrape (the run's
+    ``max_pages``, falling back to the config's). Without a ranking query it is
+    pushed into the seeder so enumeration stops there instead of walking the
+    whole site first.
     """
     source = _source(config)
     if source is None:
         log.debug("crawl %r: discovery disabled (no sitemap, no common crawl)", config.name)
         return []
-    seeding = _seeding_config(config, source)
+    if budget is None:
+        budget = config.max_pages
+    seeding = _seeding_config(config, source, budget)
     hosts = _hosts(config.seeds)
-    log.debug(
-        "crawl %r: seeding %d host(s) via %s (pattern=%r, query=%r, threshold=%s, max_urls=%s)",
+    started = time.monotonic()
+    # INFO, not DEBUG: discovery precedes the first page by minutes on a large
+    # site, and its silence next to an empty snapshot reads as a hung crawl.
+    log.info(
+        "crawl %r: discovering URLs from %d host(s) via %s (max_urls=%s)%s",
         config.name,
         len(hosts),
         source,
+        "unlimited" if seeding.max_urls < 0 else seeding.max_urls,
+        " — ranking the whole candidate set first" if config.relevance_query else "",
+    )
+    log.debug(
+        "crawl %r: seeding pattern=%r, query=%r, threshold=%s",
+        config.name,
         seeding.pattern,
         config.relevance_query,
         seeding.score_threshold,
-        seeding.max_urls,
     )
     async with AsyncUrlSeeder() as seeder:
         by_host = await seeder.many_urls(hosts, seeding)
@@ -121,7 +139,7 @@ async def discover_urls(config: CrawlConfig) -> list[str]:
         dropped,
         ", ".join(config.allow_patterns) or "no allow_patterns",
     )
-    if config.max_pages is not None:
-        urls = urls[: config.max_pages]
-    log.info("crawl %r: discovered %d URL(s)", config.name, len(urls))
+    if budget is not None:
+        urls = urls[:budget]
+    log.info("crawl %r: discovered %d URL(s) in %.0fs", config.name, len(urls), time.monotonic() - started)
     return urls

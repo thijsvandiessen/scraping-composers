@@ -39,6 +39,36 @@ def test_index_auto_refreshes_while_a_crawl_is_active(
     assert '<meta http-equiv="refresh" content="5">' in page
 
 
+def test_abandon_button_appears_only_for_a_running_snapshot(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    install(monkeypatch, StubAPI(crawls=[CRAWL_PAYLOAD]))
+    assert ">Abandon</button>" not in staff_client.get("/admin/crawls/").content.decode()
+
+    running = {**CRAWL_PAYLOAD, "last_snapshot": {**SNAPSHOT_PAYLOAD, "status": "running"}}
+    install(monkeypatch, StubAPI(crawls=[running]))
+    page = staff_client.get("/admin/crawls/").content.decode()
+    assert f'action="/admin/crawls/archive/{SNAPSHOT_PAYLOAD["id"]}/abandon"' in page
+
+
+def test_abandon_frees_the_crawl_and_reports_what_was_kept(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    stub = StubAPI(crawls=[CRAWL_PAYLOAD])
+    install(monkeypatch, stub)
+    response = staff_client.post("/admin/crawls/archive/snap-9/abandon", follow=True)
+    assert response.redirect_chain[0] == ("/admin/crawls/", 302)
+    assert stub.abandoned == [("archive", "snap-9")]
+    assert "12 crawled page(s) kept" in response.content.decode()
+    assert staff_client.get("/admin/crawls/archive/snap-9/abandon").status_code == 405
+
+
+def test_abandon_surfaces_api_error(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    install(monkeypatch, StubAPI(error="API returned 409: snapshot archive/snap-9 is not running"))
+    response = staff_client.post("/admin/crawls/archive/snap-9/abandon", follow=True)
+    assert "is not running" in response.content.decode()
+
+
 def test_index_shows_error_banner_when_api_unreachable(
     monkeypatch: pytest.MonkeyPatch, staff_client: Client
 ) -> None:
