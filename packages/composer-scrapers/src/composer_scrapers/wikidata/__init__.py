@@ -13,10 +13,9 @@ import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-import httpx
+from composer_http import new_client
 
 from .. import EntityDocument, RefreshCadence, SourceAdapter
-from .._http import user_agent
 from .parse import BASE_URL, _records_from_rows
 from .query import PAGE_SIZE, REQUEST_DELAY_S, _fetch_metrics, _fetch_page
 
@@ -34,7 +33,7 @@ class WikidataAdapter(SourceAdapter):
         """Yield every composer on Wikidata, paging until the query is exhausted."""
         after: str | None = None
         pages = 0
-        with httpx.Client(headers={"User-Agent": user_agent()}, timeout=90) as client:
+        with new_client(timeout=90) as client:
             while True:
                 rows = _fetch_page(client, after)
                 page_qids = sorted({row["item"]["value"].rsplit("/", 1)[-1] for row in rows})

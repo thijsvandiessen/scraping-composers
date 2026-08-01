@@ -13,6 +13,7 @@ from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Any
 
+from composer_http import user_agent
 from crawl4ai import (
     AsyncWebCrawler,
     BestFirstCrawlingStrategy,
@@ -28,7 +29,6 @@ from crawl4ai import (
     URLPatternFilter,
 )
 
-from ._http import user_agent
 from .config import CrawlConfig
 from .records import CrawlRecord, content_hash, kept_headers
 
