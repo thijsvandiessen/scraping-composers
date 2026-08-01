@@ -1,4 +1,5 @@
 import logging
+from dataclasses import replace
 from datetime import datetime
 from typing import Annotated
 
@@ -12,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, s
 
 from .crud import get_run, has_running, list_runs
 from .deps import DbSession, require_admin_key, session_scope
+from .logconfig import safe_for_log
 from .schemas import FetchStarted, RunOut, RunStarted, ScraperOut, SnapshotOut
 
 log = logging.getLogger(__name__)
@@ -56,6 +58,26 @@ def _last_snapshot(bucket: LocalBucket, source: str) -> Snapshot | None:
 
 def _has_running_fetch(bucket: LocalBucket, source: str) -> bool:
     return any(s.manifest.status == "running" for s in bucket.list_snapshots(source))
+
+
+def _snapshot_or_404(bucket: LocalBucket, source: str, snapshot_id: str) -> Snapshot:
+    """One snapshot by source and run_id, as the endpoints that act on it need it.
+
+    ``list_snapshots`` raises when the bucket's segment guard refuses *source*
+    (traversal, control characters). That is a malformed identifier, so it answers
+    422 like ``put_crawl`` does rather than the 500 an unhandled ValueError gives.
+    """
+    try:
+        snapshots = bucket.list_snapshots(source)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    snapshot = next((s for s in snapshots if s.manifest.run_id == snapshot_id), None)
+    if snapshot is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"unknown snapshot {safe_for_log(source)}/{safe_for_log(snapshot_id)}",
+        )
+    return snapshot
 
 
 def _fetch_in_background(source_name: str, snapshot_id: str, max_pages: int | None) -> None:
@@ -157,6 +179,39 @@ def list_snapshots() -> list[SnapshotOut]:
     return sorted(snapshots, key=lambda s: s.id, reverse=True)
 
 
+@admin.post("/snapshots/{source}/{snapshot_id}/abandon", response_model=SnapshotOut)
+def abandon_snapshot(source: str, snapshot_id: str) -> SnapshotOut:
+    """Mark a stuck ``running`` snapshot failed, unblocking the source.
+
+    A fetch or crawl killed outright (the process gone, honcho stopped) never
+    gets to finalize its manifest, so it stays ``running`` forever: the
+    dashboard shows it as live and ``_has_running_fetch`` refuses to start
+    anything new for that source. This is the way out — nothing is deleted, the
+    pages already written stay readable, and ``record_count`` is corrected to
+    what is actually on disk.
+
+    Whether the run is really dead is the caller's judgement: a crawl that *is*
+    still going will carry on writing to a snapshot now marked failed.
+    """
+    bucket = _bucket()
+    snapshot = _snapshot_or_404(bucket, source, snapshot_id)
+    if snapshot.manifest.status != "running":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"snapshot {source}/{snapshot_id} is not running (status: {snapshot.manifest.status})",
+        )
+    on_disk = sum(1 for _ in bucket.read_records(source, snapshot_id))
+    manifest = snapshot.manifest.failed("abandoned: the run was not finished by its process", on_disk)
+    bucket.write_manifest(manifest)
+    log.info(
+        "abandoned stale snapshot %s/%s (%d record(s) on disk)",
+        safe_for_log(source),
+        safe_for_log(snapshot_id),
+        on_disk,
+    )
+    return _snapshot_out(replace(snapshot, manifest=manifest))
+
+
 @admin.post(
     "/snapshots/{source}/{snapshot_id}/process",
     status_code=status.HTTP_202_ACCEPTED,
@@ -169,9 +224,7 @@ def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: B
     snapshots are the ``documents`` the LLM ``extract`` step wrote.
     """
     bucket = _bucket()
-    snapshot = next((s for s in bucket.list_snapshots(source) if s.manifest.run_id == snapshot_id), None)
-    if snapshot is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown snapshot {source}/{snapshot_id}")
+    snapshot = _snapshot_or_404(bucket, source, snapshot_id)
     if snapshot.manifest.status not in LOADABLE_STATUSES:
         raise HTTPException(
             status.HTTP_409_CONFLICT,

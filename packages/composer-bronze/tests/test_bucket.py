@@ -167,6 +167,13 @@ def test_list_snapshots_synthesizes_manifest_for_legacy_dir(tmp_path: Path) -> N
         "nested/run-1",
         "/etc/passwd",
         "run\x00id",
+        # Not traversal, but these segments reach log lines and terminals: a
+        # newline forges a second log entry, ESC starts an escape sequence.
+        "run\nid",
+        "run\r\nid",
+        "run\tid",
+        "run\x1b[31mid",
+        "run\x7fid",
     ],
 )
 def test_path_traversal_segments_rejected(tmp_path: Path, bad_segment: str) -> None:
@@ -183,6 +190,21 @@ def test_path_traversal_segments_rejected(tmp_path: Path, bad_segment: str) -> N
         bucket.read_manifest("rco", bad_segment)
     with pytest.raises(ValueError, match="single path segment"):
         bucket.write_manifest(SnapshotManifest.start(bad_segment, "run-1"))
+
+
+def test_a_real_run_id_keeps_its_colons(tmp_path: Path) -> None:
+    """Run ids are ISO timestamps (``2026-07-02T09:52:30-3086f07d``), so the segment
+    guard rejects control characters rather than allowlisting a charset — an
+    allowlist without ``:`` would reject every snapshot already on disk.
+    """
+    bucket = LocalBucket(tmp_path)
+    run_id = "2026-07-02T09:52:30-3086f07d"
+
+    bucket.write_records("rco", run_id, [{"x": 1}])
+    bucket.write_manifest(SnapshotManifest.start("rco", run_id))
+
+    assert bucket.list_runs("rco") == [run_id]
+    assert list(bucket.read_records("rco", run_id)) == [{"x": 1}]
 
 
 def test_traversal_run_id_cannot_escape_bucket_root(tmp_path: Path) -> None:

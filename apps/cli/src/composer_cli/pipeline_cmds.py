@@ -36,6 +36,7 @@ def _extract_args(args: argparse.Namespace) -> argparse.Namespace:
         crawl_run_id=None,
         model=args.model,
         max_pages=None,
+        no_cache=args.no_cache,
         bucket_path=args.bucket_path,
     )
 

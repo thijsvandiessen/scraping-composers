@@ -66,6 +66,14 @@
           {% csrf_token %}
           <button type="submit" class="sc-btn" title="Load the latest extracted snapshot into the database">Load</button>
         </form>
+        {% if crawl.last_snapshot.status == "running" %}
+        <form method="post" action="{% url 'abandon_crawl' crawl.name crawl.last_snapshot.id %}"
+              onsubmit="return confirm('Abandon this run of {{ crawl.name }}? Only do this if its process is really gone — the pages it crawled are kept.')">
+          {% csrf_token %}
+          <button type="submit" class="sc-btn"
+                  title="The crawl process is gone but never finalized its snapshot — mark it failed so the crawl can run again">Abandon</button>
+        </form>
+        {% endif %}
         {% if crawl.editable %}
         <a href="{% url 'crawl_edit' crawl.name %}" class="sc-btn">Edit</a>
         <form method="post" action="{% url 'crawl_delete' crawl.name %}"

@@ -221,6 +221,28 @@ def start_extract(request: HttpRequest, name: str) -> HttpResponse:
     return redirect("crawls_index")
 
 
+def abandon_crawl(request: HttpRequest, name: str, snapshot_id: str) -> HttpResponse:
+    """Give up on a crawl whose process is gone, so the config can be run again.
+
+    A crawl killed outright leaves its manifest on ``running`` forever, which
+    reads here as a live crawl and blocks every button on the row.
+    """
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    api = AdminAPI.from_env()
+    try:
+        snapshot = api.abandon_snapshot(name, snapshot_id)
+    except AdminAPIError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            f"abandoned {name} snapshot {snapshot_id} — "
+            f"{snapshot['record_count']} crawled page(s) kept in the bucket",
+        )
+    return redirect("crawls_index")
+
+
 def start_load(request: HttpRequest, name: str) -> HttpResponse:
     """Load the crawl's latest extracted snapshot into the database."""
     if request.method != "POST":

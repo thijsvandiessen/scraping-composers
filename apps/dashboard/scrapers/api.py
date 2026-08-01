@@ -75,6 +75,13 @@ class AdminAPI(_BaseAPI):
         started: dict[str, Any] = self._request("POST", f"/admin/v1/snapshots/{source}/{snapshot_id}/process")
         return started
 
+    def abandon_snapshot(self, source: str, snapshot_id: str) -> dict[str, Any]:
+        """Mark a snapshot stuck on ``running`` as failed, unblocking its source."""
+        snapshot: dict[str, Any] = self._request(
+            "POST", f"/admin/v1/snapshots/{source}/{snapshot_id}/abandon"
+        )
+        return snapshot
+
     def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
         runs: list[dict[str, Any]] = self._request("GET", "/admin/v1/runs", params={"limit": limit})
         return runs

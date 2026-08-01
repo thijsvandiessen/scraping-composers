@@ -24,10 +24,10 @@ def _install_seeder(monkeypatch: pytest.MonkeyPatch, by_host: dict[str, list[dic
     return seeder
 
 
-def _run(config: CrawlConfig) -> list[str]:
+def _run(config: CrawlConfig, budget: int | None = None) -> list[str]:
     import asyncio
 
-    return asyncio.run(discover_urls(config))
+    return asyncio.run(discover_urls(config, budget))
 
 
 def test_ranks_by_relevance_across_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -81,6 +81,49 @@ def test_caps_at_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     config = CrawlConfig(name="c", seeds=("https://a.example/",), max_pages=3)
     assert len(_run(config)) == 3
+
+
+def test_the_page_budget_stops_the_seeder_rather_than_the_result_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cap has to reach the seeder: enumerating a large site's whole URL set
+    and slicing afterwards costs minutes before the first page is ever fetched."""
+    seeder = _install_seeder(monkeypatch, {"a.example": [_entry("https://a.example/1")]})
+    config = CrawlConfig(name="c", seeds=("https://a.example/",))
+
+    _run(config, budget=20)
+
+    assert seeder.config.max_urls == 20
+
+
+def test_the_run_budget_wins_over_the_configs_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    seeder = _install_seeder(monkeypatch, {"a.example": [_entry(f"https://a.example/{i}") for i in range(5)]})
+    config = CrawlConfig(name="c", seeds=("https://a.example/",), max_pages=4)
+
+    assert len(_run(config, budget=2)) == 2
+    assert seeder.config.max_urls == 2
+
+
+def test_an_unbudgeted_crawl_still_falls_back_to_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    seeder = _install_seeder(monkeypatch, {"a.example": [_entry("https://a.example/1")]})
+    config = CrawlConfig(name="c", seeds=("https://a.example/",), max_pages=3)
+
+    _run(config)
+
+    assert seeder.config.max_urls == 3
+
+
+def test_a_ranked_crawl_still_seeds_everything_before_capping(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BM25 has to score the whole candidate set; capping the seeder would
+    truncate before ranking and drop the most-relevant pages."""
+    seeder = _install_seeder(
+        monkeypatch,
+        {"a.example": [_entry(f"https://a.example/{i}", score=float(i)) for i in range(5)]},
+    )
+    config = CrawlConfig(name="c", seeds=("https://a.example/",), relevance_query="composer")
+
+    assert len(_run(config, budget=2)) == 2  # capped locally, after ranking
+    assert seeder.config.max_urls == -1  # but never at the seeder
 
 
 def test_disabled_discovery_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:

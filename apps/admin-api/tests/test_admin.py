@@ -196,6 +196,57 @@ def test_process_unknown_snapshot_404(client: TestClient) -> None:
     assert client.post("/admin/v1/snapshots/nope/nope/process").status_code == 404
 
 
+def _stale_running_snapshot(bucket_path: Path, source: str, snapshot_id: str, records: int) -> None:
+    """A snapshot left behind by a killed process: pages on disk, manifest still 'running'."""
+    run_dir = bucket_path / source / snapshot_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "records.ndjson").write_text(
+        "".join(f'{{"_type": "crawl", "n": {n}}}\n' for n in range(records))
+    )
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "source": source,
+                "run_id": snapshot_id,
+                "status": "running",
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "finished_at": None,
+                "record_count": None,
+                "error": None,
+            }
+        )
+    )
+
+
+def test_abandon_frees_a_source_stuck_on_a_dead_run(client: TestClient, bucket_path: Path) -> None:
+    """A killed fetch never finalizes its manifest, so the source stays blocked
+    forever; abandoning it is the way back without deleting the pages."""
+    _stale_running_snapshot(bucket_path, "fake", "2026-01-01T00:00:00-stale00", records=3)
+    assert client.post("/admin/v1/scrapers/fake/fetch").status_code == 409
+
+    r = client.post("/admin/v1/snapshots/fake/2026-01-01T00:00:00-stale00/abandon")
+
+    assert r.status_code == 200
+    assert r.json()["status"] == "failed"
+    assert r.json()["record_count"] == 3  # corrected to what the killed run had written
+    assert "abandoned" in r.json()["error"]
+    assert client.post("/admin/v1/scrapers/fake/fetch").status_code == 202
+
+
+def test_abandon_rejects_a_snapshot_that_is_not_running(client: TestClient) -> None:
+    snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
+
+    r = client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/abandon")
+
+    assert r.status_code == 409
+    assert "not running" in r.json()["detail"]
+
+
+def test_abandon_unknown_snapshot_404(client: TestClient) -> None:
+    assert client.post("/admin/v1/snapshots/fake/nope/abandon").status_code == 404
+    assert client.post("/admin/v1/snapshots/nope/nope/abandon").status_code == 404
+
+
 def test_process_conflicts_while_ingest_running(client: TestClient, factory) -> None:  # pyright: ignore[reportMissingParameterType]
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
     # Seed an in-progress run that we never execute, so the source looks busy.

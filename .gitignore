@@ -1,5 +1,6 @@
 composers.db
 gold.db*
+extract-cache.db*
 raw-data/
 crawl_configs.json
 apps/dashboard/dashboard.sqlite3

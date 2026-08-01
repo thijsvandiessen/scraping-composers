@@ -36,6 +36,10 @@ uv run composer-ingest extract lso                       # → work-mention + pe
 uv run composer-ingest process lso --run-id <run_id>     # load the extract snapshot
 uv run composer-ingest derive-concerts                   # group the mentions into concerts
 
+# re-extracting a crawl only pays for pages whose text actually changed: model
+# answers are cached (see "Not analysing the same page twice" below)
+uv run composer-ingest extract lso --no-cache            # force every page back through the model
+
 # crawl and extract are slow and unattended, so they narrate themselves on stderr:
 # discovery, a periodic page count, and what each run dropped. DEBUG adds a line
 # per crawled page, per markdown chunk and per model call (with its latency and
@@ -110,6 +114,48 @@ form and in the `POST /admin/v1/promote` body), `--min-sitelinks N` also keeps
 persons with at least N Wikipedia sitelinks, and `--gold-path` writes the gold
 database elsewhere. In code the knobs travel as a single `PromoteConfig`
 passed to `promote()`.
+
+### Not analysing the same page twice
+
+A crawl writes a whole new snapshot every run, but most of a site is the same text
+as last time. Re-extracting it used to re-ask the model about every page — hours of
+GPU time to recompute answers it had already given. Model answers are therefore
+cached in `extract-cache.db` (`EXTRACT_CACHE_PATH`), so an `extract` only pays for
+pages whose text actually changed.
+
+The key is a SHA-256 of the **whole request**, not of the page: the model, the
+system prompt, the user prompt (which folds in the page markdown *and* its
+title/description metadata), the JSON schema demanded of the answer, and the
+generation options. Anything that could change the answer changes the key — so
+editing the prompts in `composer_extract/prompt.py`, or pointing `OLLAMA_MODEL` at
+a different model, re-asks every page by itself. There is no version constant to
+remember to bump, which is the failure mode that makes a prompt improvement look
+like it did nothing.
+
+Only answers that validate are stored, so the truncated JSON that
+`composer_extract/resilience.py` exists to survive is never cached; empty answers
+*are* cached, since "this page has no concert on it" is the common case and would
+otherwise be recomputed forever. The cache is an optimization and never a reason to
+fail — an unreachable or damaged database degrades to "not cached" and is logged.
+
+```sh
+uv run composer-ingest extract lso            # prints e.g. "412 cached, 38 asked (92% of calls saved)"
+uv run composer-ingest extract lso --no-cache # bypass it for one run
+rm extract-cache.db                           # the hard reset
+sqlite3 extract-cache.db "select model, schema_name, count(*) from extraction_cache group by 1, 2"
+```
+
+Crawling cannot skip the fetch itself: the markdown only exists once crawl4ai has
+rendered the page in its headless browser, and crawl4ai's request headers are
+browser-global, so there is no seam for a per-URL `If-None-Match`. (ETags are
+captured in each record's `headers` where a site sends them, but coverage across
+the configured sources is too sparse to build on.) What the crawl does instead is
+stamp every page with `content_sha256` and compare it against the previous
+snapshot, so the closing tally reports how much of a re-crawl was worth doing:
+
+```
+crawl 'lso' finished in 812s: 450 pages, 0 skipped, 2 without markdown, 412 unchanged
+```
 
 ### Rebuilding silver
 
@@ -212,7 +258,16 @@ The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
 - `POST /admin/v1/scrapers/fetch-due` — fetch every scraper whose raw data is stale
 - `GET  /admin/v1/snapshots` — every raw snapshot in the bucket with its status, record count, and size
 - `POST /admin/v1/snapshots/{source}/{snapshot_id}/process` — load a snapshot into the database (background, returns a `run_id`)
+- `POST /admin/v1/snapshots/{source}/{snapshot_id}/abandon` — give up on a snapshot stuck on `running`
 - `GET  /admin/v1/runs` / `GET /admin/v1/runs/{run_id}` — load history and status
+
+A fetch or crawl that is killed outright never finalizes its manifest, so it
+stays `running` for good: the dashboard keeps showing it as live and no new run
+for that source can start. **Abandon** is the way out — it marks the snapshot
+failed and corrects its record count to what is on disk, deleting nothing (a
+crawl streams its pages to the bucket as it goes, so an interrupted one keeps
+everything it had fetched). The Crawls page grows an **Abandon** button on any
+row whose last snapshot is `running`.
 
 Fetch status lives in the snapshot's manifest on disk; loads are recorded in
 `ingest_runs` (the same log the CLI `runs` command shows). `ADMIN_API_KEY` is

@@ -40,19 +40,28 @@ LOADABLE_STATUSES = ("completed", "unknown")
 DOCUMENT_RECORD_TYPES = frozenset({"entity", "work_mention"})
 
 
+#: Control characters (C0 plus DEL) are rejected in a path segment. They are not a
+#: traversal risk, but ``source`` and ``run_id`` travel from here into log lines and
+#: terminals, where an embedded newline forges a log entry and ESC starts an escape
+#: sequence (CWE-117). Deliberately a rejection list rather than an allowlist: a
+#: run_id looks like ``2026-07-02T09:52:30-3086f07d``, so the colon has to stay legal.
+_CONTROL_CHARS = frozenset(chr(code) for code in range(0x20)) | {"\x7f"}
+
+
 def _validated_segment(value: str, field: str) -> str:
-    """Require *value* to be a single path segment, guarding against traversal (CWE-22).
+    """Require *value* to be a single, plain path segment (CWE-22, CWE-117).
 
     ``source`` and ``run_id`` may come from untrusted input (API path
     parameters, CLI arguments); joined onto the bucket root unchecked, a value
-    like ``../../etc`` or an absolute path would escape the bucket.
+    like ``../../etc`` or an absolute path would escape the bucket, and one
+    carrying a newline would forge entries in the logs that report it.
     """
     if (
         not value
         or value in (".", "..")
         or "/" in value
         or "\\" in value
-        or "\x00" in value
+        or not _CONTROL_CHARS.isdisjoint(value)
         or os.path.basename(value) != value
     ):
         raise ValueError(f"invalid {field} {value!r}: must be a single path segment")
@@ -140,6 +149,11 @@ class LocalBucket:
             for record in records:
                 fh.write(json.dumps(record, ensure_ascii=False))
                 fh.write("\n")
+                # Flushed per record because *records* is usually a generator
+                # driving a live fetch or crawl: a run killed outright (SIGTERM
+                # unwinds nothing) would otherwise lose whatever sat in the
+                # buffer. One small write per record, against a network fetch.
+                fh.flush()
 
     def read_records(self, source: str, run_id: str) -> Iterator[dict[str, Any]]:
         path = self._ndjson_path(source, run_id)

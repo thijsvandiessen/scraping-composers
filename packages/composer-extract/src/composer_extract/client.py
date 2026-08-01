@@ -18,6 +18,7 @@ import ollama
 from composer_config import settings
 from pydantic import BaseModel
 
+from .cache import ExtractCache, request_key
 from .prompt import RECORDING_SYSTEM_PROMPT, SYSTEM_PROMPT, build_user_prompt
 from .schema import PageExtraction, PageRecordingExtraction
 
@@ -112,9 +113,20 @@ class OllamaExtractor:
         self._model = model
         self._tuning = tuning if tuning is not None else OllamaTuning()
         self._chat: ChatFn = chat if chat is not None else ollama.Client(host=host, timeout=timeout_s).chat
+        # Attached after construction rather than as a sixth __init__ argument:
+        # ruff's max-args is 5 and the signature above is already at the limit.
+        self._cache: ExtractCache | None = None
+
+    def with_cache(self, cache: ExtractCache | None) -> OllamaExtractor:
+        """Consult *cache* before asking the model. Mutates, and returns ``self``
+        so it can be chained straight onto a constructor call."""
+        self._cache = cache
+        return self
 
     @classmethod
-    def from_settings(cls, *, model: str | None = None, chat: ChatFn | None = None) -> OllamaExtractor:
+    def from_settings(
+        cls, *, model: str | None = None, chat: ChatFn | None = None, cache: ExtractCache | None = None
+    ) -> OllamaExtractor:
         resolved = model or settings.ollama_model
         log.info(
             "extract: using ollama model %s at %s (num_ctx=%s, num_predict=%s, timeout=%.0fs)",
@@ -130,9 +142,41 @@ class OllamaExtractor:
             tuning=OllamaTuning(num_ctx=settings.ollama_num_ctx, num_predict=settings.ollama_num_predict),
             timeout_s=settings.ollama_timeout_s,
             chat=chat,
-        )
+        ).with_cache(cache)
+
+    def _from_cache(self, key: str, schema: type[_M]) -> _M | None:
+        """A previously stored answer for *key*, or None on a miss.
+
+        A stored answer that no longer validates (the schema changed shape under
+        it, or the row is damaged) is dropped rather than raised, so one bad entry
+        costs a single model call instead of failing the page.
+        """
+        if self._cache is None:
+            return None
+        payload = self._cache.get(key)
+        if payload is None:
+            return None
+        try:
+            return schema.model_validate_json(payload)
+        except ValueError as exc:
+            log.warning("extract: cached %s no longer validates (%s); re-asking", schema.__name__, exc)
+            self._cache.delete(key)
+            return None
 
     def _extract(self, markdown: str, metadata: dict[str, str], system_prompt: str, schema: type[_M]) -> _M:
+        user_prompt = build_user_prompt(markdown, metadata)
+        options = self._tuning.options()
+        key = request_key(
+            model=self._model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            schema=schema.model_json_schema(),
+            options=options,
+        )
+        cached = self._from_cache(key, schema)
+        if cached is not None:
+            log.debug("extract: reusing the cached %s for %d chars", schema.__name__, len(markdown))
+            return cached
         log.debug(
             "extract: asking %s for %s from %d chars of markdown (%d metadata key(s))",
             self._model,
@@ -145,14 +189,19 @@ class OllamaExtractor:
             model=self._model,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": build_user_prompt(markdown, metadata)},
+                {"role": "user", "content": user_prompt},
             ],
             format=schema.model_json_schema(),
-            options=self._tuning.options(),
+            options=options,
         )
         content = _response_content(response)
         _log_response(self._model, response, len(content), time.monotonic() - started)
-        return schema.model_validate_json(content)
+        # Validated before it is stored, so unusable output — the truncated JSON
+        # .resilience retries on — is never cached.
+        extraction = schema.model_validate_json(content)
+        if self._cache is not None:
+            self._cache.put(key, model=self._model, schema_name=schema.__name__, response=content)
+        return extraction
 
     def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
         return self._extract(markdown, metadata, SYSTEM_PROMPT, PageExtraction)

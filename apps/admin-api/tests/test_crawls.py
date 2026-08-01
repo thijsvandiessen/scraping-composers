@@ -125,6 +125,31 @@ def test_put_rejects_traversal_name(client: TestClient) -> None:
     assert "path segment" in r.json()["detail"]
 
 
+def test_put_rejects_a_name_carrying_a_newline(client: TestClient) -> None:
+    """The log-injection path (CWE-117): uvicorn percent-decodes before routing and
+    Starlette's ``[^/]+`` convertor matches a newline, so ``%0A`` in the URL used to
+    reach the handler intact, become a directory under the bucket, and be echoed
+    back into single-line log output as a forged entry.
+    """
+    r = client.put("/admin/v1/crawls/evil%0AINFO%20forged-entry", json=PAYLOAD)
+
+    assert r.status_code == 422
+    assert "path segment" in r.json()["detail"]
+    stored = [c["name"] for c in client.get("/admin/v1/crawls").json()]
+    assert not any("\n" in name for name in stored)
+
+
+def test_a_malformed_snapshot_source_is_a_bad_request_not_a_crash(client: TestClient) -> None:
+    """The segment guard raises on a name it refuses; the endpoints that look a
+    snapshot up turn that into 422 rather than letting it surface as a 500.
+    """
+    for path in (
+        "/admin/v1/snapshots/evil%0Ax/run-1/abandon",
+        "/admin/v1/snapshots/evil%0Ax/run-1/process",
+    ):
+        assert client.post(path).status_code == 422, path
+
+
 def test_unknown_crawl_404(client: TestClient) -> None:
     assert client.get("/admin/v1/crawls/nope").status_code == 404
     assert client.delete("/admin/v1/crawls/nope").status_code == 404
