@@ -5,6 +5,7 @@ from pathlib import Path
 
 from composer_gold import (
     DEFAULT_GOLD_DB_PATH,
+    DEFAULT_MIN_APPEARANCES,
     DEFAULT_MIN_REFERRERS,
     DEFAULT_MIN_SITELINKS,
     PromoteConfig,
@@ -17,7 +18,7 @@ from composer_warehouse.rebuild import rebuild_silver, sqlite_db_path
 from composer_warehouse.recordings import derive_recordings
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
-from . import routes
+from . import snapshots
 from .deps import dispose_db, require_admin_key, session_scope
 from .schemas import GoldStatus, PromoteOptions, SilverStatus
 
@@ -44,16 +45,20 @@ def _promote_in_background(gold_path: str, config: PromoteConfig) -> None:
 def _promote_config(options: PromoteOptions | None) -> tuple[str, PromoteConfig]:
     """Resolve the request body (or its absence) into a gold path and config.
 
-    ``min_sitelinks`` and ``min_referrers`` left out of the body fall back to
-    the configured defaults; an explicit ``null`` switches the sitelink signal
-    off.
+    ``min_sitelinks``, ``min_appearances`` and ``min_referrers`` left out of the
+    body fall back to the configured defaults; an explicit ``null`` switches the
+    sitelink signal off.
     """
     opts = options or PromoteOptions()
     gold_path = opts.gold_path or DEFAULT_GOLD_DB_PATH
     min_sitelinks = opts.min_sitelinks if "min_sitelinks" in opts.model_fields_set else DEFAULT_MIN_SITELINKS
+    min_appearances = (
+        opts.min_appearances if "min_appearances" in opts.model_fields_set else DEFAULT_MIN_APPEARANCES
+    )
     min_referrers = opts.min_referrers if "min_referrers" in opts.model_fields_set else DEFAULT_MIN_REFERRERS
     config = PromoteConfig(
         min_sitelinks=min_sitelinks,
+        min_appearances=min_appearances,
         min_referrers=min_referrers,
         drop_unevidenced_persons=opts.drop_unevidenced_persons,
         collapse_duplicates=opts.collapse_duplicates,
@@ -110,11 +115,11 @@ def _silver_db_path() -> Path | None:
 
 def _rebuild_silver_in_background() -> None:
     """Rebuild silver from the bucket; status lives in the silver manifest."""
-    # Registry and bucket are read through the routes module so tests (and
-    # future config) can swap them in one place.
-    sources = [(adapter.name, adapter.base_url) for adapter in routes.REGISTRY.values()]
+    # Registry and bucket are read through the modules that own them, rather
+    # than imported by name, so tests (and future config) can swap them.
+    sources = [(adapter.name, adapter.base_url) for adapter in snapshots.REGISTRY.values()]
     try:
-        rebuild_silver(routes._bucket(), sources)
+        rebuild_silver(snapshots.bucket(), sources)
     except Exception:
         # Recorded as a failed manifest by rebuild_silver; log for the console.
         log.exception("background silver rebuild failed")

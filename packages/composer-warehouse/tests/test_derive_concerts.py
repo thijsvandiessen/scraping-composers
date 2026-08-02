@@ -2,7 +2,7 @@
 
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.models import Concert, ConcertParticipant, ConcertWork, Entity
-from composer_warehouse.testing import FakeSource, ingest_source, perf_mention, person
+from composer_warehouse.testing import FakeSource, ensemble, ingest_source, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -157,6 +157,92 @@ def test_derive_concerts_handles_llm_source(session: Session) -> None:
     assert ("conductor", "Simon Rattle") in by_role
     assert by_role[("soloist", "Janine Jansen")].discipline == "violin"
     assert all(p.entity_id is not None for p in concert.participants)  # verbatim names resolve
+    assert (stats.concerts, stats.participant_links) == (1, 2)
+
+
+def test_derive_concerts_credits_the_orchestra(session: Session) -> None:
+    """Berlinphil names the orchestra per work; it becomes an ensemble
+    participant resolved against the ``ensemble`` entity of the same name."""
+    berlinphil = FakeSource(
+        records=(
+            perf_mention(
+                "perf:10-1",
+                "Paradise and the Peri",
+                "Robert Schumann",
+                {
+                    "concert_id": "10",
+                    "date": "2009-02-08",
+                    "conductors": ["Sir Simon Rattle"],
+                    "ensembles": ["Berliner Philharmoniker"],
+                },
+            ),
+            person("Rattle, Sir Simon", external_id="bp:rattle"),
+            ensemble("Berliner Philharmoniker", external_id="bp:ens"),
+        ),
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    ingest_source(session, berlinphil)
+
+    stats = derive_concerts(session)
+
+    orchestra = session.scalars(select(Entity).where(Entity.label == "Berliner Philharmoniker")).one()
+    participant = session.scalars(
+        select(ConcertParticipant).where(ConcertParticipant.role == "ensemble")
+    ).one()
+    assert participant.name == "Berliner Philharmoniker"
+    assert participant.entity_id == orchestra.id  # the ensemble entity, not a person
+    assert stats.participant_links == 2  # conductor + orchestra
+
+
+def test_derive_concerts_handles_rco_source(session: Session) -> None:
+    """RCO reports concert-level credits on every work of the concert."""
+    rco = FakeSource(
+        records=(
+            perf_mention(
+                "perf:42:0",
+                "Symphony No. 5",
+                "Beethoven",
+                {
+                    "concert_id": 42,
+                    "date": "2019-11-14T20:15:00Z",
+                    "venue": "Het Concertgebouw",
+                    "url": "https://rco.example/concert/42",
+                    "conductor": "Daniele Gatti",
+                    "soloists": [{"name": "Janine Jansen", "discipline": "violin"}],
+                },
+            ),
+            perf_mention(
+                "perf:42:1",
+                "Egmont Overture",
+                "Beethoven",
+                {
+                    "concert_id": 42,
+                    "date": "2019-11-14T20:15:00Z",
+                    "venue": "Het Concertgebouw",
+                    "url": "https://rco.example/concert/42",
+                    "conductor": "Daniele Gatti",
+                    "soloists": [],
+                },
+            ),
+            person("Daniele Gatti", external_id="rco:gatti"),
+            person("Janine Jansen", external_id="rco:jansen"),
+        ),
+        name="rco",
+        base_url="https://rco.example",
+    )
+    ingest_source(session, rco)
+
+    stats = derive_concerts(session)
+
+    concert = session.scalars(select(Concert)).one()  # both works grouped by concert id
+    assert concert.external_key == "42"
+    assert (concert.date, concert.venue) == ("2019-11-14", "Het Concertgebouw")
+    assert len(concert.works) == 2
+    assert {(p.role, p.name) for p in concert.participants} == {
+        ("conductor", "Daniele Gatti"),
+        ("soloist", "Janine Jansen"),
+    }
     assert (stats.concerts, stats.participant_links) == (1, 2)
 
 

@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "composer-bronze",
     "composer-config",
+    "composer-http",
     "crawl4ai>=0.9",
 ]
 
@@ -22,3 +23,4 @@ testpaths = ["tests"]
 [tool.uv.sources]
 composer-bronze = { workspace = true }
 composer-config = { workspace = true }
+composer-http = { workspace = true }

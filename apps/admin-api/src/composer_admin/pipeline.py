@@ -21,7 +21,7 @@ from composer_crawler import CrawlConfig
 from composer_warehouse.ingestion import create_run
 
 from .deps import session_scope
-from .routes import _process_in_background, _source_base_url
+from .snapshots import process_in_background, source_base_url
 
 log = logging.getLogger(__name__)
 
@@ -39,8 +39,8 @@ def load_extracted(name: str, snapshot_id: str) -> bool:
     """
     try:
         with session_scope() as session:
-            run_id = create_run(session, name, _source_base_url(name)).id
-        _process_in_background(name, snapshot_id, run_id)
+            run_id = create_run(session, name, source_base_url(name)).id
+        process_in_background(name, snapshot_id, run_id)
     except Exception:
         log.exception("pipeline load failed for %s/%s", name, snapshot_id)
         return False

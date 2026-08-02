@@ -16,8 +16,8 @@ import time
 from collections.abc import Iterator
 
 import httpx
+from composer_http import get_text, user_agent
 
-from .._http import call_with_retries, user_agent
 from .catalogue import WorkLink, composer_paths, next_page_path, work_links
 
 BASE_URL = "https://www.boosey.com"
@@ -34,16 +34,10 @@ log = logging.getLogger(__name__)
 
 
 def _make_client() -> httpx.Client:
+    # Built here rather than with composer_http.new_client because catalogue URLs
+    # redirect (a retitled work's slug 301s to its current one) and new_client
+    # takes only a timeout and headers.
     return httpx.Client(headers={"User-Agent": user_agent()}, timeout=30, follow_redirects=True)
-
-
-def _get_text(client: httpx.Client, url: str, label: str) -> str:
-    def do() -> str:
-        resp = client.get(url)
-        resp.raise_for_status()
-        return resp.text
-
-    return call_with_retries(do, label=label, retries=RETRIES)
 
 
 def _absolute(path: str) -> str:
@@ -62,7 +56,7 @@ def _listing_pages(client: httpx.Client, path: str, label: str) -> Iterator[str]
         seen.add(url)
         if page:
             time.sleep(REQUEST_DELAY_S)
-        html = _get_text(client, url, f"{label} page {page + 1}")
+        html = get_text(client, url, label=f"{label} page {page + 1}", retries=RETRIES)
         yield html
         following = next_page_path(html)
         if following is None:
@@ -115,6 +109,6 @@ def iter_work_pages(max_pages: int | None = None) -> Iterator[tuple[WorkLink, st
                     return
                 url = _absolute(link.path)
                 time.sleep(REQUEST_DELAY_S)
-                yield link, url, _get_text(client, url, f"work {link.work_id}")
+                yield link, url, get_text(client, url, label=f"work {link.work_id}", retries=RETRIES)
                 fetched += 1
         log.info("boosey: fetched %d work pages", fetched)

@@ -8,7 +8,7 @@ consumer API (``/v1``).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -44,6 +44,20 @@ class _BaseAPI:
             return None
         return response.json()
 
+    def _json_dict(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        """A response the API documents as an object.
+
+        The two casts below are what lets every method below be a single
+        ``return`` line: ``_request`` hands back ``Any`` (the decoded JSON),
+        and pyright's strict mode wants that pinned to a real type exactly
+        once rather than at each of the twenty-odd call sites.
+        """
+        return cast(dict[str, Any], self._request(method, path, **kwargs))
+
+    def _json_list(self, method: str, path: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """A response the API documents as an array of objects."""
+        return cast(list[dict[str, Any]], self._request(method, path, **kwargs))
+
 
 @dataclass
 class AdminAPI(_BaseAPI):
@@ -56,77 +70,60 @@ class AdminAPI(_BaseAPI):
         return cls(base_url=settings.ADMIN_API_URL, api_key=settings.ADMIN_API_KEY)
 
     def list_scrapers(self) -> list[dict[str, Any]]:
-        scrapers: list[dict[str, Any]] = self._request("GET", "/admin/v1/scrapers")
-        return scrapers
+        return self._json_list("GET", "/admin/v1/scrapers")
 
     def fetch_scraper(self, name: str) -> dict[str, Any]:
-        started: dict[str, Any] = self._request("POST", f"/admin/v1/scrapers/{name}/fetch")
-        return started
+        return self._json_dict("POST", f"/admin/v1/scrapers/{name}/fetch")
 
     def fetch_due(self) -> list[dict[str, Any]]:
-        started: list[dict[str, Any]] = self._request("POST", "/admin/v1/scrapers/fetch-due")
-        return started
+        return self._json_list("POST", "/admin/v1/scrapers/fetch-due")
 
     def list_snapshots(self) -> list[dict[str, Any]]:
-        snapshots: list[dict[str, Any]] = self._request("GET", "/admin/v1/snapshots")
-        return snapshots
+        return self._json_list("GET", "/admin/v1/snapshots")
 
     def process_snapshot(self, source: str, snapshot_id: str) -> dict[str, Any]:
-        started: dict[str, Any] = self._request("POST", f"/admin/v1/snapshots/{source}/{snapshot_id}/process")
-        return started
+        return self._json_dict("POST", f"/admin/v1/snapshots/{source}/{snapshot_id}/process")
 
     def abandon_snapshot(self, source: str, snapshot_id: str) -> dict[str, Any]:
         """Mark a snapshot stuck on ``running`` as failed, unblocking its source."""
-        snapshot: dict[str, Any] = self._request(
-            "POST", f"/admin/v1/snapshots/{source}/{snapshot_id}/abandon"
-        )
-        return snapshot
+        return self._json_dict("POST", f"/admin/v1/snapshots/{source}/{snapshot_id}/abandon")
 
     def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
-        runs: list[dict[str, Any]] = self._request("GET", "/admin/v1/runs", params={"limit": limit})
-        return runs
+        return self._json_list("GET", "/admin/v1/runs", params={"limit": limit})
 
     def gold_status(self) -> dict[str, Any]:
-        status: dict[str, Any] = self._request("GET", "/admin/v1/gold")
-        return status
+        return self._json_dict("GET", "/admin/v1/gold")
 
     def start_promote(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"json": options} if options else {}
-        status: dict[str, Any] = self._request("POST", "/admin/v1/promote", **kwargs)
-        return status
+        return self._json_dict("POST", "/admin/v1/promote", **kwargs)
 
     def list_crawls(self) -> list[dict[str, Any]]:
-        crawls: list[dict[str, Any]] = self._request("GET", "/admin/v1/crawls")
-        return crawls
+        return self._json_list("GET", "/admin/v1/crawls")
 
     def get_crawl(self, name: str) -> dict[str, Any]:
-        crawl: dict[str, Any] = self._request("GET", f"/admin/v1/crawls/{name}")
-        return crawl
+        return self._json_dict("GET", f"/admin/v1/crawls/{name}")
 
     def put_crawl(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        crawl: dict[str, Any] = self._request("PUT", f"/admin/v1/crawls/{name}", json=payload)
-        return crawl
+        return self._json_dict("PUT", f"/admin/v1/crawls/{name}", json=payload)
 
     def delete_crawl(self, name: str) -> None:
+        # 204, so there is no body to type — _request is called directly.
         self._request("DELETE", f"/admin/v1/crawls/{name}")
 
     def start_crawl(self, name: str) -> dict[str, Any]:
-        started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/fetch")
-        return started
+        return self._json_dict("POST", f"/admin/v1/crawls/{name}/fetch")
 
     def start_extract(self, name: str) -> dict[str, Any]:
-        started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/extract")
-        return started
+        return self._json_dict("POST", f"/admin/v1/crawls/{name}/extract")
 
     def load_crawl(self, name: str) -> dict[str, Any]:
         """Load the crawl's latest extracted snapshot into the database."""
-        started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/process")
-        return started
+        return self._json_dict("POST", f"/admin/v1/crawls/{name}/process")
 
     def run_crawl_pipeline(self, name: str) -> dict[str, Any]:
         """Crawl, extract and load the crawl in one unattended chain."""
-        started: dict[str, Any] = self._request("POST", f"/admin/v1/crawls/{name}/run")
-        return started
+        return self._json_dict("POST", f"/admin/v1/crawls/{name}/run")
 
 
 @dataclass
@@ -146,8 +143,7 @@ class DataAPI(_BaseAPI):
         return cls(base_url=settings.SILVER_API_URL)
 
     def stats(self) -> dict[str, Any]:
-        stats: dict[str, Any] = self._request("GET", "/v1/stats")
-        return stats
+        return self._json_dict("GET", "/v1/stats")
 
     def list_entities(
         self,
@@ -162,12 +158,10 @@ class DataAPI(_BaseAPI):
             params["q"] = q
         if kind:
             params["kind"] = kind
-        result: dict[str, Any] = self._request("GET", "/v1/entities", params=params)
-        return result
+        return self._json_dict("GET", "/v1/entities", params=params)
 
     def get_entity(self, entity_id: str) -> dict[str, Any]:
-        entity: dict[str, Any] = self._request("GET", f"/v1/entities/{entity_id}")
-        return entity
+        return self._json_dict("GET", f"/v1/entities/{entity_id}")
 
     def list_people(
         self, role: str, q: str | None = None, page: int = 1, limit: int = 20, sort: str = "label"
@@ -176,14 +170,11 @@ class DataAPI(_BaseAPI):
         params: dict[str, Any] = {"page": page, "limit": limit, "sort": sort}
         if q:
             params["q"] = q
-        result: dict[str, Any] = self._request("GET", f"/v1/{role}", params=params)
-        return result
+        return self._json_dict("GET", f"/v1/{role}", params=params)
 
     def person_concerts(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
-        result: dict[str, Any] = self._request(
-            "GET", f"/v1/people/{person_id}/concerts", params={"page": page, "limit": limit}
-        )
-        return result
+        params = {"page": page, "limit": limit}
+        return self._json_dict("GET", f"/v1/people/{person_id}/concerts", params=params)
 
     def list_concerts(
         self, q: str | None = None, source: str | None = None, page: int = 1, limit: int = 20
@@ -193,18 +184,14 @@ class DataAPI(_BaseAPI):
             params["q"] = q
         if source:
             params["source"] = source
-        result: dict[str, Any] = self._request("GET", "/v1/concerts", params=params)
-        return result
+        return self._json_dict("GET", "/v1/concerts", params=params)
 
     def get_concert(self, concert_id: int) -> dict[str, Any]:
-        concert: dict[str, Any] = self._request("GET", f"/v1/concerts/{concert_id}")
-        return concert
+        return self._json_dict("GET", f"/v1/concerts/{concert_id}")
 
     def person_recordings(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
-        result: dict[str, Any] = self._request(
-            "GET", f"/v1/people/{person_id}/recordings", params={"page": page, "limit": limit}
-        )
-        return result
+        params = {"page": page, "limit": limit}
+        return self._json_dict("GET", f"/v1/people/{person_id}/recordings", params=params)
 
     def list_recordings(
         self, q: str | None = None, source: str | None = None, page: int = 1, limit: int = 20
@@ -214,12 +201,10 @@ class DataAPI(_BaseAPI):
             params["q"] = q
         if source:
             params["source"] = source
-        result: dict[str, Any] = self._request("GET", "/v1/recordings", params=params)
-        return result
+        return self._json_dict("GET", "/v1/recordings", params=params)
 
     def get_recording(self, recording_id: int) -> dict[str, Any]:
-        recording: dict[str, Any] = self._request("GET", f"/v1/recordings/{recording_id}")
-        return recording
+        return self._json_dict("GET", f"/v1/recordings/{recording_id}")
 
     def list_works(
         self,
@@ -234,12 +219,10 @@ class DataAPI(_BaseAPI):
             params["q"] = q
         if performed_only:
             params["performed"] = "true"
-        result: dict[str, Any] = self._request("GET", "/v1/works", params=params)
-        return result
+        return self._json_dict("GET", "/v1/works", params=params)
 
     def list_mentions(self, status: str | None = None, page: int = 1, limit: int = 20) -> dict[str, Any]:
         params: dict[str, Any] = {"page": page, "limit": limit}
         if status:
             params["status"] = status
-        result: dict[str, Any] = self._request("GET", "/v1/mentions", params=params)
-        return result
+        return self._json_dict("GET", "/v1/mentions", params=params)

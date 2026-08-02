@@ -35,7 +35,10 @@ log = logging.getLogger(__name__)
 class PromoteStats:
     persons_kept: int = 0
     persons_dropped: int = 0
+    persons_kept_by_appearances: int = 0
     persons_promoted_by_sitelinks: int = 0
+    ensembles_kept: int = 0
+    ensembles_dropped: int = 0
     duplicates_collapsed: int = 0
     entities_kept_other: int = 0
     entities_pruned: int = 0
@@ -57,14 +60,15 @@ class PromoteConfig:
     """Per-run knobs of the promotion: the curation rules and their signals.
 
     Every rule defaults to on; the two-argument ``promote(silver, gold_path)``
-    call is the fully curated build. ``min_sitelinks`` only matters while
-    rule 1 is on — with rule 1 off every person is kept anyway. ``min_referrers``
-    only matters while rule 3 is on — with rule 3 off every entity is kept; at
-    its default of 1 it reproduces the historical "keep anything referenced"
-    behaviour.
+    call is the fully curated build. ``min_sitelinks`` and ``min_appearances``
+    only matter while rule 1 is on — with rule 1 off every person and ensemble
+    is kept anyway. ``min_referrers`` only matters while rule 3 is on — with
+    rule 3 off every entity is kept; at its default of 1 it reproduces the
+    historical "keep anything referenced" behaviour.
     """
 
     min_sitelinks: int | None = None
+    min_appearances: int = 1  # rule 1 threshold: concerts + recordings credited to the entity
     min_referrers: int = 1  # rule 3 threshold: keep entities with >= N distinct referrers
     drop_unevidenced_persons: bool = True  # rule 1
     collapse_duplicates: bool = True  # rule 2
@@ -101,7 +105,10 @@ def _stats(build: GoldBuild) -> PromoteStats:
     return PromoteStats(
         persons_kept=len(build.kept_roots),
         persons_dropped=len(build.all_persons) - len(build.kept_members),
+        persons_kept_by_appearances=len(build.appearance_roots),
         persons_promoted_by_sitelinks=len(build.sitelink_roots - build.evidence_roots),
+        ensembles_kept=len(build.kept_ensembles),
+        ensembles_dropped=len(build.unevidenced_ensembles),
         duplicates_collapsed=len(build.kept_members) - len(build.kept_roots),
         entities_kept_other=len(build.kept_other),
         entities_pruned=len(build.all_other - build.kept_other),
@@ -126,6 +133,7 @@ def _build(silver: Session, tmp_path: Path, config: PromoteConfig) -> PromoteSta
 
     build = GoldBuild(silver, config)
     build.select_persons()
+    build.select_ensembles()
     with gold_engine.begin() as gold:
         copy_sources_and_runs(build, gold)
         copy_entities(build, gold, build.kept_roots)  # kept person representatives

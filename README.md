@@ -1,7 +1,8 @@
 # composer-ingest
 
 Ingests classical composer data from IMSLP, Wikidata, Open Opus, Concertgebouw,
-NY Phil, and Berlin Phil into a database, with full provenance: every record
+NY Phil, Berlin Phil, and classical-music-online.net into a database, with full
+provenance: every record
 knows which source it came from, when it was first and last seen, and which
 ingest run produced it.
 
@@ -25,6 +26,14 @@ uv run composer-ingest process imslp
 
 # quick test run
 uv run composer-ingest fetch imslp --max-pages 1
+
+# classical-music-online.net is a two-level crawl: 26 alphabet index pages give
+# ~11.6k composers (name, life years, country), then every composer's own page
+# is fetched for its works. That is ~11.6k requests — a couple of hours,
+# unattended; --max-pages caps the composer pages for a smoke run. Processing
+# the resulting snapshot needs no network.
+uv run composer-ingest fetch classicalmusiconline --max-pages 5
+uv run composer-ingest process classicalmusiconline
 
 # extract concerts + performers from crawled pages with a local Ollama model:
 # crawl a site, run the model over each page's markdown (stored at crawl time),
@@ -99,21 +108,27 @@ from silver by the promote step:
 uv run composer-ingest promote        # silver → gold (full rebuild, atomic swap)
 ```
 
-Promotion applies the curation rules: people with no concerts, recordings, or
-works mentioned are dropped (kept only if they composed a mentioned work or a
-performance archive reported them); duplicate person entities (linked by
-`dedupe-persons`) are collapsed into their canonical row with claims, works,
-and mentions re-pointed; entities left unreferenced are pruned. Silver is
+Promotion applies the curation rules: people and ensembles are dropped unless
+they are *credited* — a participant on at least `--min-appearances` concerts or
+recordings — or composed a work some source mentioned; duplicate person entities
+(linked by `dedupe-persons`) are collapsed into their canonical row with claims,
+works, and mentions re-pointed; entities left unreferenced are pruned. Silver is
 never modified by promotion, so it is repeatable at any time; status and
 stats land in `gold.db.manifest.json`.
+
+Being *listed* by a source is deliberately not evidence. Archives publish full
+artist and ensemble indexes, and taking those at face value is what filled gold
+with soloists and orchestras that appear on no programme; the concert and
+recording tables are the only thing rule 1 believes.
 
 Each run is configurable: every rule can be switched off (CLI
 `--no-drop-unevidenced-persons`, `--no-collapse-duplicates`,
 `--no-prune-unreferenced`; the same toggles appear in the dashboard's promote
-form and in the `POST /admin/v1/promote` body), `--min-sitelinks N` also keeps
-persons with at least N Wikipedia sitelinks, and `--gold-path` writes the gold
-database elsewhere. In code the knobs travel as a single `PromoteConfig`
-passed to `promote()`.
+form and in the `POST /admin/v1/promote` body), `--min-appearances N` raises the
+credit threshold (default 1, i.e. one real appearance is enough),
+`--min-sitelinks N` also keeps persons with at least N Wikipedia sitelinks, and
+`--gold-path` writes the gold database elsewhere. In code the knobs travel as a
+single `PromoteConfig` passed to `promote()`.
 
 ### Not analysing the same page twice
 
@@ -180,10 +195,12 @@ file replace); status and stats land in `composers.db.manifest.json`.
 **Concerts are derived in silver** from the mentions' raw performance
 context (`composer-ingest derive-concerts`, also run automatically before
 every promote): mentions are grouped into concerts per source (berlinphil by
-its concert id, nyphil by program + date, concertgebouw by date + city, dates
-normalized to ISO) with season and event type; conductors _and soloists_
-(with their instrument/voice) are resolved to person entities by normalized
-name; and each concert keeps its programme. Promotion copies the concert
+its concert id, nyphil by program + date, concertgebouw by date + city, rco by
+its concert id, dates normalized to ISO) with season and event type;
+conductors, soloists (with their instrument/voice) _and the orchestra_ are
+resolved to entities by normalized name — an ensemble credit prefers an
+`ensemble` entity and falls back to a person; and each concert keeps its
+programme. Promotion copies the concert
 tables into gold, collapsing participant links to canonical entities. That
 powers the concert browser, per-person concert lists, and concert-count
 sorting in both APIs.
@@ -384,7 +401,7 @@ say, verbatim, plus the matching passes over it; curation and conflict
 resolution happen downstream when data is promoted into gold.
 
 - **`sources`** — where data comes from (`imslp`, `wikidata`, `openopus`,
-  `concertgebouw`, `nyphil`, `berlinphil`, `boosey`, ...).
+  `concertgebouw`, `nyphil`, `berlinphil`, `classicalmusiconline`, `boosey`, ...).
 - **`ingest_runs`** — the collection log: one row per ingest, with source,
   timestamps, status, and seen/new counts.
 - **`entity_records`** — raw records per source, unique on
@@ -496,9 +513,14 @@ split by data tier, sharing one lockfile. `uv sync` installs the whole workspace
 
 Libraries under `packages/` (each depends only on the tiers below it):
 
+- `composer-config` — the one pydantic-settings `Settings` object every other member reads
 - `composer-schema` — source contracts (document types + the `SourceAdapter` interface), zero heavy deps
+- `composer-http` — the polite User-Agent (contact identity) and retrying HTTP helpers, shared by
+  `composer-scrapers` and `composer-crawler`
 - `composer-bronze` — the raw NDJSON bucket and fetch orchestration
 - `composer-scrapers` — the per-source adapters and `REGISTRY`
+- `composer-crawler` — the generic config-driven crawl4ai crawler, into the same bucket
+- `composer-extract` — local-LLM (Ollama) extraction of concerts/recordings from crawled pages
 - `composer-warehouse` — the silver staging DB: ORM models, ingestion, and person/work matching
 - `composer-gold` — promotion of the staging DB into a curated copy
 
@@ -513,8 +535,11 @@ Apps under `apps/`:
 # tests run per member (each owns its pytest config; the Django settings stay
 # scoped to the dashboard) — mock sources, in-memory SQLite, no network:
 uv run --directory packages/composer-schema pytest
+uv run --directory packages/composer-http pytest
 uv run --directory packages/composer-bronze pytest
 uv run --directory packages/composer-scrapers pytest
+uv run --directory packages/composer-crawler pytest
+uv run --directory packages/composer-extract pytest
 uv run --directory packages/composer-warehouse pytest
 uv run --directory packages/composer-gold pytest
 uv run --directory apps/consumer-api pytest
@@ -525,14 +550,16 @@ uv run --directory apps/dashboard pytest
 uv run pyright             # strict type checking (whole workspace)
 uv run ruff check          # lint
 uv run ruff format --check # formatting
+uv run pylint packages apps # file length only (C0302, 300 lines)
 ```
 
 Document/adapter test factories live in `composer_schema.testing`; the warehouse
 re-exports them alongside its DB fixtures in `composer_warehouse.testing`, which
 each member's `tests/conftest.py` loads via `pytest_plugins`.
 
-CI (`.github/workflows/ci.yml`) runs all four on every pull request to `main`
-and again on the merge commit. Commit messages and PR titles must follow
+CI (`.github/workflows/ci.yml`) runs the per-member test matrix alongside the
+type, lint and dependency-audit jobs on every pull request to `main`, and again
+on the merge commit. Commit messages and PR titles must follow
 [Conventional Commits](https://www.conventionalcommits.org/) (`feat: ...`,
 `fix: ...`); `.github/workflows/conventional-commits.yml` enforces this on
 every pull request.

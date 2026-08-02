@@ -12,7 +12,6 @@ records, keyed by the same id, with no professions.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -92,8 +91,3 @@ def _artist_record(info: _Artist) -> SourceRecord:
         kind=kind,
         claims=tuple(claims),
     )
-
-
-def _artist_records(registry: dict[str, _Artist]) -> Iterator[SourceRecord]:
-    for info in registry.values():
-        yield _artist_record(info)

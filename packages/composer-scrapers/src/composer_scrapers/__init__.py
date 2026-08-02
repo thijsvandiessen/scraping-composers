@@ -68,6 +68,7 @@ from ._pdf import PdfSourceAdapter as PdfSourceAdapter  # noqa: E402
 from .berlinphil import BerlinPhilAdapter  # noqa: E402
 from .boosey import BooseyAdapter  # noqa: E402
 from .classicalcomposersposter import ClassicalComposersPosterAdapter  # noqa: E402
+from .classicalmusiconline import ClassicalMusicOnlineAdapter  # noqa: E402
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
 from .imslp import ImslpAdapter  # noqa: E402
 from .nyphil import NyPhilAdapter  # noqa: E402
@@ -84,5 +85,6 @@ REGISTRY: dict[str, SourceAdapter] = {
     "classicalcomposersposter": ClassicalComposersPosterAdapter(),
     "rco": RcoAdapter(),
     "openopus": OpenOpusAdapter(),
+    "classicalmusiconline": ClassicalMusicOnlineAdapter(),
     "boosey": BooseyAdapter(),
 }

@@ -126,7 +126,7 @@ def test_fetch_dump_rejects_payload_without_composers(monkeypatch: pytest.Monkey
 
 
 def test_fetch_dump_retries_on_server_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers._http.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:

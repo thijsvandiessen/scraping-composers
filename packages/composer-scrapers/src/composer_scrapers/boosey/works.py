@@ -7,6 +7,14 @@ thing a redesign changes — the page is flattened to text lines first and the
 pairs are read off by *label*. That works whether a label sits in a ``<dt>``, an
 ``<h3>`` or a bolded run of text, and an unrecognised label is skipped rather
 than breaking the parse.
+
+The title is passed through exactly as the page gives it, and nothing is ever
+appended to it. Boosey is a catalogue rather than a concert programme, so one
+composer's works routinely share an opus number, and the work matcher
+(``composer_warehouse.works.match``) reads the title string alone and treats a
+matching opus as near-proof of identity — the same trap
+``classicalmusiconline/works.py`` documents, where folding a catalogue's opus
+into the title silently auto-merged 98 distinct works.
 """
 
 from __future__ import annotations

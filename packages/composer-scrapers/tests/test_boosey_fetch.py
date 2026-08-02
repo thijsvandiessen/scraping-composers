@@ -1,4 +1,9 @@
-"""Tests for the Boosey HTTP fetch layer: retries, pagination and the walk."""
+"""Tests for the Boosey HTTP fetch layer: listing pagination and the catalogue walk.
+
+Request retries are ``composer_http.get_text``'s job and are tested in that
+package; what is Boosey's own is how listings are paged and how the three-hop
+walk (index -> composer -> work) bounds and deduplicates itself.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,6 @@ import httpx
 import pytest
 from composer_scrapers.boosey.fetch import (
     BASE_URL,
-    _get_text,
     _make_client,
     composer_index,
     composer_work_links,
@@ -29,7 +33,7 @@ def _patch_client(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
 def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Politeness delays are real seconds; drop them for the suite."""
     monkeypatch.setattr("composer_scrapers.boosey.fetch.time.sleep", lambda _: None)
-    monkeypatch.setattr("composer_scrapers._http.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
 
 # A two-page composer index over two composers who share one work.
@@ -55,37 +59,6 @@ def _handler(request: httpx.Request) -> httpx.Response:
     if key.startswith("/cr/music/"):
         return httpx.Response(200, text=f"<h1>Work {key.rsplit('/', 1)[1]}</h1>")
     return httpx.Response(404, text="not found")
-
-
-# ---------------------------------------------------------------------------
-# _get_text
-# ---------------------------------------------------------------------------
-
-
-def test_get_text_returns_response_body(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_client(monkeypatch, lambda request: httpx.Response(200, text="hello"))
-    with _make_client() as client:
-        assert _get_text(client, BASE_URL + "/composers", "test") == "hello"
-
-
-def test_get_text_retries_on_server_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    attempts: list[int] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        attempts.append(1)
-        return httpx.Response(503 if len(attempts) < 3 else 200, text="ok")
-
-    _patch_client(monkeypatch, handler)
-    with _make_client() as client:
-        assert _get_text(client, BASE_URL + "/composers", "test") == "ok"
-    assert len(attempts) == 3
-
-
-def test_get_text_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_client(monkeypatch, lambda request: httpx.Response(503, text="down"))
-    with pytest.raises(httpx.HTTPStatusError):
-        with _make_client() as client:
-            _get_text(client, BASE_URL + "/composers", "test")
 
 
 # ---------------------------------------------------------------------------

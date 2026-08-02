@@ -7,26 +7,26 @@ search form's "List" button with no filters.
 from __future__ import annotations
 
 import httpx
-
-from .._http import call_with_retries, user_agent
+from composer_http import call_with_retries, new_client
 
 BASE_URL = "https://archief.concertgebouworkest.nl"
 SEARCH_URL = BASE_URL + "/en/archive/search/"
 REQUEST_DELAY_S = 0.5
-RETRIES = 3
 
 
 def _make_client() -> httpx.Client:
-    return httpx.Client(headers={"User-Agent": user_agent()}, timeout=30)
+    return new_client()
 
 
 def _fetch(client: httpx.Client, label: str, **request: object) -> str:
+    # Not composer_http.get_text: the List view is a multipart POST, so the whole
+    # request is passed through rather than just a URL.
     def do() -> str:
         resp = client.request(**request)  # pyright: ignore[reportArgumentType]
         resp.raise_for_status()
         return resp.text
 
-    return call_with_retries(do, label=label, retries=RETRIES)
+    return call_with_retries(do, label=label)
 
 
 def _fetch_search_page(client: httpx.Client) -> str:

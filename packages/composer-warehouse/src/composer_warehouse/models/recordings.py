@@ -43,10 +43,11 @@ class Recording(Base):
 
 
 class RecordingParticipant(Base):
-    """A person's role on a recording (conductor | soloist | ensemble).
+    """A participant's role on a recording (conductor | soloist | ensemble).
 
-    ``entity_id`` links to the person entity when the reported name resolves
-    (by dedup key); the verbatim ``name`` is always kept.
+    ``entity_id`` links to the person entity — or, for an ensemble credit, the
+    ensemble entity — when the reported name resolves (by dedup key); the
+    verbatim ``name`` is always kept.
     """
 
     __tablename__ = "recording_participants"
