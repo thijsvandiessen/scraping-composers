@@ -83,7 +83,7 @@ def _patch_client(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
 
     monkeypatch.setattr("composer_scrapers.classicalmusiconline.fetch.httpx.Client", _MockedClient)
     monkeypatch.setattr("composer_scrapers.classicalmusiconline.fetch.time.sleep", lambda _: None)
-    monkeypatch.setattr("composer_scrapers._http.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
 
 # ---------------------------------------------------------------------------
