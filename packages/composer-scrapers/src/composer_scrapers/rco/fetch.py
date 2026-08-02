@@ -15,12 +15,10 @@ from collections.abc import Iterator
 from typing import Any
 
 import httpx
-
-from .._http import call_with_retries, user_agent
+from composer_http import get_text, new_client
 
 BASE_URL = "https://www.concertgebouworkest.nl"
 REQUEST_DELAY_S = 0.5
-RETRIES = 3
 PAGE_SIZE = 50
 
 # Slugs end with an ISO date: e.g. vikingur-olafsson-...-2026-08-26
@@ -30,20 +28,14 @@ log = logging.getLogger(__name__)
 
 
 def _make_client() -> httpx.Client:
-    return httpx.Client(headers={"User-Agent": user_agent()}, timeout=30)
-
-
-def _get_text(client: httpx.Client, url: str, label: str) -> str:
-    def do() -> str:
-        resp = client.get(url)
-        resp.raise_for_status()
-        return resp.text
-
-    return call_with_retries(do, label=label, retries=RETRIES)
+    return new_client()
 
 
 def _get_json(client: httpx.Client, url: str, label: str) -> dict[str, Any]:
-    return json.loads(_get_text(client, url, label))
+    # Decoded separately rather than via composer_http.get_json, which retries a
+    # failed decode: here an unparseable body raises ValueError on the first try.
+    data: dict[str, Any] = json.loads(get_text(client, url, label=label))
+    return data
 
 
 def page_slugs(html: str) -> list[str]:
@@ -64,7 +56,7 @@ def iter_concerts(max_pages: int | None = None) -> Iterator[dict[str, Any]]:
         offset = 0
         while True:
             url = f"{BASE_URL}/en/calendar/?limit={PAGE_SIZE}&locale=en&offset={offset}"
-            html = _get_text(client, url, f"calendar offset={offset}")
+            html = get_text(client, url, label=f"calendar offset={offset}")
             new_slugs = [s for s in page_slugs(html) if s not in seen]
             if not new_slugs:
                 break

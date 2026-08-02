@@ -1,7 +1,7 @@
 """Tests for parsing Digital Concert Hall concert payloads into records."""
 
 from composer_scrapers import SourceClaim, SourceRecord, SourceWorkMention
-from composer_scrapers.berlinphil.artists import _Artist, _artist_records, _collect, _register
+from composer_scrapers.berlinphil.artists import _Artist, _artist_record, _collect, _register
 from composer_scrapers.berlinphil.performances import _performances
 
 # Trimmed copies of the real v2/concert/{id} structure: a concert with an
@@ -187,7 +187,9 @@ def artists() -> dict[str, SourceRecord]:
     registry: dict[str, _Artist] = {}
     for concert in CONCERTS:
         _collect(concert, registry)
-    return {record.external_id: record for record in _artist_records(registry)}
+    # Mirrors how the adapter builds these: _artist_record over the registry.
+    records = (_artist_record(info) for info in registry.values())
+    return {record.external_id: record for record in records}
 
 
 def test_orchestra_becomes_a_claimless_ensemble_record() -> None:

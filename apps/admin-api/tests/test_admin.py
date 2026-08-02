@@ -14,6 +14,7 @@ from pathlib import Path
 import composer_admin.build_routes as build_routes
 import composer_admin.deps as admin_deps
 import composer_admin.routes as admin_routes
+import composer_admin.snapshots as admin_snapshots
 import pytest
 from composer_admin import admin_app
 from composer_bronze.bucket import LocalBucket, SnapshotManifest
@@ -89,7 +90,8 @@ def client(monkeypatch: pytest.MonkeyPatch, factory, bucket_path: Path) -> Itera
     monkeypatch.setattr(admin_deps, "_session_factory", factory)
     registry = {"fake": _FakeSource(), "archive": _ArchiveSource(), "exploding": _ExplodingSource()}
     monkeypatch.setattr(admin_routes, "REGISTRY", registry)
-    monkeypatch.setattr(admin_routes, "DEFAULT_BUCKET_PATH", str(bucket_path))
+    monkeypatch.setattr(admin_snapshots, "REGISTRY", registry)
+    monkeypatch.setattr(admin_snapshots, "DEFAULT_BUCKET_PATH", str(bucket_path))
     from composer_config import settings
 
     monkeypatch.setattr(settings, "admin_api_key", "test-key")

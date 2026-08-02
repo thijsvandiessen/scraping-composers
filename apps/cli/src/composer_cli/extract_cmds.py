@@ -58,8 +58,8 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
     try:
         run_id = write_documents(bucket, config.name, docs)
-    except Exception as exc:
-        log.error("extract failed after %s: %s: %s", options.stats.summary(), type(exc).__name__, exc)
+    except Exception:
+        log.exception("extract failed after %s", options.stats.summary())
         return 1
 
     ndjson = Path(args.bucket_path) / config.name / run_id / "records.ndjson"

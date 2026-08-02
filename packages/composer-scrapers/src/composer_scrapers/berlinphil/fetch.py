@@ -16,25 +16,17 @@ from collections.abc import Iterator
 from typing import Any
 
 import httpx
-
-from .._http import call_with_retries, user_agent
+from composer_http import get_json, new_client
 
 BASE_URL = "https://www.digitalconcerthall.com"
 API_URL = "https://api.digitalconcerthall.com/v2"
 REQUEST_DELAY_S = 0.5
-RETRIES = 3
 
 log = logging.getLogger(__name__)
 
 
 def _fetch_json(client: httpx.Client, label: str, path: str) -> dict[str, Any]:
-    def do() -> dict[str, Any]:
-        resp = client.get(f"{API_URL}/{path}")
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
-        return data
-
-    return call_with_retries(do, label=label, retries=RETRIES, retry_on=(httpx.HTTPError, ValueError))
+    return get_json(client, f"{API_URL}/{path}", label=label)
 
 
 def _concert_ids(client: httpx.Client) -> list[str]:
@@ -50,8 +42,8 @@ def iter_concerts(max_pages: int | None = None) -> Iterator[dict[str, Any]]:
     ``max_pages`` caps the number of concert detail pages fetched (one request
     each) for quick test runs; ``None`` fetches them all.
     """
-    headers = {"User-Agent": user_agent(), "Accept-Language": "en"}
-    with httpx.Client(headers=headers, timeout=30) as client:
+    # Accept-Language: en selects the English titles/labels that match /en/.
+    with new_client(headers={"Accept-Language": "en"}) as client:
         ids = _concert_ids(client)
         if max_pages is not None:
             ids = ids[:max_pages]

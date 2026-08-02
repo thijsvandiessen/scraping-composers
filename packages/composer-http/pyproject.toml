@@ -1,13 +1,11 @@
 [project]
-name = "composer-crawler"
+name = "composer-http"
 version = "0.1.0"
-description = "Generic config-driven crawler: raw HTML/JSON snapshots into the bronze bucket"
+description = "Polite HTTP plumbing shared by the scrapers and the crawler: contact identity and retrying requests"
 requires-python = ">=3.11"
 dependencies = [
-    "composer-bronze",
     "composer-config",
-    "composer-http",
-    "crawl4ai>=0.9",
+    "httpx>=0.27",
 ]
 
 [build-system]
@@ -15,12 +13,10 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/composer_crawler"]
+packages = ["src/composer_http"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.uv.sources]
-composer-bronze = { workspace = true }
 composer-config = { workspace = true }
-composer-http = { workspace = true }

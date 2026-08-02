@@ -12,30 +12,23 @@ import logging
 from typing import Any
 
 import httpx
-
-from .._http import call_with_retries, user_agent
+from composer_http import get_json, new_client
 
 BASE_URL = "https://openopus.org"
 DUMP_URL = "https://api.openopus.org/work/dump.json"
-RETRIES = 3
 
 log = logging.getLogger(__name__)
 
 
 def _make_client() -> httpx.Client:
-    return httpx.Client(headers={"User-Agent": user_agent()}, timeout=120)
+    # The dump is a few MB in one response, so it gets a far longer timeout
+    # than the per-request default.
+    return new_client(timeout=120)
 
 
 def _fetch_dump(client: httpx.Client) -> list[dict[str, Any]]:
     """Download the full work dump and return its ``composers`` list."""
-
-    def do() -> dict[str, Any]:
-        resp = client.get(DUMP_URL)
-        resp.raise_for_status()
-        data: dict[str, Any] = resp.json()
-        return data
-
-    data = call_with_retries(do, label="work dump", retries=RETRIES, retry_on=(httpx.HTTPError, ValueError))
+    data = get_json(client, DUMP_URL, label="work dump")
     composers = data.get("composers")
     if not isinstance(composers, list):
         raise ValueError("work dump has no 'composers' list")

@@ -505,9 +505,14 @@ split by data tier, sharing one lockfile. `uv sync` installs the whole workspace
 
 Libraries under `packages/` (each depends only on the tiers below it):
 
+- `composer-config` — the one pydantic-settings `Settings` object every other member reads
 - `composer-schema` — source contracts (document types + the `SourceAdapter` interface), zero heavy deps
+- `composer-http` — the polite User-Agent (contact identity) and retrying HTTP helpers, shared by
+  `composer-scrapers` and `composer-crawler`
 - `composer-bronze` — the raw NDJSON bucket and fetch orchestration
 - `composer-scrapers` — the per-source adapters and `REGISTRY`
+- `composer-crawler` — the generic config-driven crawl4ai crawler, into the same bucket
+- `composer-extract` — local-LLM (Ollama) extraction of concerts/recordings from crawled pages
 - `composer-warehouse` — the silver staging DB: ORM models, ingestion, and person/work matching
 - `composer-gold` — promotion of the staging DB into a curated copy
 
@@ -522,8 +527,11 @@ Apps under `apps/`:
 # tests run per member (each owns its pytest config; the Django settings stay
 # scoped to the dashboard) — mock sources, in-memory SQLite, no network:
 uv run --directory packages/composer-schema pytest
+uv run --directory packages/composer-http pytest
 uv run --directory packages/composer-bronze pytest
 uv run --directory packages/composer-scrapers pytest
+uv run --directory packages/composer-crawler pytest
+uv run --directory packages/composer-extract pytest
 uv run --directory packages/composer-warehouse pytest
 uv run --directory packages/composer-gold pytest
 uv run --directory apps/consumer-api pytest
@@ -534,14 +542,16 @@ uv run --directory apps/dashboard pytest
 uv run pyright             # strict type checking (whole workspace)
 uv run ruff check          # lint
 uv run ruff format --check # formatting
+uv run pylint packages apps # file length only (C0302, 300 lines)
 ```
 
 Document/adapter test factories live in `composer_schema.testing`; the warehouse
 re-exports them alongside its DB fixtures in `composer_warehouse.testing`, which
 each member's `tests/conftest.py` loads via `pytest_plugins`.
 
-CI (`.github/workflows/ci.yml`) runs all four on every pull request to `main`
-and again on the merge commit. Commit messages and PR titles must follow
+CI (`.github/workflows/ci.yml`) runs the per-member test matrix alongside the
+type, lint and dependency-audit jobs on every pull request to `main`, and again
+on the merge commit. Commit messages and PR titles must follow
 [Conventional Commits](https://www.conventionalcommits.org/) (`feat: ...`,
 `fix: ...`); `.github/workflows/conventional-commits.yml` enforces this on
 every pull request.

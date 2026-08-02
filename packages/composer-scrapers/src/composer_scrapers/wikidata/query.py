@@ -19,8 +19,8 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+from composer_http import call_with_retries
 
-from .._http import call_with_retries
 from .parse import METRICS, _literal
 
 SPARQL_URL = "https://query.wikidata.org/sparql"

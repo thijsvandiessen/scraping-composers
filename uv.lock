@@ -23,6 +23,7 @@ members = [
     "composer-dashboard",
     "composer-extract",
     "composer-gold",
+    "composer-http",
     "composer-schema",
     "composer-scrapers",
     "composer-warehouse",
@@ -688,6 +689,7 @@ source = { editable = "packages/composer-crawler" }
 dependencies = [
     { name = "composer-bronze" },
     { name = "composer-config" },
+    { name = "composer-http" },
     { name = "crawl4ai" },
 ]
 
@@ -695,6 +697,7 @@ dependencies = [
 requires-dist = [
     { name = "composer-bronze", editable = "packages/composer-bronze" },
     { name = "composer-config", editable = "packages/composer-config" },
+    { name = "composer-http", editable = "packages/composer-http" },
     { name = "crawl4ai", specifier = ">=0.9" },
 ]
 
@@ -756,6 +759,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "composer-http"
+version = "0.1.0"
+source = { editable = "packages/composer-http" }
+dependencies = [
+    { name = "composer-config" },
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "composer-config", editable = "packages/composer-config" },
+    { name = "httpx", specifier = ">=0.27" },
+]
+
+[[package]]
 name = "composer-schema"
 version = "0.1.0"
 source = { editable = "packages/composer-schema" }
@@ -775,6 +793,7 @@ version = "0.1.0"
 source = { editable = "packages/composer-scrapers" }
 dependencies = [
     { name = "composer-config" },
+    { name = "composer-http" },
     { name = "composer-schema" },
     { name = "docling" },
     { name = "httpx" },
@@ -785,6 +804,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "composer-config", editable = "packages/composer-config" },
+    { name = "composer-http", editable = "packages/composer-http" },
     { name = "composer-schema", editable = "packages/composer-schema" },
     { name = "docling", specifier = ">=2.116.0" },
     { name = "httpx", specifier = ">=0.27" },

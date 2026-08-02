@@ -34,7 +34,7 @@ def test_fetch_returns_response_text() -> None:
 
 
 def test_fetch_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers._http.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
     attempts: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -51,7 +51,7 @@ def test_fetch_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_fetch_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers._http.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, text="Always failing")

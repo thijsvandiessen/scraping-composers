@@ -11,22 +11,24 @@ from __future__ import annotations
 from typing import ClassVar
 
 import httpx
+from composer_http import browser_user_agent, call_with_retries
 
 from . import SourceAdapter
-from ._http import browser_user_agent, call_with_retries
-
-_RETRIES = 3
 
 
 def _fetch_pdf_bytes(client: httpx.Client, url: str) -> bytes:
-    """GET *url* and return the response body, retrying up to ``_RETRIES`` times."""
+    """GET *url* and return the response body, retrying.
+
+    Not :func:`composer_http.get_text` or ``get_json``: a PDF is bytes, and
+    decoding it as either would corrupt it.
+    """
 
     def do() -> bytes:
         resp = client.get(url)
         resp.raise_for_status()
         return resp.content
 
-    return call_with_retries(do, label="PDF fetch", retries=_RETRIES)
+    return call_with_retries(do, label="PDF fetch")
 
 
 class PdfSourceAdapter(SourceAdapter):
