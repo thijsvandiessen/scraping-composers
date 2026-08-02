@@ -14,8 +14,8 @@ import time
 from collections.abc import Iterator
 
 import httpx
+from composer_http import call_with_retries, user_agent
 
-from .._http import call_with_retries, user_agent
 from .composers import IndexEntry, iter_index_entries
 
 BASE_URL = "https://classical-music-online.net"

@@ -49,6 +49,7 @@ def cmd_derive_recordings(args: argparse.Namespace) -> int:
     with session_factory() as session:
         stats = derive_recordings(session)
     print(f"derived {stats.recordings} recordings")
+    print(f"  merged duplicates      {stats.merged_duplicates}")
     print(f"  participant links      {stats.participant_links}")
     print(f"  unresolved names       {stats.unresolved_participant_names}")
     return 0

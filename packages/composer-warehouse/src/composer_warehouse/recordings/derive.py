@@ -4,6 +4,7 @@ The album/release counterpart to ``derive_concerts``: a post-hoc pass over the
 silver database. LLM-extracted work mentions from a *recordings* crawl carry the
 release payload in ``raw_work_mentions.raw`` (marked ``_source: "llm"``,
 ``_kind: "recording"``); this pass groups them into recordings per source,
+folds the page-scoped groups into one row per release (see ``cluster``),
 resolves artist names to person entities by normalized name, and links each
 recording to the works on it. Re-running rebuilds the recording tables from
 scratch, so the pass can be repeated after new loads.
@@ -21,10 +22,14 @@ from sqlalchemy.orm import Session
 
 from ..models import Entity, RawWorkMention, Recording, RecordingParticipant, RecordingWork, Source
 from ..normalize import dedup_key
+from .cluster import Key, cluster_recordings, participant_key
 
 INSERT_BATCH = 1000
 
 _ROLES = frozenset({"conductor", "soloist", "ensemble"})
+
+# The recording-level fields a merge carries over from the fullest payload.
+_MERGED_FIELDS = ("title", "release_date", "label", "catalogue_number", "format", "url")
 
 
 def _role(value: str | None) -> str:
@@ -80,14 +85,15 @@ class DeriveRecordingsStats:
     recordings: int = 0
     participant_links: int = 0
     unresolved_participant_names: int = 0
+    merged_duplicates: int = 0
 
 
-def _group_recordings(session: Session) -> dict[tuple[int, str], dict[str, Any]]:
+def _group_recordings(session: Session) -> dict[Key, dict[str, Any]]:
     """Fold all work mentions into recordings keyed by (source, external key)."""
     source_names: dict[int, str] = {
         source_id: name for source_id, name in session.execute(select(Source.id, Source.name)).tuples()
     }
-    recordings: dict[tuple[int, str], dict[str, Any]] = {}
+    recordings: dict[Key, dict[str, Any]] = {}
     for mention_id, source_id, raw in session.execute(
         select(RawWorkMention.id, RawWorkMention.source_id, RawWorkMention.raw)
     ).tuples():
@@ -111,6 +117,37 @@ def _group_recordings(session: Session) -> dict[tuple[int, str], dict[str, Any]]
             recording["participants"].setdefault(name, (role, discipline))
         recording["mention_ids"].append(mention_id)
     return recordings
+
+
+def _completeness(data: dict[str, Any]) -> int:
+    """How many recording-level fields a payload actually filled in — a review
+    page carrying label and catalogue number outranks a bare tag-page listing."""
+    return sum(1 for name in _MERGED_FIELDS if data[name])
+
+
+def _merge_cluster(grouped: dict[Key, dict[str, Any]], members: list[Key]) -> tuple[Key, dict[str, Any]]:
+    """Fold one cluster into a single recording, fullest payload first.
+
+    The fullest member supplies the external key and the first shot at every
+    field; thinner members fill the gaps it left. Participants collapse by
+    ``participant_key`` (so honorific variants become one credit) and mention
+    ids are unioned — ``recording_works`` has no unique constraint of its own.
+    """
+    ordered = sorted(members, key=lambda key: (-_completeness(grouped[key]), key))
+    merged: dict[str, Any] = {name: None for name in _MERGED_FIELDS}
+    participants: dict[str, tuple[str, str, str | None]] = {}
+    mention_ids: set[int] = set()
+    for key in ordered:
+        data = grouped[key]
+        for name in _MERGED_FIELDS:
+            if not merged[name]:
+                merged[name] = data[name]
+        for name, (role, discipline) in data["participants"].items():
+            participants.setdefault(participant_key(name), (name, role, discipline))
+        mention_ids.update(data["mention_ids"])
+    merged["participants"] = {name: (role, discipline) for name, role, discipline in participants.values()}
+    merged["mention_ids"] = sorted(mention_ids)
+    return ordered[0], merged
 
 
 @dataclass
@@ -148,7 +185,7 @@ class _RowBatch:
             }
         )
 
-    def add_recording(self, recording_id: int, key: tuple[int, str], data: dict[str, Any]) -> None:
+    def add_recording(self, recording_id: int, key: Key, data: dict[str, Any]) -> None:
         source_id, external_key = key
         self.recordings.append(
             {
@@ -190,8 +227,12 @@ def derive_recordings(session: Session) -> DeriveRecordingsStats:
         ).tuples()
     }
 
+    grouped = _group_recordings(session)
+    clusters = cluster_recordings(grouped)
+    merged = sorted((_merge_cluster(grouped, members) for members in clusters), key=lambda item: item[0])
+
     rows = _RowBatch(person_by_key, ensemble_by_key)
-    for recording_id, (key, data) in enumerate(sorted(_group_recordings(session).items()), start=1):
+    for recording_id, (key, data) in enumerate(merged, start=1):
         rows.add_recording(recording_id, key, data)
 
     for i in range(0, len(rows.recordings), INSERT_BATCH):
@@ -206,4 +247,5 @@ def derive_recordings(session: Session) -> DeriveRecordingsStats:
         recordings=len(rows.recordings),
         participant_links=rows.participant_links,
         unresolved_participant_names=len(rows.unresolved_names),
+        merged_duplicates=len(grouped) - len(clusters),
     )
