@@ -102,3 +102,46 @@ def test_all_crawl_configs_code_registry_wins(tmp_path: Path, monkeypatch: pytes
     merged = all_crawl_configs(store.path)
     assert merged["example"] == code_config
     assert "stored-only" in merged
+
+
+def test_extract_kinds_round_trip(tmp_path: Path) -> None:
+    store = CrawlConfigStore(tmp_path / "crawl_configs.json")
+    store.save(
+        CrawlConfig(
+            name="laphil",
+            seeds=("https://www.laphil.com/",),
+            extract_kinds=("concerts", "claims"),
+        )
+    )
+    assert store.load()["laphil"].extract_kinds == ("concerts", "claims")
+
+
+def test_a_file_written_before_kinds_became_a_list_still_loads(tmp_path: Path) -> None:
+    """Configs on disk predate the plural field; the singular one still means
+    exactly the one kind it named."""
+    path = tmp_path / "crawl_configs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "configs": [
+                    {
+                        "name": "legacy",
+                        "seeds": ["https://example.org/"],
+                        "extract_kind": "recordings",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert CrawlConfigStore(path).load()["legacy"].extract_kinds == ("recordings",)
+
+
+def test_a_file_naming_no_kind_keeps_the_default(tmp_path: Path) -> None:
+    path = tmp_path / "crawl_configs.json"
+    path.write_text(
+        json.dumps({"version": 1, "configs": [{"name": "bare", "seeds": ["https://example.org/"]}]}),
+        encoding="utf-8",
+    )
+    assert CrawlConfigStore(path).load()["bare"].extract_kinds == ("concerts",)

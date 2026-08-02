@@ -115,8 +115,23 @@ def test_new_crawl_form_posts_expected_payload(monkeypatch: pytest.MonkeyPatch, 
         "excluded_selector": "#cookie-banner",
         "request_delay_s": 1.5,
         "respect_robots": False,  # unchecked checkbox is absent from the POST
-        "extract_kind": "concerts",  # defaults when the select is absent from the POST
+        "extract_kinds": ["concerts"],  # defaults when no checkbox is in the POST
     }
+
+
+def test_extract_kinds_checkboxes_are_saved(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    """Several kinds can run over one crawl, so the form posts a list."""
+    stub = StubAPI()
+    install(monkeypatch, stub)
+    staff_client.post(
+        "/admin/crawls/new/",
+        {
+            "name": "archive",
+            "seeds": "https://example.org/a",
+            "extract_kinds": ["concerts", "claims"],
+        },
+    )
+    assert stub.saved[0][1]["extract_kinds"] == ["concerts", "claims"]
 
 
 def test_blank_excluded_selector_posts_null(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:

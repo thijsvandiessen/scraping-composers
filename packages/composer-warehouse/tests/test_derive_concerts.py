@@ -255,3 +255,33 @@ def test_derive_concerts_is_rerunnable(session: Session) -> None:
     assert session.scalar(select(func.count(Concert.id))) == 4
     assert session.scalar(select(func.count(ConcertWork.id))) == 5
     assert session.scalar(select(func.count(ConcertParticipant.id))) == 5
+
+
+def test_work_profile_mentions_derive_no_concert(session: Session) -> None:
+    """A work page states facts about a work, not a performance. Its mention
+    shares the "llm" marker with concerts and is told apart by ``_kind``, so the
+    guard has to match positively or every LA Phil work page becomes a concert."""
+    laphil = FakeSource(
+        records=(
+            perf_mention(
+                "https://www.laphil.com/works/violin-concerto-beethoven#work0",
+                "Violin Concerto",
+                "Ludwig van Beethoven",
+                {
+                    "_source": "llm",
+                    "_kind": "work_profile",
+                    "url": "https://www.laphil.com/works/violin-concerto-beethoven",
+                    "title": "Violin Concerto",
+                    "composer": "Ludwig van Beethoven",
+                },
+            ),
+        ),
+        name="laphil",
+        base_url="https://www.laphil.com",
+    )
+    ingest_source(session, laphil)
+
+    stats = derive_concerts(session)
+
+    assert session.scalars(select(Concert)).all() == []
+    assert stats.concerts == 0

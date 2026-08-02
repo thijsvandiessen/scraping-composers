@@ -8,6 +8,7 @@ status reporting and the running-crawl guard work exactly like scraper fetches.
 """
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -24,11 +25,11 @@ from composer_crawler import (
 from composer_crawler.records import iter_crawl_records
 from composer_crawler.store import DEFAULT_CRAWL_CONFIGS_PATH
 from composer_extract import (
-    ExtractOptions,
     OllamaExtractor,
-    extract_documents,
-    extract_recording_documents,
+    extract_all,
     open_cache,
+    options_per_kind,
+    summarize,
 )
 from composer_scrapers import REGISTRY
 from composer_warehouse.ingestion import create_run
@@ -102,7 +103,7 @@ def _to_config(name: str, body: CrawlConfigIn) -> CrawlConfig:
             excluded_selector=body.excluded_selector,
             request_delay_s=body.request_delay_s,
             respect_robots=body.respect_robots,
-            extract_kind=body.extract_kind,
+            extract_kinds=tuple(body.extract_kinds),
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
@@ -147,31 +148,41 @@ def _extractor() -> OllamaExtractor:
     return OllamaExtractor.from_settings(cache=cache)
 
 
-def _extract_in_background(name: str, crawl_run_id: str, snapshot_id: str, extract_kind: str) -> bool:
+def _extract_in_background(
+    name: str, crawl_run_id: str, snapshot_id: str, extract_kinds: Sequence[str]
+) -> bool:
     """Run the model over a crawl snapshot, writing documents to a new snapshot.
 
-    Pages whose output the model mangles are skipped by ``extract_documents``
-    itself; only a wholesale failure (Ollama unreachable, or nothing usable at
-    all) gets here. The ``ExtractOptions`` is held on to rather than defaulted
-    inside the call, because its stats are the only account of what the model
-    dropped — without it this path silently discards them. Returns whether the
-    stage succeeded.
+    Pages whose output the model mangles are skipped by the extractors
+    themselves; only a wholesale failure (Ollama unreachable, or nothing usable
+    at all) gets here. The ``ExtractOptions`` are held on to rather than
+    defaulted inside the call, because their stats are the only account of what
+    the model dropped — without them this path silently discards it. Returns
+    whether the stage succeeded.
     """
     store = bucket()
-    options = ExtractOptions()
-    log.info("background extract starting for %s/%s (from crawl %s)", name, snapshot_id, crawl_run_id)
+    options = options_per_kind(extract_kinds)
+    log.info(
+        "background extract starting for %s/%s (from crawl %s) as %s",
+        name,
+        snapshot_id,
+        crawl_run_id,
+        ", ".join(extract_kinds),
+    )
     try:
-        records = iter_crawl_records(name, crawl_run_id, store)
-        extract = extract_recording_documents if extract_kind == "recordings" else extract_documents
-        docs = extract(records, source_name=name, extractor=_extractor(), options=options)
+        docs = extract_all(
+            extract_kinds,
+            lambda: iter_crawl_records(name, crawl_run_id, store),
+            source_name=name,
+            extractor=_extractor(),
+            options=options,
+        )
         write_documents(store, name, docs, run_id=snapshot_id)
     except Exception:
         # Recorded as a failed manifest by write_documents; log for the console.
-        log.exception(
-            "background extract failed for %s/%s after %s", name, snapshot_id, options.stats.summary()
-        )
+        log.exception("background extract failed for %s/%s after %s", name, snapshot_id, summarize(options))
         return False
-    log.info("background extract finished for %s/%s: %s", name, snapshot_id, options.stats.summary())
+    log.info("background extract finished for %s/%s: %s", name, snapshot_id, summarize(options))
     return True
 
 
@@ -242,7 +253,7 @@ def extract_crawl(name: str, config: CrawlDep, background: BackgroundTasks) -> F
     if crawl_run_id is None:
         raise HTTPException(status.HTTP_409_CONFLICT, f"crawl {name!r} has no completed snapshot to extract")
     snapshot_id = new_snapshot_id()
-    background.add_task(_extract_in_background, name, crawl_run_id, snapshot_id, config.extract_kind)
+    background.add_task(_extract_in_background, name, crawl_run_id, snapshot_id, config.extract_kinds)
     return FetchStarted(source=name, snapshot_id=snapshot_id, status="running")
 
 

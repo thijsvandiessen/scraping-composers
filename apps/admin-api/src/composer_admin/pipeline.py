@@ -14,7 +14,7 @@ load stage has no such owner and lives here.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from composer_bronze.scraper import new_snapshot_id
 from composer_crawler import CrawlConfig
@@ -27,8 +27,8 @@ log = logging.getLogger(__name__)
 
 #: (config, snapshot_id, max_pages) -> succeeded
 CrawlStage = Callable[[CrawlConfig, str, int | None], bool]
-#: (source, crawl_run_id, snapshot_id, extract_kind) -> succeeded
-ExtractStage = Callable[[str, str, str, str], bool]
+#: (source, crawl_run_id, snapshot_id, extract_kinds) -> succeeded
+ExtractStage = Callable[[str, str, str, Sequence[str]], bool]
 
 
 def load_extracted(name: str, snapshot_id: str) -> bool:
@@ -65,7 +65,7 @@ def run_pipeline(config: CrawlConfig, crawl_id: str, crawl: CrawlStage, extract:
     if not _stage(name, "crawl", lambda: crawl(config, crawl_id, None)):
         return
     extract_id = new_snapshot_id()
-    if not _stage(name, "extract", lambda: extract(name, crawl_id, extract_id, config.extract_kind)):
+    if not _stage(name, "extract", lambda: extract(name, crawl_id, extract_id, config.extract_kinds)):
         return
     if _stage(name, "load", lambda: load_extracted(name, extract_id)):
         log.info("pipeline %s: complete", name)

@@ -85,3 +85,38 @@ class PageRecordingExtraction(BaseModel):
     """Every recording/album found on one page (empty when the page has none)."""
 
     recordings: list[ExtractedRecording] = Field(default_factory=list)
+
+
+class ExtractedFact(BaseModel):
+    """One statement a page makes about something, as a subject/predicate/object
+    triple.
+
+    Deliberately open where the other two models are closed: the predicate is a
+    free string, so a page can state something no existing scraper models. What
+    comes back is folded onto a vocabulary by :mod:`.predicates` before it becomes
+    a claim.
+    """
+
+    subject: str = Field(description="Who or what the statement is about, named as the page names it.")
+    subject_kind: str = Field(
+        default="person",
+        description="What the subject is: 'person', 'work', 'ensemble', or 'place'.",
+    )
+    predicate: str = Field(description="The relationship, as a lowercase snake_case verb phrase.")
+    value: str | None = Field(
+        default=None, description="The stated value when it is a literal (a date, a number, a text)."
+    )
+    object_kind: str | None = Field(
+        default=None,
+        description="When the object is itself a named thing, what it is: 'work', 'place', "
+        "'profession', 'genre'; null when the object is a literal.",
+    )
+    object_label: str | None = Field(
+        default=None, description="The named object, when object_kind is set; null otherwise."
+    )
+
+
+class PageClaimExtraction(BaseModel):
+    """Every fact stated on one page (empty when the page states none)."""
+
+    facts: list[ExtractedFact] = Field(default_factory=list)

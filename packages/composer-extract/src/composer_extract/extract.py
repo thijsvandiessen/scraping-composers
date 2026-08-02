@@ -8,18 +8,21 @@ on an album becomes a mention carrying the release context in ``raw`` (marked
 (composer, conductor, soloist, ...) becomes an :class:`EntityDocument`, and the
 verbatim name is reused so the matching derive pass resolves participants to
 their entities.
+
+The third mode, open fact extraction, lives in :mod:`.claims`.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Iterable, Iterator
 from datetime import datetime
 from typing import Protocol
 
 from composer_crawler.records import CrawlRecord
 from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 
+from .emit import LLM_SOURCE_MARKER, Document, emit_pages
 from .markdown import chunk_markdown, record_markdown
 from .resilience import extract_chunks
 from .run import ExtractOptions, ExtractRun
@@ -27,13 +30,7 @@ from .schema import ExtractedConcert, ExtractedRecording, PageExtraction, PageRe
 
 log = logging.getLogger(__name__)
 
-_LLM_SOURCE_MARKER = "llm"
 _RECORDING_KIND = "recording"
-
-#: What one page contributes to the output stream.
-Document = EntityDocument | WorkMentionDocument
-#: A mode's per-page emitter, bound to its extractor by the entry points below.
-Emitter = Callable[[CrawlRecord, ExtractRun], Iterator[Document]]
 
 
 class PageExtractor(Protocol):
@@ -81,7 +78,7 @@ def _concert_key(final_url: str, concert: ExtractedConcert, index: int, total: i
 
 def _concert_raw(concert_key: str, url: str, concert: ExtractedConcert) -> dict[str, object]:
     return {
-        "_source": _LLM_SOURCE_MARKER,
+        "_source": LLM_SOURCE_MARKER,
         "concert_key": concert_key,
         "url": url,
         "date": concert.date,
@@ -163,7 +160,7 @@ def _recording_key(final_url: str, recording: ExtractedRecording, index: int, to
 
 def _recording_raw(record_key: str, url: str, recording: ExtractedRecording) -> dict[str, object]:
     return {
-        "_source": _LLM_SOURCE_MARKER,
+        "_source": LLM_SOURCE_MARKER,
         "_kind": _RECORDING_KIND,
         "record_key": record_key,
         "url": url,
@@ -240,22 +237,6 @@ def _emit_recordings(
         yield from _recording_work_mentions(recording, key, url, run.source_name, run.now)
 
 
-def _emit_pages(records: Iterable[CrawlRecord], emit: Emitter, run: ExtractRun) -> Iterator[Document]:
-    """Drive *emit* over every record, counting what each page produced.
-
-    The count is tallied while the documents are handed on rather than by
-    collecting them, so the whole extract stays lazy: nothing is held in memory
-    just to be able to report it.
-    """
-    for record in records:
-        emitted = 0
-        for document in emit(record, run):
-            emitted += 1
-            yield document
-        run.mark_page(record.final_url, emitted)
-    run.finish()
-
-
 def extract_documents(
     records: Iterable[CrawlRecord],
     *,
@@ -265,7 +246,7 @@ def extract_documents(
 ) -> Iterator[Document]:
     """Yield entity/work-mention documents from crawled *records* (concert mode)."""
     run = ExtractRun.start(source_name, options)
-    yield from _emit_pages(records, lambda record, r: _emit_concerts(record, extractor, r), run)
+    yield from emit_pages(records, lambda record, r: _emit_concerts(record, extractor, r), run)
 
 
 def extract_recording_documents(
@@ -277,4 +258,4 @@ def extract_recording_documents(
 ) -> Iterator[Document]:
     """Yield entity/work-mention documents from crawled *records* (recording mode)."""
     run = ExtractRun.start(source_name, options)
-    yield from _emit_pages(records, lambda record, r: _emit_recordings(record, extractor, r), run)
+    yield from emit_pages(records, lambda record, r: _emit_recordings(record, extractor, r), run)

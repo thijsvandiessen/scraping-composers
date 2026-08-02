@@ -42,7 +42,6 @@ _SCALAR_FIELDS = (
     "request_delay_s",
     "respect_robots",
     "timeout_s",
-    "extract_kind",
 )
 
 
@@ -53,7 +52,19 @@ def config_to_dict(config: CrawlConfig) -> dict[str, Any]:
         data[field] = getattr(config, field)
     data["allow_patterns"] = list(config.allow_patterns)
     data["headers"] = [list(header) for header in config.headers]
+    data["extract_kinds"] = list(config.extract_kinds)
     return data
+
+
+def _extract_kinds(data: dict[str, Any]) -> tuple[str, ...] | None:
+    """The kinds this config declares, reading the singular ``extract_kind`` a
+    file written before kinds became a list still carries. Returns ``None`` when
+    the file names neither, leaving the dataclass default to apply."""
+    if "extract_kinds" in data:
+        return tuple(data["extract_kinds"])
+    if "extract_kind" in data:
+        return (data["extract_kind"],)
+    return None
 
 
 def config_from_dict(data: dict[str, Any]) -> CrawlConfig:
@@ -70,6 +81,8 @@ def config_from_dict(data: dict[str, Any]) -> CrawlConfig:
         kwargs["allow_patterns"] = tuple(data["allow_patterns"])
     if "headers" in data:
         kwargs["headers"] = tuple((key, value) for key, value in data["headers"])
+    if (kinds := _extract_kinds(data)) is not None:
+        kwargs["extract_kinds"] = kinds
     return CrawlConfig(**kwargs)
 
 

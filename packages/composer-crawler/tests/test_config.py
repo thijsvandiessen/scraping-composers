@@ -66,3 +66,26 @@ def test_follow_links_with_patterns_is_valid() -> None:
         allow_patterns=("*/composer/*",),
     )
     assert config.follow_links
+
+
+def test_rejects_an_unknown_extract_kind() -> None:
+    with pytest.raises(ValueError, match="extract_kinds must be drawn from"):
+        CrawlConfig(name="example", seeds=("https://example.org/",), extract_kinds=("programmes",))
+
+
+def test_rejects_no_extract_kind() -> None:
+    with pytest.raises(ValueError, match="at least one kind"):
+        CrawlConfig(name="example", seeds=("https://example.org/",), extract_kinds=())
+
+
+def test_rejects_a_repeated_extract_kind() -> None:
+    """Each kind is a model call per page; a repeat is paid for twice."""
+    with pytest.raises(ValueError, match="must not repeat"):
+        CrawlConfig(name="example", seeds=("https://example.org/",), extract_kinds=("claims", "claims"))
+
+
+def test_several_kinds_run_over_one_crawl() -> None:
+    config = CrawlConfig(
+        name="laphil", seeds=("https://www.laphil.com/",), extract_kinds=("concerts", "claims")
+    )
+    assert config.extract_kinds == ("concerts", "claims")
