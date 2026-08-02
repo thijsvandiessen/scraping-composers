@@ -27,8 +27,10 @@ from composer_crawler.testing import (
 from composer_extract import (
     ExtractedArtist,
     ExtractedConcert,
+    ExtractedFact,
     ExtractedRecording,
     ExtractedWork,
+    PageClaimExtraction,
     PageExtraction,
     PageRecordingExtraction,
 )
@@ -208,7 +210,10 @@ def test_failed_crawl_records_failed_manifest(
 
 
 def _seed_crawl_snapshot(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, markdown: str, extract_kind: str = "concerts"
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    markdown: str,
+    extract_kinds: list[str] | None = None,
 ) -> str:
     """Create the 'archive' crawl and run it once, so a snapshot exists to extract."""
     url = "https://example.org/"
@@ -223,7 +228,11 @@ def _seed_crawl_snapshot(
     )
     client.put(
         "/admin/v1/crawls/archive",
-        json={"seeds": [url], "respect_robots": False, "extract_kind": extract_kind},
+        json={
+            "seeds": [url],
+            "respect_robots": False,
+            "extract_kinds": extract_kinds or ["concerts"],
+        },
     )
     return str(client.post("/admin/v1/crawls/archive/fetch").json()["snapshot_id"])
 
@@ -286,7 +295,7 @@ class FakeRecordingExtractor:
 def test_extract_uses_recordings_schema_for_recording_crawls(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, bucket_path: Path
 ) -> None:
-    _seed_crawl_snapshot(client, monkeypatch, "# Sibelius", extract_kind="recordings")
+    _seed_crawl_snapshot(client, monkeypatch, "# Sibelius", extract_kinds=["recordings"])
     monkeypatch.setattr(crawl_routes, "_extractor", FakeRecordingExtractor)
 
     r = client.post("/admin/v1/crawls/archive/extract")
@@ -386,3 +395,72 @@ def test_excluded_selector_round_trips(client: TestClient) -> None:
 def test_admin_key_guard(client: TestClient) -> None:
     assert TestClient(admin_app).get("/admin/v1/crawls").status_code == 401
     assert client.get("/admin/v1/crawls").status_code == 200
+
+
+class FakeBothExtractor:
+    """One model standing in for both passes: a concert from the concert schema,
+    the page's stated facts from the claims schema."""
+
+    def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
+        return PageExtraction(
+            concerts=[
+                ExtractedConcert(
+                    date="2026-03-01",
+                    venue="Walt Disney Concert Hall",
+                    works=[ExtractedWork(title="Violin Concerto", composer="Beethoven")],
+                )
+            ]
+        )
+
+    def extract_claim_page(self, markdown: str, metadata: dict[str, str]) -> PageClaimExtraction:
+        return PageClaimExtraction(
+            facts=[
+                ExtractedFact(
+                    subject="Beethoven",
+                    subject_kind="person",
+                    predicate="composed",
+                    object_kind="work",
+                    object_label="Violin Concerto",
+                ),
+                ExtractedFact(
+                    subject="Violin Concerto",
+                    subject_kind="work",
+                    predicate="Length",
+                    value="c. 42 minutes",
+                ),
+            ]
+        )
+
+
+def test_a_crawl_can_run_several_extract_kinds_into_one_snapshot(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, bucket_path: Path
+) -> None:
+    """laphil wants concerts and claims off the same pages, so both kinds run
+    over the crawl and their documents land in a single snapshot."""
+    _seed_crawl_snapshot(client, monkeypatch, "# Violin Concerto", extract_kinds=["concerts", "claims"])
+    monkeypatch.setattr(crawl_routes, "_extractor", FakeBothExtractor)
+
+    r = client.post("/admin/v1/crawls/archive/extract")
+    assert r.status_code == 202
+    snapshot_id = r.json()["snapshot_id"]
+
+    ndjson = bucket_path / "archive" / snapshot_id / "records.ndjson"
+    docs = [json.loads(line) for line in ndjson.read_text().strip().splitlines()]
+
+    kinds = {d["raw"].get("_kind") for d in docs if d["_type"] == "work_mention"}
+    assert kinds == {None, "work_profile"}  # the concert pass and the claims pass
+
+    work = next(d for d in docs if d["_type"] == "entity" and d["kind"] == "work")
+    assert work["name"] == "Beethoven: Violin Concerto"
+    assert {(c["predicate"], c["value"]) for c in work["claims"]} == {("duration_minutes", "42")}
+
+    # Both passes describe Beethoven; their documents carry distinct external ids
+    # so the ingest loop records both rather than treating the second as a
+    # re-sighting and dropping its claims.
+    beethoven = [
+        d for d in docs if d["_type"] == "entity" and d["kind"] == "person" and d["name"] == "Beethoven"
+    ]
+    assert len({d["id"] for d in beethoven}) == 2
+    claims = {(c["predicate"], c["object_label"]) for d in beethoven for c in d["claims"]}
+    assert ("composed", "Beethoven: Violin Concerto") in claims
+    assert ("has_profession", "composer") in claims

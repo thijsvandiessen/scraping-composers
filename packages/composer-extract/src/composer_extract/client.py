@@ -19,8 +19,8 @@ from composer_config import settings
 from pydantic import BaseModel
 
 from .cache import ExtractCache, request_key
-from .prompt import RECORDING_SYSTEM_PROMPT, SYSTEM_PROMPT, build_user_prompt
-from .schema import PageExtraction, PageRecordingExtraction
+from .prompt import CLAIMS_SYSTEM_PROMPT, RECORDING_SYSTEM_PROMPT, SYSTEM_PROMPT, build_user_prompt
+from .schema import PageClaimExtraction, PageExtraction, PageRecordingExtraction
 
 log = logging.getLogger(__name__)
 
@@ -208,3 +208,6 @@ class OllamaExtractor:
 
     def extract_recording_page(self, markdown: str, metadata: dict[str, str]) -> PageRecordingExtraction:
         return self._extract(markdown, metadata, RECORDING_SYSTEM_PROMPT, PageRecordingExtraction)
+
+    def extract_claim_page(self, markdown: str, metadata: dict[str, str]) -> PageClaimExtraction:
+        return self._extract(markdown, metadata, CLAIMS_SYSTEM_PROMPT, PageClaimExtraction)

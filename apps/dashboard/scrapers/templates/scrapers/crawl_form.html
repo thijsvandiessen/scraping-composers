@@ -70,12 +70,17 @@
   <label><input type="checkbox" name="respect_robots" {% if values.respect_robots %}checked{% endif %}>
     respect robots.txt</label>
 
-  <label>extract as
-    <select name="extract_kind" style="width: 12rem;">
-      <option value="concerts" {% if values.extract_kind == "concerts" %}selected{% endif %}>concerts</option>
-      <option value="recordings" {% if values.extract_kind == "recordings" %}selected{% endif %}>recordings</option>
-    </select>
-    which LLM schema the extract step applies to this crawl's pages</label>
+  <fieldset>
+    <legend>extract as</legend>
+    <span class="sc-muted">which LLM schemas the extract step applies to this crawl's pages —
+      each one it reads costs a model call per page, and "claims" is meant to be combined
+      with one of the others rather than used on its own</span>
+    {% for kind, description in extract_kinds %}
+      <label><input type="checkbox" name="extract_kinds" value="{{ kind }}"
+                    {% if kind in values.extract_kinds %}checked{% endif %}>
+        {{ kind }} <span class="sc-muted">— {{ description }}</span></label>
+    {% endfor %}
+  </fieldset>
 
   <div class="sc-toolbar">
     <button type="submit" class="sc-btn sc-btn-primary">Save crawl</button>

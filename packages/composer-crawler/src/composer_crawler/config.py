@@ -19,6 +19,19 @@ from dataclasses import dataclass
 #: newline in a name is enough to forge a log entry (CWE-117).
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
+#: The LLM schemas ``extract`` can apply to a crawl's pages. The names live here,
+#: with the config they validate, rather than in :mod:`composer_extract` — which
+#: depends on this package, not the other way round. ``composer_extract.registry``
+#: holds the entry point behind each name and checks the two stay in step.
+#:
+#: "concerts" and "recordings" each look for one shape and ignore pages that do
+#: not have it; "claims" records whatever a page states, so it is normally enabled
+#: *alongside* one of the others rather than instead of it.
+EXTRACT_KINDS: tuple[str, ...] = ("concerts", "recordings", "claims")
+
+#: What a config gets when it names no kind.
+DEFAULT_EXTRACT_KIND = "concerts"
+
 
 def _validate_source_name(value: str) -> None:
     """Require a plain, single-path-segment crawl name.
@@ -67,19 +80,26 @@ class CrawlConfig:
     headers: tuple[tuple[str, str], ...] = ()
     respect_robots: bool = True
     timeout_s: float = 30.0
-    # Which LLM schema the `extract` step applies to this crawl's pages:
-    # "concerts" (default) or "recordings" (album/release listings).
-    extract_kind: str = "concerts"
+    # Which LLM schemas the `extract` step applies to this crawl's pages. Each
+    # named kind runs over every page, so a site whose pages carry both a
+    # programme and other stated facts declares ("concerts", "claims").
+    extract_kinds: tuple[str, ...] = (DEFAULT_EXTRACT_KIND,)
 
     def __post_init__(self) -> None:
         _validate_source_name(self.name)
         if not self.seeds:
             raise ValueError(f"crawl {self.name!r}: seeds must not be empty")
-        if self.extract_kind not in ("concerts", "recordings"):
-            raise ValueError(
-                f"crawl {self.name!r}: extract_kind must be 'concerts' or 'recordings', "
-                f"got {self.extract_kind!r}"
-            )
+        if not self.extract_kinds:
+            raise ValueError(f"crawl {self.name!r}: extract_kinds must name at least one kind")
+        if len(set(self.extract_kinds)) != len(self.extract_kinds):
+            # Each kind is one LLM call per page; a repeat is silently paid for twice.
+            raise ValueError(f"crawl {self.name!r}: extract_kinds must not repeat a kind")
+        for kind in self.extract_kinds:
+            if kind not in EXTRACT_KINDS:
+                raise ValueError(
+                    f"crawl {self.name!r}: extract_kinds must be drawn from "
+                    f"{', '.join(repr(k) for k in EXTRACT_KINDS)}, got {kind!r}"
+                )
         if self.follow_links and not self.allow_patterns:
             # An unrestricted link-following crawl would wander off the target host.
             raise ValueError(f"crawl {self.name!r}: follow_links requires at least one allow pattern")

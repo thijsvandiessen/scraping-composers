@@ -1,10 +1,11 @@
 # pylint: disable=too-many-lines
 """Tests for the silver → gold promote pipeline."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from composer_gold import PromoteConfig, promote, read_gold_manifest
-from composer_schema import SourceClaim
+from composer_schema import EntityDocument, SourceClaim
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import init_db
 from composer_warehouse.models import (
@@ -735,3 +736,77 @@ def test_promote_writes_manifest_and_is_rerunnable(session: Session, tmp_path: P
     assert manifest.status == "completed"
     assert manifest.stats["persons_kept"] == 2
     assert not gold_path.with_suffix(".db.tmp").exists()
+
+
+def _work_entity(label: str, *claims: SourceClaim) -> EntityDocument:
+    """A ``work`` entity as the claims extractor emits one, carrying the facts a
+    work page stated about it."""
+    return EntityDocument(
+        id=f"work:{label}",
+        url="https://www.laphil.com/works/violin-concerto-beethoven",
+        source_name="laphil",
+        ingested_at=datetime(2024, 5, 1, tzinfo=UTC),
+        name=label,
+        kind="work",
+        claims=claims,
+    )
+
+
+_WORK_LABEL = "Beethoven, Ludwig van: Violin Concerto"
+
+
+def _seed_work_claims(session: Session, *, attributed: bool) -> None:
+    """Silver as a crawled work page leaves it: a kept composer, a work entity
+    carrying the page's facts, and — when *attributed* — the ``composed`` edge
+    between them."""
+    composer_claims = (SourceClaim("composed", "work", _WORK_LABEL),) if attributed else ()
+    laphil = FakeSource(
+        records=(
+            mention("Violin Concerto", "Beethoven, Ludwig van", "lp:m1"),
+            person("Beethoven, Ludwig van", *composer_claims, external_id="lp:beethoven"),
+            _work_entity(
+                _WORK_LABEL,
+                SourceClaim("composed_in", value="1806"),
+                SourceClaim("duration_minutes", value="42"),
+                SourceClaim("program_note_by", value="Hugh Macdonald"),
+            ),
+        ),
+        name="laphil",
+        base_url="https://www.laphil.com",
+    )
+    ingest_source(session, laphil)
+
+
+def test_promote_keeps_work_claims_reached_through_the_composed_edge(
+    session: Session, tmp_path: Path
+) -> None:
+    """The whole point of emitting ``composed``: gold seeds its walk from the
+    claims of kept persons, so a work entity is only copied — and only brings its
+    own literal claims with it — because a kept composer points at it."""
+    _seed_work_claims(session, attributed=True)
+    gold_path = tmp_path / "gold.db"
+    promote(session, gold_path)
+
+    with _gold_session(gold_path) as gold:
+        work = gold.scalars(select(Entity).where(Entity.kind == "work")).one()
+        assert work.label == _WORK_LABEL
+        facts = {
+            (c.predicate, c.value) for c in gold.scalars(select(Claim).where(Claim.subject_id == work.id))
+        }
+        assert {
+            ("composed_in", "1806"),
+            ("duration_minutes", "42"),
+            ("program_note_by", "Hugh Macdonald"),
+        } <= facts
+
+
+def test_promote_drops_an_unattributed_work_entity(session: Session, tmp_path: Path) -> None:
+    """The same page without the ``composed`` edge: nothing kept references the
+    work, so rule 3 prunes it and every fact the page stated is lost."""
+    _seed_work_claims(session, attributed=False)
+    gold_path = tmp_path / "gold.db"
+    promote(session, gold_path)
+
+    with _gold_session(gold_path) as gold:
+        assert gold.scalars(select(Entity).where(Entity.kind == "work")).all() == []
+        assert gold.scalar(select(Claim).where(Claim.predicate == "composed_in")) is None

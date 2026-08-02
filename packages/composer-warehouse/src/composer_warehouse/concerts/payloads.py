@@ -139,6 +139,10 @@ def _llm_fields(raw: dict[str, Any]) -> ConcertFields | None:
     )
 
 
+#: The ``_kind`` markers on an LLM payload that mean "a concert". The concert
+#: extractor predates the marker and writes none, so ``None`` counts too.
+_CONCERT_KINDS = (None, "concert")
+
 # Each performance source encodes concert identity differently; sources not
 # listed here yield no concerts.
 _SOURCE_FIELDS = {
@@ -157,7 +161,10 @@ def concert_fields(source_name: str, raw: dict[str, Any]) -> ConcertFields | Non
         return parse(raw)
     # LLM-extracted mentions carry a normalized payload regardless of the site
     # they were crawled from, so they resolve by marker rather than source name.
-    # Recording payloads share the "llm" marker but belong to derive_recordings.
-    if raw.get("_source") == "llm" and raw.get("_kind") != "recording":
+    # Every extract kind shares the "llm" marker and is told apart by "_kind":
+    # recordings belong to derive_recordings, work profiles to no derive pass at
+    # all. Matched positively, the way derive_recordings does it, so a kind added
+    # later is ignored here rather than mistaken for a concert.
+    if raw.get("_source") == "llm" and raw.get("_kind") in _CONCERT_KINDS:
         return _llm_fields(raw)
     return None

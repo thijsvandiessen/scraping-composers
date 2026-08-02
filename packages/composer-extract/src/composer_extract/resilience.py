@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TypeVar
 
 from composer_config import settings
@@ -45,6 +46,9 @@ class ExtractStats:
 
     ``failed`` counts pieces of text given up on (the halves of a retried chunk
     count separately); ``retried`` counts chunks that were split and re-asked.
+    ``unknown_predicates`` is the review queue for open claim extraction: the
+    predicates the model coined that :mod:`.predicates` did not recognise, and how
+    often each came up.
     """
 
     pages: int = 0
@@ -52,9 +56,26 @@ class ExtractStats:
     retried: int = 0
     failed: int = 0
     consecutive_failures: int = 0
+    claims: int = 0
+    unknown_predicates: Counter[str] = field(default_factory=Counter)
 
     def summary(self) -> str:
-        return f"{self.pages} pages, {self.chunks} chunks, {self.retried} retried, {self.failed} failed"
+        parts = [
+            f"{self.pages} pages",
+            f"{self.chunks} chunks",
+            f"{self.retried} retried",
+            f"{self.failed} failed",
+        ]
+        if self.claims:
+            parts.append(f"{self.claims} claims")
+        return ", ".join(parts)
+
+    def unknown_summary(self) -> str:
+        """The coined predicates, commonest first — what to fold into the
+        vocabulary next. Empty string when the run met none."""
+        if not self.unknown_predicates:
+            return ""
+        return ", ".join(f"{name}({count})" for name, count in self.unknown_predicates.most_common())
 
 
 def _brief(exc: Exception) -> str:

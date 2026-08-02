@@ -231,3 +231,32 @@ def test_last_edited_at_unchanged_on_reingest_with_same_claims(session: Session)
 
     # no new claims were added, so last_edited_at should not advance
     assert entity.last_edited_at == edited_after_first
+
+
+def test_two_records_for_one_person_union_their_claims(session: Session) -> None:
+    """A crawl running several extract kinds describes the same person once per
+    kind. The documents carry distinct external ids, so both are recorded and
+    both sets of claims reach the one entity — an id reused across kinds would be
+    read as a re-sighting, which adds no claims at all."""
+    from_concerts = EntityDocument(
+        id="person:Beethoven",
+        url="https://www.laphil.com/works/violin-concerto-beethoven",
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        name="Beethoven",
+        claims=(SourceClaim("has_profession", "profession", "composer"),),
+    )
+    from_claims = EntityDocument(
+        id="claims:person:Beethoven",
+        url="https://www.laphil.com/works/violin-concerto-beethoven",
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        name="Beethoven",
+        claims=(SourceClaim("composed", "work", "Beethoven: Violin Concerto"),),
+    )
+    ingest_source(session, FakeSource(records=(from_concerts, from_claims)))
+
+    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
+    assert session.scalar(select(func.count()).select_from(EntityRecord)) == 2
+    predicates = {c.predicate for c in session.scalars(select(Claim).where(Claim.subject_id == entity.id))}
+    assert {"has_profession", "composed"} <= predicates

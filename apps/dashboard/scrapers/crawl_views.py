@@ -13,6 +13,19 @@ from django.shortcuts import redirect, render
 from .api import AdminAPI, AdminAPIError
 from .views.common import is_running
 
+#: The extract kinds the form offers, with a line on what each is for. Spelled
+#: out here rather than imported from ``composer_crawler``: the dashboard is a
+#: pure HTTP client of the admin API and depends on none of the pipeline
+#: packages. The API validates the choice, so a name that falls behind here is
+#: rejected on save rather than silently accepted.
+EXTRACT_KINDS: tuple[tuple[str, str], ...] = (
+    ("concerts", "concert programmes: date, venue, conductor, soloists, works"),
+    ("recordings", "album releases: label, catalogue number, format, artists, works"),
+    ("claims", "whatever else the page states, as facts about people and works"),
+)
+
+DEFAULT_EXTRACT_KINDS = ["concerts"]
+
 
 def crawls_index(request: HttpRequest) -> HttpResponse:
     """Crawls page: the configured crawl targets and their last runs."""
@@ -50,7 +63,7 @@ def _default_values(name: str | None) -> dict[str, Any]:
         "excluded_selector": "",
         "request_delay_s": "0.5",
         "respect_robots": True,
-        "extract_kind": "concerts",
+        "extract_kinds": list(DEFAULT_EXTRACT_KINDS),
     }
 
 
@@ -76,7 +89,7 @@ def _form_values(request: HttpRequest, name: str | None) -> dict[str, Any]:
         "excluded_selector": request.POST.get("excluded_selector", "").strip(),
         "request_delay_s": request.POST.get("request_delay_s", "0.5"),
         "respect_robots": request.POST.get("respect_robots") == "on",
-        "extract_kind": request.POST.get("extract_kind", "concerts"),
+        "extract_kinds": request.POST.getlist("extract_kinds") or list(DEFAULT_EXTRACT_KINDS),
     }
 
 
@@ -99,7 +112,7 @@ def _crawl_payload(values: dict[str, Any]) -> dict[str, Any]:
         "excluded_selector": values["excluded_selector"] or None,
         "request_delay_s": float(values["request_delay_s"] or "0.5"),
         "respect_robots": values["respect_robots"],
-        "extract_kind": values["extract_kind"],
+        "extract_kinds": values["extract_kinds"],
     }
 
 
@@ -119,7 +132,7 @@ def _config_to_values(crawl: dict[str, Any]) -> dict[str, Any]:
         "excluded_selector": crawl.get("excluded_selector") or "",
         "request_delay_s": str(crawl["request_delay_s"]),
         "respect_robots": crawl["respect_robots"],
-        "extract_kind": crawl.get("extract_kind") or "concerts",
+        "extract_kinds": crawl.get("extract_kinds") or list(DEFAULT_EXTRACT_KINDS),
     }
 
 
@@ -160,6 +173,7 @@ def crawl_form(request: HttpRequest, name: str | None = None) -> HttpResponse:
         "title": f"Edit crawl {name}" if name else "New crawl",
         "is_edit": name is not None,
         "values": values,
+        "extract_kinds": EXTRACT_KINDS,
     }
     return render(request, "scrapers/crawl_form.html", context)
 
