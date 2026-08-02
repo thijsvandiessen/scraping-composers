@@ -1,7 +1,8 @@
 # composer-ingest
 
 Ingests classical composer data from IMSLP, Wikidata, Open Opus, Concertgebouw,
-NY Phil, and Berlin Phil into a database, with full provenance: every record
+NY Phil, Berlin Phil, and classical-music-online.net into a database, with full
+provenance: every record
 knows which source it came from, when it was first and last seen, and which
 ingest run produced it.
 
@@ -25,6 +26,14 @@ uv run composer-ingest process imslp
 
 # quick test run
 uv run composer-ingest fetch imslp --max-pages 1
+
+# classical-music-online.net is a two-level crawl: 26 alphabet index pages give
+# ~11.6k composers (name, life years, country), then every composer's own page
+# is fetched for its works. That is ~11.6k requests — a couple of hours,
+# unattended; --max-pages caps the composer pages for a smoke run. Processing
+# the resulting snapshot needs no network.
+uv run composer-ingest fetch classicalmusiconline --max-pages 5
+uv run composer-ingest process classicalmusiconline
 
 # extract concerts + performers from crawled pages with a local Ollama model:
 # crawl a site, run the model over each page's markdown (stored at crawl time),
@@ -384,7 +393,7 @@ say, verbatim, plus the matching passes over it; curation and conflict
 resolution happen downstream when data is promoted into gold.
 
 - **`sources`** — where data comes from (`imslp`, `wikidata`, `openopus`,
-  `concertgebouw`, `nyphil`, `berlinphil`, ...).
+  `concertgebouw`, `nyphil`, `berlinphil`, `classicalmusiconline`, ...).
 - **`ingest_runs`** — the collection log: one row per ingest, with source,
   timestamps, status, and seen/new counts.
 - **`entity_records`** — raw records per source, unique on
