@@ -17,7 +17,14 @@ from composer_warehouse.models import (
     Work,
 )
 from composer_warehouse.recordings import derive_recordings
-from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
+from composer_warehouse.testing import (
+    FakeSource,
+    ensemble,
+    ingest_source,
+    mention,
+    perf_mention,
+    person,
+)
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -26,16 +33,28 @@ def _seed_silver(session: Session) -> None:
     """Silver with every promote-relevant case:
 
     - Beethoven: mentioned as a composer of two work mentions (kept, rule 1a)
-    - Mahler, Gustav: reported by the same performance archive (kept, rule 1b)
+    - Mahler, Gustav: conducted a concert the archive reports (kept, rule 1b)
       with claims referencing Vienna (place kept via rule 3)
-    - Nobody, Obscure: from a non-performance source only (dropped, rule 1),
-      referencing Atlantis (place pruned, rule 3)
+    - Nobody, Obscure: listed by a source but on no concert or recording
+      (dropped, rule 1), referencing Atlantis (place pruned, rule 3)
     - "Beethoven" duplicate linked to "Beethoven, Ludwig van" (collapsed, rule 2)
     """
     archive = FakeSource(
         records=(
             mention("Symphony No. 5, Op. 67", "Beethoven, Ludwig van", "m1"),
             mention("Sinfonie Nr. 5, op. 67", "Beethoven, Ludwig van", "m2"),
+            perf_mention(
+                "m3",
+                "Symphony No. 5, Op. 67",
+                "Beethoven, Ludwig van",
+                {
+                    "_source": "llm",
+                    "concert_key": "https://archive.example/concert/1",
+                    "date": "1910-01-02",
+                    "venue": "Musikverein",
+                    "conductors": ["Mahler, Gustav"],
+                },
+            ),
             person("Mahler, Gustav", SourceClaim("born_in", "place", "Vienna"), external_id="a:mahler"),
         ),
         name="archive",
@@ -57,6 +76,7 @@ def _seed_silver(session: Session) -> None:
     duplicate = session.scalars(select(Entity).where(Entity.label == "Beethoven")).one()
     duplicate.canonical_entity_id = canonical.id
     session.commit()
+    derive_concerts(session)  # rule 1's evidence lives in the derived concert tables
 
 
 def _gold_session(gold_path: Path) -> Session:
@@ -70,10 +90,10 @@ def test_promote_applies_all_three_rules(session: Session, tmp_path: Path) -> No
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
-        # rule 1: kept via mention (Beethoven) and via archive record (Mahler)
+        # rule 1: kept via mention (Beethoven) and via a concert credit (Mahler)
         assert "Beethoven, Ludwig van" in labels
         assert "Mahler, Gustav" in labels
-        assert "Nobody, Obscure" not in labels  # encyclopedia-only person dropped
+        assert "Nobody, Obscure" not in labels  # listed nowhere but an index: dropped
         # rule 2: the duplicate row is gone, nothing carries a canonical link
         assert "Beethoven" not in labels
         assert gold.scalar(select(Entity.id).where(Entity.canonical_entity_id.is_not(None))) is None
@@ -295,7 +315,11 @@ def test_promote_over_underived_silver_yields_no_concerts(session: Session, tmp_
 
 def test_promote_repoints_concert_participants(session: Session, tmp_path: Path) -> None:
     """A participant resolved to a duplicate collapses to its canonical root in
-    gold; one resolved to a dropped person keeps the name but loses the link."""
+    gold; one resolved to a dropped person keeps the name but loses the link.
+
+    The threshold is raised to two appearances so the one-off conductor is the
+    dropped person: Beinum conducts both Amsterdam evenings, the ghost one.
+    """
     concertgebouw = FakeSource(
         records=(
             perf_mention(
@@ -303,6 +327,12 @@ def test_promote_repoints_concert_participants(session: Session, tmp_path: Path)
                 "Symfonie nr. 5",
                 "Beethoven, Ludwig van",
                 {"date": "30-06-1929", "city": "Amsterdam", "conductor": "Beinum, Eduard"},
+            ),
+            perf_mention(
+                "perf:1",
+                "Egmont Ouverture",
+                "Beethoven, Ludwig van",
+                {"date": "01-07-1929", "city": "Amsterdam", "conductor": "Beinum, Eduard"},
             ),
             person("Beinum, Eduard", external_id="cg:beinum-short"),
             person("Beinum, Eduard van", external_id="cg:beinum"),
@@ -318,17 +348,12 @@ def test_promote_repoints_concert_participants(session: Session, tmp_path: Path)
                 "Verdi, Giuseppe",
                 {"programID": "100", "date": "1993-06-26", "conductors": ["Ghost, Dropped"]},
             ),
+            person("Ghost, Dropped", external_id="nyp:ghost"),
         ),
         name="nyphil",
         base_url="https://nyp.example",
     )
-    # the ghost conductor exists only in a non-performance source, so rule 1 drops it
-    encyclopedia = FakeSource(
-        records=(person("Ghost, Dropped", external_id="e:ghost"),),
-        name="encyclopedia",
-        base_url="https://encyclopedia.example",
-    )
-    for source in (concertgebouw, nyphil, encyclopedia):
+    for source in (concertgebouw, nyphil):
         ingest_source(session, source)
 
     # link the short-name duplicate to the fuller name (what dedupe-persons does)
@@ -341,16 +366,16 @@ def test_promote_repoints_concert_participants(session: Session, tmp_path: Path)
     # in silver the participant resolves to the duplicate spelling
     silver_conductor = session.scalars(
         select(ConcertParticipant).where(ConcertParticipant.name == "Beinum, Eduard")
-    ).one()
+    ).all()[0]
     assert silver_conductor.entity_id == duplicate.id
 
-    stats = promote(session, tmp_path / "gold.db")
+    stats = promote(session, tmp_path / "gold.db", PromoteConfig(min_appearances=2))
 
     with _gold_session(tmp_path / "gold.db") as gold:
-        conductor = gold.scalars(
+        conductors = gold.scalars(
             select(ConcertParticipant).where(ConcertParticipant.name == "Beinum, Eduard")
-        ).one()
-        assert conductor.entity_id == canonical.id  # re-pointed to the root
+        ).all()
+        assert {c.entity_id for c in conductors} == {canonical.id}  # re-pointed to the root
         ghost = gold.scalars(
             select(ConcertParticipant).where(ConcertParticipant.name == "Ghost, Dropped")
         ).one()
@@ -490,7 +515,7 @@ def test_rule3_off_keeps_unreferenced_entities(session: Session, tmp_path: Path)
 
 def _seed_referrers_silver(session: Session) -> None:
     """Silver exercising rule 3's referrer threshold. All persons are kept
-    (reported by a performance source), and they reference three places:
+    (they conduct the archive's concert), and they reference three places:
 
     - Popularville: two distinct persons refer to it (2 referrers),
     - Lonelyton: a single person refers to it (1 referrer),
@@ -498,7 +523,22 @@ def _seed_referrers_silver(session: Session) -> None:
     """
     archive = FakeSource(
         records=(
-            mention("Symphony No. 5, Op. 67", "Composer, Evidence", "m1"),  # makes archive a perf source
+            perf_mention(
+                "m1",
+                "Symphony No. 5, Op. 67",
+                "Composer, Evidence",
+                {
+                    "_source": "llm",
+                    "concert_key": "https://archive.example/concert/1",
+                    "date": "1929-06-30",
+                    "conductors": [
+                        "Popular, One",
+                        "Popular, Two",
+                        "Lonely, Composer",
+                        "Double, Claimer",
+                    ],
+                },
+            ),
             person("Popular, One", SourceClaim("born_in", "place", "Popularville"), external_id="a:one"),
             person("Popular, Two", SourceClaim("born_in", "place", "Popularville"), external_id="a:two"),
             person("Lonely, Composer", SourceClaim("born_in", "place", "Lonelyton"), external_id="a:lonely"),
@@ -513,6 +553,7 @@ def _seed_referrers_silver(session: Session) -> None:
         base_url="https://archive.example",
     )
     ingest_source(session, archive)
+    derive_concerts(session)
 
 
 def test_min_referrers_default_keeps_single_referrer(session: Session, tmp_path: Path) -> None:
@@ -554,6 +595,132 @@ def test_min_referrers_keeps_shared_referrer_with_its_claims(session: Session, t
             select(Claim).where(Claim.object_id == popularville.id, Claim.predicate == "born_in")
         ).all()
         assert len(claims) == 2  # both referrers' claims ride along
+
+
+def test_rule1_drops_archive_listed_person_without_credits(session: Session, tmp_path: Path) -> None:
+    """Appearing in a performance source's artist index is not evidence — only a
+    credit on a concert or a recording is."""
+    archive = FakeSource(
+        records=(
+            perf_mention(
+                "perf:10-1",
+                "Paradise and the Peri",
+                "Robert Schumann",
+                {
+                    "concert_id": "10",
+                    "date": "2009-02-08",
+                    "conductors": ["Sir Simon Rattle"],
+                },
+            ),
+            person("Rattle, Sir Simon", external_id="bp:rattle"),
+            person("Repetiteur, Uncredited", external_id="bp:repetiteur"),  # index entry only
+        ),
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    ingest_source(session, archive)
+    derive_concerts(session)
+
+    stats = promote(session, tmp_path / "gold.db")
+
+    with _gold_session(tmp_path / "gold.db") as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Rattle, Sir Simon" in labels  # conducted the concert
+        assert "Repetiteur, Uncredited" not in labels  # listed by the archive, credited nowhere
+    assert stats.persons_kept_by_appearances == 1
+
+
+def test_rule1_keeps_recording_participants(session: Session, tmp_path: Path) -> None:
+    _seed_recording_silver(session)
+    derive_recordings(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path)
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert {"Simon Rattle", "Janine Jansen"} <= labels  # credited on the album
+    assert stats.persons_kept_by_appearances == 2
+
+
+def test_min_appearances_drops_one_off_participants(session: Session, tmp_path: Path) -> None:
+    """A higher threshold keeps only the recurring musicians; composers are
+    evidenced by their works, so the threshold never touches them."""
+    _seed_concert_silver(session)
+    derive_concerts(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path, PromoteConfig(min_appearances=2))
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        # every performer here is credited on exactly one concert
+        assert "Beinum, Eduard van" not in labels
+        assert "Mengelberg, Willem" not in labels
+        assert "Matthews, Sally" not in labels
+        assert {"Beethoven, Ludwig van", "Verdi, Giuseppe"} <= labels  # composers of the programme
+    assert stats.persons_kept_by_appearances == 0
+
+
+def _seed_ensemble_silver(session: Session) -> None:
+    """Silver where one orchestra plays a concert and another only exists in the
+    source's ensemble index (referenced by a kept person's claim)."""
+    berlinphil = FakeSource(
+        records=(
+            perf_mention(
+                "perf:10-1",
+                "Paradise and the Peri",
+                "Robert Schumann",
+                {
+                    "concert_id": "10",
+                    "date": "2009-02-08",
+                    "conductors": ["Sir Simon Rattle"],
+                    "ensembles": ["Berliner Philharmoniker"],
+                },
+            ),
+            person(
+                "Rattle, Sir Simon",
+                SourceClaim("member_of", "ensemble", "Guest Orchestra"),
+                external_id="bp:rattle",
+            ),
+            ensemble("Berliner Philharmoniker", external_id="bp:ens-berlin"),
+            ensemble("Guest Orchestra", external_id="bp:ens-guest"),
+        ),
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    ingest_source(session, berlinphil)
+    derive_concerts(session)
+
+
+def test_ensembles_need_a_credit_of_their_own(session: Session, tmp_path: Path) -> None:
+    _seed_ensemble_silver(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path)
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Berliner Philharmoniker" in labels  # played the concert
+        assert "Guest Orchestra" not in labels  # only referenced by a kept person's claim
+        # the participant row keeps the verbatim name and links to the ensemble
+        orchestra = gold.scalars(select(Entity).where(Entity.label == "Berliner Philharmoniker")).one()
+        participant = gold.scalars(
+            select(ConcertParticipant).where(ConcertParticipant.role == "ensemble")
+        ).one()
+        assert participant.entity_id == orchestra.id
+        # no claim is left pointing at the pruned ensemble
+        objects = set(gold.scalars(select(Claim.object_id).where(Claim.object_id.is_not(None))))
+        assert objects <= set(gold.scalars(select(Entity.id)))
+    assert (stats.ensembles_kept, stats.ensembles_dropped) == (1, 1)
+
+
+def test_rule1_off_keeps_unevidenced_ensembles(session: Session, tmp_path: Path) -> None:
+    _seed_ensemble_silver(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, gold_path, PromoteConfig(drop_unevidenced_persons=False))
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert {"Berliner Philharmoniker", "Guest Orchestra"} <= labels
+    assert (stats.ensembles_kept, stats.ensembles_dropped) == (2, 0)
 
 
 def test_promote_writes_manifest_and_is_rerunnable(session: Session, tmp_path: Path) -> None:

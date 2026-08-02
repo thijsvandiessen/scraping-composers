@@ -630,7 +630,7 @@ def test_get_engine_reads_database_url_env_var(tmp_path: Path, monkeypatch: pyte
     assert str(engine.url) == db_url
 
 
-def test_promote_cli_passes_min_referrers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_promote_cli_passes_thresholds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from composer_cli import ingest_cmds
     from composer_gold import PromoteConfig, PromoteStats
 
@@ -655,9 +655,12 @@ def test_promote_cli_passes_min_referrers(tmp_path: Path, monkeypatch: pytest.Mo
             str(tmp_path / "gold.db"),
             "--min-referrers",
             "3",
+            "--min-appearances",
+            "2",
         ],
     )
     with pytest.raises(SystemExit) as exc:
         main()
     assert exc.value.code == 0
     assert captured[0].min_referrers == 3
+    assert captured[0].min_appearances == 2

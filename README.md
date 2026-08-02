@@ -108,21 +108,27 @@ from silver by the promote step:
 uv run composer-ingest promote        # silver → gold (full rebuild, atomic swap)
 ```
 
-Promotion applies the curation rules: people with no concerts, recordings, or
-works mentioned are dropped (kept only if they composed a mentioned work or a
-performance archive reported them); duplicate person entities (linked by
-`dedupe-persons`) are collapsed into their canonical row with claims, works,
-and mentions re-pointed; entities left unreferenced are pruned. Silver is
+Promotion applies the curation rules: people and ensembles are dropped unless
+they are *credited* — a participant on at least `--min-appearances` concerts or
+recordings — or composed a work some source mentioned; duplicate person entities
+(linked by `dedupe-persons`) are collapsed into their canonical row with claims,
+works, and mentions re-pointed; entities left unreferenced are pruned. Silver is
 never modified by promotion, so it is repeatable at any time; status and
 stats land in `gold.db.manifest.json`.
+
+Being *listed* by a source is deliberately not evidence. Archives publish full
+artist and ensemble indexes, and taking those at face value is what filled gold
+with soloists and orchestras that appear on no programme; the concert and
+recording tables are the only thing rule 1 believes.
 
 Each run is configurable: every rule can be switched off (CLI
 `--no-drop-unevidenced-persons`, `--no-collapse-duplicates`,
 `--no-prune-unreferenced`; the same toggles appear in the dashboard's promote
-form and in the `POST /admin/v1/promote` body), `--min-sitelinks N` also keeps
-persons with at least N Wikipedia sitelinks, and `--gold-path` writes the gold
-database elsewhere. In code the knobs travel as a single `PromoteConfig`
-passed to `promote()`.
+form and in the `POST /admin/v1/promote` body), `--min-appearances N` raises the
+credit threshold (default 1, i.e. one real appearance is enough),
+`--min-sitelinks N` also keeps persons with at least N Wikipedia sitelinks, and
+`--gold-path` writes the gold database elsewhere. In code the knobs travel as a
+single `PromoteConfig` passed to `promote()`.
 
 ### Not analysing the same page twice
 
@@ -189,10 +195,12 @@ file replace); status and stats land in `composers.db.manifest.json`.
 **Concerts are derived in silver** from the mentions' raw performance
 context (`composer-ingest derive-concerts`, also run automatically before
 every promote): mentions are grouped into concerts per source (berlinphil by
-its concert id, nyphil by program + date, concertgebouw by date + city, dates
-normalized to ISO) with season and event type; conductors _and soloists_
-(with their instrument/voice) are resolved to person entities by normalized
-name; and each concert keeps its programme. Promotion copies the concert
+its concert id, nyphil by program + date, concertgebouw by date + city, rco by
+its concert id, dates normalized to ISO) with season and event type;
+conductors, soloists (with their instrument/voice) _and the orchestra_ are
+resolved to entities by normalized name — an ensemble credit prefers an
+`ensemble` entity and falls back to a person; and each concert keeps its
+programme. Promotion copies the concert
 tables into gold, collapsing participant links to canonical entities. That
 powers the concert browser, per-person concert lists, and concert-count
 sorting in both APIs.

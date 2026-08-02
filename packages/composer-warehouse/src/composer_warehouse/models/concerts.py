@@ -41,10 +41,11 @@ class Concert(Base):
 
 
 class ConcertParticipant(Base):
-    """A person's role at a concert (v1 extracts conductors; schema is open).
+    """A participant's role at a concert (conductor | soloist | ensemble).
 
-    ``entity_id`` links to the person entity when the reported name resolves
-    (by dedup key); the verbatim ``name`` is always kept.
+    ``entity_id`` links to the person entity — or, for an ensemble credit, the
+    ensemble entity — when the reported name resolves (by dedup key); the
+    verbatim ``name`` is always kept.
     """
 
     __tablename__ = "concert_participants"
@@ -55,7 +56,7 @@ class ConcertParticipant(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     concert_id: Mapped[int] = mapped_column(ForeignKey("concerts.id"))
-    role: Mapped[str] = mapped_column(String(50))  # conductor | soloist
+    role: Mapped[str] = mapped_column(String(50))  # conductor | soloist | ensemble
     name: Mapped[str] = mapped_column(String(300))
     discipline: Mapped[str | None] = mapped_column(String(100))  # soloist instrument/voice
     entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))

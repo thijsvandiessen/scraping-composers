@@ -3,12 +3,13 @@
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.models import (
     Concert,
+    Entity,
     Recording,
     RecordingParticipant,
     RecordingWork,
 )
 from composer_warehouse.recordings import derive_recordings
-from composer_warehouse.testing import FakeSource, ingest_source, perf_mention, person
+from composer_warehouse.testing import FakeSource, ensemble, ingest_source, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -81,6 +82,33 @@ def test_derive_concerts_ignores_recording_payloads(session: Session) -> None:
     _seed(session)
     derive_concerts(session)
     assert session.scalar(select(func.count(Concert.id))) == 0
+
+
+def test_derive_recordings_resolves_ensemble_credits(session: Session) -> None:
+    """An ensemble credit prefers the ``ensemble`` entity over a same-named person."""
+    raw = _recording_raw()
+    artists = list(raw["artists"])  # type: ignore[call-overload]
+    artists.append({"name": "Berliner Philharmoniker", "role": "ensemble", "discipline": None})
+    raw["artists"] = artists
+    dg = FakeSource(
+        records=(
+            perf_mention(f"{raw['record_key']}#w0", "Symphony No. 9", "Beethoven", raw),
+            person("Simon Rattle", external_id="dg:rattle"),
+            person("Janine Jansen", external_id="dg:jansen"),
+            ensemble("Berliner Philharmoniker", external_id="dg:ens"),
+        ),
+        name="deutschegrammophon",
+        base_url="https://dg.example",
+    )
+    ingest_source(session, dg)
+
+    stats = derive_recordings(session)
+
+    orchestra = session.scalars(select(Entity).where(Entity.label == "Berliner Philharmoniker")).one()
+    recording = session.scalars(select(Recording)).one()
+    credit = next(p for p in recording.participants if p.role == "ensemble")
+    assert credit.entity_id == orchestra.id
+    assert stats.participant_links == 3
 
 
 def test_derive_recordings_is_rerunnable(session: Session) -> None:

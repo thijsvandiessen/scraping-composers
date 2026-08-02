@@ -58,6 +58,20 @@ def person(name: str, *claims: SourceClaim, external_id: str | None = None) -> E
     )
 
 
+def ensemble(name: str, *claims: SourceClaim, external_id: str | None = None) -> EntityDocument:
+    """A group (orchestra, choir) — the ``ensemble`` entity kind."""
+    return EntityDocument(
+        id=external_id or f"Category:{name}",
+        url=None,
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        name=name,
+        kind="ensemble",
+        raw={"id": name},
+        claims=claims,
+    )
+
+
 def mention(title: str, composer: str | None, external_id: str = "m1") -> WorkMentionDocument:
     return WorkMentionDocument(
         id=external_id,

@@ -118,14 +118,22 @@ class _RowBatch:
     """Accumulates the insert rows plus participant-resolution stats."""
 
     person_by_key: dict[str, uuid.UUID]
+    ensemble_by_key: dict[str, uuid.UUID] = field(default_factory=dict)
     recordings: list[dict[str, Any]] = field(default_factory=list)
     participants: list[dict[str, Any]] = field(default_factory=list)
     works: list[dict[str, Any]] = field(default_factory=list)
     participant_links: int = 0
     unresolved_names: set[str] = field(default_factory=set)
 
+    def _resolve(self, role: str, key: str) -> uuid.UUID | None:
+        """An ensemble credit prefers an ``ensemble`` entity and falls back to a
+        person (the LLM records orchestras as persons); other roles are people."""
+        if role == "ensemble":
+            return self.ensemble_by_key.get(key) or self.person_by_key.get(key)
+        return self.person_by_key.get(key)
+
     def add_participant(self, recording_id: int, role: str, name: str, discipline: str | None) -> None:
-        resolved = self.person_by_key.get(dedup_key(name))
+        resolved = self._resolve(role, dedup_key(name))
         if resolved is not None:
             self.participant_links += 1
         else:
@@ -175,8 +183,14 @@ def derive_recordings(session: Session) -> DeriveRecordingsStats:
             select(Entity.id, Entity.dedup_key).where(Entity.kind == "person")
         ).tuples()
     }
+    ensemble_by_key: dict[str, uuid.UUID] = {
+        key: entity_id
+        for entity_id, key in session.execute(
+            select(Entity.id, Entity.dedup_key).where(Entity.kind == "ensemble")
+        ).tuples()
+    }
 
-    rows = _RowBatch(person_by_key)
+    rows = _RowBatch(person_by_key, ensemble_by_key)
     for recording_id, (key, data) in enumerate(sorted(_group_recordings(session).items()), start=1):
         rows.add_recording(recording_id, key, data)
 
