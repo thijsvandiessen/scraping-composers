@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +13,24 @@ class Settings(BaseSettings):
     scraper_contact_email: str | None = None
 
     admin_api_key: str | None = None
+
+    # Neo4j export target (see composer_neo4j). Unset leaves the export off; the
+    # admin API then reports "not configured" instead of failing at write time.
+    #
+    # The username is *not* always "neo4j": an Aura instance may authenticate
+    # with its instance id instead, so it is configuration rather than a
+    # constant. NEO4J_API_KEY is accepted as an alias for the password because
+    # that is what Aura's console calls the value it hands you.
+    # Neither the username nor the database is reliably "neo4j": an Aura
+    # instance may name both after its instance id. Unset, the database falls
+    # back to the connection's home database, which is right for every Aura
+    # instance and avoids having to know the name at all.
+    neo4j_uri: str | None = None
+    neo4j_user: str = "neo4j"
+    neo4j_password: str | None = Field(
+        default=None, validation_alias=AliasChoices("neo4j_password", "neo4j_api_key")
+    )
+    neo4j_database: str | None = None
 
     # Log level for the CLI and the admin API. The crawl and extract stages narrate
     # themselves at INFO; DEBUG adds a line per page, per chunk and per model call.

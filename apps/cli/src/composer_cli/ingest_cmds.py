@@ -83,6 +83,38 @@ def cmd_promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_promote_neo4j(args: argparse.Namespace) -> int:
+    """Export the curated gold database into the configured Neo4j instance."""
+    from composer_neo4j import ExportNotConfiguredError, config_from_settings, export_to_neo4j
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    try:
+        config = config_from_settings(
+            uri=args.neo4j_uri,
+            include_unperformed_works=args.include_unperformed_works,
+            wipe_first=args.wipe,
+        )
+    except ExportNotConfiguredError as exc:
+        print(exc)
+        return 2
+
+    engine = create_engine(f"sqlite:///{args.gold_path}")
+    try:
+        with Session(engine) as gold:
+            stats = export_to_neo4j(gold, config)
+    except Exception:
+        log.exception("neo4j export failed")
+        return 1
+    finally:
+        engine.dispose()
+
+    print(f"gold exported to {config.uri}")
+    for key, value in asdict(stats).items():
+        print(f"  {key.replace('_', ' '):<28} {value}")
+    return 0
+
+
 def cmd_rebuild_silver(args: argparse.Namespace) -> int:
     bucket = LocalBucket(args.bucket_path)
     sources = [(adapter.name, adapter.base_url) for adapter in REGISTRY.values()]

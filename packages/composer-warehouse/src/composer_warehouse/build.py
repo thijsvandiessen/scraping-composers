@@ -66,6 +66,29 @@ def read_build_manifest(db_path: str | Path) -> BuildManifest | None:
     return BuildManifest(**json.loads(path.read_text(encoding="utf-8")))
 
 
+def run_tracked(key: str | Path, work: Callable[[], StatsT]) -> StatsT:
+    """Run ``work``, recording its progress in ``{key}.manifest.json``.
+
+    ``work`` returns a stats dataclass whose ``asdict`` lands in the completed
+    manifest. On failure the manifest records the error and the exception
+    propagates, so a crashed run can never be mistaken for a completed one.
+
+    The manifest is the whole contract here, which is why this is separate from
+    :func:`run_build`: an export to an external store has the same status
+    lifecycle but no local file to swap into place.
+    """
+    manifest = BuildManifest.start()
+    write_build_manifest(key, manifest)
+    try:
+        stats = work()
+    except Exception as exc:
+        write_build_manifest(key, manifest.failed(f"{type(exc).__name__}: {exc}"))
+        raise
+    write_build_manifest(key, manifest.completed(asdict(stats)))
+    log.info("built %s: %s", key, stats)
+    return stats
+
+
 def run_build(db_path: str | Path, build: Callable[[Path], StatsT]) -> StatsT:
     """Run ``build`` into ``{db_path}.tmp`` and atomically swap the result in.
 
@@ -74,14 +97,10 @@ def run_build(db_path: str | Path, build: Callable[[Path], StatsT]) -> StatsT:
     the error, the previous database (if any) stays in place, and the exception
     propagates.
     """
-    manifest = BuildManifest.start()
-    write_build_manifest(db_path, manifest)
-    try:
+
+    def _build_and_swap() -> StatsT:
         stats = build(Path(f"{db_path}.tmp"))
         os.replace(f"{db_path}.tmp", db_path)
-    except Exception as exc:
-        write_build_manifest(db_path, manifest.failed(f"{type(exc).__name__}: {exc}"))
-        raise
-    write_build_manifest(db_path, manifest.completed(asdict(stats)))
-    log.info("built %s: %s", db_path, stats)
-    return stats
+        return stats
+
+    return run_tracked(db_path, _build_and_swap)

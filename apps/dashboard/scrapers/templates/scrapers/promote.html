@@ -71,4 +71,60 @@
   switched off for a run. Silver is never modified.
 </p>
 {% endif %}
+
+<h2 style="margin-top: 2.5rem;">Graph (Neo4j)</h2>
+
+{% if graph %}
+<form method="post" action="{% url 'start_neo4j_promote' %}">
+  {% csrf_token %}
+  <div class="sc-toolbar">
+    <button type="submit" class="sc-btn sc-btn-primary"
+      {% if graph.status == "running" or not graph.configured %}disabled{% endif %}>
+      Promote gold → Neo4j
+    </button>
+    <span class="sc-muted">full rebuild of the graph from the curated gold database</span>
+    {% if graph.status == "running" %}<span class="sc-muted">exporting — refreshing every 5 s…</span>{% endif %}
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 0.375rem; margin: 0.75rem 0; font-size: 0.875rem;">
+    <label><input type="checkbox" name="include_unperformed_works">
+      also export works no source has on a programme
+      <span class="sc-muted">— adds ~120k nodes, taking a free Aura instance to ~95% of its limit</span></label>
+  </div>
+</form>
+
+<table class="sc-table" style="max-width: 34rem;">
+  <tr>
+    <td>instance</td>
+    <td>
+      {% if not graph.configured %}<span class="sc-badge sc-unknown">not configured</span>
+      {% elif graph.reachable %}<span class="sc-badge sc-completed">reachable</span>
+      {% elif graph.reachable is None %}<span class="sc-badge sc-running">busy</span>
+      {% else %}<span class="sc-badge sc-failed">unreachable</span>{% endif %}
+      {% if graph.uri %}<span class="sc-muted">{{ graph.uri }}</span>{% endif %}
+      {% if graph.detail %}<div class="sc-error-text">{{ graph.detail }}</div>{% endif %}
+    </td>
+  </tr>
+  <tr>
+    <td>last export</td>
+    <td>
+      {% if graph.status %}
+      <span class="sc-badge sc-{{ graph.status }}">{{ graph.status }}</span>
+      {{ graph.started_at|slice:":16" }}
+      {% if graph.error %}<div class="sc-error-text">{{ graph.error }}</div>{% endif %}
+      {% else %}<span class="sc-muted">never exported</span>{% endif %}
+    </td>
+  </tr>
+  {% for key, value in graph.stats.items %}
+  <tr><td class="sc-muted">{{ key }}</td><td class="sc-num">{{ value }}</td></tr>
+  {% endfor %}
+</table>
+
+<p class="sc-muted" style="max-width: 44rem; font-size: 0.875rem;">
+  The graph is for traversal — questions like "which conductors connect these two
+  composers" that the relational schema pays for every hop. People, ensembles,
+  works, concerts and recordings become nodes; what a source asserted becomes a
+  relationship, what the pipeline computed becomes a property. Gold is never
+  modified, and the export is a full rebuild: the target database is emptied first.
+</p>
+{% endif %}
 {% endblock %}

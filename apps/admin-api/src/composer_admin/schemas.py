@@ -125,3 +125,26 @@ class SilverStatus(BaseModel):
     finished_at: str | None
     error: str | None
     stats: dict[str, int]
+
+
+class Neo4jExportOptions(BaseModel):
+    """Optional per-run settings for the gold → Neo4j export."""
+
+    # Gold holds ~136k works but only ~15k appear on a programme. Including the
+    # rest takes the graph to ~95% of an Aura Free instance's node cap, so it is
+    # opt-in rather than the default.
+    include_unperformed_works: bool = False
+    wipe_first: bool = True
+    uri: str | None = None  # None: the server's configured NEO4J_URI
+
+
+class Neo4jStatus(BaseModel):
+    configured: bool  # whether NEO4J_URI and a password are set
+    reachable: bool | None  # None when unconfigured or the driver is missing
+    uri: str | None  # host only; never the credentials
+    detail: str | None  # why it is unreachable / unconfigured
+    status: str | None  # running | completed | failed | None (never exported)
+    started_at: str | None
+    finished_at: str | None
+    error: str | None
+    stats: dict[str, int]

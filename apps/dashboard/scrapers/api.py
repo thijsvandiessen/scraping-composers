@@ -98,6 +98,13 @@ class AdminAPI(_BaseAPI):
         kwargs: dict[str, Any] = {"json": options} if options else {}
         return self._json_dict("POST", "/admin/v1/promote", **kwargs)
 
+    def neo4j_status(self, probe: bool = True) -> dict[str, Any]:
+        return self._json_dict("GET", "/admin/v1/neo4j", params={"probe": probe})
+
+    def start_neo4j_promote(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"json": options} if options else {}
+        return self._json_dict("POST", "/admin/v1/neo4j/promote", **kwargs)
+
     def list_crawls(self) -> list[dict[str, Any]]:
         return self._json_list("GET", "/admin/v1/crawls")
 

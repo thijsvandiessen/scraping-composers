@@ -13,6 +13,7 @@ composer-crawler = { workspace = true }
 composer-extract = { workspace = true }
 composer-warehouse = { workspace = true }
 composer-gold = { workspace = true }
+composer-neo4j = { workspace = true }
 composer-config = { workspace = true }
 
 [dependency-groups]
@@ -23,6 +24,9 @@ dev = [
     "pyright>=1.1.390",
     "ruff>=0.16.0",
     "pylint>=4.0.6",
+    # An optional extra for consumers (composer-neo4j), but the repo's own
+    # type-checking and integration tests need it present.
+    "neo4j>=5.28",
 ]
 
 [tool.pytest.ini_options]
@@ -93,6 +97,8 @@ extraPaths = [
     "packages/composer-warehouse/tests",
     "packages/composer-gold/src",
     "packages/composer-gold/tests",
+    "packages/composer-neo4j/src",
+    "packages/composer-neo4j/tests",
     "packages/composer-config/src",
     "apps/consumer-api/src",
     "apps/consumer-api/tests",

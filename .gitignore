@@ -14,3 +14,4 @@ __pycache__/
 .venv/
 *.egg-info/
 .DS_Store
+neo4j.manifest.json
