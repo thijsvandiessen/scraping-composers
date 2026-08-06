@@ -7,7 +7,7 @@ dependencies = [
     "composer-config",
     "composer-http",
     "composer-schema",
-    "docling>=2.116.0",
+    "docling>=2.117.0",
     "httpx>=0.27",
     "kagglehub>=0.3",
     "pandas>=3.0.5",
