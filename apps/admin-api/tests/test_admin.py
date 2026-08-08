@@ -339,15 +339,15 @@ def test_promote_body_resolves_path_and_sitelinks(
     assert client.post("/admin/v1/promote", json={"min_sitelinks": None}).status_code == 202
     # explicit values win over the defaults
     custom = tmp_path / "elsewhere.db"
-    body = {"min_sitelinks": 120, "gold_path": str(custom), "collapse_duplicates": False}
+    body = {"min_sitelinks": 120, "gold_path": str(custom), "prune_unreferenced": False}
     assert client.post("/admin/v1/promote", json=body).status_code == 202
 
     paths = [path for path, _ in calls]
     configs = [config for _, config in calls]
     assert paths == [str(tmp_path / "gold.db"), str(tmp_path / "gold.db"), str(custom)]
     assert [c.min_sitelinks for c in configs] == [50, None, 120]
-    assert [c.collapse_duplicates for c in configs] == [True, True, False]
-    assert all(c.drop_unevidenced_persons and c.prune_unreferenced for c in configs)
+    assert [c.prune_unreferenced for c in configs] == [True, True, False]
+    assert all(c.drop_unevidenced_persons for c in configs)  # untouched rules stay on
 
 
 def test_promote_body_resolves_min_referrers(

@@ -76,12 +76,6 @@ uv run composer-ingest review --accept 42 <work-uuid>   # match a mention to a w
 uv run composer-ingest review --new 42                  # create a new work from a mention
 uv run composer-ingest rematch                          # re-run matching after tuning
 
-# link near-duplicate person entities ("Beethoven" vs "Beethoven, Ludwig van")
-uv run composer-ingest dedupe-persons
-uv run composer-ingest person-review                    # pairs the matcher wasn't sure about
-uv run composer-ingest person-review --accept 7         # confirm a duplicate link
-uv run composer-ingest person-review --reject 7         # reject a proposed link
-
 # group performance mentions into concerts (also runs before every promote)
 uv run composer-ingest derive-concerts
 ```
@@ -100,8 +94,8 @@ written by `fetch`): everything every source said, verbatim, as complete
 documents — the only tier holding the full fetch output, and the only way data
 enters the pipeline. **Silver** (`composers.db`) is the staging database built
 from bronze by `process`: raw records with provenance plus the interpretation
-passes over them — entity resolution, claims, work matching, person dedupe,
-and human review decisions. **Gold** (`gold.db`) is the curated copy rebuilt
+passes over them — entity resolution, claims, work matching, and human review
+decisions. **Gold** (`gold.db`) is the curated copy rebuilt
 from silver by the promote step:
 
 ```sh
@@ -110,9 +104,8 @@ uv run composer-ingest promote        # silver → gold (full rebuild, atomic sw
 
 Promotion applies the curation rules: people and ensembles are dropped unless
 they are *credited* — a participant on at least `--min-appearances` concerts or
-recordings — or composed a work some source mentioned; duplicate person entities
-(linked by `dedupe-persons`) are collapsed into their canonical row with claims,
-works, and mentions re-pointed; entities left unreferenced are pruned. Silver is
+recordings — or composed a work some source mentioned; entities left
+unreferenced are pruned. Silver is
 never modified by promotion, so it is repeatable at any time; status and
 stats land in `gold.db.manifest.json`.
 
@@ -122,8 +115,7 @@ with soloists and orchestras that appear on no programme; the concert and
 recording tables are the only thing rule 1 believes.
 
 Each run is configurable: every rule can be switched off (CLI
-`--no-drop-unevidenced-persons`, `--no-collapse-duplicates`,
-`--no-prune-unreferenced`; the same toggles appear in the dashboard's promote
+`--no-drop-unevidenced-persons`, `--no-prune-unreferenced`; the same toggles appear in the dashboard's promote
 form and in the `POST /admin/v1/promote` body), `--min-appearances N` raises the
 credit threshold (default 1, i.e. one real appearance is enough),
 `--min-sitelinks N` also keeps persons with at least N Wikipedia sitelinks, and
@@ -178,15 +170,14 @@ Interpretation (entity resolution, work matching) is applied when a record is
 first loaded — improving the heuristics doesn't fix rows already in the
 database. `rebuild-silver` closes that gap by replaying the latest complete
 snapshot of every source from the bucket into a fresh database with the
-current code, then re-running dedupe and concert derivation:
+current code, then re-running concert and recording derivation:
 
 ```sh
 uv run composer-ingest rebuild-silver   # bucket → composers.db (atomic swap)
 ```
 
-Human review decisions survive the rebuild: accepted/rejected person pairs
-carry over directly (entity ids are deterministic), and manual work matches
-are re-resolved by the work's composer + title (created again if matching no
+Human review decisions survive the rebuild: manual work matches are
+re-resolved by the work's composer + title (created again if matching no
 longer produces the work). The run log (`ingest_runs`) starts fresh, and
 **work ids may change** across rebuilds — only entity ids are stable. The
 rebuild requires a file-backed SQLite `DATABASE_URL` (the atomic swap is a
@@ -201,7 +192,7 @@ conductors, soloists (with their instrument/voice) _and the orchestra_ are
 resolved to entities by normalized name — an ensemble credit prefers an
 `ensemble` entity and falls back to a person; and each concert keeps its
 programme. Promotion copies the concert
-tables into gold, collapsing participant links to canonical entities. That
+tables into gold, nulling links to persons it did not keep. That
 powers the concert browser, per-person concert lists, and concert-count
 sorting in both APIs.
 
@@ -449,18 +440,21 @@ layer next.
 
 ### People deduplication
 
-Exact-key dedup unifies "Beethoven, Ludwig van" ↔ "Ludwig van Beethoven" but
-misses surname-only ("Beethoven"), initials ("Bach, J.S." vs "Bach, Johann
-Sebastian"), and other variants. The `dedupe-persons` pass
-(`packages/composer-warehouse/src/composer_warehouse/persons/`) closes the gap **non-destructively**: it parses
-each person name (surname / given / initials / particles), groups by surname,
-and scores pairs with a few heuristics — given-name compatibility plus
-birth-year corroboration (a conflicting `born_on` year rules a pair out; a
-matching one confirms it). High-confidence pairs set the duplicate's
-`Entity.canonical_entity_id` to the fuller name; ambiguous ones land in
-**`person_matches`** for `person-review`. Nothing is deleted and ids stay
-stable, so the pass is re-runnable as the heuristics grow (phonetic matching,
-nickname maps, external ids, …).
+Person identity is **exact-key only**: two records name the same person when
+their labels fold to the same `dedup_key`, which unifies "Beethoven, Ludwig
+van" ↔ "Ludwig van Beethoven" across name order, accents, case and
+punctuation. It does not unify surname-only ("Beethoven"), initials ("Bach,
+J.S." vs "Bach, Johann Sebastian") or nicknames — those stay separate
+entities, each judged on its own credits by the promote rules.
+
+A fuzzy post-hoc pass used to close that gap: it scored namesake pairs on
+given-name compatibility and birth-year corroboration, linked confident ones
+via `Entity.canonical_entity_id`, queued the rest in a `person_matches` review
+table, and gold collapsed the resulting clusters on promotion. That pass, its
+review queue and its schema have been removed — the heuristics decided
+identity from names alone, without the external ids that would make a merge
+verifiable. Anything replacing it should start from those ids (Wikidata and
+friends), not from spelling.
 
 ## Adding a source
 

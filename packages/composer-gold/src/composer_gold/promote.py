@@ -39,7 +39,6 @@ class PromoteStats:
     persons_promoted_by_sitelinks: int = 0
     ensembles_kept: int = 0
     ensembles_dropped: int = 0
-    duplicates_collapsed: int = 0
     entities_kept_other: int = 0
     entities_pruned: int = 0
     claims: int = 0
@@ -71,7 +70,6 @@ class PromoteConfig:
     min_appearances: int = 1  # rule 1 threshold: concerts + recordings credited to the entity
     min_referrers: int = 1  # rule 3 threshold: keep entities with >= N distinct referrers
     drop_unevidenced_persons: bool = True  # rule 1
-    collapse_duplicates: bool = True  # rule 2
     prune_unreferenced: bool = True  # rule 3
 
 
@@ -103,13 +101,12 @@ def promote(silver: Session, gold_path: str | Path, config: PromoteConfig | None
 
 def _stats(build: GoldBuild) -> PromoteStats:
     return PromoteStats(
-        persons_kept=len(build.kept_roots),
-        persons_dropped=len(build.all_persons) - len(build.kept_members),
-        persons_kept_by_appearances=len(build.appearance_roots),
-        persons_promoted_by_sitelinks=len(build.sitelink_roots - build.evidence_roots),
+        persons_kept=len(build.kept_persons),
+        persons_dropped=len(build.all_persons) - len(build.kept_persons),
+        persons_kept_by_appearances=len(build.appearance_persons),
+        persons_promoted_by_sitelinks=len(build.sitelink_persons - build.evidence_persons),
         ensembles_kept=len(build.kept_ensembles),
         ensembles_dropped=len(build.unevidenced_ensembles),
-        duplicates_collapsed=len(build.kept_members) - len(build.kept_roots),
         entities_kept_other=len(build.kept_other),
         entities_pruned=len(build.all_other - build.kept_other),
         claims=len(build.claim_rows),
@@ -136,7 +133,7 @@ def _build(silver: Session, tmp_path: Path, config: PromoteConfig) -> PromoteSta
     build.select_ensembles()
     with gold_engine.begin() as gold:
         copy_sources_and_runs(build, gold)
-        copy_entities(build, gold, build.kept_roots)  # kept person representatives
+        copy_entities(build, gold, build.kept_persons)
         referenced = collect_person_claims(build)
         walk_referenced(build, referenced)
         collect_other_literal_claims(build)

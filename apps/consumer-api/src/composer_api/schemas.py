@@ -50,8 +50,6 @@ class StatsOut(BaseModel):
     work_titles: int
     work_mentions: int
     mentions_by_status: dict[str, int]
-    persons_linked: int
-    person_matches_to_review: int
 
 
 class EntitySummary(BaseModel):
@@ -82,7 +80,6 @@ class EntityDetail(BaseModel):
     label: str
     kind: str
     created_at: datetime
-    canonical_entity_id: uuid.UUID | None
     claims: list[ClaimOut]
     incoming_total: int
     incoming: list[IncomingClaimOut]

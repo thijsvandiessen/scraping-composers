@@ -315,8 +315,6 @@ STATS_PAYLOAD: dict[str, Any] = {
     "work_titles": 3,
     "work_mentions": 5,
     "mentions_by_status": {"auto_matched": 4, "created": 1},
-    "persons_linked": 1,
-    "person_matches_to_review": 2,
 }
 
 ENTITY_DETAIL_PAYLOAD: dict[str, Any] = {
@@ -324,7 +322,6 @@ ENTITY_DETAIL_PAYLOAD: dict[str, Any] = {
     "label": "Bach, Johann Sebastian",
     "kind": "person",
     "created_at": "2026-06-11T10:00:00",
-    "canonical_entity_id": None,
     "claims": [
         {
             "predicate": "born_on",
@@ -910,7 +907,7 @@ def test_promote_button_posts_and_redirects(monkeypatch: pytest.MonkeyPatch, sta
 def test_promote_page_renders_config_fields(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     _install(monkeypatch, StubAPI())
     page = staff_client.get("/admin/promote/").content.decode()
-    for field in ("drop_unevidenced_persons", "collapse_duplicates", "prune_unreferenced"):
+    for field in ("drop_unevidenced_persons", "prune_unreferenced"):
         assert f'name="{field}" checked' in page
     assert 'name="min_sitelinks"' in page
     assert 'name="min_appearances"' in page
@@ -927,7 +924,6 @@ def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, st
         {
             "options_form": "1",
             "drop_unevidenced_persons": "on",
-            "collapse_duplicates": "on",
             "min_sitelinks": "150",
             "min_appearances": "2",
             "min_referrers": "2",
@@ -951,7 +947,6 @@ def test_promote_form_defaults_send_no_options(monkeypatch: pytest.MonkeyPatch, 
     fields = {
         "options_form": "1",
         "drop_unevidenced_persons": "on",
-        "collapse_duplicates": "on",
         "prune_unreferenced": "on",
         "min_sitelinks": "",
         "min_appearances": "",

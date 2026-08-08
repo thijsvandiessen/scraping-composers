@@ -116,7 +116,7 @@ def promote_page(request: HttpRequest) -> HttpResponse:
     return render(request, "scrapers/promote.html", context)
 
 
-PROMOTE_RULES = ("drop_unevidenced_persons", "collapse_duplicates", "prune_unreferenced")
+PROMOTE_RULES = ("drop_unevidenced_persons", "prune_unreferenced")
 
 
 def _promote_options(request: HttpRequest) -> dict[str, object]:

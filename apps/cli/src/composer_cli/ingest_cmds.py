@@ -70,7 +70,6 @@ def cmd_promote(args: argparse.Namespace) -> int:
                 min_appearances=args.min_appearances,
                 min_referrers=args.min_referrers,
                 drop_unevidenced_persons=args.drop_unevidenced_persons,
-                collapse_duplicates=args.collapse_duplicates,
                 prune_unreferenced=args.prune_unreferenced,
             )
             stats = promote(session, args.gold_path, config)

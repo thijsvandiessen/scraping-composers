@@ -1,15 +1,15 @@
 """Derive concerts from the mentions' raw performance context.
 
-A post-hoc pass over the silver database, like ``dedupe_persons``: work
-mentions carry each source's full performance payload in
-``raw_work_mentions.raw``; this pass groups them into concerts per source,
-resolves conductor, soloist and ensemble names to entities by normalized name,
-and links each concert to its programme. Re-running rebuilds the concert
-tables from scratch, so the pass can be repeated after new loads.
+A post-hoc pass over the silver database: work mentions carry each source's
+full performance payload in ``raw_work_mentions.raw``; this pass groups them
+into concerts per source, resolves conductor, soloist and ensemble names to
+entities by normalized name, and links each concert to its programme.
+Re-running rebuilds the concert tables from scratch, so the pass can be
+repeated after new loads.
 
 Participants resolve against *all* person entities (and, for ensemble credits,
-the ``ensemble`` entities) — silver keeps duplicate spellings side by side; the
-gold promote step re-points them to canonical roots when it copies the tables.
+the ``ensemble`` entities) by their normalized dedup key, so a name only links
+when it folds onto an existing entity's key.
 """
 
 from __future__ import annotations

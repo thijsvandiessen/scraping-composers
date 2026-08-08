@@ -105,7 +105,6 @@ class PromoteOptions(BaseModel):
     min_appearances: int = Field(default=1, ge=1)  # rule 1 threshold
     min_referrers: int = Field(default=1, ge=1)  # rule 3 threshold
     drop_unevidenced_persons: bool = True  # rule 1
-    collapse_duplicates: bool = True  # rule 2
     prune_unreferenced: bool = True  # rule 3
 
 

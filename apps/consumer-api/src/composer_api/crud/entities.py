@@ -4,7 +4,6 @@ from composer_warehouse.models import (
     Claim,
     Entity,
     EntityRecord,
-    PersonMatch,
     RawWorkMention,
     Source,
     Work,
@@ -58,10 +57,6 @@ def get_stats(db: Session) -> StatsOut:
         work_titles=count(select(func.count(WorkTitle.id))),
         work_mentions=count(select(func.count(RawWorkMention.id))),
         mentions_by_status=mentions_by_status,
-        persons_linked=count(select(func.count(Entity.id)).where(Entity.canonical_entity_id.is_not(None))),
-        person_matches_to_review=count(
-            select(func.count(PersonMatch.id)).where(PersonMatch.status == "needs_review")
-        ),
     )
 
 
@@ -115,7 +110,6 @@ def get_entity(db: Session, entity_id: uuid.UUID) -> EntityDetail:
         label=entity.label,
         kind=entity.kind,
         created_at=entity.created_at,
-        canonical_entity_id=entity.canonical_entity_id,
         claims=outgoing_claims(db, entity.id),
         incoming_total=incoming_total,
         incoming=[

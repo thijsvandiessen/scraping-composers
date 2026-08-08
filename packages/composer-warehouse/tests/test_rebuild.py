@@ -13,7 +13,6 @@ from composer_warehouse.models import (
     Claim,
     Concert,
     Entity,
-    PersonMatch,
     RawWorkMention,
     Work,
     WorkTitle,
@@ -32,11 +31,8 @@ def _seed_bucket(bucket: LocalBucket) -> None:
     archive = FakeSource(
         records=(
             person("Bach, Johann Sebastian", SourceClaim("has_profession", "profession", "composer")),
-            person("Bach, J.S.", external_id="a:bach-short"),
             person("Beethoven, Ludwig van", external_id="a:beethoven"),
-            person("Beethoven", external_id="a:beethoven-short"),
             person("Mozart, Wolfgang Amadeus", external_id="a:mozart"),
-            person("Mozart", external_id="a:mozart-short"),
             # similar-but-not-identical titles: the second scores in the review band
             mention("Songs of a Wayfarer", "Mahler, Gustav", "m1"),
             mention("Songs of a Traveller", "Mahler, Gustav", "m2"),
@@ -73,18 +69,15 @@ def test_rebuild_replays_bucket_with_full_fidelity(tmp_path: Path) -> None:
     stats = rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
 
     assert stats.sources_replayed == 2
-    assert stats.records_seen == 10
+    assert stats.records_seen == 7
     with _session(db_path) as silver:
         # claims exist only in the bucket documents; their presence proves the
         # replay used the full documents, not just the stored records
         bach = silver.scalars(select(Entity).where(Entity.label == "Bach, Johann Sebastian")).one()
         profession = silver.scalars(select(Claim).where(Claim.subject_id == bach.id)).all()
         assert any(c.predicate == "has_profession" for c in profession)
-        # the derivation passes ran: dedupe auto-linked the initials pair, concerts exist
-        short = silver.scalars(select(Entity).where(Entity.label == "Bach, J.S.")).one()
-        assert short.canonical_entity_id == bach.id
+        # the derivation passes ran
         assert silver.scalars(select(Concert)).one().date == "1985-03-01"
-    assert stats.persons_auto_linked == 1
     assert stats.concerts == 1
     manifest = read_build_manifest(db_path)
     assert manifest is not None and manifest.status == "completed"
@@ -99,21 +92,6 @@ def test_rebuild_preserves_human_decisions(tmp_path: Path) -> None:
 
     # simulate the human review decisions the CLI records
     with _session(db_path) as silver:
-        beethoven_pair = silver.scalars(
-            select(PersonMatch)
-            .join(Entity, Entity.id == PersonMatch.entity_id)
-            .where(PersonMatch.status == "needs_review", Entity.label == "Beethoven")
-        ).one()
-        beethoven_pair.status = "accepted"  # person-review --accept
-        beethoven_pair.entity.canonical_entity_id = beethoven_pair.canonical_entity_id
-        mozart_pair = silver.scalars(
-            select(PersonMatch)
-            .join(Entity, Entity.id == PersonMatch.entity_id)
-            .where(PersonMatch.status == "needs_review", Entity.label == "Mozart")
-        ).one()
-        mozart_pair.status = "rejected"  # person-review --reject
-        mozart_id, mozart_canonical_id = mozart_pair.entity_id, mozart_pair.canonical_entity_id
-
         # review --new: create a distinct work from the flagged mention
         flagged = silver.scalars(
             select(RawWorkMention).where(RawWorkMention.match_status == "needs_review")
@@ -132,23 +110,8 @@ def test_rebuild_preserves_human_decisions(tmp_path: Path) -> None:
 
     stats = rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
 
-    assert stats.person_decisions_applied == 2
-    assert stats.person_decisions_dropped == 0
     assert stats.work_decisions_applied == 1
     with _session(db_path) as silver:
-        # accepted: the link is back
-        beethoven_short = silver.scalars(select(Entity).where(Entity.label == "Beethoven")).one()
-        assert beethoven_short.canonical_entity_id is not None
-        # rejected: remembered, not re-proposed, not linked
-        mozart_rows = silver.scalars(
-            select(PersonMatch).where(
-                PersonMatch.entity_id == mozart_id,
-                PersonMatch.canonical_entity_id == mozart_canonical_id,
-            )
-        ).all()
-        assert [m.status for m in mozart_rows] == ["rejected"]
-        mozart = silver.scalars(select(Entity).where(Entity.label == "Mozart")).one()
-        assert mozart.canonical_entity_id is None
         # manual work match: re-created (fresh uuid) and re-linked, with the alias
         traveller = silver.scalars(
             select(RawWorkMention).where(RawWorkMention.raw_title == "Songs of a Traveller")
@@ -160,33 +123,38 @@ def test_rebuild_preserves_human_decisions(tmp_path: Path) -> None:
         assert "songs of a traveller" in aliases
 
 
-def test_rebuild_drops_decisions_for_vanished_entities(tmp_path: Path) -> None:
+def test_rebuild_drops_decisions_for_vanished_mentions(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path / "bucket")
     _seed_bucket(bucket)
     db_path = tmp_path / "silver.db"
     rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
 
     with _session(db_path) as silver:
-        # an accepted pair for entities no source reports (anymore)
-        ghost, ghost_canonical = uuid.uuid4(), uuid.uuid4()
-        silver.add(Entity(id=ghost, kind="person", dedup_key="ghost", label="Ghost"))
-        silver.add(Entity(id=ghost_canonical, kind="person", dedup_key="ghost g", label="Ghost, Gone"))
+        # a manual match on a mention no source reports (anymore)
+        mention_row = silver.scalars(select(RawWorkMention)).first()
+        assert mention_row is not None
+        ghost_work = Work(id=uuid.uuid4(), canonical_title="Ghost Sonata", title_key="ghost sonata")
+        silver.add(ghost_work)
         silver.add(
-            PersonMatch(
-                entity_id=ghost,
-                canonical_entity_id=ghost_canonical,
-                score=1.0,
-                method="manual",
-                status="accepted",
+            RawWorkMention(
+                source_id=mention_row.source_id,
+                external_id="a:gone",
+                raw_title="Ghost Sonata",
+                raw="{}",
+                work_id=ghost_work.id,
+                match_status="manual_matched",
+                match_method="manual",
+                first_run_id=mention_row.first_run_id,
+                last_run_id=mention_row.last_run_id,
             )
         )
         silver.commit()
 
     stats = rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
 
-    assert stats.person_decisions_dropped == 1
+    assert stats.work_decisions_dropped == 1
     with _session(db_path) as silver:
-        assert silver.scalar(select(Entity.id).where(Entity.label == "Ghost")) is None
+        assert silver.scalar(select(Work.id).where(Work.title_key == "ghost sonata")) is None
 
 
 def test_rebuild_failure_keeps_old_database(tmp_path: Path) -> None:

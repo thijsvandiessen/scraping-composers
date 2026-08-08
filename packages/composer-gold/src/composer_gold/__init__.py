@@ -6,9 +6,12 @@ consumers want:
 
 1. drop people and ensembles credited on fewer than ``min_appearances``
    concerts/recordings, unless they composed a work some source mentioned,
-2. collapse duplicate person entities into their canonical row,
 3. prune entities referenced by fewer than ``min_referrers`` distinct kept
    persons (default 1: keep anything referenced at all).
+
+(Rule 2 collapsed duplicate person entities into a canonical row; it and the
+person-dedupe pass behind it are gone. The remaining rules keep their numbers,
+which the code and the CLI help text refer to throughout.)
 """
 
 from composer_config import settings

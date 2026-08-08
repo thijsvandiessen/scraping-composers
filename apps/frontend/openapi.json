@@ -589,18 +589,6 @@
       },
       "EntityDetail": {
         "properties": {
-          "canonical_entity_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Canonical Entity Id"
-          },
           "claims": {
             "items": {
               "$ref": "#/components/schemas/ClaimOut"
@@ -643,7 +631,6 @@
           "label",
           "kind",
           "created_at",
-          "canonical_entity_id",
           "claims",
           "incoming_total",
           "incoming"
@@ -1381,14 +1368,6 @@
             "title": "Mentions By Status",
             "type": "object"
           },
-          "person_matches_to_review": {
-            "title": "Person Matches To Review",
-            "type": "integer"
-          },
-          "persons_linked": {
-            "title": "Persons Linked",
-            "type": "integer"
-          },
           "records": {
             "title": "Records",
             "type": "integer"
@@ -1422,9 +1401,7 @@
           "works",
           "work_titles",
           "work_mentions",
-          "mentions_by_status",
-          "persons_linked",
-          "person_matches_to_review"
+          "mentions_by_status"
         ],
         "title": "StatsOut",
         "type": "object"

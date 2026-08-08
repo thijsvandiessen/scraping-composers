@@ -25,7 +25,6 @@ from .ingest_cmds import (
     cmd_promote,
     cmd_rebuild_silver,
 )
-from .person_cmds import cmd_dedupe_persons, cmd_person_review
 from .pipeline_cmds import cmd_run
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
@@ -179,12 +178,6 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         help="rule 1: drop people and ensembles without concert/recording/work evidence",
     )
     p_promote.add_argument(
-        "--collapse-duplicates",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="rule 2: collapse duplicate persons into their canonical row",
-    )
-    p_promote.add_argument(
         "--prune-unreferenced",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -210,12 +203,7 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_rebuild.set_defaults(func=cmd_rebuild_silver)
 
 
-def _add_person_parsers(sub: _SubParsers) -> None:
-    p_dedupe = sub.add_parser(
-        "dedupe-persons", help="link near-duplicate person entities (surname/initials/birth-year heuristics)"
-    )
-    p_dedupe.set_defaults(func=cmd_dedupe_persons)
-
+def _add_derive_parsers(sub: _SubParsers) -> None:
     p_concerts = sub.add_parser(
         "derive-concerts", help="rebuild the concert tables from the work mentions' performance context"
     )
@@ -225,14 +213,6 @@ def _add_person_parsers(sub: _SubParsers) -> None:
         "derive-recordings", help="rebuild the recording tables from the work mentions' release context"
     )
     p_recordings.set_defaults(func=cmd_derive_recordings)
-
-    p_preview = sub.add_parser(
-        "person-review", help="list (or resolve) person duplicate pairs flagged for review"
-    )
-    p_preview.add_argument("--limit", type=int, default=20, help="max pairs to list")
-    p_preview.add_argument("--accept", type=int, metavar="MATCH_ID", help="confirm a duplicate link")
-    p_preview.add_argument("--reject", type=int, metavar="MATCH_ID", help="reject a proposed link")
-    p_preview.set_defaults(func=cmd_person_review)
 
 
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
@@ -273,7 +253,7 @@ def main() -> None:
     _add_query_parsers(sub)
     _add_work_parsers(sub)
     _add_pipeline_parsers(sub)
-    _add_person_parsers(sub)
+    _add_derive_parsers(sub)
 
     args = parser.parse_args()
     logging.basicConfig(

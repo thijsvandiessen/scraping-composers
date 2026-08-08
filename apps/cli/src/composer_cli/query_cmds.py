@@ -7,7 +7,6 @@ from composer_warehouse.models import (
     Entity,
     EntityRecord,
     IngestRun,
-    PersonMatch,
     RawWorkMention,
     Source,
     Work,
@@ -54,13 +53,6 @@ def cmd_stats(args: argparse.Namespace) -> int:
         ).all()
         for status, count in by_status:
             print(f"  {status}: {count}")
-
-        linked = session.scalar(select(func.count(Entity.id)).where(Entity.canonical_entity_id.is_not(None)))
-        to_review = session.scalar(
-            select(func.count(PersonMatch.id)).where(PersonMatch.status == "needs_review")
-        )
-        print(f"person duplicates linked: {linked}")
-        print(f"person matches to review: {to_review}")
     return 0
 
 

@@ -61,7 +61,6 @@ def _promote_config(options: PromoteOptions | None) -> tuple[str, PromoteConfig]
         min_appearances=min_appearances,
         min_referrers=min_referrers,
         drop_unevidenced_persons=opts.drop_unevidenced_persons,
-        collapse_duplicates=opts.collapse_duplicates,
         prune_unreferenced=opts.prune_unreferenced,
     )
     return str(gold_path), config

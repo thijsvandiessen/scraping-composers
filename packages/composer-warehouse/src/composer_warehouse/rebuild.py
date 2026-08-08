@@ -9,15 +9,10 @@ the full documents, claims included, live) into a fresh database, re-runs the
 derivation passes, and atomically swaps the result in.
 
 Human review decisions survive the rebuild. They are collected from the old
-database first and re-applied after the replay:
-
-- person matches (``person-review --accept/--reject``) carry over directly —
-  entity ids are deterministic (uuid5 of kind + dedup key), so the same
-  person gets the same id in the new database;
-- manual work matches (``review --accept/--new``) are re-resolved by the
-  work's ``(composer, title key)`` because work ids are random and change
-  across rebuilds; the target work is created if matching no longer produces
-  it.
+database first and re-applied after the replay: manual work matches
+(``review --accept/--new``) are re-resolved by the work's
+``(composer, title key)`` because work ids are random and change across
+rebuilds; the target work is created if matching no longer produces it.
 
 SQLite only: the atomic swap is a file replace, which has no Postgres
 equivalent yet.
@@ -40,8 +35,7 @@ from .build import run_build
 from .concerts import derive_concerts
 from .db import init_db
 from .ingestion import ingest_documents, new_work
-from .models import Entity, PersonMatch, RawWorkMention, Source, Work
-from .persons import dedupe_persons
+from .models import Entity, RawWorkMention, Source, Work
 from .recordings import derive_recordings
 from .works import add_alias, extract_features
 
@@ -53,25 +47,10 @@ class RebuildStats:
     sources_replayed: int = 0
     records_seen: int = 0
     records_new: int = 0
-    persons_auto_linked: int = 0
-    person_decisions_applied: int = 0
-    person_decisions_dropped: int = 0
     work_decisions_applied: int = 0
     work_decisions_dropped: int = 0
     concerts: int = 0
     recordings: int = 0
-
-
-@dataclass(frozen=True)
-class PersonDecision:
-    """A reviewed person-duplicate pair, portable across rebuilds by its
-    deterministic entity ids."""
-
-    entity_id: uuid.UUID
-    canonical_entity_id: uuid.UUID
-    status: str  # accepted | rejected
-    score: float
-    method: str | None
 
 
 @dataclass(frozen=True)
@@ -94,19 +73,9 @@ def sqlite_db_path(database_url: str) -> Path:
     return Path(url.database)
 
 
-def collect_decisions(session: Session) -> tuple[list[PersonDecision], list[WorkDecision]]:
+def collect_work_decisions(session: Session) -> list[WorkDecision]:
     """Snapshot the human review decisions to re-apply after a rebuild."""
-    person_decisions = [
-        PersonDecision(
-            entity_id=m.entity_id,
-            canonical_entity_id=m.canonical_entity_id,
-            status=m.status,
-            score=m.score,
-            method=m.method,
-        )
-        for m in session.scalars(select(PersonMatch).where(PersonMatch.status.in_(["accepted", "rejected"])))
-    ]
-    work_decisions = [
+    return [
         WorkDecision(
             source_name=source_name,
             external_id=external_id,
@@ -121,37 +90,6 @@ def collect_decisions(session: Session) -> tuple[list[PersonDecision], list[Work
             .where(RawWorkMention.match_status == "manual_matched")
         ).tuples()
     ]
-    return person_decisions, work_decisions
-
-
-def _apply_person_decisions(session: Session, decisions: Sequence[PersonDecision]) -> tuple[int, int]:
-    """Re-insert reviewed person pairs; accepted ones re-link the duplicate.
-
-    Runs before ``dedupe_persons`` so the carried rows land in its decided set:
-    accepted pairs stay linked, rejected pairs are not re-proposed. Decisions
-    whose entities no longer exist (the source stopped reporting them) drop.
-    """
-    applied = dropped = 0
-    for decision in decisions:
-        duplicate = session.get(Entity, decision.entity_id)
-        canonical = session.get(Entity, decision.canonical_entity_id)
-        if duplicate is None or canonical is None:
-            dropped += 1
-            continue
-        session.add(
-            PersonMatch(
-                entity_id=decision.entity_id,
-                canonical_entity_id=decision.canonical_entity_id,
-                score=decision.score,
-                method=decision.method,
-                status=decision.status,
-            )
-        )
-        if decision.status == "accepted":
-            duplicate.canonical_entity_id = decision.canonical_entity_id
-        applied += 1
-    session.commit()
-    return applied, dropped
 
 
 def _apply_work_decisions(session: Session, decisions: Sequence[WorkDecision]) -> tuple[int, int]:
@@ -208,12 +146,11 @@ def rebuild_silver(
     url = database_url or settings.database_url
     db_path = sqlite_db_path(url)
 
-    person_decisions: list[PersonDecision] = []
     work_decisions: list[WorkDecision] = []
     if db_path.exists():
         old_engine = create_engine(f"sqlite:///{db_path}")
         with Session(old_engine) as old:
-            person_decisions, work_decisions = collect_decisions(old)
+            work_decisions = collect_work_decisions(old)
         old_engine.dispose()
 
     def _build(tmp_path: Path) -> RebuildStats:
@@ -235,8 +172,6 @@ def rebuild_silver(
                 seen += run.records_seen
                 new += run.records_new
 
-            person_applied, person_dropped = _apply_person_decisions(session, person_decisions)
-            auto_linked, _needs_review = dedupe_persons(session)
             work_applied, work_dropped = _apply_work_decisions(session, work_decisions)
             concert_stats = derive_concerts(session)
             recording_stats = derive_recordings(session)
@@ -245,9 +180,6 @@ def rebuild_silver(
             sources_replayed=replayed,
             records_seen=seen,
             records_new=new,
-            persons_auto_linked=auto_linked,
-            person_decisions_applied=person_applied,
-            person_decisions_dropped=person_dropped,
             work_decisions_applied=work_applied,
             work_decisions_dropped=work_dropped,
             concerts=concert_stats.concerts,

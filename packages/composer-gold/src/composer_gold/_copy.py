@@ -1,4 +1,4 @@
-"""Copy phases of the gold build: kept rows, re-pointed at canonical roots."""
+"""Copy phases of the gold build: the rows the curation rules kept."""
 
 from __future__ import annotations
 
@@ -36,13 +36,12 @@ def chunked(ids: list[Any]) -> Iterable[list[Any]]:
 
 
 def _entity_row(e: Entity) -> dict[str, Any]:
-    """An entity insert row with the canonical link resolved away."""
+    """An entity insert row."""
     return {
         "id": e.id,
         "kind": e.kind,
         "dedup_key": e.dedup_key,
         "label": e.label,
-        "canonical_entity_id": None,
         "created_at": e.created_at,
         "first_ingested_at": e.first_ingested_at,
         "last_ingested_at": e.last_ingested_at,
@@ -84,13 +83,13 @@ def copy_entities(build: GoldBuild, gold: Connection, ids: set[uuid.UUID]) -> No
 
 def copy_records(build: GoldBuild, gold: Connection) -> None:
     """Entity records of everything kept, re-pointed."""
-    record_owner_ids = sorted(build.kept_members | build.kept_other, key=str)
+    record_owner_ids = sorted(build.kept_persons | build.kept_other, key=str)
     for chunk in chunked(record_owner_ids):
         rows = [
             {
                 "id": r.id,
                 "source_id": r.source_id,
-                "entity_id": build.root(r.entity_id) if r.entity_id is not None else None,
+                "entity_id": r.entity_id,
                 "external_id": r.external_id,
                 "name": r.name,
                 "url": r.url,
@@ -114,7 +113,7 @@ def copy_works_titles_mentions(build: GoldBuild, gold: Connection) -> None:
     work_rows = [
         {
             "id": w.id,
-            "composer_entity_id": build.root(w.composer_entity_id) if w.composer_entity_id else None,
+            "composer_entity_id": w.composer_entity_id,
             "canonical_title": w.canonical_title,
             "title_key": w.title_key,
             "work_type": w.work_type,
@@ -156,7 +155,7 @@ def copy_works_titles_mentions(build: GoldBuild, gold: Connection) -> None:
             "raw_composer": m.raw_composer,
             "raw_title": m.raw_title,
             "raw": m.raw,
-            "composer_entity_id": build.root(m.composer_entity_id) if m.composer_entity_id else None,
+            "composer_entity_id": m.composer_entity_id,
             "work_id": m.work_id,
             "match_status": m.match_status,
             "match_score": m.match_score,
@@ -175,13 +174,12 @@ def copy_works_titles_mentions(build: GoldBuild, gold: Connection) -> None:
 
 
 def copy_concerts(build: GoldBuild, gold: Connection) -> None:
-    """Concerts: copy the silver-derived tables, re-pointing people.
+    """Concerts: copy the silver-derived tables, dropping pruned links.
 
     ``derive_concerts`` resolved participants against every person entity;
-    here duplicates collapse to their canonical root, and links to persons
-    that didn't make it into gold are nulled (the verbatim name is always
-    kept)."""
-    gold_entities = build.kept_roots | build.kept_other
+    here links to persons that didn't make it into gold are nulled (the
+    verbatim name is always kept)."""
+    gold_entities = build.kept_persons | build.kept_other
     concert_rows = [
         {
             "id": c.id,
@@ -197,7 +195,7 @@ def copy_concerts(build: GoldBuild, gold: Connection) -> None:
     ]
     participant_rows: list[dict[str, Any]] = []
     for p in build.silver.execute(select(ConcertParticipant)).scalars():
-        entity_id = build.root(p.entity_id) if p.entity_id is not None else None
+        entity_id = p.entity_id
         if entity_id is not None and entity_id not in gold_entities:
             entity_id = None
         if entity_id is not None:
@@ -228,13 +226,12 @@ def copy_concerts(build: GoldBuild, gold: Connection) -> None:
 
 
 def copy_recordings(build: GoldBuild, gold: Connection) -> None:
-    """Recordings: copy the silver-derived tables, re-pointing people.
+    """Recordings: copy the silver-derived tables, dropping pruned links.
 
     The album counterpart to ``copy_concerts``: ``derive_recordings`` resolved
-    participants against every person entity; here duplicates collapse to their
-    canonical root, and links to persons that didn't make it into gold are
-    nulled (the verbatim name is always kept)."""
-    gold_entities = build.kept_roots | build.kept_other
+    participants against every person entity; here links to persons that didn't
+    make it into gold are nulled (the verbatim name is always kept)."""
+    gold_entities = build.kept_persons | build.kept_other
     recording_rows = [
         {
             "id": r.id,
@@ -251,7 +248,7 @@ def copy_recordings(build: GoldBuild, gold: Connection) -> None:
     ]
     participant_rows: list[dict[str, Any]] = []
     for p in build.silver.execute(select(RecordingParticipant)).scalars():
-        entity_id = build.root(p.entity_id) if p.entity_id is not None else None
+        entity_id = p.entity_id
         if entity_id is not None and entity_id not in gold_entities:
             entity_id = None
         if entity_id is not None:

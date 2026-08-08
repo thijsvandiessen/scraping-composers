@@ -165,7 +165,6 @@ export const zIncomingClaimOut = z.object({
  * EntityDetail
  */
 export const zEntityDetail = z.object({
-    canonical_entity_id: z.uuid().nullable(),
     claims: z.array(zClaimOut),
     created_at: z.iso.datetime({ offset: true, local: true }),
     id: z.uuid(),
@@ -299,8 +298,6 @@ export const zStatsOut = z.object({
     entities_by_kind: z.record(z.string(), z.int()),
     entities_total: z.int(),
     mentions_by_status: z.record(z.string(), z.int()),
-    person_matches_to_review: z.int(),
-    persons_linked: z.int(),
     records: z.int(),
     records_by_source: z.record(z.string(), z.int()),
     work_mentions: z.int(),

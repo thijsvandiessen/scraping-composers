@@ -14,26 +14,18 @@ class Entity(Base):
     """Canonical node, deduplicated across sources within its kind."""
 
     __tablename__ = "entities"
-    __table_args__ = (
-        UniqueConstraint("kind", "dedup_key", name="uq_entity_kind_key"),
-        Index("ix_entities_canonical", "canonical_entity_id"),
-    )
+    __table_args__ = (UniqueConstraint("kind", "dedup_key", name="uq_entity_kind_key"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(String(50))
     dedup_key: Mapped[str] = mapped_column(String(300))
     label: Mapped[str] = mapped_column(String(300))
-    # set when this entity is a confirmed duplicate of another (the canonical
-    # one), e.g. "Beethoven" -> "Beethoven, Ludwig van". Non-destructive: both
-    # rows stay, queries can resolve to the canonical via this pointer.
-    canonical_entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     first_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_edited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     records: Mapped[list[EntityRecord]] = relationship(back_populates="entity")
-    canonical: Mapped[Entity | None] = relationship(remote_side=[id])
 
 
 class EntityRecord(Base):
