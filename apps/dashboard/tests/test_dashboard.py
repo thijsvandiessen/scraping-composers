@@ -180,6 +180,36 @@ class StubAPI:
             "stats": {},
         }
 
+    def neo4j_status(self, probe: bool = True) -> dict[str, Any]:
+        self._maybe_fail()
+        self.neo4j_probed = probe
+        return {
+            "configured": True,
+            "reachable": True,
+            "uri": "neo4j+s://instance.databases.neo4j.io",
+            "detail": None,
+            "status": "completed",
+            "started_at": "2026-07-02T16:00:00+00:00",
+            "finished_at": "2026-07-02T16:00:47+00:00",
+            "error": None,
+            "stats": {"nodes": 68391, "relationships": 233816},
+        }
+
+    def start_neo4j_promote(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
+        self._maybe_fail()
+        self.neo4j_options = options
+        return {
+            "configured": True,
+            "reachable": True,
+            "uri": "neo4j+s://instance.databases.neo4j.io",
+            "detail": None,
+            "status": "running",
+            "started_at": None,
+            "finished_at": None,
+            "error": None,
+            "stats": {},
+        }
+
 
 def _install(monkeypatch: pytest.MonkeyPatch, stub: StubAPI) -> None:
     fake = type("FakeAdminAPI", (), {"from_env": classmethod(lambda cls: stub)})
@@ -895,6 +925,51 @@ def test_promote_page_shows_gold_status(monkeypatch: pytest.MonkeyPatch, staff_c
     assert "Promote silver" in page
     assert "sc-badge sc-completed" in page  # gold present + last promote completed
     assert "persons_kept" in page and "15387" in page
+
+
+def test_promote_page_shows_the_neo4j_button_and_status(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install(monkeypatch, StubAPI())
+    page = staff_client.get("/admin/promote/").content.decode()
+    assert "Promote gold → Neo4j" in page
+    assert "neo4j+s://instance.databases.neo4j.io" in page
+    assert "relationships" in page and "233816" in page
+
+
+def test_neo4j_button_posts_and_redirects(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    stub = StubAPI()
+    _install(monkeypatch, stub)
+    response = staff_client.post("/admin/promote/neo4j", follow=True)
+    assert response.redirect_chain[0] == ("/admin/promote/", 302)
+    assert "exporting the gold database into Neo4j" in response.content.decode()
+    # unchecked box: the expensive scope stays off unless asked for
+    assert stub.neo4j_options == {"include_unperformed_works": False, "wipe_first": True}
+    assert staff_client.get("/admin/promote/neo4j").status_code == 405
+
+
+def test_neo4j_scope_checkbox_is_passed_through(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    stub = StubAPI()
+    _install(monkeypatch, stub)
+    staff_client.post("/admin/promote/neo4j", {"include_unperformed_works": "on"})
+    assert stub.neo4j_options == {"include_unperformed_works": True, "wipe_first": True}
+
+
+def test_promote_page_survives_an_unreachable_neo4j(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    """A missing graph target must not take the gold Promote page down."""
+
+    class NoGraph(StubAPI):
+        def neo4j_status(self, probe: bool = True) -> dict[str, Any]:
+            raise AdminAPIError("connection refused")
+
+    _install(monkeypatch, NoGraph())
+    page = staff_client.get("/admin/promote/")
+    assert page.status_code == 200
+    assert "Promote silver" in page.content.decode()
 
 
 def test_promote_button_posts_and_redirects(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:

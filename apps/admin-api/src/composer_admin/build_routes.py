@@ -1,4 +1,5 @@
-"""Admin endpoints for the derived databases: promote gold, rebuild silver."""
+"""Admin endpoints for the derived databases: promote gold, rebuild silver,
+export gold to Neo4j."""
 
 import logging
 from pathlib import Path
@@ -20,7 +21,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from . import snapshots
 from .deps import dispose_db, require_admin_key, session_scope
-from .schemas import GoldStatus, PromoteOptions, SilverStatus
+from .neo4j_export import export_in_background, neo4j_status, start_neo4j_export
+from .schemas import GoldStatus, Neo4jExportOptions, Neo4jStatus, PromoteOptions, SilverStatus
 
 log = logging.getLogger(__name__)
 
@@ -99,6 +101,34 @@ def start_promote(background: BackgroundTasks, options: PromoteOptions | None = 
         raise HTTPException(status.HTTP_409_CONFLICT, "a promote is already in progress")
     background.add_task(_promote_in_background, gold_path, config)
     current = _gold_status(gold_path)
+    current.status = "running"
+    return current
+
+
+@builds.get("/neo4j", response_model=Neo4jStatus)
+def neo4j_export_status(probe: bool = True) -> Neo4jStatus:
+    """State of the Neo4j graph: configuration, reachability, last export.
+
+    ``probe=false`` skips the connection check, which is what a poll during a
+    running export wants — the instance is busy and the answer is already known.
+    """
+    return neo4j_status(probe=probe)
+
+
+@builds.post("/neo4j/promote", status_code=status.HTTP_202_ACCEPTED, response_model=Neo4jStatus)
+def start_neo4j_promote(
+    background: BackgroundTasks, options: Neo4jExportOptions | None = None
+) -> Neo4jStatus:
+    """Rebuild the Neo4j graph from the gold database (background)."""
+    current = neo4j_status(probe=False)
+    if not current.configured:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Neo4j is not configured: set NEO4J_URI and NEO4J_PASSWORD (or NEO4J_API_KEY)",
+        )
+    if current.status == "running":
+        raise HTTPException(status.HTTP_409_CONFLICT, "a Neo4j export is already in progress")
+    background.add_task(export_in_background, start_neo4j_export(options))
     current.status = "running"
     return current
 

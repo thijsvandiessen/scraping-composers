@@ -20,6 +20,7 @@ from .pipeline import (
     process_snapshot,
     promote_page,
     start_fetch,
+    start_neo4j_promote,
     start_promote,
 )
 
@@ -45,6 +46,7 @@ __all__ = [
     "recordings_list",
     "review",
     "start_fetch",
+    "start_neo4j_promote",
     "start_promote",
     "works",
 ]

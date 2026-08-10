@@ -50,6 +50,11 @@ urlpatterns = [
     path("admin/promote/", admin.site.admin_view(views.promote_page), name="promote"),
     path("admin/promote/start", admin.site.admin_view(views.start_promote), name="start_promote"),
     path(
+        "admin/promote/neo4j",
+        admin.site.admin_view(views.start_neo4j_promote),
+        name="start_neo4j_promote",
+    ),
+    path(
         "admin/load/<str:source>/<str:snapshot_id>/process",
         admin.site.admin_view(views.process_snapshot),
         name="process_snapshot",

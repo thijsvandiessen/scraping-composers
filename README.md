@@ -106,6 +106,7 @@ from silver by the promote step:
 
 ```sh
 uv run composer-ingest promote        # silver → gold (full rebuild, atomic swap)
+uv run composer-ingest promote-neo4j  # gold → Neo4j (see "The graph" below)
 ```
 
 Promotion applies the curation rules: people and ensembles are dropped unless
@@ -204,6 +205,88 @@ programme. Promotion copies the concert
 tables into gold, collapsing participant links to canonical entities. That
 powers the concert browser, per-person concert lists, and concert-count
 sorting in both APIs.
+
+## The graph (Neo4j)
+
+Gold answers "who is this person, what did they compose, what was on this
+programme" well. It answers "which conductors connect these two composers"
+badly — that is a traversal, and a relational schema pays for every hop. So
+gold can also be exported into Neo4j, where the hops are the query language:
+
+```sh
+uv sync --extra neo4j
+uv run composer-ingest promote-neo4j        # gold → Neo4j (full rebuild)
+```
+
+The same thing is a **Promote gold → Neo4j** button next to the gold promote
+button on the dashboard's Promote page, with the instance's reachability and
+the last export's stats beside it. This is strictly additive: nothing writes
+back to gold, and neither consumer API is affected.
+
+The model follows one rule, the same one that decides what becomes a claim:
+
+- **what a source asserted** — contested, provenanced, sometimes disagreed on by
+  two sources — becomes a **relationship**;
+- **what the pipeline computed** or holds one value of becomes a **property**.
+
+```
+(:Person {label, born_on, died_on, sitelink_count, …})
+(:Ensemble) (:Place) (:Genre) (:Movement) (:Period) (:Profession)
+(:Work      {title, work_type, opus_number, musical_key, number, …})
+(:Concert   {date, venue, season, event_type, url, source})
+(:Recording {title, release_date, label, catalogue_number, format, source})
+
+(:Work)     -[:COMPOSED_BY]->                        (:Person)
+(:Person)   -[:HAS_PROFESSION|:BORN_IN|:DIED_IN|…]-> (:Profession|:Place|…)
+(:Concert)  -[:CONDUCTED_BY {name, source}]->        (:Person)
+(:Concert)  -[:PERFORMED_BY {name, discipline}]->    (:Person)
+(:Concert)  -[:FEATURES]->                           (:Ensemble)
+(:Concert)  -[:PROGRAMMES {raw_title, position}]->   (:Work)
+(:Recording)-[:CONTAINS    {raw_title, position}]->  (:Work)
+```
+
+Concerts and recordings share one relationship family — the two parallel
+participant tables in SQL differ only by which column names the event, and here
+they differ only by the start label. Credits and programme lines that never
+resolved to an entity are kept verbatim as `unresolved_participants` /
+`unprogrammed_titles` array properties, so the export drops nothing.
+
+**Scope, and why the default is what it is.** Aura's free tier caps an instance
+at 200k nodes and 400k relationships. Gold holds ~136k works but only ~15k of
+them ever appear on a programme; the rest are catalogue entries whose only edge
+is their composer. So the export defaults to performed works only and the full
+set is opt-in (`--include-unperformed-works`, or the checkbox on the button):
+
+| scope | nodes | relationships |
+|---|---:|---:|
+| performed works only (default) | 68,391 (34%) | 245,459 (61%) |
+| all works | 189,783 (95%) | 366,728 (92%) |
+
+The size is checked *before* the target is wiped, so an oversized run refuses
+instead of leaving half a graph behind. Status and stats land in
+`neo4j.manifest.json`, the same contract `promote` uses. Re-running is
+idempotent (`MERGE` on `id`), and the reported counts are read back from the
+database rather than counted on the way out — a concert that lists the same work
+twice sends two rows and keeps one relationship.
+
+The traversal the relational schema makes painful:
+
+```cypher
+MATCH (a:Person {label:'Beethoven, Ludwig van'})<-[:COMPOSED_BY]-(:Work)
+      <-[:PROGRAMMES]-(:Concert)-[:CONDUCTED_BY]->(cond:Person)
+      <-[:CONDUCTED_BY]-(:Concert)-[:PROGRAMMES]->(:Work)-[:COMPOSED_BY]->(b:Person)
+WHERE a <> b
+RETURN b.label, count(DISTINCT cond) AS conductors ORDER BY conductors DESC LIMIT 10;
+```
+
+Configuration is `NEO4J_URI` plus a password (`NEO4J_PASSWORD`, or
+`NEO4J_API_KEY` — what Aura's console calls the value it gives you); see
+`.env.example`. Note that neither the username nor the database is reliably
+`neo4j`: an Aura instance may use its **instance id** for both, so set
+`NEO4J_USER` to whatever the credentials file says and leave `NEO4J_DATABASE`
+unset to use the connection's home database. With the variables unset the
+export reports "not configured" and the button is disabled; nothing else
+changes.
 
 ## Consumer API (read the dataset)
 
@@ -306,7 +389,8 @@ with one page per ingest phase:
 - **Load** — every raw snapshot in the bucket (status, record count, size)
   with a **Load into DB** button on complete ones, plus the recent-loads log.
 - **Promote** — gold status (last rebuild, curation stats) and the button to
-  rebuild gold from silver.
+  rebuild gold from silver, plus a second button exporting gold into Neo4j with
+  that instance's reachability and last-export stats (see "The graph" above).
 - **Data (silver)** (Overview / Entities / Works / Review) — inspect the
   staging data: dataset counts, a searchable entity browser (per-kind pages,
   random sampling, claims with per-source provenance, cross-linked entities),

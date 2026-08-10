@@ -97,21 +97,32 @@ def process_snapshot(request: HttpRequest, source: str, snapshot_id: str) -> Htt
 
 
 def promote_page(request: HttpRequest) -> HttpResponse:
-    """Gold status and the button to rebuild it from silver."""
+    """Gold status and the buttons to rebuild it — from silver, and into Neo4j."""
     api = AdminAPI.from_env()
     gold: dict[str, object] | None = None
+    graph: dict[str, object] | None = None
     error: str | None = None
     try:
         gold = api.gold_status()
     except AdminAPIError as exc:
         error = str(exc)
-    refreshing = bool(gold) and gold.get("status") == "running"
+    gold_running = bool(gold) and gold.get("status") == "running"
+    try:
+        # Skip the connection probe while an export is running: the instance is
+        # busy and the page already knows the answer.
+        graph = api.neo4j_status(probe=not gold_running)
+    except AdminAPIError as exc:
+        # A missing Neo4j must not take the Promote page down with it.
+        graph = None
+        error = error or str(exc)
+    graph_running = bool(graph) and graph.get("status") == "running"
     context = {
         **admin.site.each_context(request),
         "title": "Promote",
         "gold": gold,
+        "graph": graph,
         "error": error,
-        "refreshing": refreshing,
+        "refreshing": gold_running or graph_running,
     }
     return render(request, "scrapers/promote.html", context)
 
@@ -160,4 +171,21 @@ def start_promote(request: HttpRequest) -> HttpResponse:
         messages.error(request, str(exc))
     else:
         messages.success(request, "rebuilding the gold database from silver")
+    return redirect("promote")
+
+
+def start_neo4j_promote(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    options = {
+        "include_unperformed_works": request.POST.get("include_unperformed_works") == "on",
+        "wipe_first": True,
+    }
+    api = AdminAPI.from_env()
+    try:
+        api.start_neo4j_promote(options)
+    except AdminAPIError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "exporting the gold database into Neo4j")
     return redirect("promote")

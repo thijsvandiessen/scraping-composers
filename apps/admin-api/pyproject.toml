@@ -10,6 +10,7 @@ dependencies = [
     "composer-scrapers",
     "composer-warehouse",
     "composer-gold",
+    "composer-neo4j",
     "fastapi>=0.141.1",
     "uvicorn[standard]>=0.52.1",
     "python-dotenv>=1.2.2",

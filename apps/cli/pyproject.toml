@@ -10,6 +10,7 @@ dependencies = [
     "composer-scrapers",
     "composer-warehouse",
     "composer-gold",
+    "composer-neo4j",
     "python-dotenv>=1.2.2",
     "composer-config",
 ]
