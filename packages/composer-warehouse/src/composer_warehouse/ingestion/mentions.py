@@ -6,7 +6,7 @@ from composer_schema import WorkMentionDocument
 from ..models import RawWorkMention, Work, WorkTitle
 from ..works import Candidate, WorkFeatures, extract_features, resolve
 from .entities import get_or_create_entity
-from .state import IngestState
+from .state import IngestState, content_hash
 
 
 def new_work(composer_id: uuid.UUID | None, title: str, features: WorkFeatures) -> Work:
@@ -27,10 +27,10 @@ def new_work(composer_id: uuid.UUID | None, title: str, features: WorkFeatures) 
     )
 
 
-def ingest_mention(state: IngestState, mention: WorkMentionDocument) -> int:
+def ingest_mention(state: IngestState, mention: WorkMentionDocument) -> tuple[int, str]:
     """Resolve one work mention to a canonical work (match/review/create), store
     the mention with the decision, and save its title as an alias. Returns the
-    new mention's id."""
+    new mention's (id, content hash)."""
     session = state.session
     composer_id: uuid.UUID | None = None
     if mention.composer:
@@ -47,12 +47,13 @@ def ingest_mention(state: IngestState, mention: WorkMentionDocument) -> int:
         matched_work_id = work.id
         state.work_candidates.setdefault(composer_id, []).append(Candidate(matched_work_id, features))
 
+    raw_json = json.dumps(mention.raw, ensure_ascii=False)
     mention_row = RawWorkMention(
         source_id=state.source.id,
         external_id=mention.id,
         raw_composer=mention.composer,
         raw_title=mention.title,
-        raw=json.dumps(mention.raw, ensure_ascii=False),
+        raw=raw_json,
         composer_entity_id=composer_id,
         work_id=matched_work_id,
         match_status=result.status,
@@ -79,4 +80,4 @@ def ingest_mention(state: IngestState, mention: WorkMentionDocument) -> int:
             )
             state.existing_work_titles.add(key)
 
-    return mention_row.id
+    return mention_row.id, content_hash(mention.title, mention.composer, raw_json)

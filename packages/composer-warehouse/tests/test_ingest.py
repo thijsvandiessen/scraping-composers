@@ -1,5 +1,6 @@
 """Ingest pipeline tests against fake in-memory sources (no network)."""
 
+import json
 from datetime import UTC, datetime
 
 from composer_schema import EntityDocument, SourceClaim
@@ -78,6 +79,71 @@ def test_reingest_is_idempotent(session: Session) -> None:
         assert record.first_run_id == first.id
         assert record.last_run_id == second.id
         assert record.last_seen_at >= record.first_seen_at
+
+
+def test_reingest_with_changed_content_updates_record(session: Session) -> None:
+    """A re-sighted external id whose content genuinely changed (not just a
+    byte-identical replay) must update the stored row and persist any new
+    claims, not just bump the timestamp (issue #137)."""
+    first_doc = EntityDocument(
+        id="wikidata:Q1234",
+        url="https://example.com/old",
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        name="Old Name",
+        raw={"version": 1},
+        claims=(SourceClaim("born_in", "place", "Salzburg"),),
+    )
+    second_doc = EntityDocument(
+        id="wikidata:Q1234",
+        url="https://example.com/new",
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        name="New Name",
+        raw={"version": 2},
+        claims=(
+            SourceClaim("born_in", "place", "Salzburg"),
+            SourceClaim("died_in", "place", "Vienna"),
+        ),
+    )
+    first = ingest_source(session, FakeSource(records=(first_doc,)))
+    second = ingest_source(session, FakeSource(records=(second_doc,)))
+
+    assert (first.records_new, second.records_new) == (1, 0)
+
+    record = session.scalars(select(EntityRecord)).one()
+    assert record.name == "New Name"
+    assert record.url == "https://example.com/new"
+    assert json.loads(record.raw) == {"version": 2}
+    assert record.first_run_id == first.id
+    assert record.last_run_id == second.id
+
+    claims = session.scalars(select(Claim).where(Claim.record_id == record.id)).all()
+    facts = {(c.predicate, c.object.label if c.object else c.value) for c in claims}
+    assert ("died_in", "Vienna") in facts  # the new claim was persisted
+    assert ("born_in", "Salzburg") in facts  # the old claim still coexists
+
+
+def test_reingest_with_unchanged_content_adds_no_duplicate_claims(session: Session) -> None:
+    doc = EntityDocument(
+        id="wikidata:Q99",
+        url="https://example.com/same",
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        name="Same Name",
+        raw={"version": 1},
+        claims=(SourceClaim("born_in", "place", "Salzburg"),),
+    )
+    source = FakeSource(records=(doc,))
+    ingest_source(session, source)
+    ingest_source(session, source)
+
+    record = session.scalars(select(EntityRecord)).one()
+    assert record.name == "Same Name"
+    assert json.loads(record.raw) == {"version": 1}
+
+    claims = session.scalars(select(Claim).where(Claim.record_id == record.id)).all()
+    assert len(claims) == 2  # born_in + mentioned_in, not duplicated by the second run
 
 
 def test_second_source_attaches_to_same_entity(session: Session) -> None:

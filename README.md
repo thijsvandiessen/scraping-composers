@@ -357,8 +357,11 @@ source's protocol.
 2. **Load** — the ingest loop (`packages/composer-warehouse/src/composer_warehouse/ingestion/`) opens an
    `IngestRun` and consumes the stream:
    - A document already known for this source — matched on
-     `(source, external_id)` — only gets its `last_seen` timestamp and run id
-     touched, which is what makes re-ingesting idempotent.
+     `(source, external_id)` — always gets its `last_seen` timestamp and run id
+     touched; if its content (title/composer/raw, or name/url/raw plus claims)
+     differs from what's stored, that's updated too. An unchanged re-sighting
+     costs no extra write beyond the timestamp bump, which is what makes
+     re-ingesting idempotent.
    - A new `EntityDocument` is attached to a canonical `Entity` via its
      normalized `(kind, dedup_key)` (created if the label is new) and stored
      verbatim as an `entity_records` row; its `SourceClaim`s, plus a
