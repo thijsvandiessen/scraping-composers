@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any, ClassVar
@@ -64,6 +64,34 @@ class WorkMentionDocument(ScrapedDocument):
     title: str = ""
     composer: str | None = None
     raw: dict[str, Any] = field(default_factory=dict)
+
+
+def serialize_document(doc: EntityDocument | WorkMentionDocument) -> dict[str, Any]:
+    """A JSON-safe dict for *doc*, round-tripped by :func:`deserialize_document`.
+
+    Shared by the bucket (a snapshot's NDJSON lines) and the extract ledger (a
+    page's carried-forward documents), so both use one implementation of
+    "how a document survives disk" rather than two that can drift apart.
+    """
+    # asdict recursively converts nested dataclasses (including SourceClaim) to dicts
+    d = asdict(doc)
+    # datetime is not JSON-serialisable; replace with ISO 8601 string
+    d["ingested_at"] = doc.ingested_at.isoformat()
+    d["_type"] = "entity" if isinstance(doc, EntityDocument) else "work_mention"
+    return d
+
+
+def deserialize_document(d: dict[str, Any]) -> EntityDocument | WorkMentionDocument:
+    """The document *d* (from :func:`serialize_document`) was serialized from."""
+    d = dict(d)
+    kind = d.pop("_type")
+    d["ingested_at"] = datetime.fromisoformat(d["ingested_at"])
+    if kind == "entity":
+        claims = tuple(SourceClaim(**c) for c in d.pop("claims", []))
+        return EntityDocument(**d, claims=claims)
+    if kind == "work_mention":
+        return WorkMentionDocument(**d)
+    raise ValueError(f"unknown _type in document payload: {kind!r}")
 
 
 # ---------------------------------------------------------------------------

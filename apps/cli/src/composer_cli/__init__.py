@@ -115,7 +115,15 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_extract.add_argument(
         "--no-cache",
         action="store_true",
-        help="re-ask the model for every page instead of reusing cached answers",
+        help="re-ask the model for every page instead of reusing cached answers "
+        "(also bypasses the ledger, below)",
+    )
+    p_extract.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help="re-run every page's kind through the model even if its content and extractor "
+        "fingerprint are unchanged (a chunk that produces an identical prompt can still hit "
+        "the answer cache unless --no-cache is also given)",
     )
     p_extract.add_argument(
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
@@ -137,7 +145,14 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_run.add_argument(
         "--no-cache",
         action="store_true",
-        help="re-ask the model for every page instead of reusing cached answers",
+        help="re-ask the model for every page instead of reusing cached answers "
+        "(also bypasses the ledger, below)",
+    )
+    p_run.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help="re-run every page's kind through the model even if its content and extractor "
+        "fingerprint are unchanged",
     )
     p_run.add_argument(
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"

@@ -25,9 +25,11 @@ from composer_crawler import (
 from composer_crawler.records import iter_crawl_records
 from composer_crawler.store import DEFAULT_CRAWL_CONFIGS_PATH
 from composer_extract import (
+    DocumentLedger,
     OllamaExtractor,
     extract_all,
     open_cache,
+    open_ledger,
     options_per_kind,
     summarize,
 )
@@ -148,6 +150,16 @@ def _extractor() -> OllamaExtractor:
     return OllamaExtractor.from_settings(cache=cache)
 
 
+def _ledger() -> DocumentLedger | None:
+    """The extraction ledger; a seam for tests to disable or inject a fake.
+
+    Mirrors :func:`_extractor`'s cache: lets a page whose content and extractor
+    fingerprint are unchanged skip the model entirely on a re-run from the
+    dashboard, not just have its answer cache-hit.
+    """
+    return open_ledger(settings.extract_cache_path, enabled=settings.extract_ledger_enabled)
+
+
 def _extract_in_background(
     name: str, crawl_run_id: str, snapshot_id: str, extract_kinds: Sequence[str]
 ) -> bool:
@@ -171,11 +183,11 @@ def _extract_in_background(
     )
     try:
         docs = extract_all(
-            extract_kinds,
             lambda: iter_crawl_records(name, crawl_run_id, store),
             source_name=name,
             extractor=_extractor(),
             options=options,
+            ledger=_ledger(),
         )
         write_documents(store, name, docs, run_id=snapshot_id)
     except Exception:

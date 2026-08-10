@@ -6,9 +6,16 @@ over each page once per kind the config enables, and writes the resulting
 under the crawl config's name. The standard ``process`` step then ingests them
 like any other snapshot.
 
-Model answers are cached by a fingerprint of the request that produced them, so
-re-extracting a crawl only pays for the pages whose text actually changed.
-``--no-cache`` forces every page back through the model.
+Two layers avoid paying for a page more than once. The ledger, checked first,
+skips a page entirely — no chunking, no model call — when its content and the
+extractor's fingerprint (model, prompt, schema, options) are unchanged since it
+was last recorded for that kind; ``--no-ledger`` forces every page back through
+it. Below that, model answers are cached by a fingerprint of the request that
+produced them, so even a page the ledger sends to the model only pays for chunks
+whose exact text/prompt/options changed. ``--no-cache`` forces every page back
+through the model, and also bypasses the ledger (leaving it on would silently
+defeat what ``--no-cache`` promises for any page the ledger would otherwise
+have skipped).
 """
 
 import argparse
@@ -25,6 +32,7 @@ from composer_extract import (
     OllamaExtractor,
     extract_all,
     open_cache,
+    open_ledger,
     options_per_kind,
     summarize,
 )
@@ -57,10 +65,16 @@ def cmd_extract(args: argparse.Namespace) -> int:
 
     caching = settings.extract_cache_enabled and not args.no_cache
     cache = open_cache(settings.extract_cache_path, enabled=caching)
+    ledgering = settings.extract_ledger_enabled and not args.no_cache and not args.no_ledger
+    ledger = open_ledger(settings.extract_cache_path, enabled=ledgering)
     extractor = OllamaExtractor.from_settings(model=args.model, cache=cache)
     options = options_per_kind(config.extract_kinds)
     docs = extract_all(
-        config.extract_kinds, records, source_name=config.name, extractor=extractor, options=options
+        records,
+        source_name=config.name,
+        extractor=extractor,
+        options=options,
+        ledger=ledger,
     )
 
     try:
@@ -77,6 +91,8 @@ def cmd_extract(args: argparse.Namespace) -> int:
             print(f"    predicates outside the vocabulary: {unknown}")
     if cache is not None:
         print(f"  {cache.summary()}")
+    if ledger is not None:
+        print(f"  {ledger.summary()}")
     print(f"run_id: {run_id}")
     print(f"next: composer-ingest process {config.name} --run-id {run_id}")
     return 0

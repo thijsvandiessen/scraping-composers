@@ -65,6 +65,11 @@ def client(
     from composer_config import settings
 
     monkeypatch.setattr(settings, "admin_api_key", "test-key")
+    # The fake extractors below don't implement the .model/.request_options() the
+    # ledger fingerprints, and none of these tests are about the ledger itself —
+    # same reasoning as replacing _extractor wholesale rather than its cache.
+    monkeypatch.setattr(settings, "extract_ledger_enabled", False)
+    monkeypatch.setattr(settings, "extract_cache_path", str(tmp_path / "extract-cache.db"))
     yield TestClient(admin_app, headers={"X-Admin-Key": "test-key"})
 
 

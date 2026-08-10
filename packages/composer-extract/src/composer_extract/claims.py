@@ -24,8 +24,10 @@ from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 
 from .emit import LLM_SOURCE_MARKER, Document, emit_pages
 from .facts import WORK_KIND, entity_kind, object_kind, repair, stated, title_key
+from .ledger import DocumentLedger, LedgerContext, request_fingerprint
 from .markdown import chunk_markdown, record_markdown
 from .predicates import is_known, literal_form, normalize_predicate
+from .prompt import CLAIMS_SYSTEM_PROMPT
 from .resilience import extract_chunks
 from .run import ExtractOptions, ExtractRun
 from .schema import ExtractedFact, PageClaimExtraction
@@ -247,7 +249,14 @@ def extract_claim_documents(
     source_name: str,
     extractor: ClaimPageExtractor,
     options: ExtractOptions | None = None,
+    ledger: DocumentLedger | None = None,
 ) -> Iterator[Document]:
     """Yield entity/work-mention documents from crawled *records* (claims mode)."""
     run = ExtractRun.start(source_name, options)
-    yield from emit_pages(records, lambda record, r: _emit_claims(record, extractor, r), run)
+    context = None
+    if ledger is not None:
+        fingerprint = request_fingerprint(extractor, CLAIMS_SYSTEM_PROMPT, PageClaimExtraction)
+        context = LedgerContext(ledger, "claims", fingerprint)
+    yield from emit_pages(
+        records, lambda record, r: _emit_claims(record, extractor, r), run, ledger_context=context
+    )

@@ -48,7 +48,9 @@ class ExtractStats:
     count separately); ``retried`` counts chunks that were split and re-asked.
     ``unknown_predicates`` is the review queue for open claim extraction: the
     predicates the model coined that :mod:`.predicates` did not recognise, and how
-    often each came up.
+    often each came up. ``carried_forward`` counts pages the extraction ledger
+    (:mod:`.ledger`) served from a prior run instead of sending to the model at
+    all — never chunked, so they add nothing to ``chunks``.
     """
 
     pages: int = 0
@@ -57,6 +59,7 @@ class ExtractStats:
     failed: int = 0
     consecutive_failures: int = 0
     claims: int = 0
+    carried_forward: int = 0
     unknown_predicates: Counter[str] = field(default_factory=Counter)
 
     def summary(self) -> str:
@@ -68,6 +71,8 @@ class ExtractStats:
         ]
         if self.claims:
             parts.append(f"{self.claims} claims")
+        if self.carried_forward:
+            parts.append(f"{self.carried_forward} carried forward")
         return ", ".join(parts)
 
     def unknown_summary(self) -> str:
