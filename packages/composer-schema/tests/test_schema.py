@@ -2,12 +2,15 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from composer_schema import (
     EntityDocument,
     RefreshCadence,
     SourceClaim,
     WorkMentionDocument,
+    deserialize_document,
     is_due,
+    serialize_document,
 )
 from composer_schema.testing import FakeSource, mention, person
 
@@ -60,3 +63,27 @@ def test_fake_source_yields_then_fails_after() -> None:
     except RuntimeError as exc:
         assert "exploded" in str(exc)
     assert out == ["a", "b"]
+
+
+def test_serialize_deserialize_entity_round_trip() -> None:
+    doc = person(
+        "Beethoven, Ludwig van",
+        SourceClaim(predicate="has_profession", object_kind="profession", object_label="composer"),
+        SourceClaim(predicate="born_on", value="1770-12-17"),
+    )
+    assert deserialize_document(serialize_document(doc)) == doc
+
+
+def test_serialize_deserialize_work_mention_round_trip() -> None:
+    doc = mention("Symphony No. 5", "Beethoven, Ludwig van")
+    assert deserialize_document(serialize_document(doc)) == doc
+
+
+def test_serialize_tags_type() -> None:
+    assert serialize_document(person("x"))["_type"] == "entity"
+    assert serialize_document(mention("t", "c"))["_type"] == "work_mention"
+
+
+def test_deserialize_rejects_unknown_type() -> None:
+    with pytest.raises(ValueError, match="unknown _type"):
+        deserialize_document({"_type": "bogus", "ingested_at": "2024-01-01T00:00:00+00:00"})

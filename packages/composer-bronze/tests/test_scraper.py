@@ -9,8 +9,6 @@ import pytest
 from composer_bronze.bucket import LocalBucket
 from composer_bronze.scraper import (
     Scraper,
-    _deserialize,
-    _serialize,
     iter_from_bucket,
     new_snapshot_id,
 )
@@ -20,30 +18,6 @@ from composer_schema import (
     WorkMentionDocument,
 )
 from composer_schema.testing import FakeSource, mention, person
-
-
-def test_serialize_deserialize_entity_round_trip() -> None:
-    doc = person(
-        "Beethoven, Ludwig van",
-        SourceClaim(predicate="has_profession", object_kind="profession", object_label="composer"),
-        SourceClaim(predicate="born_on", value="1770-12-17"),
-    )
-    assert _deserialize(_serialize(doc)) == doc
-
-
-def test_serialize_deserialize_work_mention_round_trip() -> None:
-    doc = mention("Symphony No. 5", "Beethoven, Ludwig van")
-    assert _deserialize(_serialize(doc)) == doc
-
-
-def test_serialize_tags_type() -> None:
-    assert _serialize(person("x"))["_type"] == "entity"
-    assert _serialize(mention("t", "c"))["_type"] == "work_mention"
-
-
-def test_deserialize_rejects_unknown_type() -> None:
-    with pytest.raises(ValueError, match="unknown _type"):
-        _deserialize({"_type": "bogus", "ingested_at": "2024-01-01T00:00:00+00:00"})
 
 
 def test_new_snapshot_id_shape_and_uniqueness() -> None:

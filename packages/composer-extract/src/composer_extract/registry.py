@@ -20,6 +20,7 @@ from composer_crawler.records import CrawlRecord
 from .claims import extract_claim_documents
 from .emit import Document
 from .extract import extract_documents, extract_recording_documents
+from .ledger import DocumentLedger
 from .run import ExtractOptions
 
 #: Signature every entry shares: records in, warehouse documents out.
@@ -52,24 +53,26 @@ __all__ = [
 
 
 def extract_all(
-    kinds: Iterable[str],
     records: Callable[[], Iterable[CrawlRecord]],
     *,
     source_name: str,
     extractor: Any,
     options: dict[str, ExtractOptions],
+    ledger: DocumentLedger | None = None,
 ) -> Iterator[Document]:
-    """Run every kind in *kinds* over the crawl's pages, in the order given.
+    """Run every kind in *options* over the crawl's pages, in the order given.
 
     *records* is a factory, not an iterable: a snapshot is streamed off disk one
     record at a time, and a second kind handed the exhausted iterator would
-    silently extract nothing. Each kind gets its own entry in *options*, so the
-    caller can report per kind afterwards rather than reading one set of counters
-    that every pass has added to.
+    silently extract nothing. *options* names the kinds to run (its keys) as
+    well as holding each one's counters, so the caller can report per kind
+    afterwards rather than reading one set that every pass has added to.
+    *ledger*, when given, lets each kind skip a page whose content and
+    extractor fingerprint are unchanged since it was last recorded for that kind.
     """
-    for kind in kinds:
+    for kind, kind_options in options.items():
         yield from EXTRACTORS[kind](
-            records(), source_name=source_name, extractor=extractor, options=options[kind]
+            records(), source_name=source_name, extractor=extractor, options=kind_options, ledger=ledger
         )
 
 

@@ -123,6 +123,15 @@ class OllamaExtractor:
         self._cache = cache
         return self
 
+    @property
+    def model(self) -> str:
+        return self._model
+
+    def request_options(self) -> dict[str, Any]:
+        """The generation options every call uses — part of :func:`.ledger.request_fingerprint`,
+        since a changed option changes the answer as much as a changed prompt does."""
+        return self._tuning.options()
+
     @classmethod
     def from_settings(
         cls, *, model: str | None = None, chat: ChatFn | None = None, cache: ExtractCache | None = None

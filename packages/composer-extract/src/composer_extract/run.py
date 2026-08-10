@@ -68,10 +68,19 @@ class ExtractRun:
         divide by ~zero reports a dull number rather than an absurd one."""
         return self.stats.pages * 60.0 / max(self.elapsed, 1.0)
 
-    def mark_page(self, url: str, documents: int) -> None:
+    def mark_page(self, url: str, documents: int, *, carried_forward: bool = False) -> None:
         """Count a finished page and, now and then, say how the run is going."""
         self.stats.pages += 1
-        log.debug("extract %s: %s -> %d document(s)", self.source_name, url, documents)
+        if carried_forward:
+            self.stats.carried_forward += 1
+            log.debug(
+                "extract %s: %s -> %d document(s) (carried forward, unchanged)",
+                self.source_name,
+                url,
+                documents,
+            )
+        else:
+            log.debug("extract %s: %s -> %d document(s)", self.source_name, url, documents)
         if self.stats.pages % _PROGRESS_EVERY == 0:
             log.info(
                 "extract %s: %s in %.0fs (%.1f pages/min)",

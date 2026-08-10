@@ -7,13 +7,18 @@ knowing anything about the source's specific HTTP protocol or data format.
 
 from __future__ import annotations
 
-import dataclasses
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-from composer_schema import EntityDocument, SourceAdapter, SourceClaim, WorkMentionDocument
+from composer_schema import (
+    EntityDocument,
+    SourceAdapter,
+    WorkMentionDocument,
+    deserialize_document,
+    serialize_document,
+)
 
 from .bucket import Bucket, SnapshotManifest
 
@@ -45,7 +50,7 @@ def write_documents(
     def counted() -> Iterator[dict[str, Any]]:
         nonlocal count
         for doc in docs:
-            yield _serialize(doc)
+            yield serialize_document(doc)
             count += 1
 
     try:
@@ -55,26 +60,6 @@ def write_documents(
         raise
     bucket.write_manifest(manifest.completed(record_count=count))
     return run_id
-
-
-def _serialize(doc: EntityDocument | WorkMentionDocument) -> dict[str, Any]:
-    # asdict recursively converts nested dataclasses (including SourceClaim) to dicts
-    d = dataclasses.asdict(doc)
-    # datetime is not JSON-serialisable; replace with ISO 8601 string
-    d["ingested_at"] = doc.ingested_at.isoformat()
-    d["_type"] = "entity" if isinstance(doc, EntityDocument) else "work_mention"
-    return d
-
-
-def _deserialize(d: dict[str, Any]) -> EntityDocument | WorkMentionDocument:
-    kind = d.pop("_type")
-    d["ingested_at"] = datetime.fromisoformat(d["ingested_at"])
-    if kind == "entity":
-        claims = tuple(SourceClaim(**c) for c in d.pop("claims", []))
-        return EntityDocument(**d, claims=claims)
-    if kind == "work_mention":
-        return WorkMentionDocument(**d)
-    raise ValueError(f"unknown _type in bucket record: {kind!r}")
 
 
 class Scraper:
@@ -107,4 +92,4 @@ def iter_from_bucket(
 ) -> Iterator[EntityDocument | WorkMentionDocument]:
     """Yield typed documents previously stored by :meth:`Scraper.fetch_to_bucket`."""
     for d in bucket.read_records(source_name, run_id):
-        yield _deserialize(d)
+        yield deserialize_document(d)

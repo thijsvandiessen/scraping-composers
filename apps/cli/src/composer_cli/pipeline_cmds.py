@@ -37,6 +37,7 @@ def _extract_args(args: argparse.Namespace) -> argparse.Namespace:
         model=args.model,
         max_pages=None,
         no_cache=args.no_cache,
+        no_ledger=args.no_ledger,
         bucket_path=args.bucket_path,
     )
 

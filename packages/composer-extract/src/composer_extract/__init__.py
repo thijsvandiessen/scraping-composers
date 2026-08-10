@@ -12,6 +12,7 @@ from .cache import ExtractCache, open_cache, request_key
 from .claims import ClaimPageExtractor, extract_claim_documents
 from .client import OllamaExtractor, OllamaTuning
 from .extract import PageExtractor, RecordingPageExtractor, extract_documents, extract_recording_documents
+from .ledger import DocumentLedger, LedgerContext, LedgerKey, open_ledger, request_fingerprint
 from .markdown import chunk_markdown, record_markdown
 from .predicates import ALIASES, DENYLIST, VOCABULARY, is_known, normalize_predicate
 from .registry import (
@@ -45,6 +46,7 @@ __all__ = [
     "EXTRACT_KINDS",
     "VOCABULARY",
     "ClaimPageExtractor",
+    "DocumentLedger",
     "ExtractAborted",
     "ExtractCache",
     "ExtractOptions",
@@ -55,6 +57,8 @@ __all__ = [
     "ExtractedRecording",
     "ExtractedSoloist",
     "ExtractedWork",
+    "LedgerContext",
+    "LedgerKey",
     "OllamaExtractor",
     "OllamaTuning",
     "PageClaimExtraction",
@@ -71,8 +75,10 @@ __all__ = [
     "is_known",
     "normalize_predicate",
     "open_cache",
+    "open_ledger",
     "options_per_kind",
     "record_markdown",
+    "request_fingerprint",
     "request_key",
     "summarize",
 ]

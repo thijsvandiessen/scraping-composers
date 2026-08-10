@@ -25,9 +25,11 @@ from composer_crawler import (
 from composer_crawler.records import iter_crawl_records
 from composer_crawler.store import DEFAULT_CRAWL_CONFIGS_PATH
 from composer_extract import (
+    DocumentLedger,
     OllamaExtractor,
     extract_all,
     open_cache,
+    open_ledger,
     options_per_kind,
     summarize,
 )
@@ -139,13 +141,14 @@ def _crawl_in_background(config: CrawlConfig, snapshot_id: str, max_pages: int |
 
 
 def _extractor() -> OllamaExtractor:
-    """The LLM extractor; a seam for tests to inject a fake model.
-
-    Cached like the CLI's, so re-running an extract from the dashboard does not
-    re-analyse pages the model has already read.
-    """
+    """The LLM extractor; a seam for tests to inject a fake model."""
     cache = open_cache(settings.extract_cache_path, enabled=settings.extract_cache_enabled)
     return OllamaExtractor.from_settings(cache=cache)
+
+
+def _ledger() -> DocumentLedger | None:
+    """The extraction ledger; mirrors :func:`_extractor`'s cache, one level up."""
+    return open_ledger(settings.extract_cache_path, enabled=settings.extract_ledger_enabled)
 
 
 def _extract_in_background(
@@ -171,11 +174,11 @@ def _extract_in_background(
     )
     try:
         docs = extract_all(
-            extract_kinds,
             lambda: iter_crawl_records(name, crawl_run_id, store),
             source_name=name,
             extractor=_extractor(),
             options=options,
+            ledger=_ledger(),
         )
         write_documents(store, name, docs, run_id=snapshot_id)
     except Exception:

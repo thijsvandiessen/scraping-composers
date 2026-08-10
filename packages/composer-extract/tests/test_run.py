@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from composer_crawler.records import CrawlRecord
-from composer_extract import ExtractOptions, extract_documents
+from composer_extract import DocumentLedger, ExtractOptions, extract_documents
 from composer_extract.schema import (
     ExtractedConcert,
     ExtractedSoloist,
@@ -36,11 +37,16 @@ _CONCERT = ExtractedConcert(
 class FixedExtractor:
     """Returns the same extraction for every chunk it is handed."""
 
+    model = "test-model"
+
     def __init__(self, page: PageExtraction) -> None:
         self._page = page
 
     def extract_page(self, markdown: str, metadata: dict[str, str]) -> PageExtraction:
         return self._page
+
+    def request_options(self) -> dict[str, object]:
+        return {}
 
 
 def _record(url: str) -> CrawlRecord:
@@ -105,3 +111,38 @@ def test_the_reported_rate_stays_sane_on_a_fast_run(caplog: pytest.LogCaptureFix
 
     (finished,) = [r.getMessage() for r in caplog.records if "finished" in r.getMessage()]
     assert "(60.0 pages/min)" in finished
+
+
+def test_a_carried_forward_page_is_logged_and_counted_separately(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A page the ledger serves is marked distinctly from one the model answered,
+    both in the per-page log line and in the run's tally."""
+    ledger = DocumentLedger(tmp_path / "extract-cache.db")
+    page = PageExtraction(concerts=[_CONCERT])
+
+    with caplog.at_level(logging.DEBUG, logger=_LOGGER):
+        docs = list(
+            extract_documents(
+                [_record("https://lso.co.uk/a")],
+                source_name="lso",
+                extractor=FixedExtractor(page),
+                options=ExtractOptions(now=NOW),
+                ledger=ledger,
+            )
+        )
+        caplog.clear()
+        carried = list(
+            extract_documents(
+                [_record("https://lso.co.uk/a")],
+                source_name="lso",
+                extractor=FixedExtractor(page),
+                options=ExtractOptions(now=NOW),
+                ledger=ledger,
+            )
+        )
+
+    assert carried == docs
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("carried forward, unchanged" in m for m in messages)
+    assert any("finished" in m and "1 carried forward" in m for m in messages)

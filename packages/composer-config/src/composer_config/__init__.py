@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # Deleting the file is the hard reset; `extract --no-cache` bypasses it once.
     extract_cache_path: str = "./extract-cache.db"
     extract_cache_enabled: bool = True
+    # What each page last produced per extract kind (same file, a separate table),
+    # so a page whose content and extractor fingerprint are unchanged skips the
+    # model entirely instead of only having its answer cache-hit. `extract
+    # --no-ledger` bypasses it once; `--no-cache` bypasses both (see extract_cmds).
+    extract_ledger_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

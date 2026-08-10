@@ -23,7 +23,9 @@ from composer_crawler.records import CrawlRecord
 from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 
 from .emit import LLM_SOURCE_MARKER, Document, emit_pages
+from .ledger import DocumentLedger, LedgerContext, request_fingerprint
 from .markdown import chunk_markdown, record_markdown
+from .prompt import RECORDING_SYSTEM_PROMPT, SYSTEM_PROMPT
 from .resilience import extract_chunks
 from .run import ExtractOptions, ExtractRun
 from .schema import ExtractedConcert, ExtractedRecording, PageExtraction, PageRecordingExtraction
@@ -243,10 +245,17 @@ def extract_documents(
     source_name: str,
     extractor: PageExtractor,
     options: ExtractOptions | None = None,
+    ledger: DocumentLedger | None = None,
 ) -> Iterator[Document]:
     """Yield entity/work-mention documents from crawled *records* (concert mode)."""
     run = ExtractRun.start(source_name, options)
-    yield from emit_pages(records, lambda record, r: _emit_concerts(record, extractor, r), run)
+    context = None
+    if ledger is not None:
+        fingerprint = request_fingerprint(extractor, SYSTEM_PROMPT, PageExtraction)
+        context = LedgerContext(ledger, "concerts", fingerprint)
+    yield from emit_pages(
+        records, lambda record, r: _emit_concerts(record, extractor, r), run, ledger_context=context
+    )
 
 
 def extract_recording_documents(
@@ -255,7 +264,14 @@ def extract_recording_documents(
     source_name: str,
     extractor: RecordingPageExtractor,
     options: ExtractOptions | None = None,
+    ledger: DocumentLedger | None = None,
 ) -> Iterator[Document]:
     """Yield entity/work-mention documents from crawled *records* (recording mode)."""
     run = ExtractRun.start(source_name, options)
-    yield from emit_pages(records, lambda record, r: _emit_recordings(record, extractor, r), run)
+    context = None
+    if ledger is not None:
+        fingerprint = request_fingerprint(extractor, RECORDING_SYSTEM_PROMPT, PageRecordingExtraction)
+        context = LedgerContext(ledger, "recordings", fingerprint)
+    yield from emit_pages(
+        records, lambda record, r: _emit_recordings(record, extractor, r), run, ledger_context=context
+    )
