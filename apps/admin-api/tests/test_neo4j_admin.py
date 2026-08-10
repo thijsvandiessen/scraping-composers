@@ -88,10 +88,10 @@ def test_status_reports_an_unreachable_target_without_failing(
 
 def test_status_never_leaks_the_credentials(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     _configure(monkeypatch)
-    body = client.get("/admin/v1/neo4j").text
+    response = client.get("/admin/v1/neo4j")
 
-    assert "abc123.databases.neo4j.io" in body
-    assert "secret" not in body
+    assert response.json()["uri"] == "neo4j+s://abc123.databases.neo4j.io"
+    assert "secret" not in response.text
 
 
 def test_probe_can_be_skipped(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
