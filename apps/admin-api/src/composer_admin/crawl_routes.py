@@ -141,22 +141,13 @@ def _crawl_in_background(config: CrawlConfig, snapshot_id: str, max_pages: int |
 
 
 def _extractor() -> OllamaExtractor:
-    """The LLM extractor; a seam for tests to inject a fake model.
-
-    Cached like the CLI's, so re-running an extract from the dashboard does not
-    re-analyse pages the model has already read.
-    """
+    """The LLM extractor; a seam for tests to inject a fake model."""
     cache = open_cache(settings.extract_cache_path, enabled=settings.extract_cache_enabled)
     return OllamaExtractor.from_settings(cache=cache)
 
 
 def _ledger() -> DocumentLedger | None:
-    """The extraction ledger; a seam for tests to disable or inject a fake.
-
-    Mirrors :func:`_extractor`'s cache: lets a page whose content and extractor
-    fingerprint are unchanged skip the model entirely on a re-run from the
-    dashboard, not just have its answer cache-hit.
-    """
+    """The extraction ledger; mirrors :func:`_extractor`'s cache, one level up."""
     return open_ledger(settings.extract_cache_path, enabled=settings.extract_ledger_enabled)
 
 
