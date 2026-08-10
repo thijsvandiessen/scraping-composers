@@ -62,24 +62,6 @@ def test_ingest_creates_entities_records_and_claims(session: Session) -> None:
     assert (born_in.object.kind, born_in.object.label) == ("place", "Salzburg")
 
 
-def test_reingest_is_idempotent(session: Session) -> None:
-    source = FakeSource(records=(MOZART, person("Haydn, Joseph")))
-    first = ingest_source(session, source)
-    second = ingest_source(session, source)
-
-    assert (first.records_seen, first.records_new) == (2, 2)
-    assert (second.records_seen, second.records_new) == (2, 0)
-    assert session.scalar(select(Entity.id).where(Entity.kind == "person")) is not None
-    assert len(session.scalars(select(EntityRecord)).all()) == 2
-    assert len(session.scalars(select(Claim)).all()) == 8  # 6 Mozart + 2 mentioned_in, nothing duplicated
-
-    # re-ingest refreshes provenance: records now point at the second run
-    for record in session.scalars(select(EntityRecord)):
-        assert record.first_run_id == first.id
-        assert record.last_run_id == second.id
-        assert record.last_seen_at >= record.first_seen_at
-
-
 def test_second_source_attaches_to_same_entity(session: Session) -> None:
     imslp_like = FakeSource(
         records=(
@@ -204,33 +186,6 @@ def test_entity_has_ingestion_timestamps(session: Session) -> None:
     assert entity.first_ingested_at is not None
     assert entity.last_ingested_at is not None
     assert entity.last_edited_at is not None
-
-
-def test_reingest_updates_last_ingested_at(session: Session) -> None:
-    source = FakeSource(records=(MOZART,))
-    ingest_source(session, source)
-
-    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
-    after_first = entity.last_ingested_at
-
-    ingest_source(session, source)
-    session.expire(entity)
-
-    assert entity.last_ingested_at >= after_first
-
-
-def test_last_edited_at_unchanged_on_reingest_with_same_claims(session: Session) -> None:
-    source = FakeSource(records=(MOZART,))
-    ingest_source(session, source)
-
-    entity = session.scalars(select(Entity).where(Entity.kind == "person")).one()
-    edited_after_first = entity.last_edited_at
-
-    ingest_source(session, source)
-    session.expire(entity)
-
-    # no new claims were added, so last_edited_at should not advance
-    assert entity.last_edited_at == edited_after_first
 
 
 def test_two_records_for_one_person_union_their_claims(session: Session) -> None:

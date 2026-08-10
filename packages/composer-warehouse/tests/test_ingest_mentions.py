@@ -1,7 +1,9 @@
 """Ingest tests for work mentions: resolution, dedup, idempotency."""
 
+import json
+
 from composer_warehouse.models import Entity, RawWorkMention, Work, WorkTitle
-from composer_warehouse.testing import FakeSource, ingest_source, mention, person
+from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -92,6 +94,48 @@ def test_reingest_is_idempotent(session: Session) -> None:
     row = session.scalars(select(RawWorkMention)).one()
     assert row.first_run_id == first.id
     assert row.last_run_id == second.id
+
+
+def test_reingest_with_changed_content_updates_mention(session: Session) -> None:
+    """A re-sighted mention whose content genuinely changed must update the
+    stored row, not just bump the timestamp (issue #137). Re-matching against
+    the work catalogue is out of scope: the original match decision stands."""
+    first = ingest_source(
+        session,
+        FakeSource(records=(mention("Symphony No. 5, Op. 67", "Beethoven, Ludwig van", "m1"),)),
+    )
+    second = ingest_source(
+        session,
+        FakeSource(
+            records=(
+                perf_mention(
+                    "m1",
+                    "Symphony No. 5 in C minor, Op. 67 (corrected)",
+                    "Beethoven, Ludwig van",
+                    {"note": "corrected"},
+                ),
+            )
+        ),
+    )
+
+    assert (first.records_new, second.records_new) == (1, 0)
+
+    row = session.scalars(select(RawWorkMention)).one()
+    assert row.raw_title == "Symphony No. 5 in C minor, Op. 67 (corrected)"
+    assert json.loads(row.raw) == {"note": "corrected"}
+    assert row.first_run_id == first.id
+    assert row.last_run_id == second.id
+    assert row.match_status == "created"  # unchanged: re-matching is out of scope
+
+
+def test_reingest_with_unchanged_content_leaves_row_untouched(session: Session) -> None:
+    source = FakeSource(records=(mention("Symphony No. 5, Op. 67", "Beethoven, Ludwig van", "m1"),))
+    ingest_source(session, source)
+    ingest_source(session, source)
+
+    row = session.scalars(select(RawWorkMention)).one()
+    assert row.raw_title == "Symphony No. 5, Op. 67"
+    assert session.scalar(select(func.count(RawWorkMention.id))) == 1
 
 
 def test_batch_commit_with_mentions(session: Session) -> None:
