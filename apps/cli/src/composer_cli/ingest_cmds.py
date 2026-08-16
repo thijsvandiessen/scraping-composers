@@ -5,7 +5,7 @@ from pathlib import Path
 
 from composer_bronze.bucket import LocalBucket, latest_loadable_run_id
 from composer_bronze.scraper import Scraper, iter_from_bucket
-from composer_gold import PromoteConfig, promote
+from composer_gold import PromoteConfig, Rule1Config, promote
 from composer_scrapers import REGISTRY
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import get_engine, init_db
@@ -66,8 +66,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
             derive_concerts(session)
             derive_recordings(session)
             config = PromoteConfig(
-                min_sitelinks=args.min_sitelinks,
-                min_appearances=args.min_appearances,
+                rule1=Rule1Config.from_json(args.rule1_config),
                 min_referrers=args.min_referrers,
                 drop_unevidenced_persons=args.drop_unevidenced_persons,
                 collapse_duplicates=args.collapse_duplicates,

@@ -98,6 +98,12 @@ class AdminAPI(_BaseAPI):
         kwargs: dict[str, Any] = {"json": options} if options else {}
         return self._json_dict("POST", "/admin/v1/promote", **kwargs)
 
+    def get_rule1_config(self) -> dict[str, Any]:
+        return self._json_dict("GET", "/admin/v1/rule1-config")
+
+    def put_rule1_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._json_dict("PUT", "/admin/v1/rule1-config", json=payload)
+
     def list_crawls(self) -> list[dict[str, Any]]:
         return self._json_list("GET", "/admin/v1/crawls")
 

@@ -116,6 +116,17 @@ def test_client_sends_admin_key_header_when_set() -> None:
 # ---------------------------------------------------------------------------
 
 
+RULE1_CONFIG_PAYLOAD: dict[str, Any] = {
+    "persons": {
+        "min_concert_appearances": 1,
+        "min_recording_appearances": 1,
+        "min_appearances_for_composers": 0,
+        "min_sitelinks": None,
+    },
+    "ensembles": {"min_concert_appearances": 1, "min_recording_appearances": 1},
+}
+
+
 class StubAPI:
     def __init__(
         self,
@@ -123,11 +134,13 @@ class StubAPI:
         snapshots: list[dict[str, Any]] | None = None,
         runs: list[dict[str, Any]] | None = None,
         error: str | None = None,
+        rule1_config: dict[str, Any] | None = None,
     ) -> None:
         self._scrapers = scrapers or []
         self._snapshots = snapshots or []
         self._runs = runs or []
         self._error = error
+        self._rule1_config = rule1_config or RULE1_CONFIG_PAYLOAD
 
     def _maybe_fail(self) -> None:
         if self._error:
@@ -179,6 +192,16 @@ class StubAPI:
             "error": None,
             "stats": {},
         }
+
+    def get_rule1_config(self) -> dict[str, Any]:
+        self._maybe_fail()
+        return self._rule1_config
+
+    def put_rule1_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._maybe_fail()
+        self.rule1_config_payload = payload
+        self._rule1_config = payload
+        return payload
 
 
 def _install(monkeypatch: pytest.MonkeyPatch, stub: StubAPI) -> None:
@@ -912,10 +935,71 @@ def test_promote_page_renders_config_fields(monkeypatch: pytest.MonkeyPatch, sta
     page = staff_client.get("/admin/promote/").content.decode()
     for field in ("drop_unevidenced_persons", "collapse_duplicates", "prune_unreferenced"):
         assert f'name="{field}" checked' in page
-    assert 'name="min_sitelinks"' in page
-    assert 'name="min_appearances"' in page
     assert 'name="min_referrers"' in page
     assert 'name="gold_path"' in page
+    assert 'href="/admin/promote/rule1-config/"' in page
+
+
+def test_rule1_config_page_renders_current_values(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    config = {
+        "persons": {
+            "min_concert_appearances": 2,
+            "min_recording_appearances": 3,
+            "min_appearances_for_composers": 1,
+            "min_sitelinks": 150,
+        },
+        "ensembles": {"min_concert_appearances": 4, "min_recording_appearances": 5},
+    }
+    _install(monkeypatch, StubAPI(rule1_config=config))
+    page = staff_client.get("/admin/promote/rule1-config/").content.decode()
+    assert 'name="persons_min_concert_appearances" min="0" required\n             value="2"' in page
+    assert 'name="persons_min_sitelinks"' in page and 'value="150"' in page
+    assert 'name="ensembles_min_recording_appearances"' in page and 'value="5"' in page
+
+
+def test_rule1_config_form_submits_payload(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    stub = StubAPI()
+    _install(monkeypatch, stub)
+    response = staff_client.post(
+        "/admin/promote/rule1-config/save",
+        {
+            "persons_min_concert_appearances": "2",
+            "persons_min_recording_appearances": "1",
+            "persons_min_appearances_for_composers": "1",
+            "persons_min_sitelinks": "",
+            "ensembles_min_concert_appearances": "1",
+            "ensembles_min_recording_appearances": "4",
+        },
+        follow=True,
+    )
+    assert response.redirect_chain[0] == ("/admin/promote/rule1-config/", 302)
+    assert "saved rule 1 thresholds" in response.content.decode()
+    assert stub.rule1_config_payload == {
+        "persons": {
+            "min_concert_appearances": 2,
+            "min_recording_appearances": 1,
+            "min_appearances_for_composers": 1,
+            "min_sitelinks": None,
+        },
+        "ensembles": {"min_concert_appearances": 1, "min_recording_appearances": 4},
+    }
+
+
+def test_rule1_config_form_rejects_non_numeric_input(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    stub = StubAPI()
+    _install(monkeypatch, stub)
+    response = staff_client.post(
+        "/admin/promote/rule1-config/save",
+        {"persons_min_concert_appearances": "many"},
+        follow=True,
+    )
+    assert response.redirect_chain[0] == ("/admin/promote/rule1-config/", 302)
+    assert "rule 1 thresholds must be whole numbers" in response.content.decode()
+    assert not hasattr(stub, "rule1_config_payload")  # the API was never called
 
 
 def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
@@ -928,8 +1012,6 @@ def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, st
             "options_form": "1",
             "drop_unevidenced_persons": "on",
             "collapse_duplicates": "on",
-            "min_sitelinks": "150",
-            "min_appearances": "2",
             "min_referrers": "2",
             "gold_path": "/data/gold-alt.db",
         },
@@ -938,8 +1020,6 @@ def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, st
     assert "rebuilding the gold database" in response.content.decode()
     assert stub.promote_options == {
         "prune_unreferenced": False,
-        "min_sitelinks": 150,
-        "min_appearances": 2,
         "min_referrers": 2,
         "gold_path": "/data/gold-alt.db",
     }
@@ -953,8 +1033,6 @@ def test_promote_form_defaults_send_no_options(monkeypatch: pytest.MonkeyPatch, 
         "drop_unevidenced_persons": "on",
         "collapse_duplicates": "on",
         "prune_unreferenced": "on",
-        "min_sitelinks": "",
-        "min_appearances": "",
         "min_referrers": "",
         "gold_path": "",
     }
@@ -962,16 +1040,16 @@ def test_promote_form_defaults_send_no_options(monkeypatch: pytest.MonkeyPatch, 
     assert stub.promote_options is None  # untouched form: bodiless POST, server defaults
 
 
-def test_promote_form_rejects_non_numeric_sitelinks(
+def test_promote_form_rejects_non_numeric_referrers(
     monkeypatch: pytest.MonkeyPatch, staff_client: Client
 ) -> None:
     stub = StubAPI()
     _install(monkeypatch, stub)
     response = staff_client.post(
-        "/admin/promote/start", {"options_form": "1", "min_sitelinks": "many"}, follow=True
+        "/admin/promote/start", {"options_form": "1", "min_referrers": "many"}, follow=True
     )
     assert response.redirect_chain[0] == ("/admin/promote/", 302)
-    assert "min sitelinks, appearances and referrers must be whole numbers" in response.content.decode()
+    assert "min referrers must be a whole number" in response.content.decode()
     assert not hasattr(stub, "promote_options")  # the API was never called
 
 

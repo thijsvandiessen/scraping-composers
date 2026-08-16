@@ -4,8 +4,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     database_url: str = "sqlite:///composers.db"
     gold_db_path: str = "./gold.db"
-    gold_min_sitelinks: int | None = None
-    gold_min_appearances: int = 1
     gold_min_referrers: int = 1
     bucket_path: str = "./raw-data"
     crawl_configs_path: str = "./crawl_configs.json"

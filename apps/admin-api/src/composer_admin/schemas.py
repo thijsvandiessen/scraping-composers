@@ -94,19 +94,40 @@ class RunStarted(BaseModel):
 class PromoteOptions(BaseModel):
     """Optional per-run promotion settings; an omitted field means its default.
 
-    ``min_sitelinks`` distinguishes omitted (use the server's configured
-    default) from an explicit ``null`` (turn the sitelink signal off) via
-    ``model_fields_set``; ``min_appearances`` and ``min_referrers`` fall back to
-    the server default the same way when omitted.
+    ``min_referrers`` distinguishes omitted (use the server's configured
+    default) from an explicit value via ``model_fields_set``. Rule 1's
+    concert/recording/composer/sitelink thresholds are not settable here — the
+    server always applies its ``rule1_config.json``; read or replace it via
+    ``GET``/``PUT /admin/v1/rule1-config`` (see ``Rule1ConfigBody``).
     """
 
     gold_path: str | None = None  # None: the server's configured gold path
-    min_sitelinks: int | None = Field(default=None, ge=0)
-    min_appearances: int = Field(default=1, ge=1)  # rule 1 threshold
     min_referrers: int = Field(default=1, ge=1)  # rule 3 threshold
     drop_unevidenced_persons: bool = True  # rule 1
     collapse_duplicates: bool = True  # rule 2
     prune_unreferenced: bool = True  # rule 3
+
+
+class Rule1PersonThresholds(BaseModel):
+    min_concert_appearances: int = Field(ge=0)
+    min_recording_appearances: int = Field(ge=0)
+    min_appearances_for_composers: int = Field(ge=0)
+    min_sitelinks: int | None = Field(default=None, ge=0)
+
+
+class Rule1EnsembleThresholds(BaseModel):
+    min_concert_appearances: int = Field(ge=0)
+    min_recording_appearances: int = Field(ge=0)
+
+
+class Rule1ConfigBody(BaseModel):
+    """Rule 1's concert/recording/composer/sitelink thresholds (see
+    ``composer_gold.Rule1Config``). ``GET`` returns the server's current
+    ``rule1_config.json``; ``PUT`` replaces it wholesale and takes effect on
+    the next promote."""
+
+    persons: Rule1PersonThresholds
+    ensembles: Rule1EnsembleThresholds
 
 
 class GoldStatus(BaseModel):

@@ -318,7 +318,7 @@ def test_promote_body_toggles_rules(
     assert data["stats"]["persons_dropped"] == 0
 
 
-def test_promote_body_resolves_path_and_sitelinks(
+def test_promote_body_resolves_path(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from composer_gold import PromoteConfig, PromoteStats
@@ -331,23 +331,111 @@ def test_promote_body_resolves_path_and_sitelinks(
 
     monkeypatch.setattr(build_routes, "promote", record_promote)
     monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
-    monkeypatch.setattr(build_routes, "DEFAULT_MIN_SITELINKS", 50)
 
     # bodiless: configured defaults, all rules on
     assert client.post("/admin/v1/promote").status_code == 202
-    # explicit null: the sitelink signal is switched off, not defaulted
-    assert client.post("/admin/v1/promote", json={"min_sitelinks": None}).status_code == 202
     # explicit values win over the defaults
     custom = tmp_path / "elsewhere.db"
-    body = {"min_sitelinks": 120, "gold_path": str(custom), "collapse_duplicates": False}
+    body = {"gold_path": str(custom), "collapse_duplicates": False}
     assert client.post("/admin/v1/promote", json=body).status_code == 202
 
     paths = [path for path, _ in calls]
     configs = [config for _, config in calls]
-    assert paths == [str(tmp_path / "gold.db"), str(tmp_path / "gold.db"), str(custom)]
-    assert [c.min_sitelinks for c in configs] == [50, None, 120]
-    assert [c.collapse_duplicates for c in configs] == [True, True, False]
+    assert paths == [str(tmp_path / "gold.db"), str(custom)]
+    assert [c.collapse_duplicates for c in configs] == [True, False]
     assert all(c.drop_unevidenced_persons and c.prune_unreferenced for c in configs)
+
+
+def test_promote_body_cannot_override_rule1_thresholds(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Rule 1's thresholds always come from the server's current
+    rule1_config.json — the request body has no field for them."""
+    from composer_gold import PersonRule1Config, PromoteConfig, PromoteStats, Rule1Config
+
+    configs: list[PromoteConfig] = []
+
+    def record_promote(session: object, gold_path: str, config: PromoteConfig) -> PromoteStats:
+        configs.append(config)
+        return PromoteStats()
+
+    monkeypatch.setattr(build_routes, "promote", record_promote)
+    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
+    custom_rule1 = Rule1Config(persons=PersonRule1Config(min_concert_appearances=7))
+    rule1_path = tmp_path / "rule1_config.json"
+    custom_rule1.write_json(rule1_path)
+    monkeypatch.setattr(build_routes, "DEFAULT_RULE1_CONFIG_PATH", str(rule1_path))
+
+    # a body cannot smuggle rule-1 thresholds in; the server's file always wins
+    assert client.post("/admin/v1/promote").status_code == 202
+    assert client.post("/admin/v1/promote", json={"min_appearances": 2}).status_code == 202
+    assert all(c.rule1 == custom_rule1 for c in configs)
+
+
+def test_get_rule1_config_returns_current_file(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from composer_gold import EnsembleRule1Config, PersonRule1Config, Rule1Config
+
+    rule1_path = tmp_path / "rule1_config.json"
+    Rule1Config(
+        persons=PersonRule1Config(min_concert_appearances=3, min_sitelinks=50),
+        ensembles=EnsembleRule1Config(min_recording_appearances=2),
+    ).write_json(rule1_path)
+    monkeypatch.setattr(build_routes, "DEFAULT_RULE1_CONFIG_PATH", str(rule1_path))
+
+    body = client.get("/admin/v1/rule1-config").json()
+
+    assert body["persons"]["min_concert_appearances"] == 3
+    assert body["persons"]["min_sitelinks"] == 50
+    assert body["ensembles"]["min_recording_appearances"] == 2
+
+
+def test_put_rule1_config_writes_file_and_is_read_back(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from composer_gold import Rule1Config
+
+    rule1_path = tmp_path / "rule1_config.json"
+    monkeypatch.setattr(build_routes, "DEFAULT_RULE1_CONFIG_PATH", str(rule1_path))
+
+    body = {
+        "persons": {
+            "min_concert_appearances": 2,
+            "min_recording_appearances": 1,
+            "min_appearances_for_composers": 1,
+            "min_sitelinks": None,
+        },
+        "ensembles": {"min_concert_appearances": 1, "min_recording_appearances": 4},
+    }
+    response = client.put("/admin/v1/rule1-config", json=body)
+    assert response.status_code == 200
+    assert response.json() == body
+
+    # the file on disk now reflects the new thresholds
+    on_disk = Rule1Config.from_json(rule1_path)
+    assert on_disk.persons.min_appearances_for_composers == 1
+    assert on_disk.ensembles.min_recording_appearances == 4
+    # and a later GET reads the same values back, with no server restart needed
+    assert client.get("/admin/v1/rule1-config").json() == body
+
+
+def test_put_rule1_config_rejects_negative_thresholds(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(build_routes, "DEFAULT_RULE1_CONFIG_PATH", str(tmp_path / "rule1_config.json"))
+    body = {
+        "persons": {
+            "min_concert_appearances": -1,
+            "min_recording_appearances": 1,
+            "min_appearances_for_composers": 0,
+            "min_sitelinks": None,
+        },
+        "ensembles": {"min_concert_appearances": 1, "min_recording_appearances": 1},
+    }
+    assert client.put("/admin/v1/rule1-config", json=body).status_code == 422
+    # the invalid body was never written
+    assert not (tmp_path / "rule1_config.json").exists()
 
 
 def test_promote_body_resolves_min_referrers(
@@ -371,33 +459,9 @@ def test_promote_body_resolves_min_referrers(
     assert [c.min_referrers for c in configs] == [3, 2]
 
 
-def test_promote_body_resolves_min_appearances(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    from composer_gold import PromoteConfig, PromoteStats
-
-    configs: list[PromoteConfig] = []
-
-    def record_promote(session: object, gold_path: str, config: PromoteConfig) -> PromoteStats:
-        configs.append(config)
-        return PromoteStats()
-
-    monkeypatch.setattr(build_routes, "promote", record_promote)
-    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
-    monkeypatch.setattr(build_routes, "DEFAULT_MIN_APPEARANCES", 2)
-
-    # omitted: the configured server default; explicit value wins over it
-    assert client.post("/admin/v1/promote").status_code == 202
-    assert client.post("/admin/v1/promote", json={"min_appearances": 5}).status_code == 202
-    assert [c.min_appearances for c in configs] == [2, 5]
-
-
 def test_promote_rejects_invalid_body(client: TestClient) -> None:
-    assert client.post("/admin/v1/promote", json={"min_sitelinks": "abc"}).status_code == 422
-    assert client.post("/admin/v1/promote", json={"min_sitelinks": -1}).status_code == 422
     assert client.post("/admin/v1/promote", json={"min_referrers": 0}).status_code == 422
     assert client.post("/admin/v1/promote", json={"min_referrers": "abc"}).status_code == 422
-    assert client.post("/admin/v1/promote", json={"min_appearances": 0}).status_code == 422
 
 
 def test_silver_status_before_any_rebuild(

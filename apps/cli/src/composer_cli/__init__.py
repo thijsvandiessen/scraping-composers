@@ -9,9 +9,8 @@ from composer_bronze.bucket import DEFAULT_BUCKET_PATH
 from composer_config import settings
 from composer_gold import (
     DEFAULT_GOLD_DB_PATH,
-    DEFAULT_MIN_APPEARANCES,
     DEFAULT_MIN_REFERRERS,
-    DEFAULT_MIN_SITELINKS,
+    DEFAULT_RULE1_CONFIG_PATH,
 )
 from composer_scrapers import REGISTRY
 
@@ -174,18 +173,11 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     )
     p_promote.add_argument("--gold-path", default=DEFAULT_GOLD_DB_PATH, help="path of the gold SQLite file")
     p_promote.add_argument(
-        "--min-sitelinks",
-        type=int,
-        default=DEFAULT_MIN_SITELINKS,
-        help="also promote persons whose Wikipedia sitelink count is at least N, "
-        "even without concert/work evidence (default: $GOLD_MIN_SITELINKS or off)",
-    )
-    p_promote.add_argument(
-        "--min-appearances",
-        type=int,
-        default=DEFAULT_MIN_APPEARANCES,
-        help="rule 1: keep people and ensembles credited on at least N concerts/recordings "
-        "(default: $GOLD_MIN_APPEARANCES or 1)",
+        "--rule1-config",
+        default=str(DEFAULT_RULE1_CONFIG_PATH),
+        help="path to the rule-1 thresholds JSON (concert/recording/composer/sitelink "
+        "minimums for persons and ensembles); default: the repo's "
+        "packages/composer-gold/rule1_config.json",
     )
     p_promote.add_argument(
         "--drop-unevidenced-persons",
