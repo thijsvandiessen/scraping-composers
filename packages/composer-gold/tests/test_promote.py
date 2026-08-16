@@ -4,7 +4,13 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from composer_gold import PromoteConfig, promote, read_gold_manifest
+from composer_gold import (
+    PersonRule1Config,
+    PromoteConfig,
+    Rule1Config,
+    promote,
+    read_gold_manifest,
+)
 from composer_schema import EntityDocument, SourceClaim
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.db import init_db
@@ -109,6 +115,28 @@ def test_promote_applies_all_three_rules(session: Session, tmp_path: Path) -> No
     assert stats.duplicates_collapsed == 1
     assert stats.persons_dropped == 1  # Nobody, Obscure
     assert stats.entities_pruned >= 1  # Atlantis
+
+
+def test_zero_appearance_thresholds_keep_unevidenced_persons(session: Session, tmp_path: Path) -> None:
+    """Thresholds of 0 mean "no evidence required" — even for a person with
+    truly zero concerts and recordings, who is absent from appearance_counts
+    entirely (as opposed to present with a count of 0)."""
+    _seed_silver(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(
+        session,
+        gold_path,
+        PromoteConfig(
+            rule1=Rule1Config(
+                persons=PersonRule1Config(min_concert_appearances=0, min_recording_appearances=0)
+            )
+        ),
+    )
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Nobody, Obscure" in labels
+    assert stats.persons_kept == 3  # Beethoven root, Mahler, Nobody
 
 
 def test_promote_repoints_claims_and_mentions_to_canonical(session: Session, tmp_path: Path) -> None:
@@ -370,7 +398,11 @@ def test_promote_repoints_concert_participants(session: Session, tmp_path: Path)
     ).all()[0]
     assert silver_conductor.entity_id == duplicate.id
 
-    stats = promote(session, tmp_path / "gold.db", PromoteConfig(min_appearances=2))
+    stats = promote(
+        session,
+        tmp_path / "gold.db",
+        PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_concert_appearances=2))),
+    )
 
     with _gold_session(tmp_path / "gold.db") as gold:
         conductors = gold.scalars(
@@ -426,7 +458,9 @@ def test_sitelink_threshold_off_by_default(session: Session, tmp_path: Path) -> 
 def test_sitelink_threshold_promotes_significant_person(session: Session, tmp_path: Path) -> None:
     _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, PromoteConfig(min_sitelinks=100))  # 200 >= 100
+    stats = promote(
+        session, gold_path, PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_sitelinks=100)))
+    )  # 200 >= 100
 
     with _gold_session(gold_path) as gold:
         famous = gold.scalars(select(Entity).where(Entity.label == "Famous, Unperformed")).one()
@@ -442,7 +476,9 @@ def test_sitelink_threshold_promotes_significant_person(session: Session, tmp_pa
 def test_sitelink_threshold_below_count_drops_person(session: Session, tmp_path: Path) -> None:
     _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, PromoteConfig(min_sitelinks=300))  # 200 < 300
+    stats = promote(
+        session, gold_path, PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_sitelinks=300)))
+    )  # 200 < 300
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -643,13 +679,17 @@ def test_rule1_keeps_recording_participants(session: Session, tmp_path: Path) ->
     assert stats.persons_kept_by_appearances == 2
 
 
-def test_min_appearances_drops_one_off_participants(session: Session, tmp_path: Path) -> None:
-    """A higher threshold keeps only the recurring musicians; composers are
-    evidenced by their works, so the threshold never touches them."""
+def test_min_concert_appearances_drops_one_off_participants(session: Session, tmp_path: Path) -> None:
+    """A higher concert threshold keeps only the recurring musicians; composers
+    are evidenced by their works, so the threshold never touches them."""
     _seed_concert_silver(session)
     derive_concerts(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, PromoteConfig(min_appearances=2))
+    stats = promote(
+        session,
+        gold_path,
+        PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_concert_appearances=2))),
+    )
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -659,6 +699,55 @@ def test_min_appearances_drops_one_off_participants(session: Session, tmp_path: 
         assert "Matthews, Sally" not in labels
         assert {"Beethoven, Ludwig van", "Verdi, Giuseppe"} <= labels  # composers of the programme
     assert stats.persons_kept_by_appearances == 0
+
+
+def test_min_recording_appearances_drops_one_off_participants(session: Session, tmp_path: Path) -> None:
+    """The recording threshold is checked independently of the concert one."""
+    _seed_recording_silver(session)
+    derive_recordings(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(
+        session,
+        gold_path,
+        PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_recording_appearances=2))),
+    )
+
+    with _gold_session(gold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        # both artists are credited on exactly one recording (grouped by record_key)
+        assert "Simon Rattle" not in labels
+        assert "Janine Jansen" not in labels
+        assert "Beethoven" in labels  # composer, exempt by default
+    assert stats.persons_kept_by_appearances == 0
+
+
+def test_composer_min_appearances_requires_a_matching_credit(session: Session, tmp_path: Path) -> None:
+    """``min_appearances_for_composers`` is 0 by default (full exemption, today's
+    behaviour); raising it requires composers to clear that (lower) bar too."""
+    archive = FakeSource(
+        records=(mention("Symphony No. 5, Op. 67", "Beethoven, Ludwig van", "m1"),),
+        name="archive",
+        base_url="https://archive.example",
+    )
+    ingest_source(session, archive)
+
+    default_path = tmp_path / "default.db"
+    default_stats = promote(session, default_path)
+    with _gold_session(default_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Beethoven, Ludwig van" in labels  # zero credits, still exempt
+    assert default_stats.persons_kept == 1
+
+    threshold_path = tmp_path / "threshold.db"
+    threshold_stats = promote(
+        session,
+        threshold_path,
+        PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_appearances_for_composers=1))),
+    )
+    with _gold_session(threshold_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "Beethoven, Ludwig van" not in labels  # no concert/recording credit to clear the bar
+    assert threshold_stats.persons_kept == 0
 
 
 def _seed_ensemble_silver(session: Session) -> None:

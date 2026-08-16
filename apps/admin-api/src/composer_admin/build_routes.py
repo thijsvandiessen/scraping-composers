@@ -1,14 +1,17 @@
 """Admin endpoints for the derived databases: promote gold, rebuild silver."""
 
 import logging
+from dataclasses import asdict
 from pathlib import Path
 
 from composer_gold import (
     DEFAULT_GOLD_DB_PATH,
-    DEFAULT_MIN_APPEARANCES,
     DEFAULT_MIN_REFERRERS,
-    DEFAULT_MIN_SITELINKS,
+    DEFAULT_RULE1_CONFIG_PATH,
+    EnsembleRule1Config,
+    PersonRule1Config,
     PromoteConfig,
+    Rule1Config,
     promote,
     read_gold_manifest,
 )
@@ -20,7 +23,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
 from . import snapshots
 from .deps import dispose_db, require_admin_key, session_scope
-from .schemas import GoldStatus, PromoteOptions, SilverStatus
+from .schemas import GoldStatus, PromoteOptions, Rule1ConfigBody, SilverStatus
 
 log = logging.getLogger(__name__)
 
@@ -42,23 +45,32 @@ def _promote_in_background(gold_path: str, config: PromoteConfig) -> None:
             log.exception("background promote failed")
 
 
+def _current_rule1_config() -> Rule1Config:
+    """Rule 1's thresholds, read fresh from disk on every call so a change made
+    through ``PUT /admin/v1/rule1-config`` takes effect on the very next
+    promote without a server restart."""
+    return Rule1Config.from_json(Path(DEFAULT_RULE1_CONFIG_PATH))
+
+
+def _rule1_config_body(config: Rule1Config) -> Rule1ConfigBody:
+    return Rule1ConfigBody.model_validate(
+        {"persons": asdict(config.persons), "ensembles": asdict(config.ensembles)}
+    )
+
+
 def _promote_config(options: PromoteOptions | None) -> tuple[str, PromoteConfig]:
     """Resolve the request body (or its absence) into a gold path and config.
 
-    ``min_sitelinks``, ``min_appearances`` and ``min_referrers`` left out of the
-    body fall back to the configured defaults; an explicit ``null`` switches the
-    sitelink signal off.
+    ``min_referrers`` left out of the body falls back to the configured
+    default. Rule 1's thresholds always come from the server's current
+    ``rule1_config.json`` — the request body has no way to override them; use
+    ``GET``/``PUT /admin/v1/rule1-config`` instead.
     """
     opts = options or PromoteOptions()
     gold_path = opts.gold_path or DEFAULT_GOLD_DB_PATH
-    min_sitelinks = opts.min_sitelinks if "min_sitelinks" in opts.model_fields_set else DEFAULT_MIN_SITELINKS
-    min_appearances = (
-        opts.min_appearances if "min_appearances" in opts.model_fields_set else DEFAULT_MIN_APPEARANCES
-    )
     min_referrers = opts.min_referrers if "min_referrers" in opts.model_fields_set else DEFAULT_MIN_REFERRERS
     config = PromoteConfig(
-        min_sitelinks=min_sitelinks,
-        min_appearances=min_appearances,
+        rule1=_current_rule1_config(),
         min_referrers=min_referrers,
         drop_unevidenced_persons=opts.drop_unevidenced_persons,
         collapse_duplicates=opts.collapse_duplicates,
@@ -101,6 +113,23 @@ def start_promote(background: BackgroundTasks, options: PromoteOptions | None = 
     current = _gold_status(gold_path)
     current.status = "running"
     return current
+
+
+@builds.get("/rule1-config", response_model=Rule1ConfigBody)
+def get_rule1_config() -> Rule1ConfigBody:
+    """Rule 1's current concert/recording/composer/sitelink thresholds."""
+    return _rule1_config_body(_current_rule1_config())
+
+
+@builds.put("/rule1-config", response_model=Rule1ConfigBody)
+def update_rule1_config(body: Rule1ConfigBody) -> Rule1ConfigBody:
+    """Replace rule 1's thresholds wholesale; effective on the next promote."""
+    config = Rule1Config(
+        persons=PersonRule1Config(**body.persons.model_dump()),
+        ensembles=EnsembleRule1Config(**body.ensembles.model_dump()),
+    )
+    config.write_json(Path(DEFAULT_RULE1_CONFIG_PATH))
+    return body
 
 
 def _silver_db_path() -> Path | None:

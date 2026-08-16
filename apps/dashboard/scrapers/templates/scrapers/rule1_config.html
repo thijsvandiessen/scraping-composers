@@ -1,0 +1,58 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% for message in messages %}
+  <div class="sc-banner {{ message.tags }}">{{ message }}</div>
+{% endfor %}
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<p class="sc-muted" style="max-width: 44rem; font-size: 0.875rem;">
+  Rule 1 drops people and ensembles below these concert/recording thresholds — either
+  one alone is enough to keep an entity. Persons who composed a work some source
+  mentioned only need to clear their own (usually lower) composer threshold. Changes
+  here apply on the next promote, no restart needed.
+</p>
+
+{% if config %}
+<form method="post" action="{% url 'save_rule1_config' %}"
+      style="display: flex; flex-direction: column; gap: 0.75rem; max-width: 34rem; font-size: 0.875rem;">
+  {% csrf_token %}
+
+  <fieldset style="display: flex; flex-direction: column; gap: 0.375rem; border: 1px solid var(--border-color, #ccc); padding: 0.75rem;">
+    <legend>persons</legend>
+    <label>min concert appearances
+      <input type="number" name="persons_min_concert_appearances" min="0" required
+             value="{{ config.persons.min_concert_appearances }}" style="width: 6rem;"></label>
+    <label>min recording appearances
+      <input type="number" name="persons_min_recording_appearances" min="0" required
+             value="{{ config.persons.min_recording_appearances }}" style="width: 6rem;"></label>
+    <label>min appearances for composers
+      <input type="number" name="persons_min_appearances_for_composers" min="0" required
+             value="{{ config.persons.min_appearances_for_composers }}" style="width: 6rem;">
+      <span class="sc-muted">0 = a composer of a mentioned work is kept regardless of credits</span></label>
+    <label>min sitelinks
+      <input type="number" name="persons_min_sitelinks" min="0"
+             value="{{ config.persons.min_sitelinks|default_if_none:'' }}"
+             placeholder="off" style="width: 6rem;">
+      <span class="sc-muted">also keep persons with at least this many Wikipedia sitelinks; blank turns this signal off</span></label>
+  </fieldset>
+
+  <fieldset style="display: flex; flex-direction: column; gap: 0.375rem; border: 1px solid var(--border-color, #ccc); padding: 0.75rem;">
+    <legend>ensembles</legend>
+    <label>min concert appearances
+      <input type="number" name="ensembles_min_concert_appearances" min="0" required
+             value="{{ config.ensembles.min_concert_appearances }}" style="width: 6rem;"></label>
+    <label>min recording appearances
+      <input type="number" name="ensembles_min_recording_appearances" min="0" required
+             value="{{ config.ensembles.min_recording_appearances }}" style="width: 6rem;"></label>
+  </fieldset>
+
+  <div class="sc-toolbar">
+    <button type="submit" class="sc-btn sc-btn-primary">Save</button>
+    <a class="sc-muted" href="{% url 'promote' %}">back to promote</a>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

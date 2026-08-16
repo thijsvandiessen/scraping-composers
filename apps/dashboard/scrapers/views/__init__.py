@@ -19,6 +19,8 @@ from .pipeline import (
     load_index,
     process_snapshot,
     promote_page,
+    rule1_config_page,
+    save_rule1_config,
     start_fetch,
     start_promote,
 )
@@ -44,6 +46,8 @@ __all__ = [
     "recording_detail",
     "recordings_list",
     "review",
+    "rule1_config_page",
+    "save_rule1_config",
     "start_fetch",
     "start_promote",
     "works",

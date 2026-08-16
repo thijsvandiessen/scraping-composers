@@ -130,12 +130,6 @@ def _promote_options(request: HttpRequest) -> dict[str, object]:
         for rule in PROMOTE_RULES:
             if request.POST.get(rule) != "on":
                 options[rule] = False
-    raw_sitelinks = request.POST.get("min_sitelinks", "").strip()
-    if raw_sitelinks:
-        options["min_sitelinks"] = int(raw_sitelinks)  # ValueError handled by the view
-    raw_appearances = request.POST.get("min_appearances", "").strip()
-    if raw_appearances:
-        options["min_appearances"] = int(raw_appearances)  # ValueError handled by the view
     raw_referrers = request.POST.get("min_referrers", "").strip()
     if raw_referrers:
         options["min_referrers"] = int(raw_referrers)  # ValueError handled by the view
@@ -151,7 +145,7 @@ def start_promote(request: HttpRequest) -> HttpResponse:
     try:
         options = _promote_options(request)
     except ValueError:
-        messages.error(request, "min sitelinks, appearances and referrers must be whole numbers")
+        messages.error(request, "min referrers must be a whole number")
         return redirect("promote")
     api = AdminAPI.from_env()
     try:
@@ -161,3 +155,64 @@ def start_promote(request: HttpRequest) -> HttpResponse:
     else:
         messages.success(request, "rebuilding the gold database from silver")
     return redirect("promote")
+
+
+def rule1_config_page(request: HttpRequest) -> HttpResponse:
+    """Rule 1's concert/recording/composer/sitelink thresholds, as stored in
+    the admin API's rule1_config.json — editable here, never via Django."""
+    api = AdminAPI.from_env()
+    config: dict[str, object] | None = None
+    error: str | None = None
+    try:
+        config = api.get_rule1_config()
+    except AdminAPIError as exc:
+        error = str(exc)
+    context = {
+        **admin.site.each_context(request),
+        "title": "Rule 1 thresholds",
+        "config": config,
+        "error": error,
+    }
+    return render(request, "scrapers/rule1_config.html", context)
+
+
+def _rule1_config_payload(request: HttpRequest) -> dict[str, object]:
+    """The PUT body for the admin API; raises ValueError on non-numeric input."""
+
+    def required(name: str) -> int:
+        return int(request.POST.get(name, "").strip())
+
+    def optional(name: str) -> int | None:
+        raw = request.POST.get(name, "").strip()
+        return int(raw) if raw else None
+
+    return {
+        "persons": {
+            "min_concert_appearances": required("persons_min_concert_appearances"),
+            "min_recording_appearances": required("persons_min_recording_appearances"),
+            "min_appearances_for_composers": required("persons_min_appearances_for_composers"),
+            "min_sitelinks": optional("persons_min_sitelinks"),
+        },
+        "ensembles": {
+            "min_concert_appearances": required("ensembles_min_concert_appearances"),
+            "min_recording_appearances": required("ensembles_min_recording_appearances"),
+        },
+    }
+
+
+def save_rule1_config(request: HttpRequest) -> HttpResponse:
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    try:
+        payload = _rule1_config_payload(request)
+    except ValueError:
+        messages.error(request, "rule 1 thresholds must be whole numbers")
+        return redirect("rule1_config")
+    api = AdminAPI.from_env()
+    try:
+        api.put_rule1_config(payload)
+    except AdminAPIError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, "saved rule 1 thresholds")
+    return redirect("rule1_config")

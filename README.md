@@ -109,8 +109,8 @@ uv run composer-ingest promote        # silver → gold (full rebuild, atomic sw
 ```
 
 Promotion applies the curation rules: people and ensembles are dropped unless
-they are *credited* — a participant on at least `--min-appearances` concerts or
-recordings — or composed a work some source mentioned; duplicate person entities
+they are *credited* — a participant on at least the configured number of
+concerts or recordings — or composed a work some source mentioned; duplicate person entities
 (linked by `dedupe-persons`) are collapsed into their canonical row with claims,
 works, and mentions re-pointed; entities left unreferenced are pruned. Silver is
 never modified by promotion, so it is repeatable at any time; status and
@@ -124,11 +124,13 @@ recording tables are the only thing rule 1 believes.
 Each run is configurable: every rule can be switched off (CLI
 `--no-drop-unevidenced-persons`, `--no-collapse-duplicates`,
 `--no-prune-unreferenced`; the same toggles appear in the dashboard's promote
-form and in the `POST /admin/v1/promote` body), `--min-appearances N` raises the
-credit threshold (default 1, i.e. one real appearance is enough),
-`--min-sitelinks N` also keeps persons with at least N Wikipedia sitelinks, and
-`--gold-path` writes the gold database elsewhere. In code the knobs travel as a
-single `PromoteConfig` passed to `promote()`.
+form and in the `POST /admin/v1/promote` body), and `--gold-path` writes the
+gold database elsewhere. Rule 1's concert/recording/composer/sitelink
+thresholds live in `rule1_config.json` (CLI `--rule1-config PATH`, default the
+repo's `packages/composer-gold/rule1_config.json`) rather than CLI flags, so
+they can be tuned by editing that file or through the admin API's
+`GET`/`PUT /admin/v1/rule1-config` without touching code. In code the knobs
+travel as a single `PromoteConfig` passed to `promote()`.
 
 ### Not analysing the same page twice
 

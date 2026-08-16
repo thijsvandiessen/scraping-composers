@@ -50,6 +50,16 @@ urlpatterns = [
     path("admin/promote/", admin.site.admin_view(views.promote_page), name="promote"),
     path("admin/promote/start", admin.site.admin_view(views.start_promote), name="start_promote"),
     path(
+        "admin/promote/rule1-config/",
+        admin.site.admin_view(views.rule1_config_page),
+        name="rule1_config",
+    ),
+    path(
+        "admin/promote/rule1-config/save",
+        admin.site.admin_view(views.save_rule1_config),
+        name="save_rule1_config",
+    ),
+    path(
         "admin/load/<str:source>/<str:snapshot_id>/process",
         admin.site.admin_view(views.process_snapshot),
         name="process_snapshot",
