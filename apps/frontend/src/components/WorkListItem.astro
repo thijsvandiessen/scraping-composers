@@ -1,0 +1,33 @@
+---
+import type { ComposerWork } from "../lib/schemas";
+import SourceChip from "./SourceChip.astro";
+
+interface Props {
+  work: ComposerWork;
+}
+
+const { work } = Astro.props;
+
+const metaParts = [
+  work.work_type,
+  work.opus_number && `Op. ${work.opus_number}`,
+  work.catalogue,
+  work.musical_key && `in ${work.musical_key}`,
+  work.number !== null && `No. ${work.number}`,
+].filter((part): part is string => Boolean(part));
+---
+
+<li class="work-item">
+  <div class="work-title">{work.canonical_title}</div>
+  {metaParts.length > 0 && <div class="work-meta">{metaParts.join(" · ")}</div>}
+  <div class="work-proof">
+    {
+      work.proof.map((p) => (
+        <span class="work-proof-entry">
+          <SourceChip source={p.source} sourceUrl={p.source_url} />
+          {p.date && <span class="work-proof-date">{p.date}</span>}
+        </span>
+      ))
+    }
+  </div>
+</li>

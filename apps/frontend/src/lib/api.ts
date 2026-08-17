@@ -3,13 +3,16 @@ import type { ZodType } from "zod";
 import {
   ComposerDetailSchema,
   ComposerPageSchema,
+  ComposerWorksPageSchema,
   type ComposerDetail,
   type ComposerPage,
+  type ComposerWorksPage,
 } from "./schemas";
 
 export const PAGE_SIZE = 25;
 
 export type ComposerSort = "label" | "concerts";
+export type WorkSort = "label" | "mentions";
 
 export class ApiError extends Error {
   constructor(
@@ -72,4 +75,18 @@ export async function getComposer(id: string): Promise<ComposerDetail | null> {
     if (err instanceof ApiError && (err.status === 404 || err.status === 422)) return null;
     throw err;
   }
+}
+
+export function listComposerWorks(
+  composerId: string,
+  opts: { page?: number; sort?: WorkSort } = {},
+): Promise<ComposerWorksPage> {
+  const params = new URLSearchParams();
+  params.set("page", String(opts.page ?? 1));
+  params.set("limit", String(PAGE_SIZE));
+  if (opts.sort) params.set("sort", opts.sort);
+  return apiFetch(
+    `/v1/composers/${encodeURIComponent(composerId)}/works?${params.toString()}`,
+    ComposerWorksPageSchema,
+  );
 }

@@ -109,6 +109,34 @@ class WorkPage(BaseModel):
     limit: int
 
 
+class WorkProofOut(BaseModel):
+    source: str
+    source_url: str | None
+    date: str | None = None
+    venue: str | None = None
+
+
+class ComposerWorkOut(BaseModel):
+    id: uuid.UUID
+    canonical_title: str
+    work_type: str | None
+    opus_number: str | None
+    catalogue: str | None
+    musical_key: str | None
+    number: int | None
+    mention_count: int
+    proof: list[WorkProofOut]
+
+
+class ComposerWorksPage(BaseModel):
+    composer_id: uuid.UUID
+    composer_label: str
+    items: list[ComposerWorkOut]
+    total: int
+    page: int
+    limit: int
+
+
 class MentionOut(BaseModel):
     id: int
     source: str

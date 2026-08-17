@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from .crud import (
+    composer_works,
     get_concert,
     get_entity,
     get_person,
@@ -22,6 +23,7 @@ from .deps import DbSession, PageQuery
 from .schemas import (
     ComposerDetail,
     ComposerPage,
+    ComposerWorksPage,
     ConcertDetail,
     ConcertListPage,
     ConcertPage,
@@ -151,6 +153,17 @@ def list_composers(
 @v1.get("/composers/{composer_id}", response_model=ComposerDetail)
 def get_composer(composer_id: uuid.UUID, db: DbSession) -> ComposerDetail:
     return get_person(db, composer_id, None, "composer not found")
+
+
+@v1.get("/composers/{composer_id}/works", response_model=ComposerWorksPage)
+def get_composer_works(
+    composer_id: uuid.UUID,
+    db: DbSession,
+    pager: PageQuery,
+    sort: Annotated[str, Query(pattern="^(label|mentions)$")] = "label",
+) -> ComposerWorksPage:
+    """The composer's works, each with proof (source, and a concert/recording link when one exists)."""
+    return composer_works(db, composer_id, pager, sort=sort)
 
 
 @v1.get("/soloists", response_model=ComposerPage)

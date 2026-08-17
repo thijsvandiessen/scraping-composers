@@ -10,6 +10,8 @@ CONCERT_WORKS_CAP = 20
 
 INCOMING_CLAIMS_CAP = 50
 
+WORK_PROOF_CAP = 5
+
 
 def outgoing_claims(db: Session, entity_id: uuid.UUID) -> list[ClaimOut]:
     obj = aliased(Entity)

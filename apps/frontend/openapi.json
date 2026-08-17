@@ -177,6 +177,140 @@
         "title": "ComposerSummary",
         "type": "object"
       },
+      "ComposerWorkOut": {
+        "properties": {
+          "canonical_title": {
+            "title": "Canonical Title",
+            "type": "string"
+          },
+          "catalogue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalogue"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mention_count": {
+            "title": "Mention Count",
+            "type": "integer"
+          },
+          "musical_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Musical Key"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "opus_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opus Number"
+          },
+          "proof": {
+            "items": {
+              "$ref": "#/components/schemas/WorkProofOut"
+            },
+            "title": "Proof",
+            "type": "array"
+          },
+          "work_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work Type"
+          }
+        },
+        "required": [
+          "id",
+          "canonical_title",
+          "work_type",
+          "opus_number",
+          "catalogue",
+          "musical_key",
+          "number",
+          "mention_count",
+          "proof"
+        ],
+        "title": "ComposerWorkOut",
+        "type": "object"
+      },
+      "ComposerWorksPage": {
+        "properties": {
+          "composer_id": {
+            "format": "uuid",
+            "title": "Composer Id",
+            "type": "string"
+          },
+          "composer_label": {
+            "title": "Composer Label",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ComposerWorkOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "composer_id",
+          "composer_label",
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "ComposerWorksPage",
+        "type": "object"
+      },
       "ConcertDetail": {
         "properties": {
           "date": {
@@ -1500,6 +1634,53 @@
         "title": "WorkPage",
         "type": "object"
       },
+      "WorkProofOut": {
+        "properties": {
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "venue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Venue"
+          }
+        },
+        "required": [
+          "source",
+          "source_url"
+        ],
+        "title": "WorkProofOut",
+        "type": "object"
+      },
       "WorkSummary": {
         "properties": {
           "aliases": {
@@ -1743,6 +1924,81 @@
           }
         },
         "summary": "Get Composer"
+      }
+    },
+    "/v1/composers/{composer_id}/works": {
+      "get": {
+        "description": "The composer's works, each with proof (source, and a concert/recording link when one exists).",
+        "operationId": "get_composer_works_v1_composers__composer_id__works_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "composer_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Composer Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "label",
+              "pattern": "^(label|mentions)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComposerWorksPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Composer Works"
       }
     },
     "/v1/concerts": {

@@ -614,6 +614,85 @@ def test_person_concerts_404_and_invalid_sort(concerts_client: TestClient) -> No
     assert concerts_client.get("/v1/conductors?sort=nope").status_code == 422
 
 
+# --- /v1/composers/{id}/works ---
+
+
+@pytest.fixture
+def composer_works_client(tmp_path: Path) -> Iterator[TestClient]:
+    """Gold client with one composer credited on a concert-backed work and a catalogue-only work."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    factory = init_db(engine)
+    berlinphil = FakeSource(
+        records=(
+            perf_mention(
+                "perf:1-1",
+                "Ein Heldenleben",
+                "Richard Strauss",
+                {
+                    "concert_id": "1",
+                    "date": "1985-03-01",
+                    "season": "1984/85",
+                    "url": "https://dch.example/1",
+                    "conductors": ["Karajan, Herbert von"],
+                },
+            ),
+            _person("Richard Strauss", SourceClaim("has_profession", "profession", "composer")),
+        ),
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    # a source derive_concerts doesn't know how to group — its mention stays
+    # a bare catalogue attribution, with no concert to point to.
+    imslp = FakeSource(
+        records=(mention("Also sprach Zarathustra", "Richard Strauss", external_id="imslp:1"),),
+        name="imslp_works",
+        base_url="https://imslp.org",
+    )
+    with factory() as s:
+        ingest_source(s, berlinphil)
+        ingest_source(s, imslp)
+        derive_concerts(s)
+        gold_path = tmp_path / "gold.db"
+        promote(s, gold_path)
+    gold_factory = init_db(create_engine(f"sqlite:///{gold_path}"))
+    yield TestClient(create_app("test-gold-composer-works", lambda: gold_factory))
+
+
+def test_composer_works_includes_concert_and_catalogue_proof(composer_works_client: TestClient) -> None:
+    composer = composer_works_client.get("/v1/composers?q=Strauss").json()["items"][0]
+    data = composer_works_client.get(f"/v1/composers/{composer['id']}/works").json()
+    assert data["composer_id"] == composer["id"]
+    assert data["total"] == 2
+
+    by_title = {w["canonical_title"]: w for w in data["items"]}
+
+    heldenleben = by_title["Ein Heldenleben"]
+    assert heldenleben["proof"] != []
+    proof = heldenleben["proof"][0]
+    assert proof["source"] == "berlinphil"
+    assert proof["source_url"] == "https://dch.example/1"
+    assert proof["date"] == "1985-03-01"
+
+    # every work has proof, even one with no concert/recording behind it
+    zarathustra = by_title["Also sprach Zarathustra"]
+    assert zarathustra["proof"] != []
+    proof = zarathustra["proof"][0]
+    assert proof["source"] == "imslp_works"
+    assert proof["source_url"] == "https://imslp.org"
+    assert proof["date"] is None
+
+
+def test_composer_works_404_and_invalid_sort(composer_works_client: TestClient) -> None:
+    r = composer_works_client.get("/v1/composers/00000000-0000-0000-0000-000000000000/works")
+    assert r.status_code == 404
+    composer = composer_works_client.get("/v1/composers?q=Strauss").json()["items"][0]
+    assert composer_works_client.get(f"/v1/composers/{composer['id']}/works?sort=nope").status_code == 422
+
+
 def _recording_raw(catalogue: str, works_title: str) -> dict[str, object]:
     return {
         "_source": "llm",
