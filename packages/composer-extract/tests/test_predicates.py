@@ -6,11 +6,14 @@ from __future__ import annotations
 import pytest
 from composer_extract.predicates import (
     DENYLIST,
+    OBJECT_KINDS,
     VOCABULARY,
     is_known,
     literal_form,
     normalize_predicate,
+    object_kind_for,
     slugify,
+    takes_literal,
     vocabulary_hint,
 )
 
@@ -25,11 +28,37 @@ from composer_extract.predicates import (
         ("Instrumentation", "orchestration"),
         ("Date of Birth", "born_on"),
         ("nationality", "citizen_of"),
+        # A publisher's catalogue: the edition credits and the handles on a piece.
+        ("Editor", "edited_by"),
+        ("Herausgeber", "edited_by"),
+        ("Fingering", "fingering_by"),
+        ("Publisher", "published_by"),
+        ("Besetzung", "orchestration"),
+        ("Level of difficulty", "difficulty_level"),
+        ("HN", "catalogue_number"),
+        ("Order no.", "catalogue_number"),
+        ("Opus number", "catalogue_number"),
+        ("Key", "in_key"),
+        ("Urtext", "edition_type"),
+        ("Librettist", "text_by"),
+        ("Number of pages", "page_count"),
+        ("studied with", "student_of"),
     ],
 )
 def test_aliases_fold_onto_the_vocabulary(raw: str, expected: str) -> None:
     assert normalize_predicate(raw) == expected
     assert is_known(expected)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [("has_scoring", "orchestration"), ("has_duration", "duration_minutes"), ("composed_by", "composed")],
+)
+def test_the_hand_written_scrapers_spellings_fold_onto_the_same_terms(raw: str, expected: str) -> None:
+    """The boosey adapter names three facts differently. Without these aliases one
+    work described by both boosey and a crawl of its publisher would land on two
+    predicates that never line up on the entity."""
+    assert normalize_predicate(raw) == expected
 
 
 @pytest.mark.parametrize(
@@ -85,6 +114,35 @@ def test_no_alias_key_is_itself_a_vocabulary_term() -> None:
     from composer_extract.predicates import ALIASES
 
     assert not (set(ALIASES) & VOCABULARY)
+
+
+def test_no_declared_object_kind_belongs_to_an_uncurated_predicate() -> None:
+    """A declaration on a predicate outside the vocabulary would never be
+    consulted — ``takes_literal`` only trusts declarations for curated terms."""
+    assert set(OBJECT_KINDS) <= VOCABULARY
+
+
+@pytest.mark.parametrize(
+    ("predicate", "kind"),
+    [
+        ("written_for", "instrumentation"),
+        ("published_by", "publisher"),
+        ("edited_by", "person"),
+        ("member_of", "ensemble"),
+        ("arrangement_of", "work"),
+    ],
+)
+def test_a_declared_predicate_decides_its_own_object_kind(predicate: str, kind: str) -> None:
+    """The kind comes from the predicate, not from the slot a local model happened
+    to fill — it will hand back an entity where a literal belongs and vice versa."""
+    assert object_kind_for(predicate) == kind
+    assert not takes_literal(predicate)
+
+
+@pytest.mark.parametrize("predicate", ["catalogue_number", "in_key", "ismn", "difficulty_level"])
+def test_an_edition_fact_is_a_literal(predicate: str) -> None:
+    assert object_kind_for(predicate) is None
+    assert takes_literal(predicate)
 
 
 def test_the_prompt_hint_is_stable_and_lists_every_term() -> None:

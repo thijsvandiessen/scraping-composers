@@ -100,7 +100,7 @@ class ExtractedFact(BaseModel):
     subject: str = Field(description="Who or what the statement is about, named as the page names it.")
     subject_kind: str = Field(
         default="person",
-        description="What the subject is: 'person', 'work', 'ensemble', or 'place'.",
+        description="What the subject is: 'person', 'work', 'ensemble', 'place', or 'publisher'.",
     )
     predicate: str = Field(description="The relationship, as a lowercase snake_case verb phrase.")
     value: str | None = Field(
@@ -108,8 +108,9 @@ class ExtractedFact(BaseModel):
     )
     object_kind: str | None = Field(
         default=None,
-        description="When the object is itself a named thing, what it is: 'work', 'place', "
-        "'profession', 'genre'; null when the object is a literal.",
+        description="When the object is itself a named thing, what it is: 'work', 'person', "
+        "'place', 'profession', 'genre', 'ensemble', 'publisher', 'instrumentation'; null when "
+        "the object is a literal.",
     )
     object_label: str | None = Field(
         default=None, description="The named object, when object_kind is set; null otherwise."

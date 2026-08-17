@@ -195,6 +195,21 @@ def test_a_page_stating_nothing_yields_nothing() -> None:
     assert _run(PageClaimExtraction()) == []
 
 
+def test_an_orchestral_scoring_list_stays_a_literal_and_is_counted() -> None:
+    """The LA Phil's orchestration row is a list of sections. Reading it as a work
+    for flute would be worse than leaving it unread, so it is left — and reported,
+    which is how the category table grows."""
+    options = ExtractOptions(now=NOW)
+    scoring = "flute, 2 oboes, 2 clarinets, 2 bassoons, 2 horns, 2 trumpets, timpani, strings"
+    entities = _entities(_run(_LAPHIL_PAGE, options=options))
+
+    work = entities["Ludwig van Beethoven: Violin Concerto"]
+    assert SourceClaim(predicate="orchestration", value=scoring) in work.claims
+    assert not [c for c in work.claims if c.predicate == "written_for"]
+    assert options.stats.unrecognised_scoring == {scoring: 1}
+    assert options.stats.unrecognised_summary().startswith("flute, 2 oboes")
+
+
 def test_the_page_url_and_verbatim_facts_travel_in_raw() -> None:
     work = _entities(_run(_LAPHIL_PAGE))["Ludwig van Beethoven: Violin Concerto"]
 

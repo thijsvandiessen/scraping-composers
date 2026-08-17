@@ -24,6 +24,7 @@ from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 
 from .emit import LLM_SOURCE_MARKER, Document, emit_pages
 from .facts import WORK_KIND, entity_kind, object_kind, repair, stated, title_key
+from .instrumentation import parse_instrumentation
 from .ledger import DocumentLedger, LedgerContext, request_fingerprint
 from .markdown import chunk_markdown, record_markdown
 from .predicates import is_known, literal_form, normalize_predicate
@@ -49,6 +50,10 @@ class ClaimPageExtractor(Protocol):
 _MAX_CLAIM_VALUE_CHARS = 500
 
 _CLAIMS_KIND = "work_profile"
+
+#: Predicates that carry a page's stated scoring, whichever way the model
+#: expressed it — as the literal it was asked for, or as an edge it coined.
+_SCORING_PREDICATES = frozenset({"orchestration", "written_for"})
 
 
 @dataclass
@@ -113,14 +118,51 @@ def _resolve(predicate: str, subject_kind: str) -> str:
     return literal_form(predicate) if subject_kind == WORK_KIND else predicate
 
 
-def _add_fact(subject: _Subject, fact: ExtractedFact, predicate: str, composers: dict[str, str]) -> None:
+def _add_literal(subject: _Subject, predicate: str, raw: str) -> None:
+    """Record a literal claim, diverting one too long for the claims table."""
+    value = coerce_value(predicate, raw)
+    if len(value) > _MAX_CLAIM_VALUE_CHARS:
+        subject.long_values[predicate] = value
+        return
+    subject.claims.append(SourceClaim(predicate=predicate, value=value))
+
+
+def _add_scoring(subject: _Subject, stated_scoring: str, run: ExtractRun) -> None:
+    """Record stated scoring twice over: verbatim as the ``orchestration`` literal,
+    and as one ``written_for`` edge per scoring category named in it.
+
+    The literal is what the page said, the edges are what can be queried, so both
+    are kept. A phrase no category is recognised in yields the literal alone and is
+    counted — the queue for growing :data:`~.instrumentation.CATEGORIES`. Both the
+    model's own ``written_for`` answers and the scoring it wrote as a literal come
+    through here, so an entity is only ever created for a canonical category.
+    """
+    categories = parse_instrumentation(stated_scoring)
+    if not categories:
+        run.stats.unrecognised_scoring[" ".join(stated_scoring.split())] += 1
+    for category in categories:
+        subject.claims.append(
+            SourceClaim(predicate="written_for", object_kind="instrumentation", object_label=category)
+        )
+    _add_literal(subject, "orchestration", stated_scoring)
+
+
+def _add_fact(
+    subject: _Subject,
+    fact: ExtractedFact,
+    predicate: str,
+    composers: dict[str, str],
+    run: ExtractRun,
+) -> None:
     """Record one fact on its subject, as a claim where it can be one."""
     subject.facts.append(fact.model_dump())
     value_or_label = stated(fact)
     if not value_or_label:
         return
     predicate = _resolve(predicate, subject.kind)
-    if (kind := object_kind(fact, predicate)) is not None:
+    if predicate in _SCORING_PREDICATES:
+        _add_scoring(subject, value_or_label, run)
+    elif (kind := object_kind(fact, predicate)) is not None:
         subject.claims.append(
             SourceClaim(
                 predicate=predicate,
@@ -128,12 +170,8 @@ def _add_fact(subject: _Subject, fact: ExtractedFact, predicate: str, composers:
                 object_label=_labelled(kind, value_or_label, composers),
             )
         )
-        return
-    value = coerce_value(predicate, value_or_label)
-    if len(value) > _MAX_CLAIM_VALUE_CHARS:
-        subject.long_values[predicate] = value
-        return
-    subject.claims.append(SourceClaim(predicate=predicate, value=value))
+    else:
+        _add_literal(subject, predicate, value_or_label)
 
 
 def _collect_subjects(facts: Iterable[ExtractedFact], run: ExtractRun) -> list[_Subject]:
@@ -152,7 +190,7 @@ def _collect_subjects(facts: Iterable[ExtractedFact], run: ExtractRun) -> list[_
         if not label:
             continue
         subject = subjects.setdefault((kind, label), _Subject(kind=kind, label=label))
-        _add_fact(subject, fact, predicate, composers)
+        _add_fact(subject, fact, predicate, composers, run)
     return [subject for subject in subjects.values() if subject.claims or subject.long_values]
 
 

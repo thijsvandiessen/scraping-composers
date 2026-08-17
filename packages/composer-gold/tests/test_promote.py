@@ -858,6 +858,7 @@ def _seed_work_claims(session: Session, *, attributed: bool) -> None:
                 SourceClaim("composed_in", value="1806"),
                 SourceClaim("duration_minutes", value="42"),
                 SourceClaim("program_note_by", value="Hugh Macdonald"),
+                SourceClaim("written_for", "instrumentation", "violin and piano"),
             ),
         ),
         name="laphil",
@@ -887,6 +888,27 @@ def test_promote_keeps_work_claims_reached_through_the_composed_edge(
             ("duration_minutes", "42"),
             ("program_note_by", "Hugh Macdonald"),
         } <= facts
+
+
+def test_promote_reaches_instrumentation_two_hops_from_the_composer(session: Session, tmp_path: Path) -> None:
+    """ "Which works are for piano" has to be answerable in gold, not just silver.
+    The instrumentation entity hangs off the work, which hangs off the composer, so
+    it only survives because rule 3's walk expands through the work as well."""
+    _seed_work_claims(session, attributed=True)
+    gold_path = tmp_path / "gold.db"
+    promote(session, gold_path)
+
+    with _gold_session(gold_path) as gold:
+        scoring = gold.scalars(select(Entity).where(Entity.kind == "instrumentation")).one()
+        assert scoring.label == "violin and piano"
+        work = gold.scalars(select(Entity).where(Entity.kind == "work")).one()
+        assert gold.scalar(
+            select(Claim).where(
+                Claim.subject_id == work.id,
+                Claim.predicate == "written_for",
+                Claim.object_id == scoring.id,
+            )
+        )
 
 
 def test_promote_drops_an_unattributed_work_entity(session: Session, tmp_path: Path) -> None:

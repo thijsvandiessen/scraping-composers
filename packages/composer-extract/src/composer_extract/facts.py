@@ -25,7 +25,25 @@ WORK_KIND = "work"
 #: Predicates that can only be said of a piece of music. A page stating any of
 #: them about a subject has settled what that subject is, whatever ``subject_kind``
 #: the model guessed — nobody is scored for two oboes.
-_WORK_PREDICATES = frozenset({"composed_in", "duration_minutes", "orchestration", "first_performed_on"})
+#:
+#: The edition terms here are the ones only a piece can carry: a recording is also
+#: ``published_by`` someone and a score is also ``edited_by`` someone, so those
+#: two stay out however often a publisher's catalogue states them.
+_WORK_PREDICATES = frozenset(
+    {
+        "composed_in",
+        "duration_minutes",
+        "orchestration",
+        "written_for",
+        "first_performed_on",
+        "in_key",
+        "catalogue_number",
+        "arrangement_of",
+        "difficulty_level",
+        "edition_type",
+        "ismn",
+    }
+)
 
 
 def entity_kind(raw: str | None, default: str = PERSON_KIND) -> str:

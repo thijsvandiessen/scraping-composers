@@ -413,7 +413,9 @@ resolution happen downstream when data is promoted into gold.
   `(source, external_id)`. Stores the original payload as JSON plus
   `first_seen`/`last_seen` timestamps and run ids. Re-ingesting is idempotent.
 - **`entities`** — canonical, deduplicated nodes. `kind` says what a node is:
-  `person`, `profession`, `period`, `genre`, `place`, `work` (open set).
+  `person`, `profession`, `period`, `genre`, `place`, `work`, `ensemble`,
+  `publisher`, `instrumentation` (an open set — `kind` is a plain string column,
+  and a claim naming a new one creates it).
   Records from different sources link here via `(kind, dedup_key)` — a
   normalized label (see `normalize.py`: name-order flipping, diacritic
   stripping, case/punctuation folding) — so adding a second source later
@@ -611,3 +613,110 @@ Two things to know before running it wide:
   aliases to `_LABELS` rather than writing new regexes. Discovery
   (`boosey/catalogue.py`) keys only on the stable `/cr/music/<slug>/<id>` URL
   shape; the id is the trailing integer, and the slug is decorative.
+
+## Publisher catalogues (Henle, Bärenreiter)
+
+`boosey` is a hand-written adapter for one publisher. Every other publisher's
+catalogue is reachable with the generic crawler and the `claims` extract kind,
+with no code at all — which is what `claims` is for: it records whatever a page
+states, so a site nobody wrote a parser for still contributes.
+
+A sheet-music page states two things at once, and both land on the work:
+
+- facts about the piece — `written_for`, `in_key`, `catalogue_number`,
+  `composed_in`, `duration_minutes`;
+- facts about the printed edition of it — `published_by`, `edited_by`,
+  `fingering_by`, `edition_type`, `ismn`, `page_count`, `difficulty_level`.
+
+Edition facts are claims on the *work*, not on an "edition" entity of their own,
+so two editions of one piece merge. That is a deliberate trade: edition dedup is
+a problem in its own right and nothing downstream needs it solved yet.
+
+### Scoring is stored twice
+
+"Which works are for piano" is the question a publisher's catalogue is built to
+answer — Bärenreiter's own navigation offers *works for string orchestra* as a
+facet — and free text cannot answer it: the same scoring is written `for piano
+solo`, `Klavier zu vier Händen`, `Piano, 4 hands`. So the stated scoring is kept
+twice over:
+
+- verbatim, as an `orchestration` literal — what the page actually said;
+- folded onto canonical *scoring categories*, as one `written_for` claim each,
+  pointing at an `instrumentation` entity.
+
+The category, not the instrument, is the unit: `piano`, `string orchestra` and
+`violin and piano` are each one entity, because that is how the catalogues
+themselves are organised and because a string orchestra is not a list of
+instruments. A category that demonstrably contains a smaller one also emits it
+(`instrumentation.py`'s `CONTAINS`), so a violin sonata still answers "works for
+piano":
+
+```
+Beethoven: Violin Sonata no. 5  --orchestration--> "Violine und Klavier"   (literal)
+                                --written_for----> violin and piano        (instrumentation)
+                                --written_for----> violin                  (instrumentation)
+                                --written_for----> piano                   (instrumentation)
+```
+
+Nothing is guessed. A phrase no category is recognised in — an orchestral
+shorthand like `2.2.2.2 - 4.2.3.1 - timp - str` — keeps its literal and is
+*counted*, and the extract run's log names the commonest misses:
+
+```
+claims: 412 pages, 480 chunks, 0 retried, 0 failed, 3106 claims
+  (new predicates: plate_number(88); unrecognised scoring: 2.2.2.2 - 4.2.3.1 - timp - str(31), …)
+```
+
+Those two lists are the review queue: fold a recurring predicate into
+`vocabulary.py`'s `ALIASES` and a recurring scoring phrase into
+`instrumentation.py`'s `CATEGORIES`, and the next run curates it.
+
+### Crawl recipes
+
+Both go in via the dashboard's **New crawl** form (or `PUT
+/admin/v1/crawls/<name>`) rather than `CRAWL_REGISTRY` — a code-registered config
+wins over the stored one and is read-only in the dashboard, so tuning an allow
+pattern would mean a commit each time.
+
+Henle publishes one detail page per edition, and they are all in the sitemap:
+
+| field | value |
+| --- | --- |
+| `seeds` | `https://www.henle.de/en/` |
+| `use_sitemap` | on |
+| `allow_patterns` | `*/en/detail/*` |
+| `relevance_query` | `urtext edition composer work instrumentation editor` |
+| `extract_kinds` | `claims` |
+| `request_delay_s` | `1.0` |
+
+Bärenreiter's catalogue is reached through faceted search — `/en/search/*/1154`
+is *works for string orchestra*, 88 of them — so seed the facets you care about
+and let the crawler follow links to the detail pages:
+
+| field | value |
+| --- | --- |
+| `seeds` | `https://www.baerenreiter.com/en/`, plus each facet URL |
+| `follow_links` | on (`max_depth` 2) |
+| `allow_patterns` | `*/en/search/*`, `*/en/shop/*` |
+| `extract_kinds` | `claims` |
+| `request_delay_s` | `1.0` |
+
+Two things to check before a wide run:
+
+- **Facet URLs are often not crawlable.** Search and filter paths are usually
+  absent from `sitemap.xml` and frequently `Disallow`ed in `robots.txt`;
+  `respect_robots` defaults to on, so those pages will simply be skipped. Read
+  the site's `robots.txt` first, and fall back to sitemap-driven detail pages if
+  the facets are excluded — the detail pages state the scoring themselves, so the
+  facet listings are a convenience, not a requirement.
+- **These are commercial catalogues.** Keep the request delay polite and check
+  the site's terms of use before running anything at scale.
+
+### Enabling this on an existing crawl costs one re-extract
+
+The `claims` system prompt is part of both the answer-cache key and the
+extraction ledger's fingerprint (see [Not analysing the same page
+twice](#not-analysing-the-same-page-twice)), so widening it invalidates every
+cached `claims` answer: the next `extract` run on a crawl with `claims` enabled
+sends every page back through the model once. `concerts` and `recordings` are
+unaffected — their prompts did not change, so their caches stay warm.
