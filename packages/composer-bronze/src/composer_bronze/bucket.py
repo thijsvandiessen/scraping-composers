@@ -177,9 +177,11 @@ class LocalBucket:
                 except json.JSONDecodeError:
                     # A run killed outright mid-flush (see write_records) can leave a
                     # truncated trailing line; skip it rather than losing every record
-                    # read before it. source/run_id are validated by _run_dir above (no
-                    # control chars), but %r keeps this sink safe on its own too.
-                    log.warning("bucket: skipping malformed line %d in %r/%r", lineno, source, run_id)
+                    # read before it. Sanitize defensively at the sink so log
+                    # formatting stays single-line even if upstream validation changes.
+                    source_log = source.replace("\r", "").replace("\n", "")
+                    run_id_log = run_id.replace("\r", "").replace("\n", "")
+                    log.warning("bucket: skipping malformed line %d in %r/%r", lineno, source_log, run_id_log)
 
     def list_runs(self, source: str) -> list[str]:
         _validated_segment(source, "source")
