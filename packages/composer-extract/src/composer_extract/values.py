@@ -17,7 +17,12 @@ from __future__ import annotations
 import re
 
 #: Predicates whose value is a date, and so gets ISO-8601 treatment.
-_DATE_PREDICATES = frozenset({"born_on", "died_on", "first_performed_on"})
+_DATE_PREDICATES = frozenset({"born_on", "died_on", "first_performed_on", "recorded_on"})
+
+#: Predicates whose value is a year. A publisher's catalogue dates an edition and
+#: an ensemble's page dates its founding the same loose way a page dates a
+#: composition ("first published 1862"), so they are read the same way.
+_YEAR_PREDICATES = frozenset({"composed_in", "published_in", "founded_in"})
 
 _MONTHS = {
     "january": 1,
@@ -132,6 +137,6 @@ def coerce_value(predicate: str, raw: str) -> str:
         return _iso_date(text) or text
     if predicate == "duration_minutes":
         return _minutes(text) or text
-    if predicate == "composed_in":
+    if predicate in _YEAR_PREDICATES:
         return _year_only(text) or text
     return text

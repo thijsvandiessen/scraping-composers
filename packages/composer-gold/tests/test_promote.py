@@ -858,6 +858,8 @@ def _seed_work_claims(session: Session, *, attributed: bool) -> None:
                 SourceClaim("composed_in", value="1806"),
                 SourceClaim("duration_minutes", value="42"),
                 SourceClaim("program_note_by", value="Hugh Macdonald"),
+                SourceClaim("written_for", "instrumentation", "violin and piano"),
+                SourceClaim("includes_instrument", "instrumentation", "harp"),
             ),
         ),
         name="laphil",
@@ -887,6 +889,31 @@ def test_promote_keeps_work_claims_reached_through_the_composed_edge(
             ("duration_minutes", "42"),
             ("program_note_by", "Hugh Macdonald"),
         } <= facts
+
+
+def test_promote_reaches_instrumentation_two_hops_from_the_composer(session: Session, tmp_path: Path) -> None:
+    """ "Which works are for piano" has to be answerable in gold, not just silver.
+    The instrumentation entity hangs off the work, which hangs off the composer, so
+    it only survives because rule 3's walk expands through the work as well."""
+    _seed_work_claims(session, attributed=True)
+    gold_path = tmp_path / "gold.db"
+    promote(session, gold_path)
+
+    with _gold_session(gold_path) as gold:
+        scorings = {
+            entity.label: entity.id
+            for entity in gold.scalars(select(Entity).where(Entity.kind == "instrumentation"))
+        }
+        assert set(scorings) == {"violin and piano", "harp"}
+        work = gold.scalars(select(Entity).where(Entity.kind == "work")).one()
+        edges = {
+            (claim.predicate, claim.object_id)
+            for claim in gold.scalars(select(Claim).where(Claim.subject_id == work.id))
+        }
+        # Both scoring predicates reach the same kind of node, so an orchestral
+        # work's instruments survive curation exactly as a duo's scoring does.
+        assert ("written_for", scorings["violin and piano"]) in edges
+        assert ("includes_instrument", scorings["harp"]) in edges
 
 
 def test_promote_drops_an_unattributed_work_entity(session: Session, tmp_path: Path) -> None:

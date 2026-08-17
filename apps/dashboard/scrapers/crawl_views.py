@@ -21,7 +21,10 @@ from .views.common import is_running
 EXTRACT_KINDS: tuple[tuple[str, str], ...] = (
     ("concerts", "concert programmes: date, venue, conductor, soloists, works"),
     ("recordings", "album releases: label, catalogue number, format, artists, works"),
-    ("claims", "whatever else the page states, as facts about people and works"),
+    (
+        "claims",
+        "whatever else the page states, as facts about people, works, scoring, editions and publishers",
+    ),
 )
 
 DEFAULT_EXTRACT_KINDS = ["concerts"]

@@ -31,7 +31,13 @@ from .prompt import CLAIMS_SYSTEM_PROMPT
 from .resilience import extract_chunks
 from .run import ExtractOptions, ExtractRun
 from .schema import ExtractedFact, PageClaimExtraction
-from .values import coerce_value
+from .scoring import (
+    SCORING_PREDICATES,
+    ScoringTarget,
+    add_included_instrument,
+    add_literal,
+    add_scoring,
+)
 
 log = logging.getLogger(__name__)
 
@@ -42,24 +48,21 @@ class ClaimPageExtractor(Protocol):
     def extract_claim_page(self, markdown: str, metadata: dict[str, str]) -> PageClaimExtraction: ...
 
 
-#: Longest literal stored as a claim. Claims are for facts you can query and
-#: compare; an open extractor will sooner or later hand back a whole programme
-#: note as a "value", which belongs in the record's ``raw`` payload instead of in
-#: a column other passes read.
-_MAX_CLAIM_VALUE_CHARS = 500
-
 _CLAIMS_KIND = "work_profile"
 
 
 @dataclass
-class _Subject:
-    """One thing the page makes statements about, and what it said."""
+class _Subject(ScoringTarget):
+    """One thing the page makes statements about, and what it said.
 
-    kind: str
-    label: str
-    claims: list[SourceClaim] = field(default_factory=list)
+    Extends :class:`~.scoring.ScoringTarget` so the scoring pass can write its
+    claims, long values and parsed structure straight onto a subject without
+    knowing anything else about one.
+    """
+
+    kind: str = ""
+    label: str = ""
     facts: list[dict[str, object]] = field(default_factory=list)
-    long_values: dict[str, str] = field(default_factory=dict)
 
 
 def _work_label(title: str, composer: str | None) -> str:
@@ -113,14 +116,30 @@ def _resolve(predicate: str, subject_kind: str) -> str:
     return literal_form(predicate) if subject_kind == WORK_KIND else predicate
 
 
-def _add_fact(subject: _Subject, fact: ExtractedFact, predicate: str, composers: dict[str, str]) -> None:
+def _note_scoring(run: ExtractRun, missed: str | None) -> None:
+    """Count a scoring phrase the tables could not read, for the run's report."""
+    if missed:
+        run.stats.unrecognised_scoring[missed] += 1
+
+
+def _add_fact(
+    subject: _Subject,
+    fact: ExtractedFact,
+    predicate: str,
+    composers: dict[str, str],
+    run: ExtractRun,
+) -> None:
     """Record one fact on its subject, as a claim where it can be one."""
     subject.facts.append(fact.model_dump())
     value_or_label = stated(fact)
     if not value_or_label:
         return
     predicate = _resolve(predicate, subject.kind)
-    if (kind := object_kind(fact, predicate)) is not None:
+    if predicate in SCORING_PREDICATES:
+        _note_scoring(run, add_scoring(subject, value_or_label))
+    elif predicate == "includes_instrument":
+        _note_scoring(run, add_included_instrument(subject, value_or_label))
+    elif (kind := object_kind(fact, predicate)) is not None:
         subject.claims.append(
             SourceClaim(
                 predicate=predicate,
@@ -128,12 +147,8 @@ def _add_fact(subject: _Subject, fact: ExtractedFact, predicate: str, composers:
                 object_label=_labelled(kind, value_or_label, composers),
             )
         )
-        return
-    value = coerce_value(predicate, value_or_label)
-    if len(value) > _MAX_CLAIM_VALUE_CHARS:
-        subject.long_values[predicate] = value
-        return
-    subject.claims.append(SourceClaim(predicate=predicate, value=value))
+    else:
+        add_literal(subject, predicate, value_or_label)
 
 
 def _collect_subjects(facts: Iterable[ExtractedFact], run: ExtractRun) -> list[_Subject]:
@@ -152,7 +167,7 @@ def _collect_subjects(facts: Iterable[ExtractedFact], run: ExtractRun) -> list[_
         if not label:
             continue
         subject = subjects.setdefault((kind, label), _Subject(kind=kind, label=label))
-        _add_fact(subject, fact, predicate, composers)
+        _add_fact(subject, fact, predicate, composers, run)
     return [subject for subject in subjects.values() if subject.claims or subject.long_values]
 
 
@@ -186,6 +201,9 @@ def _subject_docs(
                 "url": url,
                 "facts": subject.facts,
                 **({"long_values": subject.long_values} if subject.long_values else {}),
+                # A shorthand's player counts and string-part number: structure for
+                # later analysis, not facts worth a claim each.
+                **({"scoring": subject.scoring} if subject.scoring else {}),
             },
             claims=_dedup_claims(subject.claims),
         )

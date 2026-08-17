@@ -84,13 +84,21 @@ def options_per_kind(kinds: Iterable[str]) -> dict[str, ExtractOptions]:
 def summarize(options: dict[str, ExtractOptions]) -> str:
     """One line accounting for every kind a run applied.
 
-    Names the predicates the claims pass coined alongside each kind's counters:
-    an unattended run's log is the only place they surface, and they are the
-    queue for growing :mod:`.predicates`' vocabulary.
+    Names what the claims pass could not curate alongside each kind's counters —
+    the predicates it coined and the scoring phrases it recognised no category in.
+    An unattended run's log is the only place either surfaces, and they are the
+    queues for growing :mod:`.vocabulary` and :mod:`.instrumentation`.
     """
     parts = []
     for kind, opts in options.items():
-        unknown = opts.stats.unknown_summary()
+        notes = [
+            f"{label}: {summary}"
+            for label, summary in (
+                ("new predicates", opts.stats.unknown_summary()),
+                ("unrecognised scoring", opts.stats.unrecognised_summary()),
+            )
+            if summary
+        ]
         line = f"{kind}: {opts.stats.summary()}"
-        parts.append(f"{line} (new predicates: {unknown})" if unknown else line)
+        parts.append(f"{line} ({'; '.join(notes)})" if notes else line)
     return "; ".join(parts)

@@ -40,6 +40,30 @@ class ExtractAborted(RuntimeError):
     """Too many chunks in a row produced unusable output; the run gave up."""
 
 
+#: Longest counter key rendered in a summary line. A coined predicate is short by
+#: construction; a scoring phrase read off a page is not necessarily.
+_MAX_KEY_CHARS = 60
+
+#: How many unrecognised scoring phrases a run's summary names. Unlike coined
+#: predicates, which a page invents a handful of, scoring text varies per work, so
+#: the whole tail would swamp the log line it shares with the counters.
+_SCORING_REPORTED = 10
+
+
+def _counted(counter: Counter[str], limit: int | None = None) -> str:
+    """A counter as ``name(count)``, commonest first — the review queues' shared
+    rendering. Empty string when the counter is empty; a trailing ``+N more`` when
+    *limit* leaves anything out."""
+    if not counter:
+        return ""
+    ranked = counter.most_common()
+    shown = ranked if limit is None else ranked[:limit]
+    parts = [f"{name[:_MAX_KEY_CHARS]}({count})" for name, count in shown]
+    if len(ranked) > len(shown):
+        parts.append(f"+{len(ranked) - len(shown)} more")
+    return ", ".join(parts)
+
+
 @dataclass
 class ExtractStats:
     """What a run did, so an unattended one can be judged after the fact.
@@ -48,9 +72,11 @@ class ExtractStats:
     count separately); ``retried`` counts chunks that were split and re-asked.
     ``unknown_predicates`` is the review queue for open claim extraction: the
     predicates the model coined that :mod:`.predicates` did not recognise, and how
-    often each came up. ``carried_forward`` counts pages the extraction ledger
-    (:mod:`.ledger`) served from a prior run instead of sending to the model at
-    all — never chunked, so they add nothing to ``chunks``.
+    often each came up. ``unrecognised_scoring`` is the same queue for
+    :data:`~.instrumentation.CATEGORIES` — the scoring phrases that stayed literals
+    because no category was recognised in them. ``carried_forward`` counts pages
+    the extraction ledger (:mod:`.ledger`) served from a prior run instead of
+    sending to the model at all — never chunked, so they add nothing to ``chunks``.
     """
 
     pages: int = 0
@@ -61,6 +87,7 @@ class ExtractStats:
     claims: int = 0
     carried_forward: int = 0
     unknown_predicates: Counter[str] = field(default_factory=Counter)
+    unrecognised_scoring: Counter[str] = field(default_factory=Counter)
 
     def summary(self) -> str:
         parts = [
@@ -78,9 +105,13 @@ class ExtractStats:
     def unknown_summary(self) -> str:
         """The coined predicates, commonest first — what to fold into the
         vocabulary next. Empty string when the run met none."""
-        if not self.unknown_predicates:
-            return ""
-        return ", ".join(f"{name}({count})" for name, count in self.unknown_predicates.most_common())
+        return _counted(self.unknown_predicates)
+
+    def unrecognised_summary(self) -> str:
+        """The scoring phrases no category was recognised in, commonest first —
+        what to fold into :data:`~.instrumentation.CATEGORIES` next. Empty string
+        when the run met none."""
+        return _counted(self.unrecognised_scoring, limit=_SCORING_REPORTED)
 
 
 def _brief(exc: Exception) -> str:
