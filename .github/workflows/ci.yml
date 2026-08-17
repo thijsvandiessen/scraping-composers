@@ -26,6 +26,7 @@ jobs:
           - { member: packages/composer-extract,   cov: "--cov=composer_extract" }
           - { member: packages/composer-warehouse, cov: "--cov=composer_warehouse" }
           - { member: packages/composer-gold,      cov: "--cov=composer_gold" }
+          - { member: packages/composer-config,    cov: "--cov=composer_config" }
           - { member: apps/consumer-api,           cov: "--cov=composer_api" }
           - { member: apps/admin-api,              cov: "--cov=composer_admin" }
           - { member: apps/cli,                    cov: "--cov=composer_cli" }

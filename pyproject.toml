@@ -94,6 +94,7 @@ extraPaths = [
     "packages/composer-gold/src",
     "packages/composer-gold/tests",
     "packages/composer-config/src",
+    "packages/composer-config/tests",
     "apps/consumer-api/src",
     "apps/consumer-api/tests",
     "apps/admin-api/src",

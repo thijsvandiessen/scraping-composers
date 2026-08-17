@@ -4,6 +4,17 @@ Before opening a PR, run everything CI runs and fix anything that fails —
 CI gives no fix-up round trip on this repo (squash-merge, so a failing PR
 just blocks). All commands below run from the repo root unless noted.
 
+Run this once before anything else below:
+
+```
+uv sync --locked
+```
+
+CI uses `--locked` (fails if `uv.lock` is out of sync with a `pyproject.toml`
+instead of silently re-resolving it), while a bare `uv run ...` will happily
+paper over that drift. Do this first or a stale lockfile can pass locally and
+still fail CI.
+
 ## Tests (per workspace member)
 
 Each `packages/*` and `apps/*` member is tested independently (its own
@@ -19,8 +30,8 @@ fail CI, but a failing test will. Run the full matrix before opening a PR:
 ```
 for m in packages/composer-schema packages/composer-http packages/composer-bronze \
          packages/composer-scrapers packages/composer-crawler packages/composer-extract \
-         packages/composer-warehouse packages/composer-gold apps/consumer-api \
-         apps/admin-api apps/cli apps/dashboard; do
+         packages/composer-warehouse packages/composer-gold packages/composer-config \
+         apps/consumer-api apps/admin-api apps/cli apps/dashboard; do
   uv run --directory "$m" pytest --rootdir . -q
 done
 ```
