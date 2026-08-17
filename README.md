@@ -623,8 +623,8 @@ states, so a site nobody wrote a parser for still contributes.
 
 A sheet-music page states two things at once, and both land on the work:
 
-- facts about the piece — `written_for`, `in_key`, `catalogue_number`,
-  `composed_in`, `duration_minutes`;
+- facts about the piece — `written_for`, `includes_instrument`, `in_key`,
+  `catalogue_number`, `composed_in`, `duration_minutes`;
 - facts about the printed edition of it — `published_by`, `edited_by`,
   `fingering_by`, `edition_type`, `ismn`, `page_count`, `difficulty_level`.
 
@@ -647,9 +647,9 @@ twice over:
 The category, not the instrument, is the unit: `piano`, `string orchestra` and
 `violin and piano` are each one entity, because that is how the catalogues
 themselves are organised and because a string orchestra is not a list of
-instruments. A category that demonstrably contains a smaller one also emits it
-(`instrumentation.py`'s `CONTAINS`), so a violin sonata still answers "works for
-piano":
+instruments. A category that names instruments rather than an ensemble also emits
+them (`instrumentation.py`'s `CONTAINS`), so a violin sonata still answers "works
+for piano":
 
 ```
 Beethoven: Violin Sonata no. 5  --orchestration--> "Violine und Klavier"   (literal)
@@ -658,18 +658,66 @@ Beethoven: Violin Sonata no. 5  --orchestration--> "Violine und Klavier"   (lite
                                 --written_for----> piano                   (instrumentation)
 ```
 
-Nothing is guessed. A phrase no category is recognised in — an orchestral
-shorthand like `2.2.2.2 - 4.2.3.1 - timp - str` — keeps its literal and is
+Nothing is guessed. A phrase no category is recognised in keeps its literal and is
 *counted*, and the extract run's log names the commonest misses:
 
 ```
 claims: 412 pages, 480 chunks, 0 retried, 0 failed, 3106 claims
-  (new predicates: plate_number(88); unrecognised scoring: 2.2.2.2 - 4.2.3.1 - timp - str(31), …)
+  (new predicates: plate_number(88); unrecognised scoring: 12 solo voices(31), …)
 ```
 
 Those two lists are the review queue: fold a recurring predicate into
 `vocabulary.py`'s `ALIASES` and a recurring scoring phrase into
 `instrumentation.py`'s `CATEGORIES`, and the next run curates it.
+
+### Orchestral shorthand
+
+An orchestral catalogue does not print prose. It prints a positional notation, in
+two dialects that say the same thing (`shorthand.py`):
+
+| | Beethoven's Fifth |
+| --- | --- |
+| Chester/Novello | `3223 / 2230 / timp.perc / str[8]` |
+| Boosey & Hawkes | `3.2.2.3 - 2.2.3.0 - timp - strings[6]` |
+
+The first two sections are *positional*: four counts standing for the four standing
+woodwind desks (flute, oboe, clarinet, bassoon) and the four brass ones (horn,
+trumpet, trombone, tuba), in score order. A parenthetical says how many of a desk's
+players double on something else — `3(pic)`, `4(2pic)`, `3(III=picc)`,
+`4(III,IV=picc)` and `Dcl(=Ebcl)` all occur — and `[N]` counts the string parts.
+
+A symphony is not "a work for flute" the way a sonata is a work for piano, so the
+two are different predicates:
+
+```
+Beethoven: Symphony No. 5  --orchestration-------> "3.2.2.3 - 2.2.3.0 - timp - strings[6]"
+                           --written_for---------> orchestra
+                           --includes_instrument-> flute, oboe, clarinet, bassoon,
+                                                   horn, trumpet, trombone,
+                                                   timpani, strings
+```
+
+Both point at the same `instrumentation` entities, so `piano` is one node whether a
+sonata is for it or a symphony contains it, and "everything involving a piano" is
+the union of the two predicates. The same split applies to a named ensemble:
+`string quartet` is what the work is `written_for`, and violin/viola/cello are what
+it `includes_instrument` (`instrumentation.py`'s `MEMBERS`).
+
+Player counts and the string-part number are structure rather than facts to
+compare, so they travel in the record's `raw` payload under `"scoring"` instead of
+becoming a claim each:
+
+```json
+{"instruments": ["flute", "oboe", "…"],
+ "counts": {"flute": 3, "oboe": 2, "clarinet": 2, "bassoon": 3, "…": 1},
+ "string_parts": 6}
+```
+
+Detection is deliberately strict, because a false positive files a work under an
+ensemble it was never written for: a shorthand must name strings **and** carry at
+least one four-count section. Prose never does — it always names an instrument
+after a count — so `flute, 2 oboes, …, strings` stays on the prose path and is
+recognised as nothing rather than as a work for flute.
 
 ### Crawl recipes
 

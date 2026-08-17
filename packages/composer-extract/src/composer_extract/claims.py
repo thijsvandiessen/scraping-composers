@@ -24,7 +24,6 @@ from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 
 from .emit import LLM_SOURCE_MARKER, Document, emit_pages
 from .facts import WORK_KIND, entity_kind, object_kind, repair, stated, title_key
-from .instrumentation import parse_instrumentation
 from .ledger import DocumentLedger, LedgerContext, request_fingerprint
 from .markdown import chunk_markdown, record_markdown
 from .predicates import is_known, literal_form, normalize_predicate
@@ -32,7 +31,13 @@ from .prompt import CLAIMS_SYSTEM_PROMPT
 from .resilience import extract_chunks
 from .run import ExtractOptions, ExtractRun
 from .schema import ExtractedFact, PageClaimExtraction
-from .values import coerce_value
+from .scoring import (
+    SCORING_PREDICATES,
+    ScoringTarget,
+    add_included_instrument,
+    add_literal,
+    add_scoring,
+)
 
 log = logging.getLogger(__name__)
 
@@ -43,28 +48,21 @@ class ClaimPageExtractor(Protocol):
     def extract_claim_page(self, markdown: str, metadata: dict[str, str]) -> PageClaimExtraction: ...
 
 
-#: Longest literal stored as a claim. Claims are for facts you can query and
-#: compare; an open extractor will sooner or later hand back a whole programme
-#: note as a "value", which belongs in the record's ``raw`` payload instead of in
-#: a column other passes read.
-_MAX_CLAIM_VALUE_CHARS = 500
-
 _CLAIMS_KIND = "work_profile"
-
-#: Predicates that carry a page's stated scoring, whichever way the model
-#: expressed it — as the literal it was asked for, or as an edge it coined.
-_SCORING_PREDICATES = frozenset({"orchestration", "written_for"})
 
 
 @dataclass
-class _Subject:
-    """One thing the page makes statements about, and what it said."""
+class _Subject(ScoringTarget):
+    """One thing the page makes statements about, and what it said.
 
-    kind: str
-    label: str
-    claims: list[SourceClaim] = field(default_factory=list)
+    Extends :class:`~.scoring.ScoringTarget` so the scoring pass can write its
+    claims, long values and parsed structure straight onto a subject without
+    knowing anything else about one.
+    """
+
+    kind: str = ""
+    label: str = ""
     facts: list[dict[str, object]] = field(default_factory=list)
-    long_values: dict[str, str] = field(default_factory=dict)
 
 
 def _work_label(title: str, composer: str | None) -> str:
@@ -118,33 +116,10 @@ def _resolve(predicate: str, subject_kind: str) -> str:
     return literal_form(predicate) if subject_kind == WORK_KIND else predicate
 
 
-def _add_literal(subject: _Subject, predicate: str, raw: str) -> None:
-    """Record a literal claim, diverting one too long for the claims table."""
-    value = coerce_value(predicate, raw)
-    if len(value) > _MAX_CLAIM_VALUE_CHARS:
-        subject.long_values[predicate] = value
-        return
-    subject.claims.append(SourceClaim(predicate=predicate, value=value))
-
-
-def _add_scoring(subject: _Subject, stated_scoring: str, run: ExtractRun) -> None:
-    """Record stated scoring twice over: verbatim as the ``orchestration`` literal,
-    and as one ``written_for`` edge per scoring category named in it.
-
-    The literal is what the page said, the edges are what can be queried, so both
-    are kept. A phrase no category is recognised in yields the literal alone and is
-    counted — the queue for growing :data:`~.instrumentation.CATEGORIES`. Both the
-    model's own ``written_for`` answers and the scoring it wrote as a literal come
-    through here, so an entity is only ever created for a canonical category.
-    """
-    categories = parse_instrumentation(stated_scoring)
-    if not categories:
-        run.stats.unrecognised_scoring[" ".join(stated_scoring.split())] += 1
-    for category in categories:
-        subject.claims.append(
-            SourceClaim(predicate="written_for", object_kind="instrumentation", object_label=category)
-        )
-    _add_literal(subject, "orchestration", stated_scoring)
+def _note_scoring(run: ExtractRun, missed: str | None) -> None:
+    """Count a scoring phrase the tables could not read, for the run's report."""
+    if missed:
+        run.stats.unrecognised_scoring[missed] += 1
 
 
 def _add_fact(
@@ -160,8 +135,10 @@ def _add_fact(
     if not value_or_label:
         return
     predicate = _resolve(predicate, subject.kind)
-    if predicate in _SCORING_PREDICATES:
-        _add_scoring(subject, value_or_label, run)
+    if predicate in SCORING_PREDICATES:
+        _note_scoring(run, add_scoring(subject, value_or_label))
+    elif predicate == "includes_instrument":
+        _note_scoring(run, add_included_instrument(subject, value_or_label))
     elif (kind := object_kind(fact, predicate)) is not None:
         subject.claims.append(
             SourceClaim(
@@ -171,7 +148,7 @@ def _add_fact(
             )
         )
     else:
-        _add_literal(subject, predicate, value_or_label)
+        add_literal(subject, predicate, value_or_label)
 
 
 def _collect_subjects(facts: Iterable[ExtractedFact], run: ExtractRun) -> list[_Subject]:
@@ -224,6 +201,9 @@ def _subject_docs(
                 "url": url,
                 "facts": subject.facts,
                 **({"long_values": subject.long_values} if subject.long_values else {}),
+                # A shorthand's player counts and string-part number: structure for
+                # later analysis, not facts worth a claim each.
+                **({"scoring": subject.scoring} if subject.scoring else {}),
             },
             claims=_dedup_claims(subject.claims),
         )

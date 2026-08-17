@@ -7,17 +7,15 @@ the older name and the one the rest of the package uses.
 
 The ``claims`` extract kind lets the model name its own predicate, which is what
 makes it general: a page that states something no existing scraper models still
-yields a claim. The cost is that one fact arrives under several names —
-``composed``, ``year_composed``, ``date_of_composition`` — and ``claims`` has no
-unique constraint, so gold would accumulate near-duplicate predicates that nobody
-can query.
+yields a claim. The cost is that one fact arrives under several names — ``composed``,
+``year_composed``, ``date_of_composition`` — and ``claims`` has no unique constraint,
+so gold would accumulate near-duplicate predicates that nobody can query.
 
 So the model is *guided* rather than constrained: :data:`VOCABULARY` is listed in
-the prompt, :data:`ALIASES` folds the spellings that have been seen in practice
-back onto it, and anything still unrecognised is kept but counted, so a run
-reports which new predicates it met (see
-:class:`~.resilience.ExtractStats`). Promoting a recurring newcomer into
-:data:`VOCABULARY` or :data:`ALIASES` is how the vocabulary is meant to grow.
+the prompt, :data:`ALIASES` folds the spellings seen in practice back onto it, and
+anything still unrecognised is kept but counted, so a run reports which new
+predicates it met (see :class:`~.resilience.ExtractStats`). Promoting a recurring
+newcomer into :data:`VOCABULARY` or :data:`ALIASES` is how it is meant to grow.
 """
 
 from __future__ import annotations
@@ -70,6 +68,11 @@ _WORK_PREDICATES = (
 #: does not.
 _SCORE_PREDICATES = (
     "written_for",
+    # What is *in* the ensemble, as against what the work is *for*. A symphony is
+    # written for orchestra and includes a flute; keeping the two apart is what
+    # stops "works for flute" from returning the entire orchestral repertoire.
+    # Derived, like ``written_for``: see :mod:`.shorthand`.
+    "includes_instrument",
     "in_key",
     "catalogue_number",
     "arrangement_of",
@@ -126,6 +129,9 @@ ALIASES: dict[str, str] = {
     "scoring": "orchestration",
     "scored_for": "orchestration",
     "besetzung": "orchestration",
+    "instruments": "includes_instrument",
+    "scored_with": "includes_instrument",
+    "uses_instrument": "includes_instrument",
     "premiere_date": "first_performed_on",
     "first_performance": "first_performed_on",
     "first_performed": "first_performed_on",
@@ -269,6 +275,10 @@ OBJECT_KINDS: dict[str, str] = {
     "dedicated_to": "person",
     "premiered_at": "place",
     "written_for": "instrumentation",
+    # The same entities as ``written_for``, deliberately: "piano" is one node
+    # whether a sonata is for it or a symphony contains it, so asking for
+    # everything involving a piano is the union of the two predicates.
+    "includes_instrument": "instrumentation",
     "arrangement_of": "work",
     "part_of": "work",
     "arranged_by": "person",

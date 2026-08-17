@@ -19,6 +19,7 @@ const PREDICATE_LABELS: Record<string, string> = {
   duration_minutes: "Duration (minutes)",
   orchestration: "Instrumentation",
   written_for: "Scored for",
+  includes_instrument: "Instruments used",
   in_key: "Key",
   catalogue_number: "Catalogue number",
   arrangement_of: "Arrangement of",

@@ -7,7 +7,8 @@ the two page shapes a sheet-music catalogue is made of.
 
 from __future__ import annotations
 
-from claims_harness import _entities, _run
+from claims_harness import NOW, _entities, _run
+from composer_extract import ExtractOptions
 from composer_extract.schema import ExtractedFact, PageClaimExtraction
 from composer_schema import SourceClaim
 
@@ -163,3 +164,111 @@ def test_a_listing_page_scores_every_work_it_lists_under_the_same_heading() -> N
             )
             in work.claims
         )
+
+
+#: An orchestral catalogue's work page: the scoring is a positional shorthand, not
+#: prose. (Beethoven 5 as Boosey & Hawkes prints it.)
+_ORCHESTRAL_PAGE = PageClaimExtraction(
+    facts=[
+        ExtractedFact(
+            subject="Ludwig van Beethoven",
+            subject_kind="person",
+            predicate="composed",
+            object_kind="work",
+            object_label="Symphony No. 5",
+        ),
+        ExtractedFact(
+            subject="Symphony No. 5",
+            subject_kind="work",
+            predicate="Instrumentation",
+            value="3.2.2.3 - 2.2.3.0 - timp - strings[6]",
+        ),
+    ]
+)
+
+_WORK = "Ludwig van Beethoven: Symphony No. 5"
+
+
+def _claims(predicate: str) -> set[str | None]:
+    work = _entities(_run(_ORCHESTRAL_PAGE))[_WORK]
+    return {claim.object_label for claim in work.claims if claim.predicate == predicate}
+
+
+def test_a_shorthand_says_the_work_is_for_orchestra() -> None:
+    """Reading the notation is decoding, not inferring: a page printing woodwind,
+    brass and string desks has said "orchestra"."""
+    assert _claims("written_for") == {"orchestra"}
+
+
+def test_a_shorthand_names_its_instruments_as_included_not_as_what_it_is_for() -> None:
+    """The split the predicates exist for. A symphony contains a flute; it is not a
+    work *for* flute, and one predicate for both would put every symphony in the
+    answer to "works for piano"."""
+    assert _claims("includes_instrument") == {
+        "flute",
+        "oboe",
+        "clarinet",
+        "bassoon",
+        "horn",
+        "trumpet",
+        "trombone",
+        "timpani",
+        "strings",
+    }
+
+
+def test_a_shorthand_still_keeps_the_publishers_own_text() -> None:
+    work = _entities(_run(_ORCHESTRAL_PAGE))[_WORK]
+
+    assert (
+        SourceClaim(predicate="orchestration", value="3.2.2.3 - 2.2.3.0 - timp - strings[6]") in work.claims
+    )
+
+
+def test_a_shorthands_counts_travel_in_raw_rather_than_as_claims() -> None:
+    """Player counts and the string-part number are structure for later analysis,
+    not facts to compare, so they stay out of the claims table."""
+    work = _entities(_run(_ORCHESTRAL_PAGE))[_WORK]
+
+    scoring = work.raw["scoring"]
+    assert scoring["counts"]["flute"] == 3
+    assert scoring["string_parts"] == 6
+    assert not [c for c in work.claims if c.predicate in {"string_parts", "counts"}]
+
+
+def test_a_shorthand_is_not_counted_as_unrecognised_scoring() -> None:
+    options = ExtractOptions(now=NOW)
+    _run(_ORCHESTRAL_PAGE, options=options)
+
+    assert options.stats.unrecognised_scoring == {}
+
+
+def test_a_model_stated_instrument_is_canonicalised_before_it_becomes_an_entity() -> None:
+    """A local model puts whatever it likes in ``object_label``. Routing the
+    predicate through the same table is what stops "2 Klarinetten in B" minting an
+    entity of its own."""
+    page = PageClaimExtraction(
+        facts=[
+            ExtractedFact(
+                subject="Symphony No. 5",
+                subject_kind="work",
+                predicate="instruments",
+                object_kind="instrumentation",
+                object_label="Klavier",
+            ),
+            ExtractedFact(
+                subject="Symphony No. 5",
+                subject_kind="work",
+                predicate="instruments",
+                object_kind="instrumentation",
+                object_label="2 Klarinetten in B",
+            ),
+        ]
+    )
+    options = ExtractOptions(now=NOW)
+    work = _entities(_run(page, options=options))["Symphony No. 5"]
+
+    assert work.claims == (
+        SourceClaim(predicate="includes_instrument", object_kind="instrumentation", object_label="piano"),
+    )
+    assert options.stats.unrecognised_scoring == {"2 Klarinetten in B": 1}

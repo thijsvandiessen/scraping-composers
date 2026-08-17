@@ -61,7 +61,10 @@ CLAIMS_SYSTEM_PROMPT = (
     "orchestra', 'Piano solo' — that heading is stated about each work listed under it, so record "
     "it for each. Do not carry a heading over to works listed under a different one.\n\n"
     "Give the scoring as the page words it, in 'value' under 'orchestration': 'for string "
-    "orchestra', 'Klavier zu vier Händen'. Do not expand, translate or itemise it.\n\n"
+    "orchestra', 'Klavier zu vier Händen'. Do not expand, translate or itemise it. This applies "
+    "above all to the shorthand an orchestral catalogue prints — '3.2.2.3 - 2.2.3.0 - timp - "
+    "strings[6]' or '3223 / 2230 / timp.perc / str[8]' — which must be copied through character "
+    "for character and never spelled out into instruments.\n\n"
     "Dates as ISO-8601 (YYYY-MM-DD) when the page gives a full one. Durations in minutes. Use "
     "names exactly as written on the page; do not translate or reformat them."
 )

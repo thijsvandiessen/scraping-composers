@@ -859,6 +859,7 @@ def _seed_work_claims(session: Session, *, attributed: bool) -> None:
                 SourceClaim("duration_minutes", value="42"),
                 SourceClaim("program_note_by", value="Hugh Macdonald"),
                 SourceClaim("written_for", "instrumentation", "violin and piano"),
+                SourceClaim("includes_instrument", "instrumentation", "harp"),
             ),
         ),
         name="laphil",
@@ -899,16 +900,20 @@ def test_promote_reaches_instrumentation_two_hops_from_the_composer(session: Ses
     promote(session, gold_path)
 
     with _gold_session(gold_path) as gold:
-        scoring = gold.scalars(select(Entity).where(Entity.kind == "instrumentation")).one()
-        assert scoring.label == "violin and piano"
+        scorings = {
+            entity.label: entity.id
+            for entity in gold.scalars(select(Entity).where(Entity.kind == "instrumentation"))
+        }
+        assert set(scorings) == {"violin and piano", "harp"}
         work = gold.scalars(select(Entity).where(Entity.kind == "work")).one()
-        assert gold.scalar(
-            select(Claim).where(
-                Claim.subject_id == work.id,
-                Claim.predicate == "written_for",
-                Claim.object_id == scoring.id,
-            )
-        )
+        edges = {
+            (claim.predicate, claim.object_id)
+            for claim in gold.scalars(select(Claim).where(Claim.subject_id == work.id))
+        }
+        # Both scoring predicates reach the same kind of node, so an orchestral
+        # work's instruments survive curation exactly as a duo's scoring does.
+        assert ("written_for", scorings["violin and piano"]) in edges
+        assert ("includes_instrument", scorings["harp"]) in edges
 
 
 def test_promote_drops_an_unattributed_work_entity(session: Session, tmp_path: Path) -> None:
