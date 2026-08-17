@@ -33,7 +33,7 @@
     <td class="sc-num">{{ snapshot.size_bytes|filesizeformat }}</td>
     <td>
       {% if snapshot.kind == "documents" %}
-        {% if snapshot.status == "completed" or snapshot.status == "unknown" %}
+        {% if snapshot.status == "completed" or snapshot.status == "unknown" or snapshot.status == "failed" %}
         <form method="post" action="{% url 'process_snapshot' snapshot.source snapshot.id %}">
           {% csrf_token %}
           <button type="submit" class="sc-btn">Load into DB</button>

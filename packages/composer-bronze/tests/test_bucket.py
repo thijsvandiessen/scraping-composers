@@ -58,6 +58,25 @@ def test_records_round_trip_preserves_unicode(tmp_path: Path) -> None:
     assert list(bucket.read_records("rco", "run-1")) == records
 
 
+def test_read_records_skips_a_malformed_trailing_line(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A run killed outright mid-flush can leave a truncated last line; it
+    must not cost every record read before it."""
+    run_dir = tmp_path / "rco" / "run-1"
+    run_dir.mkdir(parents=True)
+    (run_dir / "records.ndjson").write_text(
+        '{"_type": "entity", "name": "A"}\n{"_type": "entity", "name": "B"}\n{"_type": "entity", "nam'
+    )
+
+    bucket = LocalBucket(tmp_path)
+    with caplog.at_level("WARNING"):
+        records = list(bucket.read_records("rco", "run-1"))
+
+    assert records == [{"_type": "entity", "name": "A"}, {"_type": "entity", "name": "B"}]
+    assert "malformed line 3" in caplog.text
+
+
 def test_read_records_skips_blank_lines(tmp_path: Path) -> None:
     path = tmp_path / "rco" / "run-1" / "records.ndjson"
     path.parent.mkdir(parents=True)

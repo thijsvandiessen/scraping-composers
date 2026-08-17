@@ -147,10 +147,18 @@ def test_failed_fetch_records_failed_manifest(client: TestClient, bucket_path: P
     assert manifest["status"] == "failed"
     assert "source exploded" in manifest["error"]
 
-    # a failed snapshot is not loadable
+    # a failed snapshot is still loadable — everything written before the
+    # failure is good data
     r = client.post(f"/admin/v1/snapshots/exploding/{snapshot_id}/process")
-    assert r.status_code == 409
-    assert "not loadable" in r.json()["detail"]
+    assert r.status_code == 202
+    run_id = r.json()["run_id"]
+
+    detail = client.get(f"/admin/v1/runs/{run_id}")
+    assert detail.status_code == 200
+    data = detail.json()
+    assert data["status"] == "completed"
+    assert data["records_seen"] == 1
+    assert data["records_new"] == 1
 
 
 def test_fetch_due_starts_only_due_scrapers(client: TestClient) -> None:
