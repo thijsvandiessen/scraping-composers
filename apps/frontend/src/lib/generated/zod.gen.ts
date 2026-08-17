@@ -327,6 +327,43 @@ export const zHttpValidationError = z.object({
 });
 
 /**
+ * WorkProofOut
+ */
+export const zWorkProofOut = z.object({
+    date: z.string().nullish(),
+    source: z.string(),
+    source_url: z.string().nullable(),
+    venue: z.string().nullish()
+});
+
+/**
+ * ComposerWorkOut
+ */
+export const zComposerWorkOut = z.object({
+    canonical_title: z.string(),
+    catalogue: z.string().nullable(),
+    id: z.uuid(),
+    mention_count: z.int(),
+    musical_key: z.string().nullable(),
+    number: z.int().nullable(),
+    opus_number: z.string().nullable(),
+    proof: z.array(zWorkProofOut),
+    work_type: z.string().nullable()
+});
+
+/**
+ * ComposerWorksPage
+ */
+export const zComposerWorksPage = z.object({
+    composer_id: z.uuid(),
+    composer_label: z.string(),
+    items: z.array(zComposerWorkOut),
+    limit: z.int(),
+    page: z.int(),
+    total: z.int()
+});
+
+/**
  * WorkSummary
  */
 export const zWorkSummary = z.object({
@@ -373,6 +410,21 @@ export const zGetComposerV1ComposersComposerIdGetPath = z.object({
  * Successful Response
  */
 export const zGetComposerV1ComposersComposerIdGetResponse = zComposerDetail;
+
+export const zGetComposerWorksV1ComposersComposerIdWorksGetPath = z.object({
+    composer_id: z.uuid()
+});
+
+export const zGetComposerWorksV1ComposersComposerIdWorksGetQuery = z.object({
+    sort: z.string().regex(/^(label|mentions)$/).optional().default('label'),
+    page: z.int().gte(1).optional().default(1),
+    limit: z.int().gte(1).lte(100).optional().default(20)
+});
+
+/**
+ * Successful Response
+ */
+export const zGetComposerWorksV1ComposersComposerIdWorksGetResponse = zComposerWorksPage;
 
 export const zConcertsV1ConcertsGetQuery = z.object({
     q: z.string().nullish(),

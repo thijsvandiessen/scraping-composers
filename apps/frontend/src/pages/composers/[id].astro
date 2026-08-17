@@ -1,14 +1,35 @@
 ---
 import FactValue from "../../components/FactValue.astro";
+import WorkListItem from "../../components/WorkListItem.astro";
 import Base from "../../layouts/Base.astro";
-import { getComposer } from "../../lib/api";
+import { getComposer, listComposerWorks } from "../../lib/api";
 import { METRIC_PREDICATES, predicateLabel } from "../../lib/predicates";
-import type { Claim } from "../../lib/schemas";
+import type { Claim, ComposerWorksPage } from "../../lib/schemas";
 
 const { id } = Astro.params;
 const composer = id ? await getComposer(id) : null;
 if (!composer) {
   return new Response("Composer not found", { status: 404 });
+}
+
+const rawWorksPage = Number(Astro.url.searchParams.get("page") ?? "1");
+const worksPage = Number.isInteger(rawWorksPage) && rawWorksPage >= 1 ? rawWorksPage : 1;
+
+let works: ComposerWorksPage | null = null;
+let worksError: string | null = null;
+try {
+  works = await listComposerWorks(composer.id, { page: worksPage });
+} catch (err) {
+  worksError = err instanceof Error ? err.message : String(err);
+}
+
+const worksTotalPages = works ? Math.max(1, Math.ceil(works.total / works.limit)) : 1;
+
+function worksPageUrl(target: number): string {
+  const params = new URLSearchParams();
+  if (target > 1) params.set("page", String(target));
+  const query = params.toString();
+  return query ? `/composers/${id}?${query}` : `/composers/${id}`;
 }
 
 // Biographical facts up front, source-popularity counters apart at the bottom.
@@ -61,6 +82,33 @@ const metricGroups = groupByPredicate(metrics);
           </>
         ))}
       </dl>
+    </>
+  )}
+
+  <h2>Works</h2>
+
+  {worksError && (
+    <div class="error-box">
+      <strong>The composer API is unavailable.</strong>
+      <p>{worksError}</p>
+    </div>
+  )}
+
+  {works && works.items.length === 0 && <p class="empty">No works recorded for this composer yet.</p>}
+
+  {works && works.items.length > 0 && (
+    <>
+      <ul class="work-list">
+        {works.items.map((work) => <WorkListItem work={work} />)}
+      </ul>
+      <nav class="pagination" aria-label="Works pagination">
+        {worksPage > 1 && <a href={worksPageUrl(worksPage - 1)}>← Previous</a>}
+        {worksPage < worksTotalPages && <a href={worksPageUrl(worksPage + 1)}>Next →</a>}
+        <span class="spacer" />
+        <span class="summary">
+          page {worksPage} of {worksTotalPages} — {works.total} work{works.total === 1 ? "" : "s"}
+        </span>
+      </nav>
     </>
   )}
 </Base>

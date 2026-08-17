@@ -199,6 +199,48 @@ h2 {
   text-transform: uppercase;
 }
 
+/* --- works --- */
+
+.work-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.work-item {
+  padding: 0.6rem 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.work-title {
+  font-weight: 600;
+}
+
+.work-meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0.1rem;
+}
+
+.work-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.work-proof-entry {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+
+.work-proof-date {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 /* --- source attribution --- */
 
 .source-chip {
