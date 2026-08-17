@@ -8,6 +8,7 @@ A :class:`~composer_bronze.scraper.Scraper` drives any
 
 from .bucket import (
     DEFAULT_BUCKET_PATH,
+    EXPLICITLY_LOADABLE_STATUSES,
     LOADABLE_STATUSES,
     Bucket,
     LocalBucket,
@@ -18,6 +19,7 @@ from .scraper import Scraper, iter_from_bucket, new_snapshot_id
 
 __all__ = [
     "DEFAULT_BUCKET_PATH",
+    "EXPLICITLY_LOADABLE_STATUSES",
     "LOADABLE_STATUSES",
     "Bucket",
     "LocalBucket",

@@ -16,6 +16,7 @@ requires no changes to the callers.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, replace
@@ -25,6 +26,8 @@ from typing import Any, Protocol
 
 from composer_config import settings
 
+log = logging.getLogger(__name__)
+
 DEFAULT_BUCKET_PATH = settings.bucket_path
 
 MANIFEST_FILENAME = "manifest.json"
@@ -32,6 +35,13 @@ MANIFEST_FILENAME = "manifest.json"
 # Snapshot statuses. "unknown" is never stored: it is synthesized for legacy
 # snapshot dirs that predate the manifest.
 LOADABLE_STATUSES = ("completed", "unknown")
+
+#: Like LOADABLE_STATUSES, plus "failed" — for the one place a human
+#: explicitly picks *this* snapshot rather than "the latest": records are
+#: flushed one at a time (see write_records), so everything written before a
+#: failed run's crash is still good data, worth an informed opt-in even
+#: though "latest" auto-pick should keep skipping unreviewed failures.
+EXPLICITLY_LOADABLE_STATUSES = LOADABLE_STATUSES + ("failed",)
 
 # Record ``_type`` values that make a snapshot loadable into the warehouse.
 # A crawl source's dir mixes these "documents" snapshots (written by scrape or
@@ -158,10 +168,20 @@ class LocalBucket:
     def read_records(self, source: str, run_id: str) -> Iterator[dict[str, Any]]:
         path = self._ndjson_path(source, run_id)
         with path.open(encoding="utf-8") as fh:
-            for line in fh:
+            for lineno, line in enumerate(fh, start=1):
                 line = line.strip()
-                if line:
+                if not line:
+                    continue
+                try:
                     yield json.loads(line)
+                except json.JSONDecodeError:
+                    # A run killed outright mid-flush (see write_records) can leave a
+                    # truncated trailing line; skip it rather than losing every record
+                    # read before it. Sanitize defensively at the sink so log
+                    # formatting stays single-line even if upstream validation changes.
+                    source_log = source.replace("\r", "").replace("\n", "")
+                    run_id_log = run_id.replace("\r", "").replace("\n", "")
+                    log.warning("bucket: skipping malformed line %d in %r/%r", lineno, source_log, run_id_log)
 
     def list_runs(self, source: str) -> list[str]:
         _validated_segment(source, "source")

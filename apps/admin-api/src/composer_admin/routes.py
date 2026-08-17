@@ -3,7 +3,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Annotated
 
-from composer_bronze.bucket import LOADABLE_STATUSES, Snapshot
+from composer_bronze.bucket import EXPLICITLY_LOADABLE_STATUSES, Snapshot
 from composer_bronze.scraper import Scraper, new_snapshot_id
 from composer_scrapers import REGISTRY, SourceAdapter, is_due
 from composer_warehouse.ingestion import create_run
@@ -157,7 +157,7 @@ def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: B
     snapshots are the ``documents`` the LLM ``extract`` step wrote.
     """
     snapshot = snapshot_or_404(bucket(), source, snapshot_id)
-    if snapshot.manifest.status not in LOADABLE_STATUSES:
+    if snapshot.manifest.status not in EXPLICITLY_LOADABLE_STATUSES:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"snapshot {source}/{snapshot_id} is not loadable (status: {snapshot.manifest.status})",
