@@ -1,12 +1,4 @@
-"""Gemini-backed extractor: one generateContent call per markdown chunk, structured JSON output.
-
-Mirrors :class:`~.client.OllamaExtractor`'s public surface (``model``,
-``request_options``, ``with_cache``, ``extract_page``/``extract_recording_page``/
-``extract_claim_page``) so :mod:`.provider` can hand either one to the same
-extraction pipeline. The ``post`` callable is injectable so tests can stand in
-for a live API, the same seam ``OllamaExtractor`` uses for ``chat``. The
-Pydantic-to-``responseSchema`` translation lives in :mod:`.gemini_schema`.
-"""
+"""extractor: one generateContent call per markdown chunk, structured JSON output."""
 
 from __future__ import annotations
 
@@ -22,8 +14,15 @@ from composer_http import call_with_retries
 from pydantic import BaseModel
 
 from .cache import ExtractCache, request_key
+from .gemini_pacing import RequestGovernor
+from .gemini_rate_limits import rate_limit_for
 from .gemini_schema import to_gemini_schema
-from .prompt import CLAIMS_SYSTEM_PROMPT, RECORDING_SYSTEM_PROMPT, SYSTEM_PROMPT, build_user_prompt
+from .prompt import (
+    CLAIMS_SYSTEM_PROMPT,
+    RECORDING_SYSTEM_PROMPT,
+    SYSTEM_PROMPT,
+    build_user_prompt,
+)
 from .schema import PageClaimExtraction, PageExtraction, PageRecordingExtraction
 
 log = logging.getLogger(__name__)
@@ -104,14 +103,24 @@ class GeminiExtractor:
         self._tuning = tuning if tuning is not None else GeminiTuning()
         self._timeout_s = timeout_s
         self._post: PostFn = post if post is not None else self._http_post
-        # Attached after construction rather than a seventh __init__ argument:
-        # ruff's max-args is 5 and the signature above is already at the limit.
+        # Attached after construction rather than __init__ arguments: ruff's
+        # max-args is 5 and the signature above is already at the limit.
         self._cache: ExtractCache | None = None
+        self._governor = RequestGovernor()
 
     def with_cache(self, cache: ExtractCache | None) -> GeminiExtractor:
-        """Consult *cache* before asking the model. Mutates, and returns ``self``
-        so it can be chained straight onto a constructor call."""
+        """Consult *cache* before asking the model."""
         self._cache = cache
+        return self
+
+    def with_pacing(self, min_interval_s: float) -> GeminiExtractor:
+        """Hold at least *min_interval_s* between successive requests."""
+        self._governor.with_pacing(min_interval_s)
+        return self
+
+    def with_daily_limit(self, max_requests_per_day: int) -> GeminiExtractor:
+        """Refuse to send more than *max_requests_per_day* requests."""
+        self._governor.with_daily_limit(max_requests_per_day)
         return self
 
     @property
@@ -119,41 +128,69 @@ class GeminiExtractor:
         return self._model
 
     def request_options(self) -> dict[str, Any]:
-        """The generation options every call uses — part of :func:`.ledger.request_fingerprint`,
-        since a changed option changes the answer as much as a changed prompt does."""
+        """The generation options every call uses"""
         return self._tuning.options()
 
     @classmethod
     def from_settings(
-        cls, *, model: str | None = None, post: PostFn | None = None, cache: ExtractCache | None = None
+        cls,
+        *,
+        model: str | None = None,
+        post: PostFn | None = None,
+        cache: ExtractCache | None = None,
     ) -> GeminiExtractor:
         if not settings.google_ai_api_key:
             raise RuntimeError("GOOGLE_AI_API_KEY is not set; required to use the gemini extraction provider")
         resolved = model or settings.google_ai_model
+        model_min_interval, model_max_requests_per_day = rate_limit_for(resolved)
+        min_interval_s = (
+            settings.google_ai_min_interval_s
+            if settings.google_ai_min_interval_s is not None
+            else model_min_interval
+        )
+        max_requests_per_day = (
+            settings.google_ai_max_requests_per_day
+            if settings.google_ai_max_requests_per_day is not None
+            else model_max_requests_per_day
+        )
         log.info(
-            "extract: using gemini model %s (max_output_tokens=%s, timeout=%.0fs)",
+            "extract: using gemini model %s (max_output_tokens=%s, timeout=%.0fs, "
+            "min_interval_s=%.1f, max_requests_per_day=%d)",
             resolved,
             settings.google_ai_max_output_tokens,
             settings.google_ai_timeout_s,
+            min_interval_s,
+            max_requests_per_day,
         )
-        return cls(
-            model=resolved,
-            api_key=settings.google_ai_api_key,
-            tuning=GeminiTuning(max_output_tokens=settings.google_ai_max_output_tokens),
-            timeout_s=settings.google_ai_timeout_s,
-            post=post,
-        ).with_cache(cache)
+        return (
+            cls(
+                model=resolved,
+                api_key=settings.google_ai_api_key,
+                tuning=GeminiTuning(max_output_tokens=settings.google_ai_max_output_tokens),
+                timeout_s=settings.google_ai_timeout_s,
+                post=post,
+            )
+            .with_cache(cache)
+            .with_pacing(min_interval_s)
+            .with_daily_limit(max_requests_per_day)
+        )
 
     def _http_post(
-        self, *, model: str, system_prompt: str, user_prompt: str, schema: dict[str, Any]
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_prompt: str,
+        schema: dict[str, Any],
     ) -> dict[str, Any]:
         def do() -> dict[str, Any]:
-            # Read at call time, not construction time, so GOOGLE_AI_BASE_URL can
-            # be set after this extractor is built (composer_http.contact_email
-            # does the same for the same reason).
+            self._governor.before_request()
             response = httpx.post(
                 f"{settings.google_ai_base_url}/models/{model}:generateContent",
-                headers={"X-goog-api-key": self._api_key, "Content-Type": "application/json"},
+                headers={
+                    "X-goog-api-key": self._api_key,
+                    "Content-Type": "application/json",
+                },
                 json={
                     "contents": [{"parts": [{"text": user_prompt}]}],
                     "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -168,21 +205,10 @@ class GeminiExtractor:
             response.raise_for_status()
             return response.json()
 
-        # A free-tier per-minute quota (429) needs longer than composer_http's
-        # default 3-attempt backoff (2s+4s) to clear; without this an extract run
-        # aborted wholesale on the first rate-limited chunk rather than pausing
-        # past it. Gemini does not send a Retry-After header, so this falls back
-        # to plain exponential backoff (call_with_retries still honours one if a
-        # future response includes it).
-        return call_with_retries(do, label=f"gemini {model}", retries=5)
+        return call_with_retries(do, label=f"gemini {model}", retries=7)
 
     def _from_cache(self, key: str, schema: type[_M]) -> _M | None:
-        """A previously stored answer for *key*, or None on a miss.
-
-        A stored answer that no longer validates (the schema changed shape under
-        it, or the row is damaged) is dropped rather than raised, so one bad entry
-        costs a single model call instead of failing the page.
-        """
+        """A previously stored answer for *key*, or None on a miss."""
         if self._cache is None:
             return None
         payload = self._cache.get(key)
@@ -191,11 +217,21 @@ class GeminiExtractor:
         try:
             return schema.model_validate_json(payload)
         except ValueError as exc:
-            log.warning("extract: cached %s no longer validates (%s); re-asking", schema.__name__, exc)
+            log.warning(
+                "extract: cached %s no longer validates (%s); re-asking",
+                schema.__name__,
+                exc,
+            )
             self._cache.delete(key)
             return None
 
-    def _extract(self, markdown: str, metadata: dict[str, str], system_prompt: str, schema: type[_M]) -> _M:
+    def _extract(
+        self,
+        markdown: str,
+        metadata: dict[str, str],
+        system_prompt: str,
+        schema: type[_M],
+    ) -> _M:
         user_prompt = build_user_prompt(markdown, metadata)
         pydantic_schema = schema.model_json_schema()
         options = self.request_options()
@@ -208,7 +244,11 @@ class GeminiExtractor:
         )
         cached = self._from_cache(key, schema)
         if cached is not None:
-            log.debug("extract: reusing the cached %s for %d chars", schema.__name__, len(markdown))
+            log.debug(
+                "extract: reusing the cached %s for %d chars",
+                schema.__name__,
+                len(markdown),
+            )
             return cached
         log.debug(
             "extract: asking %s for %s from %d chars of markdown (%d metadata key(s))",
@@ -226,8 +266,6 @@ class GeminiExtractor:
         )
         content = _response_text(response)
         _log_response(self._model, response, len(content), time.monotonic() - started)
-        # Validated before it is stored, so unusable output — the truncated JSON
-        # .resilience retries on — is never cached.
         extraction = schema.model_validate_json(content)
         if self._cache is not None:
             self._cache.put(key, model=self._model, schema_name=schema.__name__, response=content)

@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     # Same role as ollama_num_predict: a hard cap on generated tokens.
     google_ai_max_output_tokens: int = 4096
     google_ai_timeout_s: float = 300.0
+    google_ai_min_interval_s: float | None = None
+    google_ai_max_requests_per_day: int | None = None
     # Cap the markdown handed to the model in one call; larger pages are split.
     extract_max_chars: int = 24000
     # Give up on a run after this many chunks in a row yield unusable output:
