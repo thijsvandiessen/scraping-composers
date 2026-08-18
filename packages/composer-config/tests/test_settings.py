@@ -26,11 +26,17 @@ def test_defaults() -> None:
     assert s.scraper_contact_email is None
     assert s.admin_api_key is None
     assert s.log_level == "INFO"
+    assert s.llm_provider == "ollama"
     assert s.ollama_base_url == "http://localhost:11434"
     assert s.ollama_model == "qwen2.5"
     assert s.ollama_num_ctx == 16384
     assert s.ollama_num_predict == 4096
     assert s.ollama_timeout_s == 300.0
+    assert s.google_ai_api_key is None
+    assert s.google_ai_model == "gemini-flash-lite-latest"
+    assert s.google_ai_base_url == "https://generativelanguage.googleapis.com/v1beta"
+    assert s.google_ai_max_output_tokens == 4096
+    assert s.google_ai_timeout_s == 300.0
     assert s.extract_max_chars == 24000
     assert s.extract_max_consecutive_failures == 25
     assert s.extract_cache_path == "./extract-cache.db"

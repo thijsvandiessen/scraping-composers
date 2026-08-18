@@ -1,13 +1,15 @@
 [project]
 name = "composer-extract"
 version = "0.1.0"
-description = "LLM (Ollama) extraction of concerts and performers from crawled pages"
+description = "LLM extraction of concerts and performers from crawled pages"
 requires-python = ">=3.12"
 dependencies = [
     "composer-schema",
     "composer-crawler",
     "composer-config",
+    "composer-http",
     "ollama>=0.4",
+    "httpx",
     "pydantic>=2",
 ]
 
@@ -25,3 +27,4 @@ testpaths = ["tests"]
 composer-schema = { workspace = true }
 composer-crawler = { workspace = true }
 composer-config = { workspace = true }
+composer-http = { workspace = true }
