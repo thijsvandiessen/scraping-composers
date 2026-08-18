@@ -37,6 +37,8 @@ def test_defaults() -> None:
     assert s.google_ai_base_url == "https://generativelanguage.googleapis.com/v1beta"
     assert s.google_ai_max_output_tokens == 4096
     assert s.google_ai_timeout_s == 300.0
+    assert s.google_ai_min_interval_s is None
+    assert s.google_ai_max_requests_per_day is None
     assert s.extract_max_chars == 24000
     assert s.extract_max_consecutive_failures == 25
     assert s.extract_cache_path == "./extract-cache.db"
