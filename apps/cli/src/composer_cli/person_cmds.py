@@ -1,7 +1,7 @@
 import argparse
 
-from composer_warehouse.db import get_engine, init_db
-from composer_warehouse.models import PersonMatch
+from composer_models import PersonMatch
+from composer_models.db import get_engine, init_db
 from composer_warehouse.persons import dedupe_persons
 from sqlalchemy import select
 

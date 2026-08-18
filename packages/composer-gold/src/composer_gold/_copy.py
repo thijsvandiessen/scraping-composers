@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
-from composer_warehouse.models import (
+from composer_models import (
     Concert,
     ConcertParticipant,
     ConcertWork,

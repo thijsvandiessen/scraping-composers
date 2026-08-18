@@ -6,6 +6,7 @@ exclude = ["apps/frontend"]
 
 [tool.uv.sources]
 composer-schema = { workspace = true }
+composer-models = { workspace = true }
 composer-http = { workspace = true }
 composer-bronze = { workspace = true }
 composer-scrapers = { workspace = true }
@@ -79,6 +80,8 @@ include = ["packages", "apps"]
 extraPaths = [
     "packages/composer-schema/src",
     "packages/composer-schema/tests",
+    "packages/composer-models/src",
+    "packages/composer-models/tests",
     "packages/composer-http/src",
     "packages/composer-http/tests",
     "packages/composer-bronze/src",

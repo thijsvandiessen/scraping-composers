@@ -27,7 +27,7 @@ from composer_crawler.testing import (
     web_crawler_factory,
 )
 from composer_extract import ExtractedConcert, ExtractedWork, PageExtraction
-from composer_warehouse.db import init_db
+from composer_models.db import init_db
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker

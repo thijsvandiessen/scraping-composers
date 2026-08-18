@@ -5,6 +5,7 @@ description = "Gold tier: promote the warehouse staging DB into a curated, dedup
 requires-python = ">=3.11"
 dependencies = [
     "composer-config",
+    "composer-models",
     "composer-warehouse",
     "sqlalchemy>=2.0.51",
 ]

@@ -522,18 +522,20 @@ Libraries under `packages/` (each depends only on the tiers below it):
 
 - `composer-config` — the one pydantic-settings `Settings` object every other member reads
 - `composer-schema` — source contracts (document types + the `SourceAdapter` interface), zero heavy deps
+- `composer-models` — the ORM schema shared by the silver and gold DBs, engine helpers, and the
+  dedup keys / seeded entity UUIDs that define entity identity
 - `composer-http` — the polite User-Agent (contact identity) and retrying HTTP helpers, shared by
   `composer-scrapers` and `composer-crawler`
 - `composer-bronze` — the raw NDJSON bucket and fetch orchestration
 - `composer-scrapers` — the per-source adapters and `REGISTRY`
 - `composer-crawler` — the generic config-driven crawl4ai crawler, into the same bucket
 - `composer-extract` — local-LLM (Ollama) extraction of concerts/recordings from crawled pages
-- `composer-warehouse` — the silver staging DB: ORM models, ingestion, and person/work matching
+- `composer-warehouse` — the silver staging DB: ingestion and person/work matching
 - `composer-gold` — promotion of the staging DB into a curated copy
 
 Apps under `apps/`:
 
-- `consumer-api` — the read-only product API (depends on warehouse + gold only)
+- `consumer-api` — the read-only product API (depends on models + gold only)
 - `admin-api` — the scrape/ingest/promote orchestration API (depends on every tier)
 - `cli` — the command-line pipeline
 - `dashboard` — the Django UI (a pure HTTP client of the two APIs)
@@ -542,6 +544,7 @@ Apps under `apps/`:
 # tests run per member (each owns its pytest config; the Django settings stay
 # scoped to the dashboard) — mock sources, in-memory SQLite, no network:
 uv run --directory packages/composer-schema pytest
+uv run --directory packages/composer-models pytest
 uv run --directory packages/composer-http pytest
 uv run --directory packages/composer-bronze pytest
 uv run --directory packages/composer-scrapers pytest

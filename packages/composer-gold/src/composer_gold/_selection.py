@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from composer_warehouse.models import (
+from composer_models import (
     Claim,
     ConcertParticipant,
     Entity,

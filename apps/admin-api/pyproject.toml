@@ -8,6 +8,7 @@ dependencies = [
     "composer-crawler",
     "composer-extract",
     "composer-scrapers",
+    "composer-models",
     "composer-warehouse",
     "composer-gold",
     "fastapi>=0.141.1",

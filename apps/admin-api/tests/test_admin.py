@@ -18,12 +18,12 @@ import composer_admin.snapshots as admin_snapshots
 import pytest
 from composer_admin import admin_app
 from composer_bronze.bucket import LocalBucket, SnapshotManifest
+from composer_models.db import init_db
 from composer_schema import (
     EntityDocument,
     RefreshCadence,
     SourceAdapter,
 )
-from composer_warehouse.db import init_db
 from composer_warehouse.ingestion import create_run
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine

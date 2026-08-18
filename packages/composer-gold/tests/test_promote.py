@@ -11,10 +11,7 @@ from composer_gold import (
     promote,
     read_gold_manifest,
 )
-from composer_schema import EntityDocument, SourceClaim
-from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.db import init_db
-from composer_warehouse.models import (
+from composer_models import (
     Claim,
     Concert,
     ConcertParticipant,
@@ -23,6 +20,9 @@ from composer_warehouse.models import (
     Recording,
     Work,
 )
+from composer_models.db import init_db
+from composer_schema import EntityDocument, SourceClaim
+from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import (
     FakeSource,

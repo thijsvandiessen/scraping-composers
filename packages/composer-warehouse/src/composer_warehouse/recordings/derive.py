@@ -17,11 +17,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from composer_models import Entity, RawWorkMention, Recording, RecordingParticipant, RecordingWork, Source
+from composer_models.normalize import dedup_key
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from ..models import Entity, RawWorkMention, Recording, RecordingParticipant, RecordingWork, Source
-from ..normalize import dedup_key
 from .cluster import Key, cluster_recordings, participant_key
 
 INSERT_BATCH = 1000

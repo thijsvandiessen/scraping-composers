@@ -28,7 +28,7 @@ Coverage is report-only (no `--cov-fail-under` yet) — a coverage drop won't
 fail CI, but a failing test will. Run the full matrix before opening a PR:
 
 ```
-for m in packages/composer-schema packages/composer-http packages/composer-bronze \
+for m in packages/composer-schema packages/composer-models packages/composer-http packages/composer-bronze \
          packages/composer-scrapers packages/composer-crawler packages/composer-extract \
          packages/composer-warehouse packages/composer-gold packages/composer-config \
          apps/consumer-api apps/admin-api apps/cli apps/dashboard; do

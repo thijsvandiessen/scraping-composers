@@ -1,9 +1,9 @@
 import argparse
 import uuid
 
-from composer_warehouse.db import get_engine, init_db
+from composer_models import Entity, RawWorkMention, Work, WorkTitle
+from composer_models.db import get_engine, init_db
 from composer_warehouse.ingestion import new_work
-from composer_warehouse.models import Entity, RawWorkMention, Work, WorkTitle
 from composer_warehouse.works import Candidate, add_alias, extract_features, resolve
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import aliased

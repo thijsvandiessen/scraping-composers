@@ -5,11 +5,11 @@ import uuid
 from collections.abc import Iterator
 from datetime import datetime
 
+from composer_models import Claim, EntityRecord, IngestRun, RawWorkMention, Source, utcnow
 from composer_schema import EntityDocument, WorkMentionDocument
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from ..models import Claim, EntityRecord, IngestRun, RawWorkMention, Source, utcnow
 from .entities import flush_entity_timestamps, get_or_create_entity
 from .mentions import ingest_mention
 from .state import IngestState, content_hash, load_state

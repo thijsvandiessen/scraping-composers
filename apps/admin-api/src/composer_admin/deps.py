@@ -3,7 +3,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Annotated
 
-from composer_warehouse.db import get_engine, init_db
+from composer_models.db import get_engine, init_db
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker

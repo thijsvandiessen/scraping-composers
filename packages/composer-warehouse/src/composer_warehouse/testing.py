@@ -10,6 +10,8 @@ in the rootdir conftest); test modules import the factories below directly. The 
 from collections.abc import Iterator
 
 import pytest
+from composer_models import IngestRun
+from composer_models.db import get_engine, init_db
 from composer_schema import SourceAdapter
 from composer_schema.testing import (
     FakeSource as FakeSource,
@@ -28,9 +30,7 @@ from composer_schema.testing import (
 )
 from sqlalchemy.orm import Session
 
-from composer_warehouse.db import get_engine, init_db
 from composer_warehouse.ingestion import ingest_documents
-from composer_warehouse.models import IngestRun
 
 
 @pytest.fixture

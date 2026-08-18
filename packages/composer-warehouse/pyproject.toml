@@ -1,17 +1,17 @@
 [project]
 name = "composer-warehouse"
 version = "0.1.0"
-description = "Warehouse (silver) tier: ORM models, ingestion, and person/work matching over the staging DB"
+description = "Warehouse (silver) tier: ingestion and person/work matching over the staging DB"
 requires-python = ">=3.11"
 dependencies = [
     "composer-bronze",
     "composer-config",
+    "composer-models",
     "composer-schema",
     "sqlalchemy>=2.0.51",
 ]
 
 [project.optional-dependencies]
-postgres = ["psycopg[binary]>=3.3.4"]
 # Pulled in by consumers that load the shared `composer_warehouse.testing` plugin.
 testing = ["composer-schema[testing]", "pytest>=9.1.1"]
 

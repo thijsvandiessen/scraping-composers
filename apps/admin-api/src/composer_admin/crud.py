@@ -1,4 +1,4 @@
-from composer_warehouse.models import IngestRun, Source
+from composer_models import IngestRun, Source
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

@@ -5,9 +5,9 @@ from typing import Annotated
 
 from composer_bronze.bucket import EXPLICITLY_LOADABLE_STATUSES, Snapshot
 from composer_bronze.scraper import Scraper, new_snapshot_id
+from composer_models import utcnow
 from composer_scrapers import REGISTRY, SourceAdapter, is_due
 from composer_warehouse.ingestion import create_run
-from composer_warehouse.models import utcnow
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from .crud import get_run, has_running, list_runs

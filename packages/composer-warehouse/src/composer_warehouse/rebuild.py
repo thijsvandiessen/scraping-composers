@@ -33,14 +33,14 @@ from pathlib import Path
 
 from composer_bronze.bucket import LOADABLE_STATUSES, Bucket
 from composer_bronze.scraper import iter_from_bucket
+from composer_models import Entity, PersonMatch, RawWorkMention, Source, Work
+from composer_models.db import init_db
 from sqlalchemy import create_engine, make_url, select
 from sqlalchemy.orm import Session
 
 from .build import run_build
 from .concerts import derive_concerts
-from .db import init_db
 from .ingestion import ingest_documents, new_work
-from .models import Entity, PersonMatch, RawWorkMention, Source, Work
 from .persons import dedupe_persons
 from .recordings import derive_recordings
 from .works import add_alias, extract_features

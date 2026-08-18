@@ -1,6 +1,6 @@
 import uuid
 
-from composer_warehouse.models import (
+from composer_models import (
     Entity,
     RawWorkMention,
     Recording,

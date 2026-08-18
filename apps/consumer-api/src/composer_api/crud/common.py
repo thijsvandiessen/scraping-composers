@@ -1,6 +1,6 @@
 import uuid
 
-from composer_warehouse.models import Claim, Entity, EntityRecord, Source
+from composer_models import Claim, Entity, EntityRecord, Source
 from sqlalchemy import select
 from sqlalchemy.orm import Session, aliased
 

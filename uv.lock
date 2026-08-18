@@ -24,6 +24,7 @@ members = [
     "composer-extract",
     "composer-gold",
     "composer-http",
+    "composer-models",
     "composer-schema",
     "composer-scrapers",
     "composer-warehouse",
@@ -585,6 +586,7 @@ dependencies = [
     { name = "composer-crawler" },
     { name = "composer-extract" },
     { name = "composer-gold" },
+    { name = "composer-models" },
     { name = "composer-scrapers" },
     { name = "composer-warehouse" },
     { name = "fastapi" },
@@ -599,6 +601,7 @@ requires-dist = [
     { name = "composer-crawler", editable = "packages/composer-crawler" },
     { name = "composer-extract", editable = "packages/composer-extract" },
     { name = "composer-gold", editable = "packages/composer-gold" },
+    { name = "composer-models", editable = "packages/composer-models" },
     { name = "composer-scrapers", editable = "packages/composer-scrapers" },
     { name = "composer-warehouse", editable = "packages/composer-warehouse" },
     { name = "fastapi", specifier = ">=0.141.1" },
@@ -631,6 +634,7 @@ dependencies = [
     { name = "composer-crawler" },
     { name = "composer-extract" },
     { name = "composer-gold" },
+    { name = "composer-models" },
     { name = "composer-scrapers" },
     { name = "composer-warehouse" },
     { name = "python-dotenv" },
@@ -643,6 +647,7 @@ requires-dist = [
     { name = "composer-crawler", editable = "packages/composer-crawler" },
     { name = "composer-extract", editable = "packages/composer-extract" },
     { name = "composer-gold", editable = "packages/composer-gold" },
+    { name = "composer-models", editable = "packages/composer-models" },
     { name = "composer-scrapers", editable = "packages/composer-scrapers" },
     { name = "composer-warehouse", editable = "packages/composer-warehouse" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
@@ -666,7 +671,7 @@ source = { editable = "apps/consumer-api" }
 dependencies = [
     { name = "composer-config" },
     { name = "composer-gold" },
-    { name = "composer-warehouse" },
+    { name = "composer-models" },
     { name = "fastapi" },
     { name = "python-dotenv" },
     { name = "uvicorn", extra = ["standard"] },
@@ -676,7 +681,7 @@ dependencies = [
 requires-dist = [
     { name = "composer-config", editable = "packages/composer-config" },
     { name = "composer-gold", editable = "packages/composer-gold" },
-    { name = "composer-warehouse", editable = "packages/composer-warehouse" },
+    { name = "composer-models", editable = "packages/composer-models" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.1" },
@@ -751,6 +756,7 @@ version = "0.1.0"
 source = { editable = "packages/composer-gold" }
 dependencies = [
     { name = "composer-config" },
+    { name = "composer-models" },
     { name = "composer-warehouse" },
     { name = "sqlalchemy" },
 ]
@@ -758,6 +764,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "composer-config", editable = "packages/composer-config" },
+    { name = "composer-models", editable = "packages/composer-models" },
     { name = "composer-warehouse", editable = "packages/composer-warehouse" },
     { name = "sqlalchemy", specifier = ">=2.0.51" },
 ]
@@ -776,6 +783,28 @@ requires-dist = [
     { name = "composer-config", editable = "packages/composer-config" },
     { name = "httpx", specifier = ">=0.27" },
 ]
+
+[[package]]
+name = "composer-models"
+version = "0.1.0"
+source = { editable = "packages/composer-models" }
+dependencies = [
+    { name = "composer-config" },
+    { name = "sqlalchemy" },
+]
+
+[package.optional-dependencies]
+postgres = [
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "composer-config", editable = "packages/composer-config" },
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.3.4" },
+    { name = "sqlalchemy", specifier = ">=2.0.51" },
+]
+provides-extras = ["postgres"]
 
 [[package]]
 name = "composer-schema"
@@ -798,6 +827,7 @@ source = { editable = "packages/composer-scrapers" }
 dependencies = [
     { name = "composer-config" },
     { name = "composer-http" },
+    { name = "composer-models" },
     { name = "composer-schema" },
     { name = "docling" },
     { name = "httpx" },
@@ -809,6 +839,7 @@ dependencies = [
 requires-dist = [
     { name = "composer-config", editable = "packages/composer-config" },
     { name = "composer-http", editable = "packages/composer-http" },
+    { name = "composer-models", editable = "packages/composer-models" },
     { name = "composer-schema", editable = "packages/composer-schema" },
     { name = "docling", specifier = ">=2.117.0" },
     { name = "httpx", specifier = ">=0.27" },
@@ -823,14 +854,12 @@ source = { editable = "packages/composer-warehouse" }
 dependencies = [
     { name = "composer-bronze" },
     { name = "composer-config" },
+    { name = "composer-models" },
     { name = "composer-schema" },
     { name = "sqlalchemy" },
 ]
 
 [package.optional-dependencies]
-postgres = [
-    { name = "psycopg", extra = ["binary"] },
-]
 testing = [
     { name = "composer-schema", extra = ["testing"] },
     { name = "pytest" },
@@ -840,13 +869,13 @@ testing = [
 requires-dist = [
     { name = "composer-bronze", editable = "packages/composer-bronze" },
     { name = "composer-config", editable = "packages/composer-config" },
+    { name = "composer-models", editable = "packages/composer-models" },
     { name = "composer-schema", editable = "packages/composer-schema" },
     { name = "composer-schema", extras = ["testing"], marker = "extra == 'testing'", editable = "packages/composer-schema" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.3.4" },
     { name = "pytest", marker = "extra == 'testing'", specifier = ">=9.1.1" },
     { name = "sqlalchemy", specifier = ">=2.0.51" },
 ]
-provides-extras = ["postgres", "testing"]
+provides-extras = ["testing"]
 
 [[package]]
 name = "coverage"

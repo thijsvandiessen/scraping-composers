@@ -1,7 +1,7 @@
 """Warehouse tier: the silver staging database.
 
 Ingestion writes every source's records here verbatim with provenance
-(``models`` + ``ingestion``); ``persons`` and ``works`` resolve and dedupe
-entities; ``normalize`` provides the shared dedup keys. The gold tier promotes
-a curated copy from this database.
+(``ingestion``, over the shared ``composer_models`` schema); ``persons`` and
+``works`` resolve and dedupe entities using ``composer_models.normalize``'s
+dedup keys. The gold tier promotes a curated copy from this database.
 """

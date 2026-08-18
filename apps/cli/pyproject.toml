@@ -8,6 +8,7 @@ dependencies = [
     "composer-crawler",
     "composer-extract",
     "composer-scrapers",
+    "composer-models",
     "composer-warehouse",
     "composer-gold",
     "python-dotenv>=1.2.2",

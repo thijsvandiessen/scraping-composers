@@ -8,7 +8,7 @@ from composer_config import settings
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import Base
+from . import Base
 
 
 def get_engine(url: str | None = None) -> Engine:

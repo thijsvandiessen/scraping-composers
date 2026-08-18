@@ -1,6 +1,6 @@
 import uuid
 
-from composer_warehouse.models import (
+from composer_models import (
     Claim,
     Entity,
     EntityRecord,
@@ -10,7 +10,7 @@ from composer_warehouse.models import (
     Work,
     WorkTitle,
 )
-from composer_warehouse.normalize import dedup_key
+from composer_models.normalize import dedup_key
 from sqlalchemy import Select, UnaryExpression, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
