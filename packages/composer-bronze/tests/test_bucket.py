@@ -12,6 +12,7 @@ from composer_bronze.bucket import (
     LocalBucket,
     Snapshot,
     SnapshotManifest,
+    all_document_run_ids,
     latest_document_run_id,
     latest_loadable_run_id,
 )
@@ -127,6 +128,17 @@ def _complete(bucket: LocalBucket, source: str, run_id: str, record: dict[str, o
     bucket.write_manifest(SnapshotManifest.start(source, run_id).completed(record_count=1))
 
 
+def _failed(bucket: LocalBucket, source: str, run_id: str, record: dict[str, object]) -> None:
+    """A crashed run: the record was flushed before the crash, so it's still on disk."""
+    bucket.write_records(source, run_id, [record])
+    bucket.write_manifest(SnapshotManifest.start(source, run_id).failed("RuntimeError: boom", record_count=1))
+
+
+def _running(bucket: LocalBucket, source: str, run_id: str, record: dict[str, object]) -> None:
+    bucket.write_records(source, run_id, [record])
+    bucket.write_manifest(SnapshotManifest.start(source, run_id))
+
+
 def test_list_snapshots_classifies_kind_by_first_record(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path)
     _complete(bucket, "lso", "run-pages", {"_type": "crawl", "url": "https://x"})
@@ -155,6 +167,22 @@ def test_latest_document_run_id_skips_pages(tmp_path: Path) -> None:
     assert latest_loadable_run_id(bucket, "lso") == "2026-02-01T00:00:00-pages"
     assert latest_document_run_id(bucket, "lso") == "2026-01-01T00:00:00-docs"
     assert latest_document_run_id(bucket, "missing") is None
+
+
+def test_all_document_run_ids_includes_failed_excludes_running_and_pages(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    _complete(bucket, "henle", "2026-01-01T00:00:00-docs-1", {"_type": "entity", "id": "1"})
+    _failed(bucket, "henle", "2026-01-02T00:00:00-docs-2", {"_type": "entity", "id": "2"})
+    _complete(bucket, "henle", "2026-01-03T00:00:00-docs-3", {"_type": "entity", "id": "3"})
+    _running(bucket, "henle", "2026-01-04T00:00:00-docs-4", {"_type": "entity", "id": "4"})
+    _complete(bucket, "henle", "2026-01-05T00:00:00-pages", {"_type": "crawl", "url": "https://x"})
+
+    assert all_document_run_ids(bucket, "henle") == [
+        "2026-01-01T00:00:00-docs-1",
+        "2026-01-02T00:00:00-docs-2",
+        "2026-01-03T00:00:00-docs-3",
+    ]
+    assert all_document_run_ids(bucket, "missing") == []
 
 
 def test_list_snapshots_synthesizes_manifest_for_legacy_dir(tmp_path: Path) -> None:

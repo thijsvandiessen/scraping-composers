@@ -15,7 +15,7 @@ from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_review
 from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
-from composer_models import Concert, Entity, PersonMatch, RawWorkMention, Work
+from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work
 from composer_models.db import get_engine, init_db
 from composer_schema import SourceClaim
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
@@ -403,7 +403,7 @@ def test_cmd_fetch_returns_1_on_source_failure(tmp_path: Path, monkeypatch: pyte
     assert "source exploded" in manifest["error"]
 
 
-def test_cmd_process_default_skips_incomplete_snapshots(
+def test_cmd_process_default_unions_all_loadable_runs_including_failed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from composer_scrapers import REGISTRY
@@ -414,8 +414,9 @@ def test_cmd_process_default_skips_incomplete_snapshots(
     monkeypatch.setitem(REGISTRY, "fake", good)
     assert cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path)) == 0
 
-    # a later fetch crashes -> failed manifest; default process must skip it
-    bad = FakeSource(records=(person("Mozart"),), name="fake", fail_after=0)
+    # a later fetch crashes after flushing one record -> failed manifest, but
+    # that record is still on disk and must still be picked up by default
+    bad = FakeSource(records=(person("Mozart"), person("Haydn")), name="fake", fail_after=1)
     monkeypatch.setitem(REGISTRY, "fake", bad)
     assert cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path)) == 1
     monkeypatch.setitem(REGISTRY, "fake", good)
@@ -425,7 +426,58 @@ def test_cmd_process_default_skips_incomplete_snapshots(
     factory = init_db(get_engine(db_url))
     with factory() as session:
         labels = session.scalars(select(Entity.label).where(Entity.kind == "person")).all()
-        assert labels == ["Bach, Johann Sebastian"]  # the completed snapshot, not the crashed one
+        # the completed run's record, plus what the crashed run flushed before it crashed
+        assert set(labels) == {"Bach, Johann Sebastian", "Mozart"}
+
+
+def test_cmd_process_default_unions_unique_records_across_completed_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record that only ever appears in an older run must still land in the
+    DB, and a record seen again by external_id in a later run must not be
+    duplicated."""
+    from composer_scrapers import REGISTRY
+
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    bucket_path = str(tmp_path / "bucket")
+
+    # run 1: two records, one of which (Bach) drops out of every later run
+    monkeypatch.setitem(
+        REGISTRY,
+        "fake",
+        FakeSource(
+            records=(
+                person("Bach, Johann Sebastian", external_id="bach"),
+                person("Mozart", external_id="mozart"),
+            ),
+            name="fake",
+        ),
+    )
+    assert cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path)) == 0
+
+    # run 2: Mozart is re-sighted (same external_id) alongside a genuinely new record
+    monkeypatch.setitem(
+        REGISTRY,
+        "fake",
+        FakeSource(
+            records=(
+                person("Mozart", external_id="mozart"),
+                person("Haydn", external_id="haydn"),
+            ),
+            name="fake",
+        ),
+    )
+    assert cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path)) == 0
+
+    rc = cmd_process(_ns(database_url=db_url, source="fake", run_id=None, bucket_path=bucket_path))
+    assert rc == 0
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        labels = set(session.scalars(select(Entity.label).where(Entity.kind == "person")).all())
+        # Bach only ever appeared in run 1, but is still present
+        assert labels == {"Bach, Johann Sebastian", "Mozart", "Haydn"}
+        # Mozart's external_id was seen in both runs -> one record, not two
+        assert session.scalar(select(func.count()).select_from(EntityRecord)) == 3
 
 
 def test_cmd_process_returns_1_without_fetched_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

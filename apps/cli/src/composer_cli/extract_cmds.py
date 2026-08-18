@@ -95,5 +95,6 @@ def cmd_extract(args: argparse.Namespace) -> int:
     if ledger is not None:
         print(f"  {ledger.summary()}")
     print(f"run_id: {run_id}")
-    print(f"next: composer-ingest process {config.name} --run-id {run_id}")
+    print(f"next: composer-ingest process {config.name}")
+    print(f"  (loads every loadable run, including {run_id}; pass --run-id to load only this one)")
     return 0

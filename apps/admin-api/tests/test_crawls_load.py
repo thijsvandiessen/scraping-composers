@@ -108,14 +108,25 @@ def test_process_pages_snapshot_conflicts(client: TestClient, bucket_path: Path)
     assert "crawled pages" in r.json()["detail"]
 
 
-def test_process_crawl_loads_latest_documents(client: TestClient, bucket_path: Path) -> None:
-    client.put("/admin/v1/crawls/archive", json=PAYLOAD)
-    _seed_documents(bucket_path)  # the extract to load
+def test_process_crawl_loads_every_documents_snapshot(client: TestClient, bucket_path: Path) -> None:
+    """Two extract runs, neither of which alone has the full picture, should
+    both be loaded — not just the newest."""
+    _seed_documents(bucket_path, run_id="2026-01-01T00:00:00-docs-1")  # Bach, Adams
+    write_documents(
+        LocalBucket(bucket_path),
+        "archive",
+        iter([_entity("Bach"), _entity("Elgar")]),
+        "2026-02-01T00:00:00-docs-2",
+    )
     _seed_pages(bucket_path)  # a later, non-loadable crawl — must be skipped
+    client.put("/admin/v1/crawls/archive", json=PAYLOAD)
 
     r = client.post("/admin/v1/crawls/archive/process")
     assert r.status_code == 202
-    assert client.get(f"/admin/v1/runs/{r.json()['run_id']}").json()["status"] == "completed"
+    run = client.get(f"/admin/v1/runs/{r.json()['run_id']}").json()
+    assert run["status"] == "completed"
+    assert run["records_seen"] == 4  # 2 + 2 across both runs
+    assert run["records_new"] == 3  # Bach, Adams, Elgar (Bach re-sighted, not duplicated)
 
 
 def test_process_crawl_without_documents_conflicts(client: TestClient, bucket_path: Path) -> None:

@@ -281,3 +281,20 @@ def latest_document_run_id(bucket: Bucket, source: str) -> str | None:
         if snapshot.manifest.status in LOADABLE_STATUSES and snapshot.kind == "documents"
     ]
     return documents[-1] if documents else None
+
+
+def all_document_run_ids(bucket: Bucket, source: str) -> list[str]:
+    """Every loadable *documents* snapshot of *source*, oldest to newest.
+
+    Unlike :func:`latest_document_run_id`, this includes ``failed`` snapshots
+    (:data:`EXPLICITLY_LOADABLE_STATUSES`): records are flushed one at a time
+    (see ``write_records``), so a crawl/extract that crashed mid-run still has
+    good data for everything written before the crash. Callers wanting every
+    unique record ever seen for a source (rather than whatever the single
+    latest run happened to contain) should replay all of these in order.
+    """
+    return [
+        snapshot.manifest.run_id
+        for snapshot in bucket.list_snapshots(source)
+        if snapshot.manifest.status in EXPLICITLY_LOADABLE_STATUSES and snapshot.kind == "documents"
+    ]

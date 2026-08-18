@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
-from composer_bronze.bucket import latest_document_run_id, latest_loadable_run_id
+from composer_bronze.bucket import all_document_run_ids, latest_loadable_run_id
 from composer_bronze.scraper import new_snapshot_id, write_documents
 from composer_config import settings
 from composer_crawler import (
@@ -46,7 +46,7 @@ from .snapshots import (
     bucket,
     has_running_fetch,
     last_snapshot,
-    process_in_background,
+    process_all_in_background,
     running_conflict,
     snapshot_out,
 )
@@ -281,20 +281,19 @@ def run_crawl_pipeline(
 
 @crawls.post("/crawls/{name}/process", status_code=status.HTTP_202_ACCEPTED, response_model=RunStarted)
 def process_crawl(name: str, config: CrawlDep, db: DbSession, background: BackgroundTasks) -> RunStarted:
-    """Load the crawl's latest LLM-extracted ``documents`` snapshot into the DB.
+    """Load every extracted ``documents`` snapshot of the crawl into the DB.
 
-    The per-crawl counterpart to ``/snapshots/{source}/{id}/process``: it
-    resolves the newest extracted snapshot server-side (skipping raw-page
-    crawls), so the dashboard can drive Crawl → Extract → Load from one row.
+    Idempotent per external_id, so unioning every run (skipping raw-page
+    crawls) captures every unique record ever seen, not just the latest run's.
     """
     if has_running(db, name):
         raise running_conflict(name)
-    run_id = latest_document_run_id(bucket(), name)
-    if run_id is None:
+    run_ids = all_document_run_ids(bucket(), name)
+    if not run_ids:
         raise HTTPException(
             status.HTTP_409_CONFLICT, f"crawl {name!r} has no extracted snapshot; run extract first"
         )
     base_url = config.seeds[0] if config.seeds else ""
     run = create_run(db, name, base_url)
-    background.add_task(process_in_background, name, run_id, run.id)
+    background.add_task(process_all_in_background, name, run_ids, run.id)
     return RunStarted(run_id=run.id, source=name, status=run.status)

@@ -9,6 +9,7 @@ import pytest
 from composer_bronze.bucket import LocalBucket
 from composer_bronze.scraper import (
     Scraper,
+    iter_all_from_bucket,
     iter_from_bucket,
     new_snapshot_id,
 )
@@ -94,3 +95,17 @@ def test_iter_from_bucket_reads_back_typed_documents(tmp_path: Path) -> None:
     assert restored == docs
     assert isinstance(restored[0], EntityDocument)
     assert isinstance(restored[1], WorkMentionDocument)
+
+
+def test_iter_all_from_bucket_chains_runs_in_order(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    run_a = Scraper(FakeSource(records=(person("a"), person("b")), name="fake")).fetch_to_bucket(
+        bucket, run_id="run-a"
+    )
+    run_b = Scraper(FakeSource(records=(person("c"),), name="fake")).fetch_to_bucket(bucket, run_id="run-b")
+
+    restored = list(iter_all_from_bucket("fake", [run_a, run_b], bucket))
+    assert [d.name for d in restored] == ["a", "b", "c"]  # type: ignore[union-attr]
+
+    reversed_order = list(iter_all_from_bucket("fake", [run_b, run_a], bucket))
+    assert [d.name for d in reversed_order] == ["c", "a", "b"]  # type: ignore[union-attr]

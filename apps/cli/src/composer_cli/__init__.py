@@ -168,7 +168,9 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         "process", help="ingest previously fetched records from the bucket into the DB"
     )
     p_process.add_argument("source", choices=sorted(set(REGISTRY) | set(crawl_choices())))
-    p_process.add_argument("--run-id", help="bucket run_id to process (default: latest)")
+    p_process.add_argument(
+        "--run-id", help="bucket run_id to process (default: every loadable run, oldest to newest)"
+    )
     p_process.add_argument(
         "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
     )
