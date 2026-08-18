@@ -1,12 +1,12 @@
 {
   "persons": {
-    "min_concert_appearances": 3,
-    "min_recording_appearances": 3,
-    "min_appearances_for_composers": 3,
-    "min_sitelinks": null
+    "min_concert_appearances": 2,
+    "min_recording_appearances": 2,
+    "min_appearances_for_composers": 2,
+    "min_sitelinks": 50
   },
   "ensembles": {
-    "min_concert_appearances": 3,
-    "min_recording_appearances": 3
+    "min_concert_appearances": 2,
+    "min_recording_appearances": 2
   }
 }

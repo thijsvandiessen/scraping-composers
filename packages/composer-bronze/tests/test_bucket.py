@@ -13,6 +13,7 @@ from composer_bronze.bucket import (
     Snapshot,
     SnapshotManifest,
     all_document_run_ids,
+    all_page_run_ids,
     latest_document_run_id,
     latest_loadable_run_id,
 )
@@ -183,6 +184,22 @@ def test_all_document_run_ids_includes_failed_excludes_running_and_pages(tmp_pat
         "2026-01-03T00:00:00-docs-3",
     ]
     assert all_document_run_ids(bucket, "missing") == []
+
+
+def test_all_page_run_ids_includes_failed_excludes_running_and_documents(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path)
+    _complete(bucket, "lso", "2026-01-01T00:00:00-pages-1", {"_type": "crawl", "url": "https://x/1"})
+    _failed(bucket, "lso", "2026-01-02T00:00:00-pages-2", {"_type": "crawl", "url": "https://x/2"})
+    _complete(bucket, "lso", "2026-01-03T00:00:00-pages-3", {"_type": "crawl", "url": "https://x/3"})
+    _running(bucket, "lso", "2026-01-04T00:00:00-pages-4", {"_type": "crawl", "url": "https://x/4"})
+    _complete(bucket, "lso", "2026-01-05T00:00:00-docs", {"_type": "entity", "id": "1"})
+
+    assert all_page_run_ids(bucket, "lso") == [
+        "2026-01-01T00:00:00-pages-1",
+        "2026-01-02T00:00:00-pages-2",
+        "2026-01-03T00:00:00-pages-3",
+    ]
+    assert all_page_run_ids(bucket, "missing") == []
 
 
 def test_list_snapshots_synthesizes_manifest_for_legacy_dir(tmp_path: Path) -> None:

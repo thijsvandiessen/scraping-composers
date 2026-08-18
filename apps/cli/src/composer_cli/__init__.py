@@ -15,7 +15,7 @@ from composer_gold import (
 from composer_scrapers import REGISTRY
 
 from .crawl_cmds import cmd_crawl, crawl_choices
-from .extract_cmds import cmd_extract
+from .extract_cmds import cmd_extract, cmd_extract_all
 from .ingest_cmds import (
     cmd_derive_concerts,
     cmd_derive_recordings,
@@ -78,18 +78,38 @@ def _add_work_parsers(sub: _SubParsers) -> None:
 
 
 def _add_provider_args(parser: argparse.ArgumentParser) -> None:
-    """``--provider``/``--model``: shared by ``extract`` and ``run`` (both build an extractor)."""
+    """``--provider``/``--model``: shared by ``extract``, ``extract-all`` and ``run``
+    (all build an extractor)."""
     parser.add_argument("--provider", choices=("ollama", "gemini"), help="LLM backend (env $LLM_PROVIDER)")
     parser.add_argument("--model", help="model for the provider (env $OLLAMA_MODEL/$GOOGLE_AI_MODEL)")
+
+
+def _add_extract_cache_args(parser: argparse.ArgumentParser) -> None:
+    """``--no-cache``/``--no-ledger``: shared by ``extract``, ``extract-all`` and ``run``."""
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="re-ask the model for every page instead of reusing cached answers "
+        "(also bypasses the ledger, below)",
+    )
+    parser.add_argument(
+        "--no-ledger",
+        action="store_true",
+        help="re-run every page's kind through the model even if its content and extractor "
+        "fingerprint are unchanged (a chunk that produces an identical prompt can still hit "
+        "the answer cache unless --no-cache is also given)",
+    )
+
+
+def _add_bucket_path_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the bucket")
 
 
 def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_fetch = sub.add_parser("fetch", help="fetch raw records from a source and store in the bucket")
     p_fetch.add_argument("source", choices=sorted(REGISTRY))
     p_fetch.add_argument("--max-pages", type=int, help="stop after N pages (for testing)")
-    p_fetch.add_argument(
-        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
-    )
+    _add_bucket_path_arg(p_fetch)
     p_fetch.set_defaults(func=cmd_fetch)
 
     p_crawl = sub.add_parser(
@@ -103,9 +123,7 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         "--query",
         help="rank discovered URLs by relevance to this topic (overrides the config's relevance_query)",
     )
-    p_crawl.add_argument(
-        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
-    )
+    _add_bucket_path_arg(p_crawl)
     p_crawl.set_defaults(func=cmd_crawl)
 
     p_extract = sub.add_parser(
@@ -117,23 +135,22 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_extract.add_argument("--crawl-run-id", help="crawl run to read (default: latest completed)")
     _add_provider_args(p_extract)
     p_extract.add_argument("--max-pages", type=int, help="stop after N crawled pages (for testing)")
-    p_extract.add_argument(
-        "--no-cache",
-        action="store_true",
-        help="re-ask the model for every page instead of reusing cached answers "
-        "(also bypasses the ledger, below)",
-    )
-    p_extract.add_argument(
-        "--no-ledger",
-        action="store_true",
-        help="re-run every page's kind through the model even if its content and extractor "
-        "fingerprint are unchanged (a chunk that produces an identical prompt can still hit "
-        "the answer cache unless --no-cache is also given)",
-    )
-    p_extract.add_argument(
-        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
-    )
+    _add_extract_cache_args(p_extract)
+    _add_bucket_path_arg(p_extract)
     p_extract.set_defaults(func=cmd_extract)
+
+    p_extract_all = sub.add_parser(
+        "extract-all",
+        help="LLM-extract every loadable crawl snapshot for every crawl-config source "
+        "(best-effort: one run failing doesn't stop the rest)",
+    )
+    _add_provider_args(p_extract_all)
+    p_extract_all.add_argument(
+        "--max-pages", type=int, help="stop after N crawled pages per run (for testing)"
+    )
+    _add_extract_cache_args(p_extract_all)
+    _add_bucket_path_arg(p_extract_all)
+    p_extract_all.set_defaults(func=cmd_extract_all)
 
     p_run = sub.add_parser(
         "run",
@@ -147,21 +164,8 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         help="rank discovered URLs by relevance to this topic (overrides the config's relevance_query)",
     )
     _add_provider_args(p_run)
-    p_run.add_argument(
-        "--no-cache",
-        action="store_true",
-        help="re-ask the model for every page instead of reusing cached answers "
-        "(also bypasses the ledger, below)",
-    )
-    p_run.add_argument(
-        "--no-ledger",
-        action="store_true",
-        help="re-run every page's kind through the model even if its content and extractor "
-        "fingerprint are unchanged",
-    )
-    p_run.add_argument(
-        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
-    )
+    _add_extract_cache_args(p_run)
+    _add_bucket_path_arg(p_run)
     p_run.set_defaults(func=cmd_run)
 
     p_process = sub.add_parser(
@@ -171,9 +175,7 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_process.add_argument(
         "--run-id", help="bucket run_id to process (default: every loadable run, oldest to newest)"
     )
-    p_process.add_argument(
-        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
-    )
+    _add_bucket_path_arg(p_process)
     p_process.set_defaults(func=cmd_process)
 
     p_promote = sub.add_parser(
@@ -219,9 +221,7 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         help="rebuild the silver database from the bucket with the current heuristics "
         "(human review decisions are preserved)",
     )
-    p_rebuild.add_argument(
-        "--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the local bucket"
-    )
+    _add_bucket_path_arg(p_rebuild)
     p_rebuild.set_defaults(func=cmd_rebuild_silver)
 
 

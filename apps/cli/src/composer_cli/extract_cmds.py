@@ -25,7 +25,7 @@ import logging
 from collections.abc import Iterator
 from pathlib import Path
 
-from composer_bronze.bucket import LocalBucket, latest_loadable_run_id
+from composer_bronze.bucket import LocalBucket, all_page_run_ids, latest_loadable_run_id
 from composer_bronze.scraper import write_documents
 from composer_config import settings
 from composer_crawler.records import CrawlRecord, iter_crawl_records
@@ -98,3 +98,48 @@ def cmd_extract(args: argparse.Namespace) -> int:
     print(f"next: composer-ingest process {config.name}")
     print(f"  (loads every loadable run, including {run_id}; pass --run-id to load only this one)")
     return 0
+
+
+def cmd_extract_all(args: argparse.Namespace) -> int:
+    """Extract every loadable crawl-pages run of every crawl-config source.
+
+    Best-effort: one run's extraction failing (returning non-zero or raising)
+    doesn't stop the rest of the batch — each (source, run) pair is
+    independent, so a single bad snapshot shouldn't hide progress on the rest.
+    """
+    bucket = LocalBucket(args.bucket_path)
+    configs = crawl_choices()
+    failures: list[tuple[str, str]] = []
+    total = 0
+    for name in sorted(configs):
+        run_ids = all_page_run_ids(bucket, name)
+        if not run_ids:
+            continue
+        print(f"{name}: {len(run_ids)} run(s): {', '.join(run_ids)}")
+        for crawl_run_id in run_ids:
+            total += 1
+            run_args = argparse.Namespace(
+                config=name,
+                crawl_run_id=crawl_run_id,
+                provider=args.provider,
+                model=args.model,
+                max_pages=args.max_pages,
+                no_cache=args.no_cache,
+                no_ledger=args.no_ledger,
+                bucket_path=args.bucket_path,
+            )
+            try:
+                ok = cmd_extract(run_args) == 0
+            except Exception:
+                log.exception("extract-all: %s run %s failed", name, crawl_run_id)
+                ok = False
+            if not ok:
+                failures.append((name, crawl_run_id))
+
+    if total == 0:
+        print(f"no crawl snapshots found in {args.bucket_path}")
+        return 0
+    print(f"extract-all: {total - len(failures)}/{total} run(s) succeeded")
+    for name, run_id in failures:
+        print(f"  failed: {name} {run_id}")
+    return 1 if failures else 0
