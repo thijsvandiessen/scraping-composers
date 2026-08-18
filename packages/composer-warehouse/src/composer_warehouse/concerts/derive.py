@@ -19,11 +19,11 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from composer_models import Concert, ConcertParticipant, ConcertWork, Entity, RawWorkMention, Source
+from composer_models.normalize import dedup_key
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from ..models import Concert, ConcertParticipant, ConcertWork, Entity, RawWorkMention, Source
-from ..normalize import dedup_key
 from .payloads import concert_fields
 
 INSERT_BATCH = 1000

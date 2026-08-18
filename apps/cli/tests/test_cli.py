@@ -15,9 +15,9 @@ from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_review
 from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
+from composer_models import Concert, Entity, PersonMatch, RawWorkMention, Work
+from composer_models.db import get_engine, init_db
 from composer_schema import SourceClaim
-from composer_warehouse.db import get_engine, init_db
-from composer_warehouse.models import Concert, Entity, PersonMatch, RawWorkMention, Work
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session

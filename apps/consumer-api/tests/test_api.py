@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 from composer_api import create_app
 from composer_gold import promote
+from composer_models.db import init_db
 from composer_schema import EntityDocument, SourceAdapter, SourceClaim
 from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.db import init_db
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
 from fastapi.testclient import TestClient

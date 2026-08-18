@@ -7,8 +7,8 @@ too-many-lines threshold.
 import json
 from datetime import UTC, datetime
 
+from composer_models import Claim, Entity, EntityRecord
 from composer_schema import EntityDocument, SourceClaim
-from composer_warehouse.models import Claim, Entity, EntityRecord
 from composer_warehouse.testing import FakeSource, ingest_source, person
 from sqlalchemy import select
 from sqlalchemy.orm import Session

@@ -6,9 +6,9 @@ from pathlib import Path
 from composer_bronze.bucket import LocalBucket, latest_loadable_run_id
 from composer_bronze.scraper import Scraper, iter_from_bucket
 from composer_gold import PromoteConfig, Rule1Config, promote
+from composer_models.db import get_engine, init_db
 from composer_scrapers import REGISTRY
 from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.db import get_engine, init_db
 from composer_warehouse.ingestion import ingest_documents
 from composer_warehouse.rebuild import rebuild_silver
 from composer_warehouse.recordings import derive_recordings

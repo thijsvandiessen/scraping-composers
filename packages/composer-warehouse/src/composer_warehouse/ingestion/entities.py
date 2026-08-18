@@ -1,11 +1,10 @@
 import uuid
 from datetime import datetime
 
+from composer_models import Entity, Source
+from composer_models.normalize import dedup_key, entity_uuid
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
-
-from ..models import Entity, Source
-from ..normalize import dedup_key, entity_uuid
 
 
 def get_or_create_source(session: Session, name: str, base_url: str) -> Source:

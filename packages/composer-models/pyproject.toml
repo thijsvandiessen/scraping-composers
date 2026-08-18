@@ -1,23 +1,22 @@
 [project]
-name = "composer-consumer-api"
+name = "composer-models"
 version = "0.1.0"
-description = "Read-only consumer product API (serves the curated gold and raw staging datasets)"
+description = "Shared database schema: the ORM models behind the silver and gold DBs, engine helpers, and dedup identity"
 requires-python = ">=3.11"
 dependencies = [
-    "composer-models",
-    "composer-gold",
-    "fastapi>=0.141.1",
-    "uvicorn[standard]>=0.52.1",
-    "python-dotenv>=1.2.2",
     "composer-config",
+    "sqlalchemy>=2.0.51",
 ]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.3.4"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/composer_api"]
+packages = ["src/composer_models"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

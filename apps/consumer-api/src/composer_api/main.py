@@ -12,7 +12,7 @@ from collections.abc import Callable, Generator
 
 from composer_config import settings
 from composer_gold import DEFAULT_GOLD_DB_PATH
-from composer_warehouse.db import get_engine, init_db
+from composer_models.db import get_engine, init_db
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import create_engine, make_url

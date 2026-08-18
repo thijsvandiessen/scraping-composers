@@ -2,7 +2,7 @@
 
 import json
 
-from composer_warehouse.models import Entity, RawWorkMention, Work, WorkTitle
+from composer_models import Entity, RawWorkMention, Work, WorkTitle
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session

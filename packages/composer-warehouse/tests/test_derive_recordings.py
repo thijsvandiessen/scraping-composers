@@ -1,13 +1,13 @@
 """Tests for the silver recording-derivation pass."""
 
-from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.models import (
+from composer_models import (
     Concert,
     Entity,
     Recording,
     RecordingParticipant,
     RecordingWork,
 )
+from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ensemble, ingest_source, perf_mention, person
 from sqlalchemy import func, select

@@ -18,7 +18,7 @@ import re
 from collections import defaultdict
 from typing import Any
 
-from ..normalize import dedup_key
+from composer_models.normalize import dedup_key
 
 # The recording key ``_group_recordings`` folds mentions into: (source, record key).
 Key = tuple[int, str]

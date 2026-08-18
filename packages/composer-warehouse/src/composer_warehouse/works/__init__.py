@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import uuid
 
+from composer_models import WorkTitle
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import WorkTitle
 from .extract import WorkFeatures, extract_features, normalize_title
 from .match import (
     AUTO_THRESHOLD,

@@ -13,9 +13,9 @@ from datetime import datetime
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH, LocalBucket, Snapshot
 from composer_bronze.scraper import iter_from_bucket
 from composer_crawler import all_crawl_configs
+from composer_models import IngestRun
 from composer_scrapers import REGISTRY
 from composer_warehouse.ingestion import execute_run
-from composer_warehouse.models import IngestRun
 from fastapi import HTTPException, status
 
 from .deps import session_scope

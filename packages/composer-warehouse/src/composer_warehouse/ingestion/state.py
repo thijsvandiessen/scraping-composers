@@ -8,10 +8,10 @@ import hashlib
 import uuid
 from dataclasses import dataclass, field
 
+from composer_models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, Work, WorkTitle
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, Work, WorkTitle
 from ..works import Candidate, extract_features
 
 

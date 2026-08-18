@@ -7,9 +7,7 @@ from pathlib import Path
 import pytest
 from composer_bronze.bucket import LocalBucket, SnapshotManifest
 from composer_bronze.scraper import Scraper
-from composer_schema import SourceClaim
-from composer_warehouse.build import read_build_manifest
-from composer_warehouse.models import (
+from composer_models import (
     Claim,
     Concert,
     Entity,
@@ -18,6 +16,8 @@ from composer_warehouse.models import (
     Work,
     WorkTitle,
 )
+from composer_schema import SourceClaim
+from composer_warehouse.build import read_build_manifest
 from composer_warehouse.rebuild import rebuild_silver, sqlite_db_path
 from composer_warehouse.testing import FakeSource, mention, perf_mention, person
 from sqlalchemy import create_engine, select

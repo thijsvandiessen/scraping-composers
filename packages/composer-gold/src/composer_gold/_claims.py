@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from composer_warehouse.models import Claim, Entity
+from composer_models import Claim, Entity
 from sqlalchemy import Connection, insert, select
 
 from ._copy import INSERT_BATCH, chunked

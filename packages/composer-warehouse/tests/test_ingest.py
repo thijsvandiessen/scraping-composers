@@ -2,8 +2,8 @@
 
 from datetime import UTC, datetime
 
+from composer_models import Claim, Entity, EntityRecord, IngestRun
 from composer_schema import EntityDocument, SourceClaim
-from composer_warehouse.models import Claim, Entity, EntityRecord, IngestRun
 from composer_warehouse.testing import FakeSource, ingest_source, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session

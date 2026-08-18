@@ -1,7 +1,7 @@
 """Tests for the post-hoc person dedupe pass."""
 
+from composer_models import Entity, PersonMatch
 from composer_schema import SourceClaim
-from composer_warehouse.models import Entity, PersonMatch
 from composer_warehouse.persons import dedupe_persons
 from composer_warehouse.testing import FakeSource, ingest_source, person
 from sqlalchemy import func, select

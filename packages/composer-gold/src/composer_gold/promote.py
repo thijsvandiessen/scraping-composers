@@ -6,8 +6,8 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from composer_models import Base
 from composer_warehouse.build import BuildManifest, read_build_manifest, run_build
-from composer_warehouse.models import Base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 

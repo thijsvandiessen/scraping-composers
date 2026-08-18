@@ -1,9 +1,9 @@
 import json
 import uuid
 
+from composer_models import RawWorkMention, Work, WorkTitle
 from composer_schema import WorkMentionDocument
 
-from ..models import RawWorkMention, Work, WorkTitle
 from ..works import Candidate, WorkFeatures, extract_features, resolve
 from .entities import get_or_create_entity
 from .state import IngestState, content_hash

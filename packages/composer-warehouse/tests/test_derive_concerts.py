@@ -1,7 +1,7 @@
 """Tests for the silver concert-derivation pass."""
 
+from composer_models import Concert, ConcertParticipant, ConcertWork, Entity
 from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.models import Concert, ConcertParticipant, ConcertWork, Entity
 from composer_warehouse.testing import FakeSource, ensemble, ingest_source, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session

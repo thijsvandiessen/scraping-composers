@@ -1,6 +1,6 @@
 import uuid
 
-from composer_warehouse.models import Claim, ConcertParticipant, Entity
+from composer_models import Claim, ConcertParticipant, Entity
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 

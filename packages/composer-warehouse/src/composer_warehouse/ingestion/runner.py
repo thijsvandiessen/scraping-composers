@@ -1,10 +1,10 @@
 import logging
 from collections.abc import Iterator
 
+from composer_models import IngestRun, utcnow
 from composer_schema import EntityDocument, WorkMentionDocument
 from sqlalchemy.orm import Session
 
-from ..models import IngestRun, utcnow
 from .core import IngestError, run_ingest_records
 from .entities import get_or_create_source
 

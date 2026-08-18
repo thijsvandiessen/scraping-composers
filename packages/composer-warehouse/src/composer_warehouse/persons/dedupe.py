@@ -15,10 +15,10 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 
+from composer_models import Claim, Entity, PersonMatch
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Claim, Entity, PersonMatch
 from .extract import PersonName, parse_name
 from .match import PersonProfile, classify, score
 
