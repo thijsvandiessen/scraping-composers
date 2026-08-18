@@ -1,7 +1,8 @@
 """``extract``: LLM-extract concerts/performers/facts from crawled pages into the bucket.
 
-Reads a crawl snapshot (raw pages + their markdown), runs the local Ollama model
-over each page once per kind the config enables, and writes the resulting
+Reads a crawl snapshot (raw pages + their markdown), runs the configured LLM
+provider (``$LLM_PROVIDER``: Ollama or Gemini) over each page once per kind the
+config enables, and writes the resulting
 :class:`WorkMentionDocument` / :class:`EntityDocument` records back to the bucket
 under the crawl config's name. The standard ``process`` step then ingests them
 like any other snapshot.
@@ -29,7 +30,7 @@ from composer_bronze.scraper import write_documents
 from composer_config import settings
 from composer_crawler.records import CrawlRecord, iter_crawl_records
 from composer_extract import (
-    OllamaExtractor,
+    create_extractor,
     extract_all,
     open_cache,
     open_ledger,
@@ -67,7 +68,7 @@ def cmd_extract(args: argparse.Namespace) -> int:
     cache = open_cache(settings.extract_cache_path, enabled=caching)
     ledgering = settings.extract_ledger_enabled and not args.no_cache and not args.no_ledger
     ledger = open_ledger(settings.extract_cache_path, enabled=ledgering)
-    extractor = OllamaExtractor.from_settings(model=args.model, cache=cache)
+    extractor = create_extractor(provider=args.provider, model=args.model, cache=cache)
     options = options_per_kind(config.extract_kinds)
     docs = extract_all(
         records,

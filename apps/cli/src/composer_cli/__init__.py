@@ -77,6 +77,12 @@ def _add_work_parsers(sub: _SubParsers) -> None:
     p_rematch.set_defaults(func=cmd_rematch)
 
 
+def _add_provider_args(parser: argparse.ArgumentParser) -> None:
+    """``--provider``/``--model``: shared by ``extract`` and ``run`` (both build an extractor)."""
+    parser.add_argument("--provider", choices=("ollama", "gemini"), help="LLM backend (env $LLM_PROVIDER)")
+    parser.add_argument("--model", help="model for the provider (env $OLLAMA_MODEL/$GOOGLE_AI_MODEL)")
+
+
 def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_fetch = sub.add_parser("fetch", help="fetch raw records from a source and store in the bucket")
     p_fetch.add_argument("source", choices=sorted(REGISTRY))
@@ -105,11 +111,11 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_extract = sub.add_parser(
         "extract",
         help="LLM-extract concerts/performers from a crawl snapshot into the bucket "
-        "(local Ollama model; runs between crawl and process)",
+        "(Ollama or Gemini, per $LLM_PROVIDER; runs between crawl and process)",
     )
     p_extract.add_argument("config", choices=sorted(crawl_choices()))
     p_extract.add_argument("--crawl-run-id", help="crawl run to read (default: latest completed)")
-    p_extract.add_argument("--model", help="Ollama model to use (overrides $OLLAMA_MODEL / the default)")
+    _add_provider_args(p_extract)
     p_extract.add_argument("--max-pages", type=int, help="stop after N crawled pages (for testing)")
     p_extract.add_argument(
         "--no-cache",
@@ -140,7 +146,7 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
         "--query",
         help="rank discovered URLs by relevance to this topic (overrides the config's relevance_query)",
     )
-    p_run.add_argument("--model", help="Ollama model to use (overrides $OLLAMA_MODEL / the default)")
+    _add_provider_args(p_run)
     p_run.add_argument(
         "--no-cache",
         action="store_true",

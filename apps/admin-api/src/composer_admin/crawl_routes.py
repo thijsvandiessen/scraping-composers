@@ -26,7 +26,8 @@ from composer_crawler.records import iter_crawl_records
 from composer_crawler.store import DEFAULT_CRAWL_CONFIGS_PATH
 from composer_extract import (
     DocumentLedger,
-    OllamaExtractor,
+    Extractor,
+    create_extractor,
     extract_all,
     open_cache,
     open_ledger,
@@ -140,10 +141,11 @@ def _crawl_in_background(config: CrawlConfig, snapshot_id: str, max_pages: int |
     return True
 
 
-def _extractor() -> OllamaExtractor:
-    """The LLM extractor; a seam for tests to inject a fake model."""
+def _extractor() -> Extractor:
+    """The configured LLM extractor (``settings.llm_provider``); a seam for tests
+    to inject a fake model."""
     cache = open_cache(settings.extract_cache_path, enabled=settings.extract_cache_enabled)
-    return OllamaExtractor.from_settings(cache=cache)
+    return create_extractor(cache=cache)
 
 
 def _ledger() -> DocumentLedger | None:

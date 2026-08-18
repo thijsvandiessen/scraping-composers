@@ -34,6 +34,7 @@ def _extract_args(args: argparse.Namespace) -> argparse.Namespace:
     return argparse.Namespace(
         config=args.config,
         crawl_run_id=None,
+        provider=args.provider,
         model=args.model,
         max_pages=None,
         no_cache=args.no_cache,
