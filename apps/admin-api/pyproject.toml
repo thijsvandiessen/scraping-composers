@@ -13,7 +13,7 @@ dependencies = [
     "composer-gold",
     "fastapi>=0.141.1",
     "uvicorn[standard]>=0.52.1",
-    "python-dotenv>=1.2.2",
+    "python-dotenv>=1.2.3",
     "composer-config",
 ]
 

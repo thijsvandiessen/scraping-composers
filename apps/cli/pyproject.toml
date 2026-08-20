@@ -11,7 +11,7 @@ dependencies = [
     "composer-models",
     "composer-warehouse",
     "composer-gold",
-    "python-dotenv>=1.2.2",
+    "python-dotenv>=1.2.3",
     "composer-config",
 ]
 
