@@ -5,7 +5,7 @@ description = "Django admin dashboard (HTTP client for the composer APIs)"
 requires-python = ">=3.11"
 dependencies = [
     "django>=6.1",
-    "django-unfold>=0.103.0",
+    "django-unfold>=0.104.1",
     "httpx>=0.27",
     "python-dotenv>=1.2.3",
 ]
