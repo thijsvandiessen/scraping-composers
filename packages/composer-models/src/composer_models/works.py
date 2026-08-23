@@ -25,8 +25,8 @@ class Work(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     composer_entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
-    canonical_title: Mapped[str] = mapped_column(String(500))
-    title_key: Mapped[str] = mapped_column(String(500))
+    canonical_title: Mapped[str] = mapped_column(Text)
+    title_key: Mapped[str] = mapped_column(Text)
     # features extracted from the title, for candidate scoring
     work_type: Mapped[str | None] = mapped_column(String(100))
     opus_number: Mapped[str | None] = mapped_column(String(50))
@@ -53,8 +53,8 @@ class WorkTitle(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     work_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("works.id"))
-    title: Mapped[str] = mapped_column(String(500))
-    title_key: Mapped[str] = mapped_column(String(500))
+    title: Mapped[str] = mapped_column(Text)
+    title_key: Mapped[str] = mapped_column(Text)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -80,9 +80,9 @@ class RawWorkMention(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
-    external_id: Mapped[str] = mapped_column(String(500))
-    raw_composer: Mapped[str | None] = mapped_column(String(500))
-    raw_title: Mapped[str] = mapped_column(String(500))
+    external_id: Mapped[str] = mapped_column(Text)
+    raw_composer: Mapped[str | None] = mapped_column(Text)
+    raw_title: Mapped[str] = mapped_column(Text)
     raw: Mapped[str] = mapped_column(Text)  # original payload as JSON
     composer_entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
     work_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("works.id"))

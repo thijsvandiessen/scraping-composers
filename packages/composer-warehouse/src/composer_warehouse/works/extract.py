@@ -15,6 +15,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from composer_models.normalize import MAX_KEY_CHARS
+
 
 @dataclass(frozen=True)
 class WorkFeatures:
@@ -67,10 +69,14 @@ def _strip_diacritics(text: str) -> str:
 
 
 def normalize_title(raw: str) -> str:
-    """Lowercase, strip diacritics and punctuation, collapse whitespace."""
+    """Lowercase, strip diacritics and punctuation, collapse whitespace.
+
+    Truncated to ``MAX_KEY_CHARS``: the result is stored in ``title_key``,
+    which sits in the ``uq_work_title`` btree index that Postgres caps.
+    """
     text = _strip_diacritics(raw).lower()
     text = re.sub(r"[^\w\s]", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+    return re.sub(r"\s+", " ", text).strip()[:MAX_KEY_CHARS]
 
 
 def _normalize_key(letter: str, accidental: str | None, mode: str) -> str:

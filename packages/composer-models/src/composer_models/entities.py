@@ -21,8 +21,8 @@ class Entity(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(String(50))
-    dedup_key: Mapped[str] = mapped_column(String(300))
-    label: Mapped[str] = mapped_column(String(300))
+    dedup_key: Mapped[str] = mapped_column(Text)
+    label: Mapped[str] = mapped_column(Text)
     # set when this entity is a confirmed duplicate of another (the canonical
     # one), e.g. "Beethoven" -> "Beethoven, Ludwig van". Non-destructive: both
     # rows stay, queries can resolve to the canonical via this pointer.
@@ -48,9 +48,9 @@ class EntityRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
     entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
-    external_id: Mapped[str] = mapped_column(String(500))
-    name: Mapped[str] = mapped_column(String(300))
-    url: Mapped[str | None] = mapped_column(String(500))
+    external_id: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[str] = mapped_column(Text)  # original payload as JSON
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
