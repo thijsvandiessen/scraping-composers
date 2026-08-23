@@ -571,7 +571,6 @@ uv run --directory apps/dashboard pytest
 uv run pyright             # strict type checking (whole workspace)
 uv run ruff check          # lint
 uv run ruff format --check # formatting
-uv run pylint packages apps # file length only (C0302, 300 lines)
 ```
 
 Document/adapter test factories live in `composer_schema.testing`; the warehouse

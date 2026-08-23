@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 """Admin API tests using an in-memory database and a tmp_path bucket.
 
 The Starlette TestClient runs FastAPI BackgroundTasks synchronously once the

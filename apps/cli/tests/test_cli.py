@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 """Tests for CLI query helpers (claim provenance lookup) and CLI commands."""
 
 from __future__ import annotations
