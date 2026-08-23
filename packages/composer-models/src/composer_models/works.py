@@ -66,8 +66,10 @@ class RawWorkMention(Base):
     """A (composer, title) pair as one source reported it, plus the matcher's
     decision. The raw payload keeps the full performance context (date,
     conductor, soloists, venue) for a later performances pass. Idempotent on
-    (source, external_id): re-ingesting refreshes ``last_seen`` instead of
-    re-resolving."""
+    (source, external_id): an unchanged re-sighting only refreshes
+    ``last_seen``, while one whose content actually changed is re-resolved
+    against the work catalogue so a corrected title doesn't keep the decision
+    made for the old one."""
 
     __tablename__ = "raw_work_mentions"
     __table_args__ = (
