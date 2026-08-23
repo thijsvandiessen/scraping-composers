@@ -9,8 +9,8 @@ Each NDJSON line is a JSON object with a ``_type`` field (``"entity"`` or
 ``"work_mention"``) followed by the fields of the document. The manifest
 records the fetch's status (``running``/``completed``/``failed``) and record
 count, so readers can tell a complete snapshot from one whose fetch crashed
-mid-write. Replacing ``LocalBucket`` with an ``S3Bucket`` implementation later
-requires no changes to the callers.
+mid-write. Replacing ``LocalBucket`` with an ``S3Bucket`` implementation
+later requires no changes to the callers.
 """
 
 from __future__ import annotations
@@ -36,10 +36,9 @@ MANIFEST_FILENAME = "manifest.json"
 # snapshot dirs that predate the manifest.
 LOADABLE_STATUSES = ("completed", "unknown")
 
-#: Like LOADABLE_STATUSES, plus "failed" — for the one place a human
-#: explicitly picks *this* snapshot rather than "the latest": records are
-#: flushed one at a time (see write_records), so everything written before a
-#: failed run's crash is still good data, worth an informed opt-in even
+#: Like LOADABLE_STATUSES, plus "failed" — for callers replaying *every* run of a
+#: source: records are flushed one at a time (see write_records), so everything
+#: written before a failed run's crash is still good data worth replaying, even
 #: though "latest" auto-pick should keep skipping unreviewed failures.
 EXPLICITLY_LOADABLE_STATUSES = LOADABLE_STATUSES + ("failed",)
 
@@ -50,21 +49,19 @@ EXPLICITLY_LOADABLE_STATUSES = LOADABLE_STATUSES + ("failed",)
 DOCUMENT_RECORD_TYPES = frozenset({"entity", "work_mention"})
 
 
-#: Control characters (C0 plus DEL) are rejected in a path segment. They are not a
-#: traversal risk, but ``source`` and ``run_id`` travel from here into log lines and
-#: terminals, where an embedded newline forges a log entry and ESC starts an escape
-#: sequence (CWE-117). Deliberately a rejection list rather than an allowlist: a
-#: run_id looks like ``2026-07-02T09:52:30-3086f07d``, so the colon has to stay legal.
+#: Control characters (C0 plus DEL) rejected in a path segment (not a traversal risk,
+#: but ``source``/``run_id`` reach log lines and terminals, where a newline forges a
+#: log entry — CWE-117). A rejection list, not an allowlist: a run_id looks like
+#: ``2026-07-02T09:52:30-3086f07d``, so the colon has to stay legal.
 _CONTROL_CHARS = frozenset(chr(code) for code in range(0x20)) | {"\x7f"}
 
 
 def _validated_segment(value: str, field: str) -> str:
     """Require *value* to be a single, plain path segment (CWE-22, CWE-117).
 
-    ``source`` and ``run_id`` may come from untrusted input (API path
-    parameters, CLI arguments); joined onto the bucket root unchecked, a value
-    like ``../../etc`` or an absolute path would escape the bucket, and one
-    carrying a newline would forge entries in the logs that report it.
+    ``source``/``run_id`` may come from untrusted input; joined onto the bucket
+    root unchecked, ``../../etc`` would escape the bucket and a newline would
+    forge log entries.
     """
     if (
         not value
@@ -159,10 +156,8 @@ class LocalBucket:
             for record in records:
                 fh.write(json.dumps(record, ensure_ascii=False))
                 fh.write("\n")
-                # Flushed per record because *records* is usually a generator
-                # driving a live fetch or crawl: a run killed outright (SIGTERM
-                # unwinds nothing) would otherwise lose whatever sat in the
-                # buffer. One small write per record, against a network fetch.
+                # *records* is usually a generator driving a live fetch/crawl; flush
+                # per record so a run killed outright doesn't lose a buffered one.
                 fh.flush()
 
     def read_records(self, source: str, run_id: str) -> Iterator[dict[str, Any]]:
@@ -175,10 +170,8 @@ class LocalBucket:
                 try:
                     yield json.loads(line)
                 except json.JSONDecodeError:
-                    # A run killed outright mid-flush (see write_records) can leave a
-                    # truncated trailing line; skip it rather than losing every record
-                    # read before it. Sanitize defensively at the sink so log
-                    # formatting stays single-line even if upstream validation changes.
+                    # A run killed mid-flush (see write_records) can leave a truncated
+                    # trailing line; skip it rather than losing every record before it.
                     source_log = source.replace("\r", "").replace("\n", "")
                     run_id_log = run_id.replace("\r", "").replace("\n", "")
                     log.warning("bucket: skipping malformed line %d in %r/%r", lineno, source_log, run_id_log)
@@ -197,8 +190,8 @@ class LocalBucket:
     def list_sources(self) -> list[str]:
         """Every source with data in the bucket (each a top-level dir), sorted.
 
-        Enumerating the bucket itself — rather than a registry — surfaces
-        crawl-config sources and even sources whose config was later deleted.
+        Enumerating the bucket itself — rather than a registry — surfaces crawl-config
+        sources and even sources whose config was later deleted.
         """
         if not self.root.is_dir():
             return []
@@ -232,9 +225,8 @@ class LocalBucket:
     def _snapshot_kind(self, source: str, run_id: str) -> str:
         """Classify a snapshot by peeking its first record's ``_type``.
 
-        Cheap — reads a single line. An empty or unreadable snapshot (and any
-        raw-page snapshot) is "pages": not loadable, so nothing is lost by the
-        default.
+        Cheap — reads a single line. An empty/unreadable snapshot (and any raw-page
+        snapshot) is "pages": not loadable, so nothing is lost by the default.
         """
         try:
             first = next(self.read_records(source, run_id), None)
@@ -258,8 +250,8 @@ class LocalBucket:
 def latest_loadable_run_id(bucket: Bucket, source: str) -> str | None:
     """The most recent snapshot of *source* worth reading, or None if there is none.
 
-    Skips fetches that are still running or crashed, so callers defaulting to "the
-    latest snapshot" never pick up a half-written one.
+    Skips fetches still running or crashed, so callers defaulting to "the latest
+    snapshot" never pick up a half-written one.
     """
     loadable = [
         snapshot.manifest.run_id
@@ -270,14 +262,38 @@ def latest_loadable_run_id(bucket: Bucket, source: str) -> str | None:
 
 
 def latest_document_run_id(bucket: Bucket, source: str) -> str | None:
-    """The most recent loadable *documents* snapshot of *source*, or None.
-
-    Like :func:`latest_loadable_run_id` but skips raw-page crawl snapshots, so a
-    crawl re-run after an extract never shadows the extracted documents.
-    """
+    """The most recent loadable *documents* snapshot of *source*, or None. Like
+    :func:`latest_loadable_run_id` but skips raw-page crawl snapshots, so a crawl
+    re-run after an extract never shadows the extracted documents."""
     documents = [
         snapshot.manifest.run_id
         for snapshot in bucket.list_snapshots(source)
         if snapshot.manifest.status in LOADABLE_STATUSES and snapshot.kind == "documents"
     ]
     return documents[-1] if documents else None
+
+
+def _explicitly_loadable_run_ids(bucket: Bucket, source: str, kind: str) -> list[str]:
+    """Every *kind* snapshot of *source* in :data:`EXPLICITLY_LOADABLE_STATUSES`, oldest to newest.
+
+    Includes ``failed`` runs: records are flushed one at a time (see
+    ``write_records``), so a run that crashed mid-way still has good data for
+    everything written before the crash. Callers wanting every unique record
+    ever seen for a source should replay all of these in order.
+    """
+    return [
+        snapshot.manifest.run_id
+        for snapshot in bucket.list_snapshots(source)
+        if snapshot.manifest.status in EXPLICITLY_LOADABLE_STATUSES and snapshot.kind == kind
+    ]
+
+
+def all_document_run_ids(bucket: Bucket, source: str) -> list[str]:
+    """Every loadable *documents* snapshot of *source* — see :func:`_explicitly_loadable_run_ids`."""
+    return _explicitly_loadable_run_ids(bucket, source, "documents")
+
+
+def all_page_run_ids(bucket: Bucket, source: str) -> list[str]:
+    """The extract step's input side of :func:`all_document_run_ids`: every loadable
+    raw-*pages* crawl snapshot of *source*."""
+    return _explicitly_loadable_run_ids(bucket, source, "pages")

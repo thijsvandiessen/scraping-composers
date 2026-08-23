@@ -3,8 +3,8 @@ import logging
 from dataclasses import asdict
 from pathlib import Path
 
-from composer_bronze.bucket import LocalBucket, latest_loadable_run_id
-from composer_bronze.scraper import Scraper, iter_from_bucket
+from composer_bronze.bucket import LocalBucket, all_document_run_ids
+from composer_bronze.scraper import Scraper, iter_all_from_bucket, iter_from_bucket
 from composer_gold import PromoteConfig, Rule1Config, promote
 from composer_models.db import get_engine, init_db
 from composer_scrapers import REGISTRY
@@ -113,16 +113,18 @@ def _source_identity(source: str) -> tuple[str, str]:
 def cmd_process(args: argparse.Namespace) -> int:
     source_name, base_url = _source_identity(args.source)
     bucket = LocalBucket(args.bucket_path)
-    run_id = args.run_id
-    if run_id is None:
-        run_id = latest_loadable_run_id(bucket, source_name)
-        if run_id is None:
-            print(f"no complete snapshots found for source '{source_name}' in {args.bucket_path}")
+    if args.run_id is not None:
+        records = iter_from_bucket(source_name, args.run_id, bucket)
+    else:
+        run_ids = all_document_run_ids(bucket, source_name)
+        if not run_ids:
+            print(f"no loadable snapshots found for source '{source_name}' in {args.bucket_path}")
             return 1
-        print(f"using latest run: {run_id}")
+        print(f"using {len(run_ids)} run(s): {', '.join(run_ids)}")
+        records = iter_all_from_bucket(source_name, run_ids, bucket)
     engine = get_engine(args.database_url)
     session_factory = init_db(engine)
     with session_factory() as session:
-        records = iter_from_bucket(source_name, run_id, bucket)
         run = ingest_documents(session, source_name, base_url, records)
+    print(f"seen {run.records_seen}, new {run.records_new}")
     return 0 if run.status == "completed" else 1

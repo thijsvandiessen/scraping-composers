@@ -8,10 +8,11 @@ are public here instead.
 """
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH, LocalBucket, Snapshot
-from composer_bronze.scraper import iter_from_bucket
+from composer_bronze.scraper import iter_all_from_bucket, iter_from_bucket
 from composer_crawler import all_crawl_configs
 from composer_models import IngestRun
 from composer_scrapers import REGISTRY
@@ -101,6 +102,20 @@ def process_in_background(source_name: str, snapshot_id: str, run_id: int) -> No
         run = session.get(IngestRun, run_id)
         if run is not None:
             execute_run(session, run, iter_from_bucket(source_name, snapshot_id, bucket()))
+
+
+def process_all_in_background(source_name: str, snapshot_ids: Sequence[str], run_id: int) -> None:
+    """Load every snapshot in ``snapshot_ids`` into the DB for an already-created run.
+
+    Like :func:`process_in_background` but unions every loadable run instead
+    of one: ingestion is idempotent per external_id, so replaying every run
+    (oldest to newest) captures every unique record ever seen for the source
+    rather than whatever the single latest run happened to contain.
+    """
+    with session_scope() as session:
+        run = session.get(IngestRun, run_id)
+        if run is not None:
+            execute_run(session, run, iter_all_from_bucket(source_name, snapshot_ids, bucket()))
 
 
 def running_conflict(name: str) -> HTTPException:

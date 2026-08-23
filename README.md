@@ -49,6 +49,14 @@ uv run composer-ingest derive-concerts                   # group the mentions in
 # answers are cached (see "Not analysing the same page twice" below)
 uv run composer-ingest extract lso --no-cache            # force every page back through the model
 
+# extract-all: LLM-extract every loadable crawl snapshot of every crawl-config
+# source in one call — every past crawl run, not just the latest — instead of
+# looping `extract <config> --crawl-run-id <id>` by hand. Best-effort: one run
+# failing doesn't stop the rest of the batch, and it prints which (source, run)
+# pairs failed. Accepts the same --provider/--model/--no-cache/--no-ledger flags
+# as `extract`, applied to every run.
+uv run composer-ingest extract-all
+
 # crawl and extract are slow and unattended, so they narrate themselves on stderr:
 # discovery, a periodic page count, and what each run dropped. DEBUG adds a line
 # per crawled page, per markdown chunk and per model call (with its latency and

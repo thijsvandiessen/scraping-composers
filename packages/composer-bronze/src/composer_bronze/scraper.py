@@ -8,7 +8,7 @@ knowing anything about the source's specific HTTP protocol or data format.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -93,3 +93,21 @@ def iter_from_bucket(
     """Yield typed documents previously stored by :meth:`Scraper.fetch_to_bucket`."""
     for d in bucket.read_records(source_name, run_id):
         yield deserialize_document(d)
+
+
+def iter_all_from_bucket(
+    source_name: str,
+    run_ids: Sequence[str],
+    bucket: Bucket,
+) -> Iterator[EntityDocument | WorkMentionDocument]:
+    """Yield typed documents from every run in ``run_ids``, in the given order.
+
+    Ingestion is idempotent per external_id (see
+    ``composer_warehouse.ingestion.core``), so chaining every loadable
+    snapshot into one ingest unions the unique records ever seen for the
+    source rather than whatever the single latest run happened to contain;
+    where content for the same record differs across runs, whichever run
+    comes later in ``run_ids`` wins.
+    """
+    for run_id in run_ids:
+        yield from iter_from_bucket(source_name, run_id, bucket)
