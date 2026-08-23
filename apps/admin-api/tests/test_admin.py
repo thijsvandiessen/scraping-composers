@@ -512,12 +512,12 @@ def test_rebuild_silver_conflicts_while_running(
     assert client.post("/admin/v1/rebuild-silver").status_code == 409
 
 
-def test_rebuild_silver_rejects_non_sqlite_database(
+def test_rebuild_silver_rejects_a_database_with_nothing_to_swap(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from composer_config import settings
 
-    monkeypatch.setattr(settings, "database_url", "postgresql+psycopg://user:pass@host:5432/composers")
+    monkeypatch.setattr(settings, "database_url", "mysql://user:pass@host/composers")
     assert client.get("/admin/v1/silver").json()["exists"] is False
     r = client.post("/admin/v1/rebuild-silver")
     assert r.status_code == 400

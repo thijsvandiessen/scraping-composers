@@ -15,9 +15,9 @@ from composer_gold import (
     promote,
     read_gold_manifest,
 )
-from composer_warehouse.build import read_build_manifest
+from composer_warehouse.build import BuildTarget
 from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.rebuild import rebuild_silver, sqlite_db_path
+from composer_warehouse.rebuild import rebuild_silver, silver_target
 from composer_warehouse.recordings import derive_recordings
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 
@@ -132,12 +132,12 @@ def update_rule1_config(body: Rule1ConfigBody) -> Rule1ConfigBody:
     return body
 
 
-def _silver_db_path() -> Path | None:
-    """The silver database file, or None when DATABASE_URL isn't sqlite."""
+def _silver_target() -> BuildTarget | None:
+    """The silver build target, or None when DATABASE_URL supports no swap."""
     from composer_config import settings
 
     try:
-        return sqlite_db_path(settings.database_url)
+        return silver_target(settings.database_url)
     except ValueError:
         return None
 
@@ -158,10 +158,10 @@ def _rebuild_silver_in_background() -> None:
 
 
 def _silver_status() -> SilverStatus:
-    path = _silver_db_path()
-    manifest = read_build_manifest(path) if path is not None else None
+    target = _silver_target()
+    manifest = target.read_manifest() if target is not None else None
     return SilverStatus(
-        exists=path.exists() if path is not None else False,
+        exists=target.exists() if target is not None else False,
         status=manifest.status if manifest else None,
         started_at=manifest.started_at if manifest else None,
         finished_at=manifest.finished_at if manifest else None,
@@ -179,13 +179,13 @@ def silver_status() -> SilverStatus:
 @builds.post("/rebuild-silver", status_code=status.HTTP_202_ACCEPTED, response_model=SilverStatus)
 def start_rebuild_silver(background: BackgroundTasks) -> SilverStatus:
     """Rebuild the silver database from the bucket (background)."""
-    path = _silver_db_path()
-    if path is None:
+    target = _silver_target()
+    if target is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "rebuild-silver requires a file-backed sqlite DATABASE_URL",
         )
-    manifest = read_build_manifest(path)
+    manifest = target.read_manifest()
     if manifest is not None and manifest.status == "running":
         raise HTTPException(status.HTTP_409_CONFLICT, "a silver rebuild is already in progress")
     background.add_task(_rebuild_silver_in_background)

@@ -670,12 +670,11 @@ def test_cmd_rebuild_silver_replays_bucket(
         assert entity.label == "Bach, Johann Sebastian"
 
 
-def test_cmd_rebuild_silver_rejects_non_sqlite(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cmd_rebuild_silver_rejects_a_url_with_nothing_to_swap(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     rc = cmd_rebuild_silver(
-        _ns(
-            database_url="postgresql+psycopg://user:pass@host:5432/composers",
-            bucket_path=str(tmp_path / "bucket"),
-        )
+        _ns(database_url="sqlite://", bucket_path=str(tmp_path / "bucket"))  # in-memory
     )
     assert rc == 1
     assert "sqlite" in capsys.readouterr().out

@@ -18,7 +18,7 @@ from composer_models import (
 )
 from composer_schema import SourceClaim
 from composer_warehouse.build import read_build_manifest
-from composer_warehouse.rebuild import rebuild_silver, sqlite_db_path
+from composer_warehouse.rebuild import rebuild_silver, silver_target
 from composer_warehouse.testing import FakeSource, mention, perf_mention, person
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -209,12 +209,12 @@ def test_rebuild_failure_keeps_old_database(tmp_path: Path) -> None:
         assert silver.scalar(select(Entity.id).where(Entity.label == "Bach, Johann Sebastian")) is not None
 
 
-def test_rebuild_requires_a_sqlite_file_url(tmp_path: Path) -> None:
+def test_silver_target_rejects_urls_with_nothing_to_swap(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path / "bucket")
     with pytest.raises(ValueError, match="file-backed sqlite"):
-        rebuild_silver(bucket, SOURCES, "postgresql+psycopg://user:pass@host:5432/composers")
+        rebuild_silver(bucket, SOURCES, "mysql://user:pass@host/composers")
     with pytest.raises(ValueError, match="file-backed sqlite"):
-        sqlite_db_path("sqlite://")  # in-memory: nothing to swap
+        silver_target("sqlite://")  # in-memory: nothing to swap
 
 
 def test_rebuild_failed_source_snapshots_are_skipped(tmp_path: Path) -> None:

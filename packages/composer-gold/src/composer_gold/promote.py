@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from composer_models import Base
-from composer_warehouse.build import BuildManifest, read_build_manifest, run_build
-from sqlalchemy import create_engine
+from composer_warehouse.build import BuildManifest, SqliteFileTarget, read_build_manifest, run_build
+from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from ._claims import (
@@ -97,7 +97,7 @@ def promote(silver: Session, gold_path: str | Path, config: PromoteConfig | None
     the sitelink signal off.
     """
     cfg = config or PromoteConfig()
-    stats = run_build(gold_path, lambda tmp: _build(silver, tmp, cfg))
+    stats = run_build(SqliteFileTarget(Path(gold_path)), lambda engine: _build(silver, engine, cfg))
     log.info("gold promoted to %s: %s", gold_path, stats)
     return stats
 
@@ -127,9 +127,7 @@ def _stats(build: GoldBuild) -> PromoteStats:
     )
 
 
-def _build(silver: Session, tmp_path: Path, config: PromoteConfig) -> PromoteStats:
-    tmp_path.unlink(missing_ok=True)
-    gold_engine = create_engine(f"sqlite:///{tmp_path}")
+def _build(silver: Session, gold_engine: Engine, config: PromoteConfig) -> PromoteStats:
     Base.metadata.create_all(gold_engine)
 
     build = GoldBuild(silver, config)
@@ -149,5 +147,6 @@ def _build(silver: Session, tmp_path: Path, config: PromoteConfig) -> PromoteSta
         copy_concerts(build, gold)
         copy_recordings(build, gold)
 
-    gold_engine.dispose()
+    # The engine belongs to the build target, which disposes it as part of the
+    # swap; closing it here would pull the file handle out from under it.
     return _stats(build)
