@@ -110,6 +110,53 @@ def test_reingest_with_unchanged_content_adds_no_duplicate_claims(session: Sessi
     assert len(claims) == 2  # born_in + mentioned_in, not duplicated by the second run
 
 
+def _named_doc(name: str, version: int) -> EntityDocument:
+    """The same record seen twice under a corrected name: only ``name`` and the
+    raw payload differ, so the content hash changes but the identity doesn't."""
+    return EntityDocument(
+        id="wikidata:Q1234",
+        url="https://example.com/old",
+        source_name="fake",
+        ingested_at=_INGESTED_AT,
+        name=name,
+        raw={"version": version},
+        claims=(),
+    )
+
+
+def test_reingest_with_changed_name_updates_entity_label_only(session: Session) -> None:
+    """A re-sighted record's corrected name updates the shared Entity's label
+    (cosmetic rename), but must not touch dedup_key/id — those are derived
+    from the label at creation time (composer_models.normalize.entity_uuid),
+    so changing them in place would desync id from dedup_key and break future
+    dedup lookups (issue #142)."""
+    ingest_source(session, FakeSource(records=(_named_doc("Old Name", 1),)))
+    entity = session.scalars(select(Entity)).one()
+    original_id, original_dedup_key = entity.id, entity.dedup_key
+
+    ingest_source(session, FakeSource(records=(_named_doc("New Name", 2),)))
+    session.expire(entity)
+
+    assert entity.label == "New Name"
+    assert entity.id == original_id
+    assert entity.dedup_key == original_dedup_key
+
+
+def test_reingest_with_changed_name_advances_last_edited_at(session: Session) -> None:
+    """The rename must mark the entity *edited*, not merely seen. Asserted
+    strictly (``>``, not ``>=``): the ``mentioned_in`` claim already exists on
+    the second run, so without the label update nothing would add the entity to
+    ``edited_entity_ids`` and last_edited_at would simply stay put."""
+    ingest_source(session, FakeSource(records=(_named_doc("Old Name", 1),)))
+    entity = session.scalars(select(Entity)).one()
+    edited_after_first = entity.last_edited_at
+
+    ingest_source(session, FakeSource(records=(_named_doc("New Name", 2),)))
+    session.expire(entity)
+
+    assert entity.last_edited_at > edited_after_first
+
+
 def test_reingest_updates_last_ingested_at(session: Session) -> None:
     source = FakeSource(records=(MOZART,))
     ingest_source(session, source)

@@ -5,13 +5,13 @@ import uuid
 from collections.abc import Iterator
 from datetime import datetime
 
-from composer_models import Claim, EntityRecord, IngestRun, RawWorkMention, Source, utcnow
+from composer_models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, utcnow
 from composer_schema import EntityDocument, WorkMentionDocument
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from .entities import flush_entity_timestamps, get_or_create_entity
-from .mentions import ingest_mention
+from .mentions import add_work_title_alias, ingest_mention, resolve_mention
 from .state import IngestState, content_hash, load_state
 
 log = logging.getLogger(__name__)
@@ -47,6 +47,25 @@ def _ingest_work_mention(state: IngestState, item: WorkMentionDocument, now: dat
         if new_hash != existing_hash:
             values.update(raw_title=item.title, raw_composer=item.composer, raw=raw_json)
             state.existing_mentions[item.id] = (existing_mid, new_hash)
+
+            composer_id: uuid.UUID | None = None
+            if item.composer:
+                composer_id = get_or_create_entity(
+                    state.session, state.entities_by_key, "person", item.composer
+                )
+                state.seen_entity_ids.add(composer_id)
+
+            result, matched_work_id, features = resolve_mention(state, composer_id, item.title)
+            values.update(
+                composer_entity_id=composer_id,
+                work_id=matched_work_id,
+                match_status=result.status,
+                match_score=result.score,
+                match_method=result.method,
+                candidate_work_id=result.candidate_work_id,
+            )
+            if matched_work_id is not None:
+                add_work_title_alias(state, matched_work_id, item.title, features)
         state.session.execute(
             update(RawWorkMention).where(RawWorkMention.id == existing_mid).values(**values)
         )
@@ -137,6 +156,16 @@ def _ingest_entity_record(state: IngestState, record: EntityDocument, now: datet
     if new_hash != existing_hash:
         values.update(name=record.name, url=record.url, raw=raw_json)
         state.existing_records[record.id] = (existing_id, existing_entity_id, new_hash)
+        if existing_entity_id is not None:
+            # Cosmetic rename only: dedup_key/id are derived from the label at
+            # creation time (see composer_models.normalize.entity_uuid), so
+            # updating them here would desync id from dedup_key and break
+            # future dedup lookups. This does not fix dedup against a
+            # differently-spelled existing entity.
+            state.session.execute(
+                update(Entity).where(Entity.id == existing_entity_id).values(label=record.name)
+            )
+            state.edited_entity_ids.add(existing_entity_id)
     state.session.execute(update(EntityRecord).where(EntityRecord.id == existing_id).values(**values))
     if existing_entity_id is not None:
         state.seen_entity_ids.add(existing_entity_id)
