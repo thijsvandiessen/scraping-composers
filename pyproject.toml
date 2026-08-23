@@ -22,7 +22,7 @@ dev = [
     "pytest-cov>=5",
     "pytest-django>=4.14.0",
     "pyright>=1.1.390",
-    "ruff>=0.16.2",
+    "ruff>=0.16.4",
 ]
 
 [tool.pytest.ini_options]
