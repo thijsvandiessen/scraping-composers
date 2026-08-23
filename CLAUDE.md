@@ -42,7 +42,6 @@ done
 uv run pyright              # strict mode, whole workspace
 uv run ruff check
 uv run ruff format --check
-uv run pylint packages apps # scoped to C0302 file-length only (300-line cap; see pyproject.toml)
 ```
 
 ## Dependency audit

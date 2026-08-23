@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 """Crawl-config endpoint tests: a tmp_path store and bucket, no network.
 
 Like the scraper tests, the Starlette TestClient runs background tasks

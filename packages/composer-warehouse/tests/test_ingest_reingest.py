@@ -1,7 +1,6 @@
 """Ingest tests for re-sighted entity records: idempotency and content changes.
 
-Split out of test_ingest.py to keep that module under pylint's C0302
-too-many-lines threshold.
+Split out of test_ingest.py to keep each module to one concern.
 """
 
 import json

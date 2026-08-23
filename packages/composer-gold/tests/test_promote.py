@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 """Tests for the silver → gold promote pipeline."""
 
 from datetime import UTC, datetime

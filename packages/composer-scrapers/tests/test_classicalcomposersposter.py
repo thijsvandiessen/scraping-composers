@@ -1,4 +1,3 @@
-# pylint: disable=too-many-lines
 """Tests for the Classical Composers Poster PDF source."""
 
 from __future__ import annotations
