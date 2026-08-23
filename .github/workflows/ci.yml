@@ -41,6 +41,42 @@ jobs:
       # report-only: no --cov-fail-under until a baseline is established
       - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }} --cov-report=term-missing
 
+  test-postgres:
+    name: postgres tests (${{ matrix.member }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Only the members with a Postgres-specific surface: the schema and its
+        # migrations, the rebuild's schema swap, and the admin API that reports
+        # on it. Everything else is dialect-agnostic and covered by the matrix
+        # above, which runs on SQLite.
+        include:
+          - { member: packages/composer-models,    cov: "--cov=composer_models" }
+          - { member: packages/composer-warehouse, cov: "--cov=composer_warehouse" }
+          - { member: apps/admin-api,              cov: "--cov=composer_admin" }
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: composers
+          POSTGRES_PASSWORD: composers
+          POSTGRES_DB: composers_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U composers -d composers_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      COMPOSER_TEST_POSTGRES_URL: postgresql+psycopg://composers:composers@localhost:5432/composers_test
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }} --cov-report=term-missing
+
   audit:
     name: dependency audit (pip-audit)
     runs-on: ubuntu-latest

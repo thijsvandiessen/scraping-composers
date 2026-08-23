@@ -96,7 +96,7 @@ extraPaths = [
     "apps/dashboard/tests",
 ]
 # Trivial per-member conftests share the module name "conftest"; nothing to type-check there.
-exclude = ["**/conftest.py", "**/.venv", "**/__pycache__"]
+exclude = ["**/conftest.py", "**/.venv", "**/__pycache__", "**/migrations/versions/**"]
 # django, pandas, docling, unfold and kagglehub ship no type information. Don't
 # infer half-typed signatures from their source (which produces false positives
 # on e.g. the Django test client and request objects); treat them as untyped,

@@ -801,16 +801,22 @@ dependencies = [
 
 [package.optional-dependencies]
 postgres = [
+    { name = "alembic" },
     { name = "psycopg", extra = ["binary"] },
+]
+testing = [
+    { name = "pytest" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "alembic", marker = "extra == 'postgres'", specifier = ">=1.16" },
     { name = "composer-config", editable = "packages/composer-config" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.3.4" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=9.1.1" },
     { name = "sqlalchemy", specifier = ">=2.0.51" },
 ]
-provides-extras = ["postgres"]
+provides-extras = ["postgres", "testing"]
 
 [[package]]
 name = "composer-schema"

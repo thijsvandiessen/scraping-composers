@@ -56,5 +56,15 @@ def get_engine(url: str | None = None, *, schema: str | None = None) -> Engine:
 
 
 def init_db(engine: Engine) -> sessionmaker[Session]:
-    Base.metadata.create_all(engine)
+    """Session factory for ``engine``, creating the schema on SQLite.
+
+    On SQLite the schema is created on demand: silver is disposable there, and
+    a schema change means replaying bronze rather than migrating. On Postgres
+    the schema belongs to Alembic (``alembic upgrade head``) or to
+    ``rebuild-silver``'s staging build, both of which stamp what they create —
+    so creating tables here would leave an unstamped schema that no migration
+    could ever run against.
+    """
+    if engine.dialect.name == "sqlite":
+        Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)
