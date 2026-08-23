@@ -69,3 +69,14 @@ def test_the_key_bound_fits_a_postgres_index_tuple() -> None:
     # Postgres caps a btree index tuple at ~2704 bytes; UTF-8 is at most 4
     # bytes per character, so this is the worst case for a truncated key.
     assert MAX_KEY_CHARS * 4 < 2704
+
+
+def test_get_engine_rejects_a_schema_name_that_cannot_be_escaped() -> None:
+    # The name is interpolated into DDL (schema names can't be bound), so it
+    # is validated rather than escaped.
+    with pytest.raises(ValueError, match="invalid schema name"):
+        get_engine("postgresql+psycopg://u:p@h/db", schema='x"; drop schema public cascade; --')
+
+
+def test_get_engine_ignores_the_schema_for_sqlite() -> None:
+    assert get_engine("sqlite://", schema="silver").dialect.name == "sqlite"
