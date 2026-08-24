@@ -2,7 +2,7 @@
   "persons": {
     "min_concert_appearances": 2,
     "min_recording_appearances": 2,
-    "min_appearances_for_composers": 2,
+    "min_appearances_for_composers": 0,
     "min_sitelinks": 50
   },
   "ensembles": {

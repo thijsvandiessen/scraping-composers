@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from composer_gold import (
+    DEFAULT_RULE1_CONFIG_PATH,
     PersonRule1Config,
     PromoteConfig,
     Rule1Config,
@@ -925,3 +926,81 @@ def test_promote_drops_an_unattributed_work_entity(session: Session, tmp_path: P
     with _gold_session(gold_path) as gold:
         assert gold.scalars(select(Entity).where(Entity.kind == "work")).all() == []
         assert gold.scalar(select(Claim).where(Claim.predicate == "composed_in")) is None
+
+
+# ---------------------------------------------------------------------------
+# Composers survive curation, and gold never emits a composer id it can't
+# resolve. Regression guard for the config regression that dropped Bach,
+# Brahms, Chopin, Debussy and Wagner from gold while keeping their works.
+
+
+def _seed_composer_only_silver(session: Session) -> None:
+    """A composer with works and no performance credits — the shape rule 1's
+    composer exemption exists for, and the one a raised
+    ``min_appearances_for_composers`` silently kills."""
+    archive = FakeSource(
+        records=(
+            mention("Toccata and Fugue in D minor, BWV 565", "Bach, Johann Sebastian", "b1"),
+            mention("Goldberg Variations, BWV 988", "Bach, Johann Sebastian", "b2"),
+        )
+    )
+    ingest_source(session, archive)
+
+
+def test_composer_with_works_but_no_credits_survives(session: Session, tmp_path: Path) -> None:
+    """The repo's own rule1_config must keep composers.
+
+    Composers are never *participants* — concert_participants.role is only
+    soloist/conductor/ensemble — so any non-zero
+    ``min_appearances_for_composers`` is unsatisfiable and silently drops the
+    entire canon while leaving their works behind.
+    """
+    _seed_composer_only_silver(session)
+    gold_path = tmp_path / "gold.db"
+
+    promote(session, gold_path, PromoteConfig(rule1=Rule1Config.from_json(DEFAULT_RULE1_CONFIG_PATH)))
+
+    with _gold_session(gold_path) as gold:
+        assert "Bach, Johann Sebastian" in {e.label for e in gold.scalars(select(Entity))}
+
+
+def test_gold_never_emits_an_unresolvable_composer_id(session: Session, tmp_path: Path) -> None:
+    """Rule 1 may prune a composer; the works it composed still get copied.
+
+    Copying the raw composer id then leaves a foreign key into a row that isn't
+    in gold, so the API hands out a composer_id that 404s. Null is the honest
+    answer.
+    """
+    _seed_composer_only_silver(session)
+    gold_path = tmp_path / "gold.db"
+
+    # Force the composer out: demand credits they cannot have.
+    promote(
+        session,
+        gold_path,
+        PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_appearances_for_composers=1))),
+    )
+
+    with _gold_session(gold_path) as gold:
+        assert "Bach, Johann Sebastian" not in {e.label for e in gold.scalars(select(Entity))}
+        entity_ids = set(gold.scalars(select(Entity.id)))
+        works = list(gold.scalars(select(Work)))
+        assert works  # the works are still published
+        dangling = [w for w in works if w.composer_entity_id and w.composer_entity_id not in entity_ids]
+        assert dangling == []
+        mentions = list(gold.scalars(select(RawWorkMention)))
+        assert [m for m in mentions if m.composer_entity_id and m.composer_entity_id not in entity_ids] == []
+
+
+def test_kept_composer_keeps_the_link_on_their_works(session: Session, tmp_path: Path) -> None:
+    # The null-out must not fire when the composer *did* survive.
+    _seed_composer_only_silver(session)
+    gold_path = tmp_path / "gold.db"
+
+    promote(session, gold_path)
+
+    with _gold_session(gold_path) as gold:
+        bach = gold.scalars(select(Entity).where(Entity.label == "Bach, Johann Sebastian")).one()
+        works = list(gold.scalars(select(Work)))
+        assert works
+        assert all(w.composer_entity_id == bach.id for w in works)
