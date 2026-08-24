@@ -13,6 +13,8 @@ from composer_models import (
     Entity,
     PersonMatch,
     RawWorkMention,
+    Recording,
+    Source,
     Work,
     WorkTitle,
 )
@@ -21,14 +23,19 @@ from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
 from composer_models.testing import requires_postgres
 from composer_schema import SourceClaim
 from composer_warehouse.build import read_build_manifest
-from composer_warehouse.rebuild import rebuild_silver, silver_target
+from composer_warehouse.rebuild import rebuild_silver, replayable_sources, silver_target
 from composer_warehouse.testing import FakeSource, mention, perf_mention, person
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 ARCHIVE = ("archive", "https://archive.example")
 BERLINPHIL = ("berlinphil", "https://bp.example")
-SOURCES = [ARCHIVE, BERLINPHIL]
+BASE_URLS: dict[str, str] = dict([ARCHIVE, BERLINPHIL])
+
+
+def base_url_for(source: str) -> str:
+    """Stand-in for the CLI/admin resolver: empty for a source it doesn't know."""
+    return BASE_URLS.get(source, "")
 
 
 def _seed_bucket(bucket: LocalBucket) -> None:
@@ -73,7 +80,7 @@ def test_rebuild_replays_bucket_with_full_fidelity(tmp_path: Path) -> None:
     _seed_bucket(bucket)
     db_path = tmp_path / "silver.db"
 
-    stats = rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
 
     assert stats.sources_replayed == 2
     assert stats.records_seen == 10
@@ -98,7 +105,7 @@ def test_rebuild_preserves_human_decisions(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path / "bucket")
     _seed_bucket(bucket)
     db_path = tmp_path / "silver.db"
-    rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
+    rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
 
     # simulate the human review decisions the CLI records
     with _session(db_path) as silver:
@@ -133,7 +140,7 @@ def test_rebuild_preserves_human_decisions(tmp_path: Path) -> None:
         flagged.match_method = "manual"
         silver.commit()
 
-    stats = rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
 
     assert stats.person_decisions_applied == 2
     assert stats.person_decisions_dropped == 0
@@ -167,7 +174,7 @@ def test_rebuild_drops_decisions_for_vanished_entities(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path / "bucket")
     _seed_bucket(bucket)
     db_path = tmp_path / "silver.db"
-    rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
+    rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
 
     with _session(db_path) as silver:
         # an accepted pair for entities no source reports (anymore)
@@ -185,7 +192,7 @@ def test_rebuild_drops_decisions_for_vanished_entities(tmp_path: Path) -> None:
         )
         silver.commit()
 
-    stats = rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
 
     assert stats.person_decisions_dropped == 1
     with _session(db_path) as silver:
@@ -196,15 +203,17 @@ def test_rebuild_failure_keeps_old_database(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path / "bucket")
     _seed_bucket(bucket)
     db_path = tmp_path / "silver.db"
-    rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
+    rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
 
-    # a "complete" snapshot whose records are garbage: the replay must fail
-    bucket.write_records("archive", "run-bad", [{"_type": "nonsense"}])
+    # a "complete" documents snapshot whose records are garbage: the replay must
+    # fail. It has to look like a document (``_type: entity``) to be picked up at
+    # all — a snapshot of any other ``_type`` is a raw-pages one and is skipped.
+    bucket.write_records("archive", "run-bad", [{"_type": "entity", "ingested_at": "not-a-date"}])
     manifest = SnapshotManifest.start("archive", "run-bad")
     bucket.write_manifest(manifest.completed(record_count=1))
 
-    with pytest.raises(RuntimeError, match="replaying archive/run-bad failed"):
-        rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
+    with pytest.raises(RuntimeError, match="replaying archive .*run-bad.* failed"):
+        rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
 
     build_manifest = read_build_manifest(db_path)
     assert build_manifest is not None and build_manifest.status == "failed"
@@ -215,20 +224,21 @@ def test_rebuild_failure_keeps_old_database(tmp_path: Path) -> None:
 def test_silver_target_rejects_urls_with_nothing_to_swap(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path / "bucket")
     with pytest.raises(ValueError, match="sqlite file or a Postgres URL"):
-        rebuild_silver(bucket, SOURCES, "mysql://user:pass@host/composers")
+        rebuild_silver(bucket, base_url_for, "mysql://user:pass@host/composers")
     with pytest.raises(ValueError, match="sqlite file or a Postgres URL"):
         silver_target("sqlite://")  # in-memory: nothing to swap
 
 
-def test_rebuild_failed_source_snapshots_are_skipped(tmp_path: Path) -> None:
+def test_rebuild_skips_a_snapshot_with_no_documents(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path / "bucket")
     _seed_bucket(bucket)
-    # a failed fetch must not shadow the older complete snapshot
+    # a fetch that crashed before writing anything: nothing to load, and it must
+    # not shadow the source's real snapshot
     manifest = SnapshotManifest.start("archive", "zzz-later-run")
     bucket.write_manifest(manifest.failed("boom"))
     db_path = tmp_path / "silver.db"
 
-    stats = rebuild_silver(bucket, SOURCES, f"sqlite:///{db_path}")
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
 
     assert stats.sources_replayed == 2
     assert (
@@ -237,6 +247,103 @@ def test_rebuild_failed_source_snapshots_are_skipped(tmp_path: Path) -> None:
         ]
         == "failed"
     )
+
+
+def test_rebuild_skips_a_source_whose_snapshots_are_all_raw_pages(tmp_path: Path) -> None:
+    """A crawled-but-not-yet-extracted source has nothing a replay could load.
+
+    Regression guard for the reason ``rebuild-silver`` could not simply swap the
+    registry for ``bucket.list_sources()``: without the ``documents`` filter the
+    replay reaches a raw crawl snapshot and ``deserialize_document`` raises.
+    """
+    bucket = LocalBucket(tmp_path / "bucket")
+    _seed_bucket(bucket)
+    bucket.write_records("crawled-only", "run-1", [{"_type": "crawl", "url": "https://x.example"}])
+    bucket.write_manifest(SnapshotManifest.start("crawled-only", "run-1").completed(record_count=1))
+    db_path = tmp_path / "silver.db"
+
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
+
+    assert stats.sources_replayed == 2
+    with _session(db_path) as silver:
+        assert silver.scalar(select(Source.id).where(Source.name == "crawled-only")) is None
+
+
+def test_rebuild_replays_every_bucket_source_and_every_document_run(tmp_path: Path) -> None:
+    """The replay is driven by the bucket, not by a registry of scrapers.
+
+    Both halves of the #182 regression: a source nobody passed in (a crawl
+    config's extracted documents, or an orphan whose adapter was removed) is
+    replayed, and a record that only ever appeared in an older snapshot is not
+    dropped by taking just the newest one.
+    """
+    bucket = LocalBucket(tmp_path / "bucket")
+    _seed_bucket(bucket)
+    # "theclassicreview" is a crawl config, not a scraper: no adapter, no
+    # base_url, but its extract step wrote documents under its name.
+    extracted = FakeSource(records=(person("Gardiner, John Eliot"),), name="theclassicreview")
+    Scraper(extracted).fetch_to_bucket(bucket)
+    # a second, newer run of the same source that no longer reports Gardiner
+    later = FakeSource(records=(person("Hogwood, Christopher"),), name="theclassicreview")
+    Scraper(later).fetch_to_bucket(bucket, run_id="zzz-newest")
+    db_path = tmp_path / "silver.db"
+
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
+
+    assert stats.sources_replayed == 3
+    with _session(db_path) as silver:
+        source = silver.scalars(select(Source).where(Source.name == "theclassicreview")).one()
+        assert source.base_url == ""  # no adapter and no config: nothing to resolve
+        labels = set(silver.scalars(select(Entity.label)).all())
+        assert {"Gardiner, John Eliot", "Hogwood, Christopher"} <= labels
+
+
+def test_rebuild_keeps_recordings_from_a_crawl_derived_source(tmp_path: Path) -> None:
+    """The headline #182 symptom: a rebuild used to take recordings to zero.
+
+    Recordings come only from LLM-extracted mentions (``_source: "llm"``,
+    ``_kind: "recording"``), which only crawl-config sources produce — precisely
+    the sources a registry-driven replay never opened.
+    """
+    bucket = LocalBucket(tmp_path / "bucket")
+    _seed_bucket(bucket)
+    raw = {
+        "_source": "llm",
+        "_kind": "recording",
+        "record_key": "https://dg.example/album",
+        "title": "Beethoven: Symphony No. 9",
+        "label": "Deutsche Grammophon",
+        "artists": [{"name": "Simon Rattle", "role": "conductor", "discipline": None}],
+    }
+    extracted = FakeSource(
+        records=(
+            perf_mention("https://dg.example/album#w0", "Symphony No. 9", "Beethoven", raw),
+            person("Simon Rattle", external_id="dg:rattle"),
+        ),
+        name="deutschegrammophon",
+    )
+    Scraper(extracted).fetch_to_bucket(bucket)
+    db_path = tmp_path / "silver.db"
+
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
+
+    assert stats.recordings == 1
+    with _session(db_path) as silver:
+        recording = silver.scalars(select(Recording)).one()
+        assert recording.title == "Beethoven: Symphony No. 9"
+
+
+def test_replayable_sources_lists_the_bucket_not_a_registry(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path / "bucket")
+    _seed_bucket(bucket)
+    Scraper(FakeSource(records=(person("Anon"),), name="theclassicreview")).fetch_to_bucket(bucket)
+    bucket.write_records("crawled-only", "run-1", [{"_type": "crawl"}])
+    bucket.write_manifest(SnapshotManifest.start("crawled-only", "run-1").completed(record_count=1))
+
+    replayable = replayable_sources(bucket)
+
+    assert [name for name, _ in replayable] == ["archive", "berlinphil", "theclassicreview"]
+    assert all(len(run_ids) == 1 for _, run_ids in replayable)
 
 
 # --------------------------------------------------------------------------
@@ -250,7 +357,7 @@ def test_rebuild_replays_bucket_into_postgres(tmp_path: Path, pg_url: str) -> No
     bucket = LocalBucket(tmp_path / "bucket")
     _seed_bucket(bucket)
 
-    stats = rebuild_silver(bucket, SOURCES, pg_url)
+    stats = rebuild_silver(bucket, base_url_for, pg_url)
 
     assert stats.sources_replayed == 2
     assert stats.records_seen == 10
@@ -288,7 +395,7 @@ def test_rebuild_preserves_human_decisions_on_postgres(tmp_path: Path, pg_url: s
     # starts; on Postgres that is a different schema, not a different file.
     bucket = LocalBucket(tmp_path / "bucket")
     _seed_bucket(bucket)
-    rebuild_silver(bucket, SOURCES, pg_url)
+    rebuild_silver(bucket, base_url_for, pg_url)
 
     engine = get_engine(pg_url)
     with Session(engine) as silver:
@@ -322,7 +429,7 @@ def test_rebuild_preserves_human_decisions_on_postgres(tmp_path: Path, pg_url: s
         silver.commit()
     engine.dispose()
 
-    stats = rebuild_silver(bucket, SOURCES, pg_url)
+    stats = rebuild_silver(bucket, base_url_for, pg_url)
 
     assert stats.person_decisions_applied == 2
     assert stats.person_decisions_dropped == 0

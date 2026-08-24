@@ -145,11 +145,12 @@ def _silver_target() -> BuildTarget | None:
 
 def _rebuild_silver_in_background() -> None:
     """Rebuild silver from the bucket; status lives in the silver manifest."""
-    # Registry and bucket are read through the modules that own them, rather
-    # than imported by name, so tests (and future config) can swap them.
-    sources = [(adapter.name, adapter.base_url) for adapter in snapshots.REGISTRY.values()]
+    # Which sources get replayed is the bucket's own listing, not the scraper
+    # registry — crawl-config sources have no adapter but do have extracted
+    # documents in the bucket. The bucket and the base-URL lookup are reached
+    # through the module that owns them so tests can swap them.
     try:
-        rebuild_silver(snapshots.bucket(), sources)
+        rebuild_silver(snapshots.bucket(), snapshots.source_base_url)
     except Exception:
         # Recorded as a failed manifest by rebuild_silver; log for the console.
         log.exception("background silver rebuild failed")

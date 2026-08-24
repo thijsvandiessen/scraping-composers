@@ -28,8 +28,9 @@ log = logging.getLogger(__name__)
 
 def source_base_url(source: str) -> str:
     """Base URL for a bucket source: a registered scraper, or a crawl config's
-    first seed. Mirrors the CLI's ``_source_identity`` so crawl-config sources
-    (whose LLM ``extract`` docs live under their name) can open an IngestRun."""
+    first seed. Mirrors the CLI's ``source_base_url`` so crawl-config sources
+    (whose LLM ``extract`` docs live under their name) can open an IngestRun,
+    and so ``rebuild-silver`` can label the sources it replays from the bucket."""
     adapter = REGISTRY.get(source)
     if adapter is not None:
         return adapter.base_url

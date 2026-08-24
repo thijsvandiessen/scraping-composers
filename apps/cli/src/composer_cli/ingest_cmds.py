@@ -82,11 +82,30 @@ def cmd_promote(args: argparse.Namespace) -> int:
     return 0
 
 
+def source_base_url(source: str) -> str:
+    """Base URL for a bucket source: a registered scraper's, or a crawl config's
+    first seed (the ``extract`` step wrote its LLM-derived docs under that name).
+
+    Empty for a source with neither — the bucket keeps data for sources whose
+    adapter or config was later removed, and ``rebuild-silver`` replays those too.
+    """
+    adapter = REGISTRY.get(source)
+    if adapter is not None:
+        return adapter.base_url
+    config = crawl_choices().get(source)
+    return config.seeds[0] if config and config.seeds else ""
+
+
+def _source_identity(source: str) -> tuple[str, str]:
+    """(name, base_url) for a bucket source."""
+    adapter = REGISTRY.get(source)
+    return (adapter.name if adapter is not None else source), source_base_url(source)
+
+
 def cmd_rebuild_silver(args: argparse.Namespace) -> int:
     bucket = LocalBucket(args.bucket_path)
-    sources = [(adapter.name, adapter.base_url) for adapter in REGISTRY.values()]
     try:
-        stats = rebuild_silver(bucket, sources, args.database_url)
+        stats = rebuild_silver(bucket, source_base_url, args.database_url)
     except ValueError as exc:
         print(exc)
         return 1
@@ -97,17 +116,6 @@ def cmd_rebuild_silver(args: argparse.Namespace) -> int:
     for key, value in asdict(stats).items():
         print(f"  {key.replace('_', ' '):<26} {value}")
     return 0
-
-
-def _source_identity(source: str) -> tuple[str, str]:
-    """(name, base_url) for a bucket source: a registered scraper, or a crawl
-    config (whose LLM-extracted docs the ``extract`` step wrote under its name)."""
-    adapter = REGISTRY.get(source)
-    if adapter is not None:
-        return adapter.name, adapter.base_url
-    config = crawl_choices().get(source)
-    base_url = config.seeds[0] if config and config.seeds else ""
-    return source, base_url
 
 
 def cmd_process(args: argparse.Namespace) -> int:
