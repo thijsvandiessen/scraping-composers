@@ -109,12 +109,31 @@ def copy_records(build: GoldBuild, gold: Connection) -> None:
             build.record_count += len(rows)
 
 
+def _gold_composer(
+    build: GoldBuild, gold_entities: set[uuid.UUID], composer_id: uuid.UUID | None
+) -> uuid.UUID | None:
+    """A composer id that resolves in gold, or None.
+
+    Rule 1 can prune a composer the work still points at — it keeps people with
+    *performance* credits, and a composer is rarely a performer. Emitting the
+    raw id anyway leaves a foreign key into a row that isn't there, so the API
+    returns a composer_id that 404s and composer-name search can never match
+    the work. Null is the honest answer, and it matches how participant links
+    to pruned persons are handled above."""
+    if composer_id is None:
+        return None
+    root = build.root(composer_id)
+    return root if root in gold_entities else None
+
+
 def copy_works_titles_mentions(build: GoldBuild, gold: Connection) -> None:
-    """Works, titles, mentions — composer ids remapped."""
+    """Works, titles, mentions — composer ids remapped, and dropped when the
+    composer didn't survive curation."""
+    gold_entities = build.kept_roots | build.kept_other
     work_rows = [
         {
             "id": w.id,
-            "composer_entity_id": build.root(w.composer_entity_id) if w.composer_entity_id else None,
+            "composer_entity_id": _gold_composer(build, gold_entities, w.composer_entity_id),
             "canonical_title": w.canonical_title,
             "title_key": w.title_key,
             "work_type": w.work_type,
@@ -156,7 +175,7 @@ def copy_works_titles_mentions(build: GoldBuild, gold: Connection) -> None:
             "raw_composer": m.raw_composer,
             "raw_title": m.raw_title,
             "raw": m.raw,
-            "composer_entity_id": build.root(m.composer_entity_id) if m.composer_entity_id else None,
+            "composer_entity_id": _gold_composer(build, gold_entities, m.composer_entity_id),
             "work_id": m.work_id,
             "match_status": m.match_status,
             "match_score": m.match_score,
