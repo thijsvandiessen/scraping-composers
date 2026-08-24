@@ -159,6 +159,35 @@ they can be tuned by editing that file or through the admin API's
 `GET`/`PUT /admin/v1/rule1-config` without touching code. In code the knobs
 travel as a single `PromoteConfig` passed to `promote()`.
 
+### Mapping gold in Kumu
+
+`export-kumu` writes a [Kumu](https://kumu.io) blueprint — the
+`{"elements": [...], "connections": [...]}` JSON its import accepts — that you
+drag onto a map's canvas (or host and point Kumu at as a remote link):
+
+```sh
+uv run composer-ingest export-kumu                      # → kumu.json
+uv run composer-ingest export-kumu --limit 1500         # a wider slice
+uv run composer-ingest export-kumu --min-weight 3       # only well-evidenced pairings
+uv run composer-ingest export-kumu --no-claims -o performances.json
+```
+
+Gold is far too large to hand Kumu whole, so the export is a *slice*: the
+`--limit` most-credited performers and ensembles, the composers whose music they
+programmed, and the biographical context hanging off both. Two kinds of edge go
+in — **performances** (performer → composer, derived by walking a concert's or
+recording's participants and its programme back to each work's composer, and
+weighted by how many performances back the pairing) and **claims** (the
+object-valued rows of `claims`: profession, birthplace, citizenship, genre,
+period, teacher). Literal claims like `born_on` and `program_count` are not
+edges; they ride along as element fields, which is where Kumu wants them for
+styling and filtering. Roles become tags, so one person can be a composer *and*
+a conductor without the map having to choose. Elements left with no connection
+are dropped.
+
+The defaults produce roughly a thousand elements, which Kumu opens comfortably;
+`--limit 0` exports every performer and is a good deal more than it enjoys.
+
 ### Not analysing the same page twice
 
 A crawl writes a whole new snapshot every run, but most of a site is the same text

@@ -10,11 +10,13 @@ from composer_config import settings
 from composer_gold import (
     DEFAULT_GOLD_DB_PATH,
     DEFAULT_MIN_REFERRERS,
+    DEFAULT_PERFORMER_LIMIT,
     DEFAULT_RULE1_CONFIG_PATH,
 )
 from composer_scrapers import REGISTRY
 
 from .crawl_cmds import cmd_crawl, crawl_choices
+from .export_cmds import cmd_export_kumu
 from .extract_cmds import cmd_extract, cmd_extract_all
 from .ingest_cmds import (
     cmd_derive_concerts,
@@ -225,6 +227,42 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_rebuild.set_defaults(func=cmd_rebuild_silver)
 
 
+def _add_export_parsers(sub: _SubParsers) -> None:
+    p_kumu = sub.add_parser(
+        "export-kumu",
+        help="export a slice of the gold database as a Kumu blueprint "
+        "(elements + connections JSON, drag-and-drop onto a Kumu map)",
+    )
+    p_kumu.add_argument("-o", "--output", default="kumu.json", help="path of the blueprint to write")
+    p_kumu.add_argument("--gold-path", default=DEFAULT_GOLD_DB_PATH, help="path of the gold SQLite file")
+    p_kumu.add_argument(
+        "--limit",
+        type=int,
+        default=DEFAULT_PERFORMER_LIMIT,
+        help="seed the map with the N most-credited performers and ensembles, and the composers "
+        "they programmed (0 = all of them; the whole graph is far more than Kumu opens happily)",
+    )
+    p_kumu.add_argument(
+        "--min-weight",
+        type=int,
+        default=1,
+        help="drop performer→composer edges backed by fewer than N performances",
+    )
+    p_kumu.add_argument(
+        "--performances",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="include performer→composer edges derived from concerts and recordings",
+    )
+    p_kumu.add_argument(
+        "--claims",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="include the biographical claim edges (profession, birthplace, citizenship, genre, ...)",
+    )
+    p_kumu.set_defaults(func=cmd_export_kumu)
+
+
 def _add_person_parsers(sub: _SubParsers) -> None:
     p_dedupe = sub.add_parser(
         "dedupe-persons", help="link near-duplicate person entities (surname/initials/birth-year heuristics)"
@@ -289,6 +327,7 @@ def main() -> None:
     _add_work_parsers(sub)
     _add_pipeline_parsers(sub)
     _add_person_parsers(sub)
+    _add_export_parsers(sub)
 
     args = parser.parse_args()
     logging.basicConfig(
