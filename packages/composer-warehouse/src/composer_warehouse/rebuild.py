@@ -274,11 +274,16 @@ def rebuild_silver(
 
     person_decisions: list[PersonDecision] = []
     work_decisions: list[WorkDecision] = []
-    old_engine = get_engine(url)
-    if inspect(old_engine).has_table(PersonMatch.__tablename__):
-        with Session(old_engine) as old:
-            person_decisions, work_decisions = collect_decisions(old)
-    old_engine.dispose()
+    # Ask the target first: connecting to a sqlite URL creates the file, so a
+    # first-ever rebuild would leave an empty database beside the real one.
+    if target.exists():
+        old_engine = get_engine(url)
+        try:
+            if inspect(old_engine).has_table(PersonMatch.__tablename__):
+                with Session(old_engine) as old:
+                    person_decisions, work_decisions = collect_decisions(old)
+        finally:
+            old_engine.dispose()
 
     stats = run_build(
         target, lambda engine: _replay(engine, bucket, sources, person_decisions, work_decisions)
