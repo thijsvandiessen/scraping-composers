@@ -3,6 +3,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     database_url: str = "sqlite:///composers.db"
+    # Postgres only: the schema holding silver. rebuild-silver builds into a
+    # staging schema and renames it into this name, so nothing else may live
+    # here — it is replaced wholesale by every rebuild.
+    silver_schema: str = "silver"
     gold_db_path: str = "./gold.db"
     gold_min_referrers: int = 1
     bucket_path: str = "./raw-data"

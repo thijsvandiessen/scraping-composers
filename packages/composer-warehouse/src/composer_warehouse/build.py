@@ -1,10 +1,17 @@
 """Atomic database builds with a status manifest.
 
-A build writes a fresh database into ``{db_path}.tmp`` and atomically swaps it
-in with :func:`os.replace`, so readers never see a half-built file. Progress
-and outcome land in ``{db_path}.manifest.json`` — a crashed build can never be
-mistaken for a completed one. Both the gold promote step and the silver
-rebuild use this machinery.
+A build writes a fresh database into a staging area no reader can see, then
+swaps it in indivisibly, so readers never see a half-built result. Progress and
+outcome land in a manifest — a crashed build can never be mistaken for a
+completed one. Both the gold promote step and the silver rebuild use this
+machinery.
+
+Where the staging area lives and what "swap" means depends on the backend, so
+``run_build`` talks to a :class:`BuildTarget` rather than to a filesystem path.
+:class:`SqliteFileTarget` builds into ``{db_path}.tmp`` and swaps with
+:func:`os.replace`; the Postgres target (see :mod:`composer_warehouse.postgres`)
+builds into a staging schema and swaps with ``ALTER SCHEMA … RENAME``. Both are
+atomic; neither can leave a partially applied result behind.
 """
 
 from __future__ import annotations
@@ -17,6 +24,8 @@ from dataclasses import Field, asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, TypeVar
+
+from sqlalchemy import Engine, create_engine
 
 log = logging.getLogger(__name__)
 
@@ -66,22 +75,111 @@ def read_build_manifest(db_path: str | Path) -> BuildManifest | None:
     return BuildManifest(**json.loads(path.read_text(encoding="utf-8")))
 
 
-def run_build(db_path: str | Path, build: Callable[[Path], StatsT]) -> StatsT:
-    """Run ``build`` into ``{db_path}.tmp`` and atomically swap the result in.
+class BuildTarget(Protocol):
+    """Where a build lands, and how the finished result is swapped in.
 
-    ``build`` receives the temporary path and returns a stats dataclass; its
-    ``asdict`` lands in the completed manifest. On failure the manifest records
-    the error, the previous database (if any) stays in place, and the exception
-    propagates.
+    ``begin`` returns an engine on a staging area no reader can see; ``commit``
+    makes it the live database in one indivisible step; ``abort`` throws it
+    away. The manifest lives outside whatever ``commit`` replaces, so it
+    survives the build it is describing.
+    """
+
+    def describe(self) -> str:
+        """The live database, for logs and error messages."""
+        ...
+
+    def backend(self) -> str:
+        """``sqlite`` or ``postgres`` — how the swap is performed."""
+        ...
+
+    def exists(self) -> bool:
+        """Whether a built silver database is actually there to read."""
+        ...
+
+    def read_manifest(self) -> BuildManifest | None: ...
+
+    def write_manifest(self, manifest: BuildManifest) -> None: ...
+
+    def begin(self) -> Engine:
+        """Create the staging area and return an engine bound to it."""
+        ...
+
+    def commit(self) -> None:
+        """Atomically replace the live database with the staged one."""
+        ...
+
+    def abort(self) -> None:
+        """Discard the staging area, leaving the live database untouched."""
+        ...
+
+
+@dataclass
+class SqliteFileTarget:
+    """A SQLite file swapped in with :func:`os.replace`."""
+
+    path: Path
+    _tmp: Path = field(init=False)
+    _engine: Engine | None = field(default=None, init=False)
+
+    def __post_init__(self) -> None:
+        self._tmp = Path(f"{self.path}.tmp")
+
+    def describe(self) -> str:
+        return str(self.path)
+
+    def backend(self) -> str:
+        return "sqlite"
+
+    def exists(self) -> bool:
+        return self.path.exists()
+
+    def read_manifest(self) -> BuildManifest | None:
+        return read_build_manifest(self.path)
+
+    def write_manifest(self, manifest: BuildManifest) -> None:
+        write_build_manifest(self.path, manifest)
+
+    def begin(self) -> Engine:
+        self._tmp.unlink(missing_ok=True)
+        self._engine = create_engine(f"sqlite:///{self._tmp}")
+        return self._engine
+
+    def commit(self) -> None:
+        self._dispose()
+        os.replace(self._tmp, self.path)
+
+    def abort(self) -> None:
+        self._dispose()
+        self._tmp.unlink(missing_ok=True)
+
+    def _dispose(self) -> None:
+        # Release the file handle before moving or deleting the file it points
+        # at; on Windows an open handle would block both.
+        if self._engine is not None:
+            self._engine.dispose()
+            self._engine = None
+
+
+def run_build(target: BuildTarget, build: Callable[[Engine], StatsT]) -> StatsT:
+    """Run ``build`` into ``target``'s staging area and swap the result in.
+
+    ``build`` receives an engine on the staging database and returns a stats
+    dataclass; its ``asdict`` lands in the completed manifest. On failure the
+    staging area is discarded, the manifest records the error, the live
+    database stays untouched, and the exception propagates.
     """
     manifest = BuildManifest.start()
-    write_build_manifest(db_path, manifest)
+    target.write_manifest(manifest)
+    engine = target.begin()
     try:
-        stats = build(Path(f"{db_path}.tmp"))
-        os.replace(f"{db_path}.tmp", db_path)
-    except Exception as exc:
-        write_build_manifest(db_path, manifest.failed(f"{type(exc).__name__}: {exc}"))
+        stats = build(engine)
+        target.commit()
+    # BaseException, not Exception: a Ctrl-C during an hour-long rebuild must
+    # still drop the staging area rather than orphan a half-built database.
+    except BaseException as exc:
+        target.abort()
+        target.write_manifest(manifest.failed(f"{type(exc).__name__}: {exc}"))
         raise
-    write_build_manifest(db_path, manifest.completed(asdict(stats)))
-    log.info("built %s: %s", db_path, stats)
+    target.write_manifest(manifest.completed(asdict(stats)))
+    log.info("built %s: %s", target.describe(), stats)
     return stats

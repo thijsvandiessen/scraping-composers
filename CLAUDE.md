@@ -36,6 +36,40 @@ for m in packages/composer-schema packages/composer-models packages/composer-htt
 done
 ```
 
+## Postgres-backed tests
+
+Three members (`composer-models`, `composer-warehouse`, `admin-api`) have tests
+that need a real Postgres; CI runs them in a separate `test-postgres` job. They
+**skip silently** when `COMPOSER_TEST_POSTGRES_URL` is unset, so the matrix
+above passes without Docker — which also means a broken Postgres path looks
+green locally unless you set it:
+
+```
+docker compose up -d postgres
+export COMPOSER_TEST_POSTGRES_URL=postgresql+psycopg://composers:composers@localhost:5433/composers
+for m in packages/composer-models packages/composer-warehouse apps/admin-api; do
+  uv run --directory "$m" pytest --rootdir . -q
+done
+```
+
+## Schema changes
+
+SQLite gets its schema from `create_all` and is rebuilt from bronze; Postgres
+is migrated by Alembic. A drift test asserts the two agree, so a model change
+without a revision fails CI. Autogenerate **against Postgres** — reflecting
+SQLite compares `CHAR(32)` to the model's `Uuid` and proposes a bogus
+`alter_column`:
+
+```
+docker compose up -d postgres
+DATABASE_URL=postgresql+psycopg://composers:composers@localhost:5433/composers \
+  uv run alembic revision --autogenerate -m "<what changed>"
+uv run ruff format packages/composer-models/src/composer_models/migrations/versions
+```
+
+The `ruff format` is not optional: generated revisions routinely exceed the
+110-column limit and `ruff format --check` is a CI job.
+
 ## Types, lint, format
 
 ```

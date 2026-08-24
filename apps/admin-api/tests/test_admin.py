@@ -18,6 +18,8 @@ import pytest
 from composer_admin import admin_app
 from composer_bronze.bucket import LocalBucket, SnapshotManifest
 from composer_models.db import init_db
+from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import requires_postgres
 from composer_schema import (
     EntityDocument,
     RefreshCadence,
@@ -512,16 +514,51 @@ def test_rebuild_silver_conflicts_while_running(
     assert client.post("/admin/v1/rebuild-silver").status_code == 409
 
 
-def test_rebuild_silver_rejects_non_sqlite_database(
+def test_rebuild_silver_rejects_a_database_with_nothing_to_swap(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from composer_config import settings
 
-    monkeypatch.setattr(settings, "database_url", "postgresql+psycopg://user:pass@host:5432/composers")
+    monkeypatch.setattr(settings, "database_url", "mysql://user:pass@host/composers")
     assert client.get("/admin/v1/silver").json()["exists"] is False
     r = client.post("/admin/v1/rebuild-silver")
     assert r.status_code == 400
-    assert "sqlite" in r.json()["detail"]
+    assert "Postgres" in r.json()["detail"]
+
+
+def test_silver_status_reports_the_backend(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from composer_config import settings
+
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'silver.db'}")
+    assert client.get("/admin/v1/silver").json()["backend"] == "sqlite"
+
+
+def test_silver_status_degrades_when_postgres_is_unreachable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Postgres manifest read can fail — the server is down, the credentials
+    are wrong. A file-backed manifest never could, so this path is new."""
+    from composer_config import settings
+
+    monkeypatch.setattr(settings, "database_url", "postgresql+psycopg://u:p@127.0.0.1:1/nope")
+    body = client.get("/admin/v1/silver").json()
+    assert body["backend"] == "postgres"
+    assert body["exists"] is False
+    assert body["error"]
+
+
+@requires_postgres
+def test_rebuild_silver_accepts_a_postgres_database(client: TestClient, pg_url: str) -> None:
+    from composer_warehouse.build import BuildManifest
+    from composer_warehouse.rebuild import silver_target
+
+    # No 400 any more: Postgres is a supported backend, not a rejected one.
+    assert client.get("/admin/v1/silver").json()["backend"] == "postgres"
+    # An in-progress rebuild is still refused, now read from the Postgres manifest.
+    silver_target(pg_url).write_manifest(BuildManifest.start())
+    assert client.post("/admin/v1/rebuild-silver").status_code == 409
 
 
 def test_admin_key_guard(client: TestClient) -> None:

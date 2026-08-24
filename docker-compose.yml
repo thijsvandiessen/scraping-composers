@@ -1,0 +1,33 @@
+# Local Postgres for the silver database. SQLite stays the default; this is
+# here so rebuild-silver's Postgres path and the Alembic migrations can be
+# developed and tested without a hosted database.
+#
+#   docker compose up -d postgres
+#   export DATABASE_URL=postgresql+psycopg://composers:composers@localhost:5433/composers
+#   uv run composer-ingest rebuild-silver
+services:
+  postgres:
+    # Debian rather than alpine: glibc collation, which is what a hosted
+    # Postgres will use, and this project compares sorted text.
+    image: postgres:17
+    environment:
+      POSTGRES_USER: composers
+      POSTGRES_PASSWORD: composers
+      POSTGRES_DB: composers
+    ports:
+      # 5433 on the host: a Homebrew postgresql@14 may already own 5432.
+      - "5433:5432"
+    volumes:
+      # A named volume, not a bind mount: it survives `docker compose down`
+      # and avoids the macOS bind-mount fsync penalty, which would make a
+      # full rebuild from the bucket painfully slow.
+      - pgdata:/var/lib/postgresql/data
+    # A full rebuild sorts and hashes millions of rows; 64MB is not enough.
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U composers -d composers"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  pgdata:

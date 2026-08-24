@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, utcnow
@@ -28,13 +28,13 @@ class Recording(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
-    external_key: Mapped[str] = mapped_column(String(500))  # per-source recording identity
-    title: Mapped[str | None] = mapped_column(String(500))
-    release_date: Mapped[str | None] = mapped_column(String(20))  # ISO where derivable
-    label: Mapped[str | None] = mapped_column(String(300))
-    catalogue_number: Mapped[str | None] = mapped_column(String(100))
-    format: Mapped[str | None] = mapped_column(String(50))  # CD | Vinyl | Digital | ...
-    url: Mapped[str | None] = mapped_column(String(500))
+    external_key: Mapped[str] = mapped_column(Text)  # per-source recording identity
+    title: Mapped[str | None] = mapped_column(Text)
+    release_date: Mapped[str | None] = mapped_column(Text)  # ISO where derivable
+    label: Mapped[str | None] = mapped_column(Text)
+    catalogue_number: Mapped[str | None] = mapped_column(Text)
+    format: Mapped[str | None] = mapped_column(Text)  # CD | Vinyl | Digital | ...
+    url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     source: Mapped[Source] = relationship()
@@ -59,8 +59,8 @@ class RecordingParticipant(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     recording_id: Mapped[int] = mapped_column(ForeignKey("recordings.id"))
     role: Mapped[str] = mapped_column(String(50))  # conductor | soloist | ensemble
-    name: Mapped[str] = mapped_column(String(300))
-    discipline: Mapped[str | None] = mapped_column(String(100))  # soloist instrument/voice
+    name: Mapped[str] = mapped_column(Text)
+    discipline: Mapped[str | None] = mapped_column(Text)  # soloist instrument/voice
     entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
 
     recording: Mapped[Recording] = relationship(back_populates="participants")

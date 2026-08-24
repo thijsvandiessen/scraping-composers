@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from composer_models.normalize import dedup_key, entity_uuid
+from composer_models.normalize import MAX_KEY_CHARS, dedup_key, entity_uuid
 
 
 @pytest.mark.parametrize(
@@ -58,3 +58,18 @@ def test_dedup_key_with_wikidata_id() -> None:
     assert dedup_key("Beethoven, Ludwig van", wikidata_id="Q255") == "ludwig van beethoven|Q255"
     assert dedup_key("Strauss, Johann", wikidata_id="Q72340") == "johann strauss|Q72340"
     assert dedup_key("Strauss, Johann", wikidata_id="Q312683") == "johann strauss|Q312683"
+
+
+def test_dedup_key_is_bounded_for_the_postgres_btree_limit() -> None:
+    # A scraper swallowing a whole index page produces names thousands of
+    # characters long; the key lands in a unique btree index Postgres caps.
+    key = dedup_key(" ".join(f"name{i}" for i in range(500)))
+    assert len(key) == MAX_KEY_CHARS
+
+
+def test_dedup_key_truncation_keeps_the_wikidata_suffix() -> None:
+    # The id disambiguates two composers who share a name — truncating the
+    # base must never cost it, or distinct people collapse into one entity.
+    key = dedup_key("x" * 2000, wikidata_id="Q255")
+    assert key.endswith("|Q255")
+    assert len(key) == MAX_KEY_CHARS + len("|Q255")

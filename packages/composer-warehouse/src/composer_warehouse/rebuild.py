@@ -19,8 +19,8 @@ database first and re-applied after the replay:
   across rebuilds; the target work is created if matching no longer produces
   it.
 
-SQLite only: the atomic swap is a file replace, which has no Postgres
-equivalent yet.
+The swap is atomic on both backends: a file replace on SQLite, a schema
+rename on Postgres (see :mod:`composer_warehouse.postgres`).
 """
 
 from __future__ import annotations
@@ -33,12 +33,13 @@ from pathlib import Path
 
 from composer_bronze.bucket import LOADABLE_STATUSES, Bucket
 from composer_bronze.scraper import iter_from_bucket
-from composer_models import Entity, PersonMatch, RawWorkMention, Source, Work
-from composer_models.db import init_db
-from sqlalchemy import create_engine, make_url, select
+from composer_models import Base, Entity, PersonMatch, RawWorkMention, Source, Work
+from composer_models.alembic_support import stamp_head
+from composer_models.db import get_engine, init_db
+from sqlalchemy import Engine, inspect, make_url, select
 from sqlalchemy.orm import Session
 
-from .build import run_build
+from .build import BuildTarget, SqliteFileTarget, run_build
 from .concerts import derive_concerts
 from .ingestion import ingest_documents, new_work
 from .persons import dedupe_persons
@@ -86,12 +87,24 @@ class WorkDecision:
     title_key: str
 
 
-def sqlite_db_path(database_url: str) -> Path:
-    """The file behind a sqlite URL; rejects anything the swap can't handle."""
-    url = make_url(database_url)
-    if url.drivername.partition("+")[0] != "sqlite" or not url.database or url.database == ":memory:":
-        raise ValueError(f"rebuild-silver requires a file-backed sqlite database URL, got {database_url!r}")
-    return Path(url.database)
+def silver_target(database_url: str | None = None) -> BuildTarget:
+    """The swap target for the silver database at ``database_url``.
+
+    A SQLite file gets an atomic file replace; Postgres gets an atomic schema
+    rename. Raises ``ValueError`` for a URL neither can handle — an in-memory
+    SQLite database has no file to swap, and no other dialect is supported.
+    """
+    from composer_config import settings
+
+    url = make_url(database_url or settings.database_url)
+    backend = url.get_backend_name()
+    if backend == "postgresql":
+        from .postgres import PostgresSchemaTarget
+
+        return PostgresSchemaTarget(url, settings.silver_schema)
+    if backend == "sqlite" and url.database and url.database != ":memory:":
+        return SqliteFileTarget(Path(url.database))
+    raise ValueError(f"rebuild-silver needs a sqlite file or a Postgres URL, got {database_url!r}")
 
 
 def collect_decisions(session: Session) -> tuple[list[PersonDecision], list[WorkDecision]]:
@@ -192,6 +205,57 @@ def _apply_work_decisions(session: Session, decisions: Sequence[WorkDecision]) -
     return applied, dropped
 
 
+def _replay(
+    engine: Engine,
+    bucket: Bucket,
+    sources: Sequence[tuple[str, str]],
+    person_decisions: Sequence[PersonDecision],
+    work_decisions: Sequence[WorkDecision],
+) -> RebuildStats:
+    """Build a complete silver database on ``engine`` from the bucket."""
+    if engine.dialect.name != "sqlite":
+        # init_db only creates tables on SQLite. Build the staging schema from
+        # the models and stamp it at head, so what the swap promotes looks
+        # migrated rather than hand-made — the drift test guarantees the two
+        # are the same schema.
+        Base.metadata.create_all(engine)
+        stamp_head(engine)
+    factory = init_db(engine)
+    with factory() as session:
+        replayed = seen = new = 0
+        for name, base_url in sources:
+            snapshots = [s for s in bucket.list_snapshots(name) if s.manifest.status in LOADABLE_STATUSES]
+            if not snapshots:
+                continue
+            run_id = snapshots[-1].manifest.run_id
+            log.info("replaying %s/%s", name, run_id)
+            run = ingest_documents(session, name, base_url, iter_from_bucket(name, run_id, bucket))
+            if run.status != "completed":
+                raise RuntimeError(f"replaying {name}/{run_id} failed: {run.error}")
+            replayed += 1
+            seen += run.records_seen
+            new += run.records_new
+
+        person_applied, person_dropped = _apply_person_decisions(session, person_decisions)
+        auto_linked, _needs_review = dedupe_persons(session)
+        work_applied, work_dropped = _apply_work_decisions(session, work_decisions)
+        concert_stats = derive_concerts(session)
+        recording_stats = derive_recordings(session)
+
+    return RebuildStats(
+        sources_replayed=replayed,
+        records_seen=seen,
+        records_new=new,
+        persons_auto_linked=auto_linked,
+        person_decisions_applied=person_applied,
+        person_decisions_dropped=person_dropped,
+        work_decisions_applied=work_applied,
+        work_decisions_dropped=work_dropped,
+        concerts=concert_stats.concerts,
+        recordings=recording_stats.recordings,
+    )
+
+
 def rebuild_silver(
     bucket: Bucket, sources: Sequence[tuple[str, str]], database_url: str | None = None
 ) -> RebuildStats:
@@ -199,61 +263,30 @@ def rebuild_silver(
 
     ``sources`` is the ``(name, base_url)`` of every source to replay (the
     scraper registry); a source without a complete snapshot is skipped. Builds
-    into ``{path}.tmp`` and atomically swaps it in; progress and outcome land
-    in ``{path}.manifest.json``. The old database is only replaced when every
+    into a staging area and atomically swaps it in; progress and outcome land
+    in the target's manifest. The old database is only replaced when every
     replay succeeds — a failure keeps it untouched.
     """
     from composer_config import settings
 
     url = database_url or settings.database_url
-    db_path = sqlite_db_path(url)
+    target = silver_target(url)
 
     person_decisions: list[PersonDecision] = []
     work_decisions: list[WorkDecision] = []
-    if db_path.exists():
-        old_engine = create_engine(f"sqlite:///{db_path}")
-        with Session(old_engine) as old:
-            person_decisions, work_decisions = collect_decisions(old)
-        old_engine.dispose()
+    # Ask the target first: connecting to a sqlite URL creates the file, so a
+    # first-ever rebuild would leave an empty database beside the real one.
+    if target.exists():
+        old_engine = get_engine(url)
+        try:
+            if inspect(old_engine).has_table(PersonMatch.__tablename__):
+                with Session(old_engine) as old:
+                    person_decisions, work_decisions = collect_decisions(old)
+        finally:
+            old_engine.dispose()
 
-    def _build(tmp_path: Path) -> RebuildStats:
-        tmp_path.unlink(missing_ok=True)
-        engine = create_engine(f"sqlite:///{tmp_path}")
-        factory = init_db(engine)
-        with factory() as session:
-            replayed = seen = new = 0
-            for name, base_url in sources:
-                snapshots = [s for s in bucket.list_snapshots(name) if s.manifest.status in LOADABLE_STATUSES]
-                if not snapshots:
-                    continue
-                run_id = snapshots[-1].manifest.run_id
-                log.info("replaying %s/%s", name, run_id)
-                run = ingest_documents(session, name, base_url, iter_from_bucket(name, run_id, bucket))
-                if run.status != "completed":
-                    raise RuntimeError(f"replaying {name}/{run_id} failed: {run.error}")
-                replayed += 1
-                seen += run.records_seen
-                new += run.records_new
-
-            person_applied, person_dropped = _apply_person_decisions(session, person_decisions)
-            auto_linked, _needs_review = dedupe_persons(session)
-            work_applied, work_dropped = _apply_work_decisions(session, work_decisions)
-            concert_stats = derive_concerts(session)
-            recording_stats = derive_recordings(session)
-        engine.dispose()
-        return RebuildStats(
-            sources_replayed=replayed,
-            records_seen=seen,
-            records_new=new,
-            persons_auto_linked=auto_linked,
-            person_decisions_applied=person_applied,
-            person_decisions_dropped=person_dropped,
-            work_decisions_applied=work_applied,
-            work_decisions_dropped=work_dropped,
-            concerts=concert_stats.concerts,
-            recordings=recording_stats.recordings,
-        )
-
-    stats = run_build(db_path, _build)
-    log.info("silver rebuilt at %s: %s", db_path, stats)
+    stats = run_build(
+        target, lambda engine: _replay(engine, bucket, sources, person_decisions, work_decisions)
+    )
+    log.info("silver rebuilt at %s: %s", target.describe(), stats)
     return stats

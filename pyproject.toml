@@ -18,6 +18,13 @@ composer-config = { workspace = true }
 
 [dependency-groups]
 dev = [
+    # The workspace root has no [project] table, so `uv sync` installs members
+    # plus this group but never a member's optional extras. psycopg and alembic
+    # live here so every CI job — tests, pyright over migrations/env.py — has
+    # them without a per-job flag. composer-models still ships them as its
+    # `postgres` extra, which is the production install path.
+    "psycopg[binary]>=3.3.4",
+    "alembic>=1.16",
     "pytest>=9.1.1",
     "pytest-cov>=5",
     "pytest-django>=4.14.0",
@@ -89,7 +96,7 @@ extraPaths = [
     "apps/dashboard/tests",
 ]
 # Trivial per-member conftests share the module name "conftest"; nothing to type-check there.
-exclude = ["**/conftest.py", "**/.venv", "**/__pycache__"]
+exclude = ["**/conftest.py", "**/.venv", "**/__pycache__", "**/migrations/versions/**"]
 # django, pandas, docling, unfold and kagglehub ship no type information. Don't
 # infer half-typed signatures from their source (which produces false positives
 # on e.g. the Django test client and request objects); treat them as untyped,

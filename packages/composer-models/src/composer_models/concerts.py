@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid
+from sqlalchemy import DateTime, ForeignKey, Index, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, utcnow
@@ -27,12 +27,12 @@ class Concert(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
-    external_key: Mapped[str] = mapped_column(String(500))  # per-source concert identity
-    date: Mapped[str | None] = mapped_column(String(20))  # ISO where derivable
-    venue: Mapped[str | None] = mapped_column(String(300))
+    external_key: Mapped[str] = mapped_column(Text)  # per-source concert identity
+    date: Mapped[str | None] = mapped_column(Text)  # ISO where derivable
+    venue: Mapped[str | None] = mapped_column(Text)
     season: Mapped[str | None] = mapped_column(String(50))
-    event_type: Mapped[str | None] = mapped_column(String(100))
-    url: Mapped[str | None] = mapped_column(String(500))
+    event_type: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     source: Mapped[Source] = relationship()
@@ -57,8 +57,8 @@ class ConcertParticipant(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     concert_id: Mapped[int] = mapped_column(ForeignKey("concerts.id"))
     role: Mapped[str] = mapped_column(String(50))  # conductor | soloist | ensemble
-    name: Mapped[str] = mapped_column(String(300))
-    discipline: Mapped[str | None] = mapped_column(String(100))  # soloist instrument/voice
+    name: Mapped[str] = mapped_column(Text)
+    discipline: Mapped[str | None] = mapped_column(Text)  # soloist instrument/voice
     entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
 
     concert: Mapped[Concert] = relationship(back_populates="participants")

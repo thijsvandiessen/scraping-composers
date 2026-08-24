@@ -65,6 +65,10 @@ def _silver_factory() -> sessionmaker[Session]:
     # For a sqlite file, NullPool for the same reason as gold: `rebuild-silver`
     # swaps the file with os.replace, and pooled connections would keep serving
     # the old inode until a restart.
+    # NullPool for SQLite only: there the swap replaces the file, so a pooled
+    # connection still points at the old inode. A Postgres rebuild renames
+    # schemas instead, and name resolution happens per statement, so pooled
+    # connections follow the swap on their own.
     if make_url(settings.database_url).drivername.partition("+")[0] == "sqlite":
         return init_db(create_engine(settings.database_url, poolclass=NullPool))
     return init_db(get_engine())
