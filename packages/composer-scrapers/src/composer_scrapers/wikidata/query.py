@@ -1,12 +1,18 @@
 """SPARQL access to the Wikidata Query Service.
 
-Pagination uses an inner subquery over just the item ids (ORDER BY ?item with a
-keyset FILTER(?item > wd:<last>) LIMIT) so each page covers a fixed set of
-composers; the OPTIONAL property joins then expand each composer into one row
-per property-value combination, and all rows for a composer land in the same
-page. Keyset (seek) paging rather than LIMIT/OFFSET: deep OFFSET makes WDQS sort
-and discard every prior row on every page and 504s past ~30k in, whereas the
-FILTER range scan keeps per-page cost flat regardless of depth.
+The composer id list is fetched up front in one cheap query (~15s for the whole
+population), and the detail query then runs over batches of those ids bound
+with VALUES. Paging on the server was tried and removed: keyset paging only
+works if the ORDER BY and the seek FILTER agree on an order, and on WDQS they
+do not. ``ORDER BY ?item`` is not lexicographic -- Q0-Q255 are inlined as byte
+IVs and lead every result set (they even survive a
+``FILTER(STR(?item) > STR(wd:Q101424951))`` that should exclude them), and a
+QID that is a strict prefix of another sorts *after* it (Q7294 comes back
+behind Q7294821). A STR()-based cursor consequently leapt to wd:Q255 on the
+first page and skipped 55% of the population, Bach and Brahms included; see
+issue #181. Driving the batches from a client-side id list drops the cursor
+entirely and makes coverage checkable: every id bound in a VALUES block must
+come back, and ``_fetch_page`` fails the run if one does not.
 
 Each page is followed by a second, cheap VALUES query for per-item popularity
 metrics (sitelink/statement/identifier counts and the P86 backlink count). All
@@ -30,11 +36,19 @@ REQUEST_DELAY_S = 1.0
 # sleep/wake network blip, not just a WDQS hiccup
 RETRIES = 5
 
+# The whole population in one query. Cheap because it touches only the
+# occupation index: no OPTIONAL joins, no label service, no ORDER BY.
+ID_QUERY = """\
+SELECT ?item WHERE { ?item wdt:P106 wd:Q36834 . }
+"""
+
+# The single-valued fields, plus the label. Each item contributes a handful of
+# rows here: the truthy date/place/id properties have one best value apiece.
 QUERY = """\
 SELECT ?item ?itemLabel ?birth ?birthPrecision ?death ?deathPrecision
-       ?birthPlaceLabel ?deathPlaceLabel ?countryLabel ?genreLabel ?movementLabel ?alias ?musicbrainz
+       ?birthPlaceLabel ?deathPlaceLabel ?musicbrainz
 WHERE {{
-  {{ SELECT ?item WHERE {{ ?item wdt:P106 wd:Q36834 . {after_filter} }} ORDER BY ?item LIMIT {page_size} }}
+  VALUES ?item {{ {values} }}
   # Take the truthy (best-rank) date via wdt:, then join the statement value
   # node carrying that same value to read its precision. Wikidata pads unknown
   # components to 01, so without timePrecision a year-only birth is
@@ -50,11 +64,27 @@ WHERE {{
                 [ wikibase:timeValue ?death ; wikibase:timePrecision ?deathPrecision ] . }}
   OPTIONAL {{ ?item wdt:P19 ?birthPlace . }}
   OPTIONAL {{ ?item wdt:P20 ?deathPlace . }}
-  OPTIONAL {{ ?item wdt:P27 ?country . }}
-  OPTIONAL {{ ?item wdt:P136 ?genre . }}
-  OPTIONAL {{ ?item wdt:P135 ?movement . }}
-  OPTIONAL {{ ?item skos:altLabel ?alias . }}
   OPTIONAL {{ ?item wdt:P434 ?musicbrainz . }}
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+}}
+"""
+
+# The multi-valued fields, one per row via UNION rather than side-by-side
+# OPTIONALs. OPTIONALs multiply: a well-documented composer has hundreds of
+# altLabels (every language) times a dozen genres times several countries, and
+# the cross product ran to tens of thousands of rows per item -- 57MB of JSON
+# that WDQS truncates mid-stream at its 60s cap. UNION adds instead of
+# multiplies, so a page costs the sum of the values, not the product. Each row
+# binds exactly one of the four variables; ``_fold_rows`` reads whichever is
+# present, so these rows concatenate onto the QUERY rows above.
+MULTI_QUERY = """\
+SELECT ?item ?countryLabel ?genreLabel ?movementLabel ?alias
+WHERE {{
+  VALUES ?item {{ {values} }}
+  {{ ?item wdt:P27 ?country . }}
+  UNION {{ ?item wdt:P136 ?genre . }}
+  UNION {{ ?item wdt:P135 ?movement . }}
+  UNION {{ ?item skos:altLabel ?alias . }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
 }}
 """
@@ -63,7 +93,7 @@ WHERE {{
 # identifier counts as single-valued triples, and the P86 backlink count
 # (works naming the item as composer) proxies how much the composer is
 # played/recorded. Joining these into the paged QUERY above times out the
-# query planner at deep offsets, so they are fetched per page via VALUES.
+# query planner, so they are fetched per page via their own VALUES query.
 METRICS_QUERY = """\
 SELECT ?item ?sitelinks ?statements ?identifiers (COUNT(?work) AS ?works)
 WHERE {{
@@ -95,25 +125,53 @@ def _run_query(client: httpx.Client, query: str, desc: str) -> list[dict[str, An
     )
 
 
-def _fetch_page(client: httpx.Client, after: str | None) -> list[dict[str, Any]]:
-    """Fetch one page of composers whose QID sorts strictly after ``after`` (or
-    from the start when None). Keyset paging: the inner ORDER BY ?item plus
-    FILTER(?item > wd:<after>) is an indexed range scan, so page cost stays flat
-    with depth where LIMIT/OFFSET does not (see module docstring)."""
-    # STR(?item): SPARQL's relational operators are undefined for IRIs (a bare
-    # ?item > wd:X errors, and FILTER drops every erroring row -> an empty page
-    # that looks like the end). Comparing the IRI strings is well-defined and,
-    # since ORDER BY ?item also sorts by IRI string, stays consistent with it.
-    after_filter = f"FILTER(STR(?item) > STR(wd:{after}))" if after else ""
-    query = QUERY.format(page_size=PAGE_SIZE, after_filter=after_filter)
-    return _run_query(client, query, f"page after={after or 'START'}")
+def _qid(row: dict[str, Any]) -> str:
+    """The QID from a row's ?item binding."""
+    item: str = row["item"]["value"]
+    return item.rsplit("/", 1)[-1]
+
+
+def _values(qids: list[str]) -> str:
+    """QIDs as the body of a SPARQL VALUES block."""
+    return " ".join(f"wd:{qid}" for qid in qids)
+
+
+def _fetch_qids(client: httpx.Client) -> list[str]:
+    """Every composer QID, numerically ordered."""
+    qids = {_qid(row) for row in _run_query(client, ID_QUERY, "composer id list")}
+    # numeric, not lexicographic: QIDs carry no leading zeros, so (length,
+    # string) is numeric order. It keeps the low -- and therefore best known --
+    # QIDs in the first batches, which is what a max_pages smoke run sees.
+    return sorted(qids, key=lambda qid: (len(qid), qid))
+
+
+def _fetch_page(client: httpx.Client, qids: list[str]) -> list[dict[str, Any]]:
+    """Fetch the detail rows for one batch of composers: the single-valued
+    fields, then the multi-valued ones (see MULTI_QUERY for why they are a
+    separate query). The two row lists concatenate -- ``_fold_rows`` groups by
+    QID and reads whichever variables a row binds -- and QUERY's rows must come
+    first, since the label is taken from the first row seen for an item.
+
+    In QUERY every pattern besides the VALUES block is OPTIONAL, so each bound
+    item must produce at least one row; a short answer means rows went missing
+    in transit rather than an item having no properties. Raising here is what
+    stops a silent hole from quietly halving the dataset (issue #181)."""
+    rows = _run_query(client, QUERY.format(values=_values(qids)), f"page of {len(qids)} items")
+    missing = set(qids) - {_qid(row) for row in rows}
+    if missing:
+        raise RuntimeError(
+            f"wikidata page returned {len(qids) - len(missing)} of {len(qids)} requested items; "
+            f"missing e.g. {sorted(missing)[:5]}"
+        )
+    # no coverage check here: an item with none of these properties, and so no
+    # row at all, is ordinary
+    return rows + _run_query(client, MULTI_QUERY.format(values=_values(qids)), f"multi for {len(qids)} items")
 
 
 def _fetch_metrics(client: httpx.Client, qids: list[str]) -> dict[str, dict[str, str]]:
     """Popularity metrics keyed by QID for the given items."""
-    query = METRICS_QUERY.format(values=" ".join(f"wd:{qid}" for qid in qids))
+    query = METRICS_QUERY.format(values=_values(qids))
     metrics: dict[str, dict[str, str]] = {}
     for row in _run_query(client, query, f"metrics for {len(qids)} items"):
-        qid = row["item"]["value"].rsplit("/", 1)[-1]
-        metrics[qid] = {var: value for var, _ in METRICS if (value := _literal(row, var)) is not None}
+        metrics[_qid(row)] = {var: value for var, _ in METRICS if (value := _literal(row, var)) is not None}
     return metrics

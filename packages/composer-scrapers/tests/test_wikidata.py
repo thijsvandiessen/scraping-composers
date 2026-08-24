@@ -1,13 +1,22 @@
 """Tests for folding Wikidata SPARQL result rows into SourceRecords."""
 
+import re
 import urllib.parse
 from typing import Any
 
 import httpx
 import pytest
 from composer_schema import SourceClaim
+from composer_scrapers.wikidata import WikidataAdapter
 from composer_scrapers.wikidata.parse import _format_time, _records_from_rows
-from composer_scrapers.wikidata.query import QUERY, _fetch_metrics, _fetch_page, _run_query
+from composer_scrapers.wikidata.query import (
+    MULTI_QUERY,
+    QUERY,
+    _fetch_metrics,
+    _fetch_page,
+    _fetch_qids,
+    _run_query,
+)
 
 
 def row(qid: str, label: str | None = None, **vars: str) -> dict[str, Any]:
@@ -151,30 +160,88 @@ def test_truncated_body_is_retried_via_uncached_post(monkeypatch: pytest.MonkeyP
         return httpx.Response(200, json={"results": {"bindings": []}})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        assert _fetch_page(client, after=None) == []
+        assert _run_query(client, "SELECT ?item WHERE {}", "test") == []
 
     assert len(requests) == 2
     assert all(r.method == "POST" for r in requests)  # POSTs are never edge-cached
 
 
-def test_fetch_page_seeks_from_the_given_qid() -> None:
-    """Keyset paging: a non-None ``after`` must emit FILTER(?item > wd:<after>)
-    so WDQS range-scans instead of doing a deep OFFSET that 504s."""
+def test_fetch_page_binds_the_batch_as_values() -> None:
+    """Pages are driven from a client-side id list, so the batch goes out as a
+    VALUES block -- no server-side cursor, and nothing to seek past."""
     captured: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured.append(urllib.parse.parse_qs(request.read().decode())["query"][0])
-        return httpx.Response(200, json={"results": {"bindings": []}})
+        return httpx.Response(200, json={"results": {"bindings": [row("Q6600"), row("Q7")]}})
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        _fetch_page(client, after="Q6600")
-        _fetch_page(client, after=None)
+        _fetch_page(client, ["Q6600", "Q7"])
 
-    # compare IRI strings, not the IRIs themselves: ?item > wd:X is a type error
-    # in SPARQL and would silently drop every row
-    assert "FILTER(STR(?item) > STR(wd:Q6600))" in captured[0]
+    assert "VALUES ?item { wd:Q6600 wd:Q7 }" in captured[0]
     assert "OFFSET" not in captured[0]
-    assert "FILTER" not in captured[1]  # the first page starts unfiltered
+    assert "FILTER" not in captured[0]
+
+
+def test_multi_valued_fields_are_unioned_not_optional() -> None:
+    """OPTIONALs multiply: aliases (every language) x genres x countries ran to
+    tens of thousands of rows for a well-documented composer and truncated the
+    response. UNION makes a page cost the sum, not the product."""
+    assert "OPTIONAL" not in MULTI_QUERY
+    assert MULTI_QUERY.count("UNION") == 3
+    for var in ("?countryLabel", "?genreLabel", "?movementLabel", "?alias"):
+        assert var in MULTI_QUERY
+        assert var not in QUERY  # split out of the single-valued query
+
+
+def test_fetch_page_concatenates_both_queries_label_bearing_rows_first() -> None:
+    """``_fold_rows`` takes an item's label from the first row it sees, so the
+    labelled QUERY rows have to lead the MULTI_QUERY rows."""
+    responses = {
+        "?itemLabel": [row("Q7294", "Johannes Brahms", birth="1833-05-07T00:00:00Z")],
+        "UNION": [row("Q7294", genreLabel="symphony"), row("Q7294", alias="Brahms")],
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = urllib.parse.parse_qs(request.read().decode())["query"][0]
+        key = "?itemLabel" if "?itemLabel" in query else "UNION"
+        return httpx.Response(200, json={"results": {"bindings": responses[key]}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        (record,) = _records_from_rows(_fetch_page(client, ["Q7294"]))
+
+    assert record.name == "Johannes Brahms"
+    assert record.claims == (
+        SourceClaim("has_profession", "profession", "composer"),
+        SourceClaim("born_on", value="1833-05-07"),
+        SourceClaim("has_genre", "genre", "symphony"),
+        SourceClaim("also_known_as", value="Brahms"),
+    )
+
+
+def test_fetch_page_fails_when_wdqs_drops_an_item() -> None:
+    """Every pattern but VALUES is OPTIONAL, so a bound item must come back.
+    A short page is a silent hole (issue #181) and has to fail the run."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": {"bindings": [row("Q6600")]}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(RuntimeError, match="1 of 2 requested items"):
+            _fetch_page(client, ["Q6600", "Q7"])
+
+
+def test_fetch_qids_orders_the_population_numerically() -> None:
+    """Lexicographic order would bury the low (famous) QIDs behind every
+    Q1000000+ id, and it is what broke keyset paging in the first place."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert "ORDER BY" not in urllib.parse.parse_qs(request.read().decode())["query"][0]
+        rows = [row(q) for q in ("Q1339", "Q101424951", "Q255", "Q7294", "Q1339")]
+        return httpx.Response(200, json={"results": {"bindings": rows}})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert _fetch_qids(client) == ["Q255", "Q1339", "Q7294", "Q101424951"]
 
 
 def metrics_row(qid: str, **vars: str) -> dict[str, Any]:
@@ -290,3 +357,62 @@ def test_run_query_retries_on_malformed_json(monkeypatch: pytest.MonkeyPatch) ->
 
     assert len(attempts) == 3
     assert result == []
+
+
+def _fake_wdqs(monkeypatch: pytest.MonkeyPatch, population: list[str]) -> list[str]:
+    """Stand WDQS up over ``population``: the id query returns all of them, the
+    detail and metrics queries answer whatever VALUES block they are given.
+    Returns the list the queries got asked for, in request order."""
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = urllib.parse.parse_qs(request.read().decode())["query"][0]
+        if "VALUES" not in query:  # the id query
+            return httpx.Response(200, json={"results": {"bindings": [row(q) for q in population]}})
+        qids = re.findall(r"wd:(Q\d+)", query.split("VALUES", 1)[1].split("}", 1)[0])
+        if "?sitelinks" in query:
+            return httpx.Response(200, json={"results": {"bindings": []}})
+        asked.extend(qids)
+        rows = [row(qid, f"Composer {qid}") for qid in qids]
+        return httpx.Response(200, json={"results": {"bindings": rows}})
+
+    monkeypatch.setattr(
+        "composer_scrapers.wikidata.new_client",
+        lambda **_: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    monkeypatch.setattr("composer_scrapers.wikidata.time.sleep", lambda _: None)
+    return asked
+
+
+def test_fetch_covers_every_composer_across_page_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The regression from issue #181: a cursor that disagreed with the server's
+    ordering skipped whole ranges. Batching a client-side id list cannot."""
+    population = ["Q254", "Q255", "Q1339", "Q7294", "Q101424951"] + [f"Q{n}" for n in range(2000, 3200)]
+    _fake_wdqs(monkeypatch, population)
+    monkeypatch.setattr("composer_scrapers.wikidata.PAGE_SIZE", 500)
+
+    fetched = [doc.id for doc in WikidataAdapter().fetch()]
+
+    assert len(fetched) == len(population)
+    assert set(fetched) == set(population)
+
+
+def test_fetch_orders_pages_so_a_capped_run_gets_the_famous_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    population = [f"Q{n}" for n in range(1_000_000, 1_000_010)] + ["Q254", "Q255", "Q1339"]
+    _fake_wdqs(monkeypatch, population)
+    monkeypatch.setattr("composer_scrapers.wikidata.PAGE_SIZE", 3)
+
+    fetched = [doc.id for doc in WikidataAdapter().fetch(max_pages=1)]
+
+    assert fetched == ["Q254", "Q255", "Q1339"]
+
+
+def test_fetch_refuses_an_empty_population(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An id query that comes back empty means WDQS is broken, not that
+    Wikidata has no composers -- yielding nothing would wipe silver clean."""
+    _fake_wdqs(monkeypatch, [])
+
+    with pytest.raises(RuntimeError, match="no composer ids"):
+        list(WikidataAdapter().fetch())
