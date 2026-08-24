@@ -94,12 +94,31 @@ uv run composer-ingest person-review --reject 7         # reject a proposed link
 uv run composer-ingest derive-concerts
 ```
 
-Data lands in `composers.db` (SQLite) by default. To use Postgres instead:
+Data lands in `composers.db` (SQLite) by default. **Postgres is fully
+supported for silver** — including `rebuild-silver`, whose atomic swap has a
+real Postgres equivalent (see [Schema and migrations](#schema-and-migrations)):
 
 ```sh
 uv sync --extra postgres
 export DATABASE_URL="postgresql+psycopg://user:pass@host:5432/composers"
+uv run alembic upgrade head          # creates the schema on a fresh database
 ```
+
+A local one for development comes with the repo:
+
+```sh
+docker compose up -d postgres
+export DATABASE_URL="postgresql+psycopg://composers:composers@localhost:5433/composers"
+```
+
+Silver lives in its own schema (`SILVER_SCHEMA`, default `silver`), never in
+`public`, because `rebuild-silver` replaces that schema wholesale. The role
+needs `CREATE` on the database — `GRANT CREATE ON DATABASE composers TO app` —
+and nothing more; no superuser, no ownership of `public`.
+
+**Gold stays SQLite** either way. It is a single-file artifact shipped and read
+as one (`gold.db` plus its manifest), and `promote` reads silver through a
+normal session, so it builds correctly from either backend.
 
 ## Bronze, silver & gold
 
@@ -198,9 +217,16 @@ Human review decisions survive the rebuild: accepted/rejected person pairs
 carry over directly (entity ids are deterministic), and manual work matches
 are re-resolved by the work's composer + title (created again if matching no
 longer produces the work). The run log (`ingest_runs`) starts fresh, and
-**work ids may change** across rebuilds — only entity ids are stable. The
-rebuild requires a file-backed SQLite `DATABASE_URL` (the atomic swap is a
-file replace); status and stats land in `composers.db.manifest.json`.
+**work ids may change** across rebuilds — only entity ids are stable.
+
+The swap is atomic on both backends. On SQLite it is a file replace, and
+status lands in `composers.db.manifest.json` beside the database. On Postgres
+the rebuild builds into a staging schema and promotes it with `ALTER SCHEMA …
+RENAME` inside one transaction — Postgres DDL is transactional, so this is
+exactly as indivisible — and status lands in a `composer_meta.build_manifest`
+table, which sits outside everything the swap touches. Readers follow the swap
+without a restart. Budget roughly twice silver's size on disk: the demoted
+schema is dropped just after the rename, not before it.
 
 **Concerts are derived in silver** from the mentions' raw performance
 context (`composer-ingest derive-concerts`, also run automatically before
@@ -214,6 +240,46 @@ programme. Promotion copies the concert
 tables into gold, collapsing participant links to canonical entities. That
 powers the concert browser, per-person concert lists, and concert-count
 sorting in both APIs.
+
+## Schema and migrations
+
+The two backends answer "how does an existing database get a schema change?"
+differently, and both answers are deliberate.
+
+**SQLite has no migrations, and doesn't need any.** The schema comes from
+`Base.metadata.create_all`, and a schema change means running `rebuild-silver`:
+bronze holds the full documents, so nothing in silver is irreplaceable. That is
+cheaper than writing migrations for a tier that is rebuilt anyway — and SQLite
+has no real `ALTER`, so every non-trivial migration would be a table-copy
+recipe.
+
+**Postgres uses Alembic**, because a hosted database is not disposable the same
+way. `uv run alembic upgrade head` is the whole bootstrap for an empty
+database — it creates the schema itself, not just the tables in it.
+`rebuild-silver` still builds its staging schema from the models directly and
+stamps it at head, so a rebuilt database looks migrated rather than hand-made.
+
+What keeps the two from drifting apart is a test, not discipline:
+`test_head_matches_the_models` asserts that `alembic upgrade head` produces
+exactly what `create_all` would. Add a column to a model without writing a
+revision and it fails.
+
+**Always autogenerate against Postgres.** Types are rendered from the models,
+so one revision serves both dialects (`sa.Uuid()` becomes `UUID` on Postgres
+and `CHAR(32)` on SQLite) — but reflecting a *SQLite* database compares
+`CHAR(32)` against the model's `Uuid` and proposes a bogus `alter_column`.
+
+```sh
+docker compose up -d postgres
+DATABASE_URL=postgresql+psycopg://composers:composers@localhost:5433/composers \
+  uv run alembic revision --autogenerate -m "add work.canonical_work_id"
+uv run ruff format packages/composer-models/src/composer_models/migrations/versions
+```
+
+Moving an existing SQLite silver to Postgres is a **rebuild from bronze**, not
+a dump and restore: `DATABASE_URL=postgresql+psycopg://… uv run composer-ingest
+rebuild-silver`. Entity ids are deterministic, so they survive; work ids and
+the run log do not, exactly as with any other rebuild.
 
 ## Consumer API (read the dataset)
 
