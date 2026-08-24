@@ -253,6 +253,12 @@ cheaper than writing migrations for a tier that is rebuilt anyway — and SQLite
 has no real `ALTER`, so every non-trivial migration would be a table-copy
 recipe.
 
+> ⚠️ **That premise is currently only true for the 11 scraper sources.**
+> `rebuild-silver` replays `composer_scrapers.REGISTRY`, not the bucket, so the
+> crawl-config sources are skipped and every LLM-derived recording is lost —
+> a rebuild today takes the recordings tables to zero. Until that is fixed,
+> treat `rebuild-silver` as destructive and check what it would drop first.
+
 **Postgres uses Alembic**, because a hosted database is not disposable the same
 way. `uv run alembic upgrade head` is the whole bootstrap for an empty
 database — it creates the schema itself, not just the tables in it.
@@ -276,10 +282,28 @@ DATABASE_URL=postgresql+psycopg://composers:composers@localhost:5433/composers \
 uv run ruff format packages/composer-models/src/composer_models/migrations/versions
 ```
 
-Moving an existing SQLite silver to Postgres is a **rebuild from bronze**, not
-a dump and restore: `DATABASE_URL=postgresql+psycopg://… uv run composer-ingest
-rebuild-silver`. Entity ids are deterministic, so they survive; work ids and
-the run log do not, exactly as with any other rebuild.
+### Moving an existing SQLite silver to Postgres
+
+A rebuild from bronze *would* be the natural way to do this — but see the
+warning above: `rebuild-silver` currently replays only the scraper registry, so
+it would drop every recording and the crawl-derived concerts along with them.
+Until that is fixed, copy the data across instead:
+
+```sh
+uv run alembic upgrade head        # create the schema on the Postgres side
+# then copy table by table from the SQLite file
+```
+
+Both backends run the same models, and the ids are portable (entity ids are
+uuid5-deterministic; `sa.Uuid()` renders as `CHAR(32)` on SQLite and native
+`UUID` on Postgres), so a straight table-by-table copy is faithful.
+
+Once the rebuild is bucket-driven, the one-liner below becomes the right answer
+and this section can go away:
+
+```sh
+DATABASE_URL=postgresql+psycopg://… uv run composer-ingest rebuild-silver
+```
 
 ## Consumer API (read the dataset)
 
