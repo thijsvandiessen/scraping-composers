@@ -19,8 +19,8 @@ database first and re-applied after the replay:
   across rebuilds; the target work is created if matching no longer produces
   it.
 
-SQLite only: the atomic swap is a file replace, which has no Postgres
-equivalent yet.
+The swap is atomic on both backends: a file replace on SQLite, a schema
+rename on Postgres (see :mod:`composer_warehouse.postgres`).
 """
 
 from __future__ import annotations
@@ -33,7 +33,8 @@ from pathlib import Path
 
 from composer_bronze.bucket import LOADABLE_STATUSES, Bucket
 from composer_bronze.scraper import iter_from_bucket
-from composer_models import Entity, PersonMatch, RawWorkMention, Source, Work
+from composer_models import Base, Entity, PersonMatch, RawWorkMention, Source, Work
+from composer_models.alembic_support import stamp_head
 from composer_models.db import get_engine, init_db
 from sqlalchemy import Engine, inspect, make_url, select
 from sqlalchemy.orm import Session
@@ -89,16 +90,21 @@ class WorkDecision:
 def silver_target(database_url: str | None = None) -> BuildTarget:
     """The swap target for the silver database at ``database_url``.
 
-    A SQLite file gets an atomic file replace. Raises ``ValueError`` for a URL
-    with nothing to swap — an in-memory SQLite database has no file, and no
-    other dialect is supported yet.
+    A SQLite file gets an atomic file replace; Postgres gets an atomic schema
+    rename. Raises ``ValueError`` for a URL neither can handle — an in-memory
+    SQLite database has no file to swap, and no other dialect is supported.
     """
     from composer_config import settings
 
     url = make_url(database_url or settings.database_url)
-    if url.get_backend_name() == "sqlite" and url.database and url.database != ":memory:":
+    backend = url.get_backend_name()
+    if backend == "postgresql":
+        from .postgres import PostgresSchemaTarget
+
+        return PostgresSchemaTarget(url, settings.silver_schema)
+    if backend == "sqlite" and url.database and url.database != ":memory:":
         return SqliteFileTarget(Path(url.database))
-    raise ValueError(f"rebuild-silver needs a file-backed sqlite URL, got {database_url!r}")
+    raise ValueError(f"rebuild-silver needs a sqlite file or a Postgres URL, got {database_url!r}")
 
 
 def collect_decisions(session: Session) -> tuple[list[PersonDecision], list[WorkDecision]]:
@@ -207,6 +213,13 @@ def _replay(
     work_decisions: Sequence[WorkDecision],
 ) -> RebuildStats:
     """Build a complete silver database on ``engine`` from the bucket."""
+    if engine.dialect.name != "sqlite":
+        # init_db only creates tables on SQLite. Build the staging schema from
+        # the models and stamp it at head, so what the swap promotes looks
+        # migrated rather than hand-made — the drift test guarantees the two
+        # are the same schema.
+        Base.metadata.create_all(engine)
+        stamp_head(engine)
     factory = init_db(engine)
     with factory() as session:
         replayed = seen = new = 0

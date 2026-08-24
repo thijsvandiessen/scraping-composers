@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 from composer_config import settings
-from sqlalchemy import Engine, create_engine, make_url
+from sqlalchemy import Engine, create_engine, make_url, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from . import Base
@@ -19,6 +19,8 @@ from . import Base
 # Schema names cannot be bound parameters, so anything that reaches DDL has to
 # be validated rather than escaped.
 _SCHEMA_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,50}$")
+# Table and column names reach SQL as text too, for the same reason.
+_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
 
 def get_engine(url: str | None = None, *, schema: str | None = None) -> Engine:
@@ -39,17 +41,9 @@ def get_engine(url: str | None = None, *, schema: str | None = None) -> Engine:
         raise ValueError(f"invalid schema name {name!r}")
     return create_engine(
         resolved,
-        connect_args={
-            "options": f"-csearch_path={name}",
-            # psycopg auto-prepares repeated statements, and a prepared plan
-            # pins the relation OID. A schema rename doesn't change OIDs, so a
-            # pooled reader would keep reading the *demoted* tables after a
-            # rebuild swap and then fail outright once they are dropped. With
-            # auto-prepare off, every execution re-resolves by name and follows
-            # the swap — which is how the read APIs survive a rebuild without a
-            # restart.
-            "prepare_threshold": None,
-        },
+        connect_args={"options": f"-csearch_path={name}"},
+        # A rebuild renames schemas under live readers; pre-ping so a pooled
+        # connection that was broken meanwhile is replaced rather than raised.
         pool_pre_ping=True,
         pool_recycle=300,
     )
@@ -68,3 +62,24 @@ def init_db(engine: Engine) -> sessionmaker[Session]:
     if engine.dialect.name == "sqlite":
         Base.metadata.create_all(engine)
     return sessionmaker(engine, expire_on_commit=False)
+
+
+def resync_pk_sequence(session: Session, table: str, column: str = "id") -> None:
+    """Move a serial primary key's sequence past the largest id in the table.
+
+    Bulk inserts that assign integer ids explicitly (the concert and recording
+    derivations number their rows) bypass the sequence, which on Postgres stays
+    at 1 — so the next ORM insert collides on the primary key. SQLite has no
+    sequences and no such problem, so this is a no-op there.
+    """
+    if session.bind is None or session.bind.dialect.name != "postgresql":
+        return
+    if not _IDENTIFIER.match(table) or not _IDENTIFIER.match(column):
+        raise ValueError(f"invalid table or column name: {table!r}.{column!r}")
+    session.execute(
+        text(
+            "SELECT setval(pg_get_serial_sequence(:table, :column),"
+            f" coalesce((SELECT max({column}) FROM {table}), 0) + 1, false)"
+        ),
+        {"table": table, "column": column},
+    )

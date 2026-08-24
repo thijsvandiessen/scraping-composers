@@ -16,11 +16,14 @@ from composer_models import (
     Work,
     WorkTitle,
 )
+from composer_models.db import get_engine
+from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import requires_postgres
 from composer_schema import SourceClaim
 from composer_warehouse.build import read_build_manifest
 from composer_warehouse.rebuild import rebuild_silver, silver_target
 from composer_warehouse.testing import FakeSource, mention, perf_mention, person
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 ARCHIVE = ("archive", "https://archive.example")
@@ -211,9 +214,9 @@ def test_rebuild_failure_keeps_old_database(tmp_path: Path) -> None:
 
 def test_silver_target_rejects_urls_with_nothing_to_swap(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path / "bucket")
-    with pytest.raises(ValueError, match="file-backed sqlite"):
+    with pytest.raises(ValueError, match="sqlite file or a Postgres URL"):
         rebuild_silver(bucket, SOURCES, "mysql://user:pass@host/composers")
-    with pytest.raises(ValueError, match="file-backed sqlite"):
+    with pytest.raises(ValueError, match="sqlite file or a Postgres URL"):
         silver_target("sqlite://")  # in-memory: nothing to swap
 
 
@@ -234,3 +237,107 @@ def test_rebuild_failed_source_snapshots_are_skipped(tmp_path: Path) -> None:
         ]
         == "failed"
     )
+
+
+# --------------------------------------------------------------------------
+# The same rebuild, against Postgres. These prove the whole ingest → dedupe →
+# derive stack is dialect-clean, and that the schema swap carries a real
+# database rather than a marker table.
+
+
+@requires_postgres
+def test_rebuild_replays_bucket_into_postgres(tmp_path: Path, pg_url: str) -> None:
+    bucket = LocalBucket(tmp_path / "bucket")
+    _seed_bucket(bucket)
+
+    stats = rebuild_silver(bucket, SOURCES, pg_url)
+
+    assert stats.sources_replayed == 2
+    assert stats.records_seen == 10
+    assert stats.persons_auto_linked == 1
+    assert stats.concerts == 1
+
+    engine = get_engine(pg_url)
+    try:
+        with Session(engine) as silver:
+            bach = silver.scalars(select(Entity).where(Entity.label == "Bach, Johann Sebastian")).one()
+            claims = silver.scalars(select(Claim).where(Claim.subject_id == bach.id)).all()
+            assert any(c.predicate == "has_profession" for c in claims)
+            short = silver.scalars(select(Entity).where(Entity.label == "Bach, J.S.")).one()
+            assert short.canonical_entity_id == bach.id
+            assert silver.scalars(select(Concert)).one().date == "1985-03-01"
+
+            # The staging schema was stamped, so the swapped-in database looks
+            # migrated rather than hand-made.
+            version = silver.execute(text("SELECT version_num FROM alembic_version")).scalar()
+            assert version is not None
+
+            # And the derivations' explicit ids left the sequence usable.
+            silver.add(Concert(source_id=1, external_key="manual"))
+            silver.commit()
+    finally:
+        engine.dispose()
+
+    manifest = silver_target(pg_url).read_manifest()
+    assert manifest is not None and manifest.status == "completed"
+
+
+@requires_postgres
+def test_rebuild_preserves_human_decisions_on_postgres(tmp_path: Path, pg_url: str) -> None:
+    # collect_decisions reads the *live* schema before the staging build
+    # starts; on Postgres that is a different schema, not a different file.
+    bucket = LocalBucket(tmp_path / "bucket")
+    _seed_bucket(bucket)
+    rebuild_silver(bucket, SOURCES, pg_url)
+
+    engine = get_engine(pg_url)
+    with Session(engine) as silver:
+        beethoven_pair = silver.scalars(
+            select(PersonMatch)
+            .join(Entity, Entity.id == PersonMatch.entity_id)
+            .where(PersonMatch.status == "needs_review", Entity.label == "Beethoven")
+        ).one()
+        beethoven_pair.status = "accepted"  # person-review --accept
+        beethoven_pair.entity.canonical_entity_id = beethoven_pair.canonical_entity_id
+        mozart_pair = silver.scalars(
+            select(PersonMatch)
+            .join(Entity, Entity.id == PersonMatch.entity_id)
+            .where(PersonMatch.status == "needs_review", Entity.label == "Mozart")
+        ).one()
+        mozart_pair.status = "rejected"  # person-review --reject
+
+        flagged = silver.scalars(
+            select(RawWorkMention).where(RawWorkMention.match_status == "needs_review")
+        ).one()
+        new = Work(
+            id=uuid.uuid4(),
+            composer_entity_id=flagged.composer_entity_id,
+            canonical_title=flagged.raw_title,
+            title_key="songs of a traveller",
+        )
+        silver.add(new)
+        flagged.work_id = new.id
+        flagged.match_status = "manual_matched"
+        flagged.match_method = "manual"
+        silver.commit()
+    engine.dispose()
+
+    stats = rebuild_silver(bucket, SOURCES, pg_url)
+
+    assert stats.person_decisions_applied == 2
+    assert stats.person_decisions_dropped == 0
+    assert stats.work_decisions_applied == 1
+
+    engine = get_engine(pg_url)
+    try:
+        with Session(engine) as silver:
+            beethoven = silver.scalars(select(Entity).where(Entity.label == "Beethoven, Ludwig van")).one()
+            short = silver.scalars(select(Entity).where(Entity.label == "Beethoven")).one()
+            assert short.canonical_entity_id == beethoven.id
+            # the rejected pair stays rejected rather than being re-proposed
+            mozart = silver.scalars(select(Entity).where(Entity.label == "Mozart")).one()
+            rejected = silver.scalars(select(PersonMatch).where(PersonMatch.entity_id == mozart.id)).one()
+            assert rejected.status == "rejected"
+            assert mozart.canonical_entity_id is None
+    finally:
+        engine.dispose()
