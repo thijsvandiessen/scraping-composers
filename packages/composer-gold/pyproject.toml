@@ -7,7 +7,7 @@ dependencies = [
     "composer-config",
     "composer-models",
     "composer-warehouse",
-    "sqlalchemy>=2.0.51",
+    "sqlalchemy>=2.0.52",
 ]
 
 [build-system]

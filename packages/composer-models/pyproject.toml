@@ -5,7 +5,7 @@ description = "Shared database schema: the ORM models behind the silver and gold
 requires-python = ">=3.11"
 dependencies = [
     "composer-config",
-    "sqlalchemy>=2.0.51",
+    "sqlalchemy>=2.0.52",
 ]
 
 [project.optional-dependencies]

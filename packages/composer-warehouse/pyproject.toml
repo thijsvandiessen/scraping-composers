@@ -8,7 +8,7 @@ dependencies = [
     "composer-config",
     "composer-models",
     "composer-schema",
-    "sqlalchemy>=2.0.51",
+    "sqlalchemy>=2.0.52",
 ]
 
 [project.optional-dependencies]
