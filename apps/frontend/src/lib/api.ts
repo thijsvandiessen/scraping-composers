@@ -30,14 +30,23 @@ function apiBaseUrl(): string {
   return (process.env.GOLD_API_URL ?? "http://127.0.0.1:8000").replace(/\/+$/, "");
 }
 
+// These pages are server-rendered per request, so a hanging fetch holds the
+// SSR request open rather than degrading in the browser — without a timeout it
+// would sit there until node's 300s headers timeout. Matches the dashboard's
+// own 10s budget for the same APIs.
+const TIMEOUT_MS = 10_000;
+
 async function apiFetch<T>(path: string, schema: ZodType<T>): Promise<T> {
   const url = `${apiBaseUrl()}${path}`;
   let response: Response;
   try {
-    response = await fetch(url);
+    response = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) });
   } catch (cause) {
+    const timedOut = cause instanceof DOMException && cause.name === "TimeoutError";
     throw new ApiError(
-      `Could not reach the composer API at ${apiBaseUrl()}. Is the gold API running? (${String(cause)})`,
+      timedOut
+        ? `The composer API at ${apiBaseUrl()} did not respond within ${TIMEOUT_MS / 1000}s.`
+        : `Could not reach the composer API at ${apiBaseUrl()}. Is the gold API running? (${String(cause)})`,
     );
   }
   if (!response.ok) {
