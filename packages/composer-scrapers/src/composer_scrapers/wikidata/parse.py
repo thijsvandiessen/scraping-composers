@@ -3,8 +3,9 @@
 Birth/death dates are stored at the precision Wikidata records for them (see
 ``_format_time``): a year-only fact lands as ``1756``, not the padded
 ``1756-01-01``, so the stored string never overstates how precisely the date is
-known. Items (or claim objects) without an English label come back as their
+known. Items (or claim objects) the label service cannot name come back as their
 bare QID ("Q12345") and are skipped, since a QID is not a name to dedup on.
+See LABEL_LANGUAGES in ``query`` for which labels count as a name.
 """
 
 from __future__ import annotations
@@ -108,7 +109,7 @@ def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             if kind == _DATE:
                 value = _format_time(value, _literal(row, f"{var}Precision"))
             elif kind is not None and _BARE_QID.match(value):
-                continue  # claim object has no English label
+                continue  # claim object has no label
             item["values"].setdefault(var, set()).add(value)
     return items
 
@@ -138,7 +139,7 @@ def _records_from_rows(
     for qid, item in _fold_rows(rows).items():
         name = item["label"]
         if not name or _BARE_QID.match(name):
-            log.debug("skipping %s: no English label", qid)
+            log.debug("skipping %s: no label", qid)
             continue
         item_metrics = (metrics or {}).get(qid, {})
         raw = {"item": f"http://www.wikidata.org/entity/{qid}", "label": name}
