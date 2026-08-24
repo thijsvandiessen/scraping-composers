@@ -32,7 +32,12 @@ requires_postgres = pytest.mark.skipif(
 
 
 def drop_test_schemas(url: str, prefix: str) -> None:
-    """Drop ``prefix`` and everything a rebuild may have derived from it."""
+    """Drop ``prefix``, everything a rebuild derived from it, and its manifest.
+
+    The build manifest deliberately lives outside the schemas a swap replaces,
+    so dropping those does not reach it — a test's row would otherwise outlive
+    the test and accumulate in a shared database.
+    """
     engine = get_engine(url, schema="public")
     try:
         with engine.begin() as conn:
@@ -42,6 +47,11 @@ def drop_test_schemas(url: str, prefix: str) -> None:
             ).all()
             for name in names:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{name}" CASCADE'))
+            if conn.scalar(text("SELECT to_regclass('composer_meta.build_manifest')")) is not None:
+                conn.execute(
+                    text("DELETE FROM composer_meta.build_manifest WHERE target = :target"),
+                    {"target": prefix},
+                )
     finally:
         engine.dispose()
 
