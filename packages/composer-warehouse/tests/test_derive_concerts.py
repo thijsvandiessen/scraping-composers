@@ -195,6 +195,48 @@ def test_derive_concerts_credits_the_orchestra(session: Session) -> None:
     assert stats.participant_links == 2  # conductor + orchestra
 
 
+def test_choir_credited_as_a_soloist_resolves_to_its_ensemble(session: Session) -> None:
+    """A credit's slot says how the source filed the name, not what the name is:
+    choirs turn up among the soloists. Ingest kinds those as ensembles (#174),
+    so the lookup has to consult the ensemble entities for every role, not only
+    for the ensemble one — otherwise the credit resolves to nothing."""
+    lso = FakeSource(
+        records=(
+            perf_mention(
+                "https://lso.co.uk/mahler#w0",
+                "Symphony No. 8",
+                "Mahler",
+                {
+                    "_source": "llm",
+                    "concert_key": "https://lso.co.uk/mahler",
+                    "url": "https://lso.co.uk/mahler",
+                    "date": "2024-05-01",
+                    "soloists": [
+                        {"name": "Sally Matthews", "discipline": "soprano"},
+                        {"name": "Tölzer Knabenchor", "discipline": None},
+                    ],
+                },
+            ),
+            # Both credits reach ingest as person documents — that is what the
+            # extractor emits for every named participant.
+            person("Sally Matthews", external_id="lso:matthews"),
+            person("Tölzer Knabenchor", external_id="lso:tk"),
+        ),
+        name="lso",
+        base_url="https://lso.co.uk",
+    )
+    ingest_source(session, lso)
+
+    stats = derive_concerts(session)
+
+    choir = session.scalars(select(Entity).where(Entity.label == "Tölzer Knabenchor")).one()
+    assert choir.kind == "ensemble"
+    by_name = {p.name: p for p in session.scalars(select(ConcertParticipant))}
+    assert by_name["Tölzer Knabenchor"].role == "soloist"  # the credit stays verbatim
+    assert by_name["Tölzer Knabenchor"].entity_id == choir.id
+    assert stats.participant_links == 2
+
+
 def test_derive_concerts_handles_rco_source(session: Session) -> None:
     """RCO reports concert-level credits on every work of the concert."""
     rco = FakeSource(

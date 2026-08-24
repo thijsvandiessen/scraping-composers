@@ -7,9 +7,9 @@ resolves conductor, soloist and ensemble names to entities by normalized name,
 and links each concert to its programme. Re-running rebuilds the concert
 tables from scratch, so the pass can be repeated after new loads.
 
-Participants resolve against *all* person entities (and, for ensemble credits,
-the ``ensemble`` entities) — silver keeps duplicate spellings side by side; the
-gold promote step re-points them to canonical roots when it copies the tables.
+Participants resolve against *all* person and ensemble entities — silver keeps
+duplicate spellings side by side; the gold promote step re-points them to
+canonical roots when it copies the tables.
 """
 
 from __future__ import annotations
@@ -85,12 +85,17 @@ class _RowBatch:
     unresolved_names: set[str] = field(default_factory=set)
 
     def _resolve(self, role: str, key: str) -> uuid.UUID | None:
-        """The entity a credited name refers to: an ensemble credit prefers an
-        ``ensemble`` entity and falls back to a person (LLM-extracted orchestras
-        are recorded as persons); every other role resolves to a person."""
+        """The entity a credited name refers to.
+
+        Both maps are consulted whatever the role: a credit's slot says how the
+        source filed the name, not what the name is — sources list choirs and
+        piano trios among the soloists — and ingest kinds a name that reads as
+        an ensemble as one (see :func:`~composer_schema.resolve_entity_kind`).
+        The role only decides which map is asked first.
+        """
         if role == "ensemble":
             return self.ensemble_by_key.get(key) or self.person_by_key.get(key)
-        return self.person_by_key.get(key)
+        return self.person_by_key.get(key) or self.ensemble_by_key.get(key)
 
     def add_participant(self, concert_id: int, role: str, name: str, discipline: str | None) -> None:
         resolved = self._resolve(role, dedup_key(name))

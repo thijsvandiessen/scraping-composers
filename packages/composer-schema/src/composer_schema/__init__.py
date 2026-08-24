@@ -16,6 +16,19 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any, ClassVar
 
+from .kinds import (
+    ENSEMBLE_KIND as ENSEMBLE_KIND,
+)
+from .kinds import (
+    PERSON_KIND as PERSON_KIND,
+)
+from .kinds import (
+    looks_like_ensemble as looks_like_ensemble,
+)
+from .kinds import (
+    resolve_entity_kind as resolve_entity_kind,
+)
+
 
 @dataclass(frozen=True)
 class SourceClaim:
