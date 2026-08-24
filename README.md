@@ -234,13 +234,20 @@ crawl 'lso' finished in 812s: 450 pages, 0 skipped, 2 without markdown, 412 unch
 
 Interpretation (entity resolution, work matching) is applied when a record is
 first loaded — improving the heuristics doesn't fix rows already in the
-database. `rebuild-silver` closes that gap by replaying the latest complete
-snapshot of every source from the bucket into a fresh database with the
-current code, then re-running dedupe and concert derivation:
+database. `rebuild-silver` closes that gap by replaying the bucket into a fresh
+database with the current code, then re-running dedupe and concert derivation:
 
 ```sh
 uv run composer-ingest rebuild-silver   # bucket → composers.db (atomic swap)
 ```
+
+What gets replayed is **every source the bucket has data for, and every one of
+its loadable document snapshots** — the same union `process` loads, not just
+the newest run. The source list comes from the bucket rather than the scraper
+registry, so the crawl-config sources count too: they have no adapter, but the
+`extract` step writes their LLM-derived documents in the same format a scraper
+writes, and they are the only source of recordings. A source that has been
+crawled but not yet extracted has no document snapshot and is skipped.
 
 Human review decisions survive the rebuild: accepted/rejected person pairs
 carry over directly (entity ids are deterministic), and manual work matches

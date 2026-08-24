@@ -672,6 +672,52 @@ def test_cmd_rebuild_silver_replays_bucket(
         assert entity.label == "Bach, Johann Sebastian"
 
 
+def test_cmd_rebuild_silver_replays_every_bucket_source_with_production_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rebuild's source list is the bucket's, resolved through the real lookup.
+
+    Regression for #182: it used to be ``composer_scrapers.REGISTRY``, so the
+    crawl-config sources — the only ones that produce recordings — were skipped.
+    Only the scraper here is registered; the other two must be replayed anyway.
+    """
+    from composer_bronze.bucket import LocalBucket
+    from composer_bronze.scraper import Scraper
+    from composer_cli import ingest_cmds
+    from composer_crawler import CrawlConfig
+    from composer_models import Source
+    from composer_scrapers import REGISTRY
+
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    bucket_path = str(tmp_path / "bucket")
+    bucket = LocalBucket(bucket_path)
+    scraped = FakeSource(records=(person("Bach, Johann Sebastian"),), name="fake")
+    monkeypatch.setitem(REGISTRY, "fake", scraped)
+    # a crawl config: no adapter, but `extract` wrote documents under its name
+    monkeypatch.setattr(
+        ingest_cmds,
+        "crawl_choices",
+        lambda: {"alpha": CrawlConfig(name="alpha", seeds=("https://alpha.example",))},
+    )
+    crawled = FakeSource(records=(person("Rattle, Simon"),), name="alpha")
+    # an orphan: data in the bucket, adapter and config both long gone
+    orphan = FakeSource(records=(person("Hogwood, Christopher"),), name="ghost")
+    for source in (scraped, crawled, orphan):
+        Scraper(source).fetch_to_bucket(bucket)
+
+    assert cmd_rebuild_silver(_ns(database_url=db_url, bucket_path=bucket_path)) == 0
+
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        rows = session.execute(select(Source.name, Source.base_url)).all()
+    base_urls = {name: base_url for name, base_url in rows}
+    assert base_urls == {
+        "alpha": "https://alpha.example",
+        "fake": scraped.base_url,
+        "ghost": "",
+    }
+
+
 def test_cmd_rebuild_silver_rejects_a_url_with_nothing_to_swap(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
