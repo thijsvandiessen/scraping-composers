@@ -10,6 +10,7 @@ from composer_schema import SourceClaim
 from composer_scrapers.wikidata import WikidataAdapter
 from composer_scrapers.wikidata.parse import _format_time, _records_from_rows
 from composer_scrapers.wikidata.query import (
+    LABEL_LANGUAGES,
     MULTI_QUERY,
     QUERY,
     _fetch_metrics,
@@ -62,7 +63,7 @@ def test_minimal_composer_still_claims_the_profession() -> None:
     assert record.claims == (SourceClaim("has_profession", "profession", "composer"),)
 
 
-def test_items_without_english_label_are_skipped() -> None:
+def test_items_the_label_service_cannot_name_are_skipped() -> None:
     # the label service echoes the QID back when no label exists
     rows = [row("Q2", "Q2", birth="1900-01-01T00:00:00Z"), row("Q3", "Maurice Ravel"), row("Q4")]
     records = _records_from_rows(rows)
@@ -181,6 +182,16 @@ def test_fetch_page_binds_the_batch_as_values() -> None:
     assert "VALUES ?item { wd:Q6600 wd:Q7 }" in captured[0]
     assert "OFFSET" not in captured[0]
     assert "FILTER" not in captured[0]
+
+
+def test_labels_fall_back_to_the_language_agnostic_ones() -> None:
+    """Wikidata is migrating names that are spelled the same everywhere out of
+    "en" and into "mul". Q254 has only a mul label, so asking for "en" alone
+    gets "Q254" echoed back and drops Mozart from the dataset entirely."""
+    assert LABEL_LANGUAGES == "en,mul"
+    for template in (QUERY, MULTI_QUERY):
+        rendered = template.format(values="wd:Q254", languages=LABEL_LANGUAGES)
+        assert 'bd:serviceParam wikibase:language "en,mul"' in rendered
 
 
 def test_multi_valued_fields_are_unioned_not_optional() -> None:

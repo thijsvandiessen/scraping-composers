@@ -36,6 +36,14 @@ REQUEST_DELAY_S = 1.0
 # sleep/wake network blip, not just a WDQS hiccup
 RETRIES = 5
 
+# Label languages, in fallback order. "mul" is Wikidata's language-agnostic
+# label: a name spelled the same across languages lives there rather than being
+# repeated per language, and names are being migrated to it -- Q254 has only a
+# mul label now, so asking for "en" alone gets "Q254" echoed back and drops
+# Mozart from the dataset entirely. Only these two: any real language would
+# store, say, a German name as though it were the English one.
+LABEL_LANGUAGES = "en,mul"
+
 # The whole population in one query. Cheap because it touches only the
 # occupation index: no OPTIONAL joins, no label service, no ORDER BY.
 ID_QUERY = """\
@@ -65,7 +73,7 @@ WHERE {{
   OPTIONAL {{ ?item wdt:P19 ?birthPlace . }}
   OPTIONAL {{ ?item wdt:P20 ?deathPlace . }}
   OPTIONAL {{ ?item wdt:P434 ?musicbrainz . }}
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
 }}
 """
 
@@ -85,7 +93,7 @@ WHERE {{
   UNION {{ ?item wdt:P136 ?genre . }}
   UNION {{ ?item wdt:P135 ?movement . }}
   UNION {{ ?item skos:altLabel ?alias . }}
-  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en" . }}
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
 }}
 """
 
@@ -156,7 +164,8 @@ def _fetch_page(client: httpx.Client, qids: list[str]) -> list[dict[str, Any]]:
     item must produce at least one row; a short answer means rows went missing
     in transit rather than an item having no properties. Raising here is what
     stops a silent hole from quietly halving the dataset (issue #181)."""
-    rows = _run_query(client, QUERY.format(values=_values(qids)), f"page of {len(qids)} items")
+    page = QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
+    rows = _run_query(client, page, f"page of {len(qids)} items")
     missing = set(qids) - {_qid(row) for row in rows}
     if missing:
         raise RuntimeError(
@@ -165,7 +174,8 @@ def _fetch_page(client: httpx.Client, qids: list[str]) -> list[dict[str, Any]]:
         )
     # no coverage check here: an item with none of these properties, and so no
     # row at all, is ordinary
-    return rows + _run_query(client, MULTI_QUERY.format(values=_values(qids)), f"multi for {len(qids)} items")
+    multi = MULTI_QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
+    return rows + _run_query(client, multi, f"multi for {len(qids)} items")
 
 
 def _fetch_metrics(client: httpx.Client, qids: list[str]) -> dict[str, dict[str, str]]:
