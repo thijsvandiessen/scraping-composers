@@ -677,7 +677,7 @@ def test_cmd_rebuild_silver_rejects_a_url_with_nothing_to_swap(
         _ns(database_url="sqlite://", bucket_path=str(tmp_path / "bucket"))  # in-memory
     )
     assert rc == 1
-    assert "sqlite" in capsys.readouterr().out
+    assert "Postgres" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

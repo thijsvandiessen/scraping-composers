@@ -140,7 +140,10 @@ class GoldStatus(BaseModel):
 
 
 class SilverStatus(BaseModel):
-    exists: bool  # whether the silver database file is present (False when not sqlite)
+    backend: str  # sqlite | postgres — how the atomic swap is performed
+    # whether silver has actually been built: the file is present (sqlite) or
+    # the schema holds the tables (postgres)
+    exists: bool
     status: str | None  # running | completed | failed | None (never rebuilt)
     started_at: str | None
     finished_at: str | None

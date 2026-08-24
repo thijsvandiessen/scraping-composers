@@ -270,7 +270,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="composer-ingest", description="Ingest classical composer data")
     parser.add_argument(
         "--database-url",
-        help="SQLAlchemy URL (default: $DATABASE_URL or sqlite:///composers.db)",
+        help="SQLAlchemy URL, sqlite or postgres (default: $DATABASE_URL or sqlite:///composers.db)",
     )
     parser.add_argument(
         "-v",

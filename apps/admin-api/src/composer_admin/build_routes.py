@@ -20,6 +20,7 @@ from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.rebuild import rebuild_silver, silver_target
 from composer_warehouse.recordings import derive_recordings
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from sqlalchemy.exc import SQLAlchemyError
 
 from . import snapshots
 from .deps import dispose_db, require_admin_key, session_scope
@@ -153,15 +154,44 @@ def _rebuild_silver_in_background() -> None:
         # Recorded as a failed manifest by rebuild_silver; log for the console.
         log.exception("background silver rebuild failed")
     finally:
-        # The swap replaced the database file; drop pooled connections to it.
+        # On SQLite the swap replaced the file, so pooled connections still
+        # point at the old inode and must go. On Postgres the swap renames
+        # schemas and name resolution happens per statement, so connections
+        # follow it on their own — disposing is belt and braces there, and
+        # still drops any whose transaction spanned the swap.
         dispose_db()
 
 
 def _silver_status() -> SilverStatus:
     target = _silver_target()
-    manifest = target.read_manifest() if target is not None else None
+    if target is None:
+        return SilverStatus(
+            backend="unsupported",
+            exists=False,
+            status=None,
+            started_at=None,
+            finished_at=None,
+            error=None,
+            stats={},
+        )
+    try:
+        manifest = target.read_manifest()
+        exists = target.exists()
+    except SQLAlchemyError as exc:
+        # Reading the manifest can fail on Postgres (the server is down, the
+        # credentials are wrong); a file-backed manifest never could.
+        return SilverStatus(
+            backend=target.backend(),
+            exists=False,
+            status=None,
+            started_at=None,
+            finished_at=None,
+            error=str(exc),
+            stats={},
+        )
     return SilverStatus(
-        exists=target.exists() if target is not None else False,
+        backend=target.backend(),
+        exists=exists,
         status=manifest.status if manifest else None,
         started_at=manifest.started_at if manifest else None,
         finished_at=manifest.finished_at if manifest else None,
@@ -183,7 +213,7 @@ def start_rebuild_silver(background: BackgroundTasks) -> SilverStatus:
     if target is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "rebuild-silver requires a file-backed sqlite DATABASE_URL",
+            "rebuild-silver requires a sqlite file or a Postgres DATABASE_URL",
         )
     manifest = target.read_manifest()
     if manifest is not None and manifest.status == "running":
