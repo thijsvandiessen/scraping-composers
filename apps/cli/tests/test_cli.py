@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from composer_cli import _log_level, main
+from composer_cli.export_cmds import cmd_export_kumu
 from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_review
 from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
@@ -17,6 +18,7 @@ from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
 from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work
 from composer_models.db import get_engine, init_db
 from composer_schema import SourceClaim
+from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -867,3 +869,102 @@ def test_promote_cli_passes_thresholds(tmp_path: Path, monkeypatch: pytest.Monke
     assert exc.value.code == 0
     assert captured[0].min_referrers == 3
     assert captured[0].rule1.persons.min_concert_appearances == 2
+
+
+def _gold_with_one_concert(gold_path: Path) -> None:
+    """A gold database holding one conductor, one composer and the concert
+    linking them — enough for the export to have something to draw."""
+    factory = init_db(get_engine(f"sqlite:///{gold_path}"))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    perf_mention(
+                        "perf:1",
+                        "Symphony No. 5, Op. 67",
+                        "Beethoven, Ludwig van",
+                        {
+                            "_source": "llm",
+                            "concert_key": "c1",
+                            "date": "1929-06-30",
+                            "conductors": ["Beinum, Eduard van"],
+                        },
+                    ),
+                    person("Beinum, Eduard van", external_id="a:beinum"),
+                ),
+                name="archive",
+            ),
+        )
+        derive_concerts(session)
+        session.commit()
+
+
+def test_cmd_export_kumu_writes_a_blueprint(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    gold_path = tmp_path / "gold.db"
+    _gold_with_one_concert(gold_path)
+    out = tmp_path / "kumu.json"
+
+    rc = cmd_export_kumu(
+        _ns(
+            gold_path=str(gold_path),
+            output=str(out),
+            limit=500,
+            min_weight=1,
+            performances=True,
+            claims=True,
+        )
+    )
+
+    assert rc == 0
+    blueprint = json.loads(out.read_text())
+    labels = {element["label"] for element in blueprint["elements"]}
+    assert labels == {"Beinum, Eduard van", "Beethoven, Ludwig van"}
+    assert blueprint["connections"][0]["type"] == "performed"
+    assert "kumu blueprint written to" in capsys.readouterr().out
+
+
+def test_cmd_export_kumu_returns_1_without_a_gold_database(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo in --gold-path must not leave an empty database behind."""
+    missing = tmp_path / "nope.db"
+    rc = cmd_export_kumu(
+        _ns(
+            gold_path=str(missing),
+            output=str(tmp_path / "kumu.json"),
+            limit=500,
+            min_weight=1,
+            performances=True,
+            claims=True,
+        )
+    )
+    assert rc == 1
+    assert "no gold database" in capsys.readouterr().out
+    assert not missing.exists()
+
+
+def test_main_routes_to_export_kumu_subcommand(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    gold_path = tmp_path / "gold.db"
+    _gold_with_one_concert(gold_path)
+    out = tmp_path / "kumu.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "composer-ingest",
+            "export-kumu",
+            "--gold-path",
+            str(gold_path),
+            "-o",
+            str(out),
+            "--min-weight",
+            "2",
+            "--no-claims",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    # One performance backs the pairing, so --min-weight 2 empties the map.
+    assert json.loads(out.read_text()) == {"elements": [], "connections": []}

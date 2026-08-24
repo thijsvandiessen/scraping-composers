@@ -1,5 +1,6 @@
 composers.db
 gold.db*
+kumu.json
 extract-cache.db*
 raw-data/
 crawl_configs.json
