@@ -142,18 +142,27 @@ class PersonScorer:
         """Posterior P(same person) in [0, 1] with the method that decided it.
 
         Aliases are tried alongside the primary names and the strongest pairing
-        wins — a record can be filed under a stage name and still match the
-        legal name of the same person.
+        wins — a record filed under a stage name can still match the legal name
+        of the same person.
+
+        Only pairings that agree on the surname are considered. Blocking
+        guarantees that of the *primary* names, but an alias list can contain
+        any surname at all, and comparing given names across two unrelated ones
+        is meaningless: it let "Béla Balázs" match the alias "B. V. Asaf'ev" on
+        initials, because nothing required `balazs` and `asaf'ev` to be the same
+        surname. A pair with no surname in common is not comparable.
         """
-        best_score = -1.0
+        best_score = 0.0
         best_levels: tuple[str, ...] = ()
         for an in (a.name, *a.aliases):
             for bn in (b.name, *b.aliases):
+                if not an.surname or an.surname != bn.surname:
+                    continue
                 levels = comparison_levels(an, bn, a, b)
                 value = self.model.match_probability(levels, self.tf_bits(an, bn, levels))
-                if value > best_score:
+                if not best_levels or value > best_score:
                     best_score, best_levels = value, levels
-        return best_score, _method(best_levels)
+        return (best_score, _method(best_levels)) if best_levels else (0.0, "surname_gate")
 
 
 @lru_cache(maxsize=1)

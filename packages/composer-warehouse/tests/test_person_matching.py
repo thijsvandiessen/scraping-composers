@@ -112,6 +112,39 @@ def test_aliases_are_tried_alongside_the_primary_names() -> None:
     assert scorer.score(with_alias, plain)[0] > scorer.score(without_alias, plain)[0]
 
 
+def test_an_alias_is_only_compared_against_a_matching_surname() -> None:
+    """Alias lists contain arbitrary surnames, and comparing given names across
+    two unrelated ones is meaningless.
+
+    Blocking guarantees the *primary* names share a surname, not the aliases,
+    so without an explicit gate "Bela Balazs" matched the transliteration alias
+    "B. V. Asafev" on initials — two different people who also happen to share
+    a birth and death year, which auto-linked them.
+    """
+    scorer = _scorer(balazs=2, asafev=2, smith=400)
+    balazs = PersonProfile(parse_name("Bela Balazs"), 1884, (parse_name("Balash B."),), 1949)
+    asafev = PersonProfile(
+        parse_name("Boris Asafev"),
+        1884,
+        (parse_name("B. V. Asafev"), parse_name("Asafev B.")),
+        1949,
+    )
+    value, method = scorer.score(balazs, asafev)
+    assert method == "surname_gate"
+    assert value == 0.0
+    assert classify(value) == "distinct"
+
+
+def test_a_shared_alias_surname_is_still_compared() -> None:
+    # The gate must not throw away the alias matching it exists to enable.
+    scorer = _scorer(schoenberg=2, smith=400)
+    a = PersonProfile(parse_name("Schoenberg, Arnold"), 1874, (parse_name("Schonberg, Arnold"),), 1951)
+    b = PersonProfile(parse_name("Schonberg, Arnold"), 1874, death_year=1951)
+    value, method = scorer.score(a, b)
+    assert method.startswith("given:exact")
+    assert classify(value) == "auto_linked"
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [

@@ -32,3 +32,28 @@ def test_von_particle_binds_to_surname_in_both_forms() -> None:
     b = parse_name("Herbert von Karajan")
     assert a.surname == b.surname == "karajan"
     assert a.given == b.given == ("herbert",)
+
+
+def test_a_trailing_initial_is_not_the_surname() -> None:
+    """ "Surname I." is a common form in Cyrillic and Hungarian sources.
+
+    Reading the last token as the surname keyed these on the initial, so
+    "Asafev B." and "Balash B." both landed in a bogus "b" block together.
+    """
+    name = parse_name("Asafev B.")
+    assert (name.surname, name.given) == ("asafev", ("b",))
+
+    two = parse_name("Asafev B. V.")
+    assert (two.surname, two.given) == ("asafev", ("b", "v"))
+
+    assert parse_name("Asafev B.").surname != parse_name("Balash B.").surname
+
+
+def test_initials_leading_a_surname_still_read_as_given_names() -> None:
+    name = parse_name("B. V. Asafev")
+    assert (name.surname, name.given) == ("asafev", ("b", "v"))
+
+
+def test_ordinary_names_are_unaffected() -> None:
+    assert parse_name("Ludwig van Beethoven").surname == "beethoven"
+    assert parse_name("Johann Sebastian Bach").surname == "bach"
