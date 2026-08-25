@@ -279,6 +279,11 @@ def _add_person_parsers(sub: _SubParsers) -> None:
         help="discard existing machine-made links first (keeps reviewed decisions); "
         "needed to re-decide pairs an earlier run already ruled on",
     )
+    p_dedupe.add_argument(
+        "--recluster-only",
+        action="store_true",
+        help="skip scoring and just rebuild the links from the pairs already recorded",
+    )
     p_dedupe.set_defaults(func=cmd_dedupe_persons)
 
     p_train = sub.add_parser(

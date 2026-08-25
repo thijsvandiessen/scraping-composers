@@ -150,6 +150,12 @@ def _apply_person_decisions(session: Session, decisions: Sequence[PersonDecision
     Runs before ``dedupe_persons`` so the carried rows land in its decided set:
     accepted pairs stay linked, rejected pairs are not re-proposed. Decisions
     whose entities no longer exist (the source stopped reporting them) drop.
+
+    The link written here is provisional — ``dedupe_persons`` rebuilds every
+    person link from the clusters these rows imply, so an accepted pair ends up
+    pointing at its cluster's canonical rather than at the entity the reviewer
+    happened to see. It is written anyway so the carry-over stands on its own
+    when the dedupe pass is skipped.
     """
     applied = dropped = 0
     for decision in decisions:

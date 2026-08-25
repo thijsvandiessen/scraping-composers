@@ -2,7 +2,7 @@
 
 from composer_models import Entity, PersonMatch
 from composer_schema import SourceClaim
-from composer_warehouse.persons import dedupe_persons, reset_person_links
+from composer_warehouse.persons import apply_clusters, dedupe_persons, reset_person_links
 from composer_warehouse.testing import FakeSource, ingest_source, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -209,3 +209,97 @@ def test_reset_drops_a_link_a_reviewer_rejected(session: Session) -> None:
     assert (deleted, unlinked) == (0, 1)  # the row survives, the link does not
     assert session.scalars(select(PersonMatch)).one().status == "rejected"
     assert _linked(session) == 0
+
+
+def _chain_of_three(session: Session) -> dict[str, Entity]:
+    """Three spellings of one person, pairwise-linkable in any order."""
+    _ingest(
+        session,
+        person("Bach, J.S.", *_dates("1685", "1750")),
+        person("Bach, Johann S.", *_dates("1685", "1750")),
+        person("Bach, Johann Sebastian", *_dates("1685", "1750")),
+    )
+    dedupe_persons(session)
+    return _by_label(session)
+
+
+def test_a_group_of_three_all_points_at_one_canonical(session: Session) -> None:
+    """The pointer-per-pair defect: ``J.S. -> Johann S.`` and
+    ``Johann S. -> Johann Sebastian`` are both defensible pair decisions, and
+    together they are a chain nothing asked for. Clustering picks the canonical
+    once, from the whole membership."""
+    people = _chain_of_three(session)
+    canonical = people["Bach, Johann Sebastian"]
+
+    assert canonical.canonical_entity_id is None  # fullest given names, chosen once
+    assert people["Bach, J.S."].canonical_entity_id == canonical.id
+    assert people["Bach, Johann S."].canonical_entity_id == canonical.id
+
+
+def test_no_canonical_is_itself_a_duplicate(session: Session) -> None:
+    """The invariant gold relies on: ``canonical_entity_id`` is one hop to a
+    root, so ``_resolve_roots`` is a dict read and needs no cycle guard."""
+    _chain_of_three(session)
+
+    links = {
+        entity_id: canonical_id
+        for entity_id, canonical_id in session.execute(
+            select(Entity.id, Entity.canonical_entity_id).where(Entity.canonical_entity_id.is_not(None))
+        ).tuples()
+    }
+    assert links  # the fixture linked something, so the assertion below has teeth
+    assert not [dup for dup, canonical in links.items() if canonical in links]
+
+
+def test_an_accepted_decision_joins_the_cluster(session: Session) -> None:
+    """A human ``accepted`` row is a link like any other, and the canonical is
+    still chosen from the whole group rather than from that pair."""
+    _ingest(
+        session,
+        person("Beethoven", SourceClaim("born_on", value="1770")),
+        person("Beethoven, Ludwig van", *_dates("1770", "1827")),
+        person("Beethoven, Ludwig", *_dates("1770", "1827")),
+        *_crowd(),
+    )
+    dedupe_persons(session)
+    people = _by_label(session)
+    assert people["Beethoven"].canonical_entity_id is None  # too sparse to link on its own
+    accepted = session.scalars(
+        select(PersonMatch).where(
+            PersonMatch.entity_id == people["Beethoven"].id,
+            PersonMatch.canonical_entity_id == people["Beethoven, Ludwig"].id,
+        )
+    ).one()
+    accepted.status = "accepted"
+    session.commit()
+    apply_clusters(session)
+
+    canonical = people["Beethoven, Ludwig van"]
+    assert canonical.canonical_entity_id is None
+    assert people["Beethoven"].canonical_entity_id == canonical.id
+    assert people["Beethoven, Ludwig"].canonical_entity_id == canonical.id
+
+
+def test_a_rejected_decision_is_not_undone_by_a_transitive_merge(session: Session) -> None:
+    """What a pairwise pass could not express. The reviewer said these two are
+    different people; the pass must not reunite them through a third record."""
+    _ingest(
+        session,
+        person("Bach, J.S.", *_dates("1685", "1750")),
+        person("Bach, Johann S.", *_dates("1685", "1750")),
+        person("Bach, Johann Sebastian", *_dates("1685", "1750")),
+    )
+    dedupe_persons(session)
+    people = _by_label(session)
+    rejected = session.scalars(
+        select(PersonMatch).where(
+            PersonMatch.entity_id == people["Bach, J.S."].id,
+            PersonMatch.canonical_entity_id == people["Bach, Johann Sebastian"].id,
+        )
+    ).one()
+    rejected.status = "rejected"
+    session.commit()
+    apply_clusters(session)
+
+    assert people["Bach, J.S."].canonical_entity_id != people["Bach, Johann Sebastian"].id
+    assert people["Bach, Johann Sebastian"].canonical_entity_id is None

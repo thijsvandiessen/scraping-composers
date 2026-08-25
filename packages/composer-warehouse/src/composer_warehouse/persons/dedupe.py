@@ -1,10 +1,15 @@
 """The post-hoc person dedupe pass.
 
 Blocks the person entities by surname, scores every pair in a block with the
-trained Fellegi-Sunter model, and records the decision: pairs above the auto
-cut-point are linked (``Entity.canonical_entity_id`` set plus a ``PersonMatch``
-row), middling pairs are queued for review, the rest are ignored. Re-running is
-idempotent — a pair that already has a ``PersonMatch`` is skipped.
+trained Fellegi-Sunter model, and records the decision as a ``PersonMatch``
+row: pairs above the auto cut-point are links, middling pairs are queued for
+review, the rest are ignored. Re-running is idempotent — a pair that already
+has a ``PersonMatch`` is skipped.
+
+Scoring decides pairs; :mod:`cluster` decides *groups*. Once every pair is
+recorded the pass rebuilds the whole partition from the surviving links and
+writes one canonical per cluster, so ``Entity.canonical_entity_id`` is always a
+single hop to a cluster canonical and never a link in a chain.
 
 Scores are posterior probabilities from :mod:`fellegi_sunter`, and the pass
 builds term-frequency tables over the corpus before it starts, so sharing a
@@ -24,7 +29,9 @@ from composer_models import Entity, PersonMatch
 from sqlalchemy import CursorResult, Delete, Update, delete, select, update
 from sqlalchemy.orm import Session
 
+from .cluster import Clustering, Edge, build_clusters
 from .corpus import PersonRecord, build_corpus, candidate_pairs, load_records
+from .extract import PersonName, parse_name
 from .match import PersonScorer, classify, default_model
 
 log = logging.getLogger(__name__)
@@ -35,15 +42,20 @@ COMMIT_BATCH = 1000
 HUMAN_STATUSES = ("accepted", "rejected")
 
 
-def _given_length(record: PersonRecord) -> int:
+def _given_length(name: PersonName) -> int:
     """Total spelled-out length of the given names — so "Johann Sebastian"
     counts as fuller than the initials "J. S." (same token count)."""
-    return sum(len(token) for token in record.name.given)
+    return sum(len(token) for token in name.given)
 
 
 def _canonical_and_duplicate(a: PersonRecord, b: PersonRecord) -> tuple[PersonRecord, PersonRecord]:
-    """The fuller name (most spelled-out given names; id tie-break) is canonical."""
-    la, lb = _given_length(a), _given_length(b)
+    """The fuller name (most spelled-out given names; id tie-break) is canonical.
+
+    This orients the ``PersonMatch`` row — the audit trail of what was scored
+    against what. Which entity a cluster actually points at is decided later,
+    once, by :func:`_cluster_canonical` over the whole membership.
+    """
+    la, lb = _given_length(a.name), _given_length(b.name)
     if la != lb:
         return (a, b) if la > lb else (b, a)
     return (a, b) if str(a.entity_id) < str(b.entity_id) else (b, a)
@@ -51,13 +63,11 @@ def _canonical_and_duplicate(a: PersonRecord, b: PersonRecord) -> tuple[PersonRe
 
 @dataclass
 class _DedupeState:
-    """Scorer, preloaded lookups and progress counters for one dedupe pass."""
+    """Scorer, the pairs already decided, and progress counters for one pass."""
 
     session: Session
     scorer: PersonScorer
-    entities: dict[uuid.UUID, Entity]
     decided: set[tuple[uuid.UUID, uuid.UUID]]
-    linked: set[uuid.UUID]
     auto: int = 0
     review: int = 0
     pending: int = 0
@@ -81,9 +91,6 @@ def _record_decision(
     )
     state.decided.add((duplicate.entity_id, canonical.entity_id))
     if status == "auto_linked":
-        if duplicate.entity_id not in state.linked:
-            state.entities[duplicate.entity_id].canonical_entity_id = canonical.entity_id
-            state.linked.add(duplicate.entity_id)
         state.auto += 1
     else:
         state.review += 1
@@ -151,6 +158,80 @@ def reset_person_links(session: Session) -> tuple[int, int]:
     return deleted, unlinked
 
 
+def _cluster_canonical(members: frozenset[uuid.UUID], names: dict[uuid.UUID, PersonName]) -> uuid.UUID:
+    """The member with the fullest given names, ties broken on the id.
+
+    Chosen once from the whole cluster. Picking a canonical per pair was what
+    let one group point at two different entities, since each pair only ever
+    saw the two names in front of it.
+    """
+    return min(members, key=lambda entity_id: (-_given_length(names[entity_id]), str(entity_id)))
+
+
+def _cluster_edges(session: Session) -> tuple[list[Edge], list[tuple[uuid.UUID, uuid.UUID]]]:
+    """The links to cluster, and the pairs that may not be clustered together.
+
+    ``auto_linked`` is the model's verdict and ``accepted`` a human's; both are
+    links. ``rejected`` is a human saying "not the same person", which becomes
+    a cannot-link so the pair cannot be reunited by a transitive merge either.
+    The corpus carries no human rows at all today — the constraint machinery is
+    there for #204, which derives cannot-links from authority ids.
+    """
+    links: list[Edge] = []
+    barred: list[tuple[uuid.UUID, uuid.UUID]] = []
+    rows = session.execute(
+        select(
+            PersonMatch.entity_id, PersonMatch.canonical_entity_id, PersonMatch.score, PersonMatch.status
+        ).where(PersonMatch.status.in_(("auto_linked", "accepted", "rejected")))
+    ).tuples()
+    for entity_id, canonical_id, score, status in rows:
+        if status == "rejected":
+            barred.append((entity_id, canonical_id))
+        else:
+            links.append(Edge(a=entity_id, b=canonical_id, score=score))
+    return links, barred
+
+
+def apply_clusters(session: Session) -> Clustering:
+    """Rebuild every person link from the clusters the recorded links imply.
+
+    Every member of a cluster is pointed straight at that cluster's canonical
+    and every other person entity is unlinked, so the pointer graph is a
+    partition: one hop to a root, no chains, no cycles. Gold relies on this —
+    ``_selection._resolve_roots`` reads the column as a dict rather than
+    walking it.
+
+    Rebuilding the whole partition rather than patching the pairs that changed
+    is what keeps it consistent: one new link can join two existing clusters,
+    and the canonical of the merged group is not necessarily the canonical of
+    either.
+    """
+    entities = {
+        entity.id: entity for entity in session.scalars(select(Entity).where(Entity.kind == "person"))
+    }
+    names = {entity_id: parse_name(entity.label) for entity_id, entity in entities.items()}
+    clustering = build_clusters(*_cluster_edges(session))
+
+    wanted: dict[uuid.UUID, uuid.UUID | None] = {}
+    for members in clustering.clusters:
+        canonical = _cluster_canonical(members, names)
+        for member in members:
+            wanted[member] = None if member == canonical else canonical
+    for entity_id, entity in entities.items():
+        target = wanted.get(entity_id)
+        if entity.canonical_entity_id != target:
+            entity.canonical_entity_id = target
+    session.commit()
+    log.info(
+        "%d cluster(s), %d member(s), largest %d, %d merge(s) refused",
+        len(clustering.clusters),
+        clustering.members,
+        clustering.largest,
+        len(clustering.refused),
+    )
+    return clustering
+
+
 def dedupe_persons(session: Session) -> tuple[int, int]:
     """Run the dedupe pass. Returns (auto-linked count, needs-review count)."""
     entities = list(session.scalars(select(Entity).where(Entity.kind == "person")))
@@ -161,14 +242,13 @@ def dedupe_persons(session: Session) -> tuple[int, int]:
     state = _DedupeState(
         session=session,
         scorer=scorer,
-        entities={entity.id: entity for entity in entities},
         decided=set(session.execute(select(PersonMatch.entity_id, PersonMatch.canonical_entity_id)).tuples()),
-        linked={entity.id for entity in entities if entity.canonical_entity_id is not None},
     )
 
     for a, b in candidate_pairs(records):
         _decide_pair(state, a, b)
 
     session.commit()
+    apply_clusters(session)
     log.info("auto-linked %d, queued %d for review", state.auto, state.review)
     return state.auto, state.review

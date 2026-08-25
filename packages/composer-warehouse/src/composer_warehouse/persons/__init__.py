@@ -14,6 +14,9 @@ The pipeline is four layers, each testable on its own:
     shared rare surname outweighs a shared common one.
 ``dedupe``
     drives all of that over the warehouse and records the decisions.
+``cluster``
+    turns the recorded pairs into disjoint duplicate groups, so a link is one
+    hop to a cluster canonical and a constraint has a group to apply to.
 
 ``training`` fits the model offline, ``evaluation`` builds an automatically
 labelled holdout and measures any scorer against it. See ``MODEL.md`` for the
@@ -22,9 +25,10 @@ current parameters and their measured operating points.
 
 from __future__ import annotations
 
+from .cluster import Clustering, Edge, build_clusters
 from .compare import GivenLevel, YearLevel, given_level, year_level
 from .corpus import PersonRecord, build_corpus, candidate_pairs, load_records
-from .dedupe import dedupe_persons, reset_person_links
+from .dedupe import apply_clusters, dedupe_persons, reset_person_links
 from .extract import PersonName, parse_name
 from .fellegi_sunter import LinkageModel, TermFrequencyTable, probability
 from .match import (
@@ -44,7 +48,9 @@ __all__ = [
     "AUTO_THRESHOLD",
     "MODEL_PATH",
     "REVIEW_THRESHOLD",
+    "Clustering",
     "Corpus",
+    "Edge",
     "GivenLevel",
     "LinkageModel",
     "PersonName",
@@ -53,6 +59,8 @@ __all__ = [
     "PersonScorer",
     "TermFrequencyTable",
     "YearLevel",
+    "apply_clusters",
+    "build_clusters",
     "build_corpus",
     "candidate_pairs",
     "classify",

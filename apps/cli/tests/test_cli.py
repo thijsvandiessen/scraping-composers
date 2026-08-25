@@ -29,7 +29,15 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 def _ns(**kwargs: object) -> argparse.Namespace:
     """Build a minimal Namespace with defaults a CLI command expects."""
-    return argparse.Namespace(**{"database_url": None, "verbose": False, "reset": False, **kwargs})
+    return argparse.Namespace(
+        **{
+            "database_url": None,
+            "verbose": False,
+            "reset": False,
+            "recluster_only": False,
+            **kwargs,
+        }
+    )
 
 
 def _ingest_two_sources_disagreeing(session: Session) -> None:
@@ -1053,3 +1061,29 @@ def test_main_routes_to_export_kumu_subcommand(tmp_path: Path, monkeypatch: pyte
     assert exc.value.code == 0
     # One performance backs the pairing, so --min-weight 2 empties the map.
     assert json.loads(out.read_text()) == {"elements": [], "connections": []}
+
+
+def test_cmd_dedupe_persons_recluster_only_rebuilds_links_without_scoring(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The migration path for a database whose links predate the clustering
+    step: the verdicts are already in ``person_matches``, so the partition can
+    be rebuilt from them without re-scoring anything."""
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_varied_people(db_url)
+    cmd_dedupe_persons(_ns(database_url=db_url))
+    capsys.readouterr()
+
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        for entity in session.scalars(select(Entity).where(Entity.kind == "person")):
+            entity.canonical_entity_id = None
+        session.commit()
+
+    assert cmd_dedupe_persons(_ns(database_url=db_url, recluster_only=True)) == 0
+    assert "1 cluster(s), 2 member(s), largest 2, 0 merge(s) refused" in capsys.readouterr().out
+    with factory() as session:
+        linked = session.scalars(
+            select(Entity).where(Entity.kind == "person", Entity.canonical_entity_id.is_not(None))
+        ).all()
+        assert [e.label for e in linked] == ["Bach, J.S."]
