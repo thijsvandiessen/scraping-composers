@@ -11,6 +11,12 @@ recorded the pass rebuilds the whole partition from the surviving links and
 writes one canonical per cluster, so ``Entity.canonical_entity_id`` is always a
 single hop to a cluster canonical and never a link in a chain.
 
+:mod:`constraints` gets a veto over that partition. Two records carrying
+distinct Wikidata QIDs or distinct MusicBrainz ids are two people unless
+corroboration says otherwise, and the constraint is enforced against the whole
+cluster — so a merge is refused even when the score that proposed it came from
+a third record.
+
 Scores are posterior probabilities from :mod:`fellegi_sunter`, and the pass
 builds term-frequency tables over the corpus before it starts, so sharing a
 rare surname counts for far more than sharing a common one. Without that table
@@ -30,6 +36,7 @@ from sqlalchemy import CursorResult, Delete, Update, delete, select, update
 from sqlalchemy.orm import Session
 
 from .cluster import Clustering, Edge, build_clusters
+from .constraints import Constraints, authority_constraints
 from .corpus import PersonRecord, build_corpus, candidate_pairs, load_records
 from .extract import PersonName, parse_name
 from .match import PersonScorer, classify, default_model
@@ -169,13 +176,13 @@ def _cluster_canonical(members: frozenset[uuid.UUID], names: dict[uuid.UUID, Per
 
 
 def _cluster_edges(session: Session) -> tuple[list[Edge], list[tuple[uuid.UUID, uuid.UUID]]]:
-    """The links to cluster, and the pairs that may not be clustered together.
+    """The links to cluster, and the pairs a human said not to cluster together.
 
     ``auto_linked`` is the model's verdict and ``accepted`` a human's; both are
     links. ``rejected`` is a human saying "not the same person", which becomes
     a cannot-link so the pair cannot be reunited by a transitive merge either.
-    The corpus carries no human rows at all today — the constraint machinery is
-    there for #204, which derives cannot-links from authority ids.
+    The corpus carries no human rows at all today; the cannot-links that
+    actually bind come from :mod:`constraints`.
     """
     links: list[Edge] = []
     barred: list[tuple[uuid.UUID, uuid.UUID]] = []
@@ -192,7 +199,29 @@ def _cluster_edges(session: Session) -> tuple[list[Edge], list[tuple[uuid.UUID, 
     return links, barred
 
 
-def apply_clusters(session: Session) -> Clustering:
+@dataclass(frozen=True)
+class Partition:
+    """The person partition and the authority constraints that shaped it."""
+
+    clustering: Clustering
+    constraints: Constraints
+
+
+@dataclass(frozen=True)
+class DedupeResult:
+    """What one pass decided: the pair counts, and the partition they produced.
+
+    The refusals live on ``partition``, and they are part of the pass's result
+    rather than a detail of it: a cannot-link firing on a pair the model scored
+    above the auto threshold is a report about the model.
+    """
+
+    auto: int
+    review: int
+    partition: Partition
+
+
+def apply_clusters(session: Session) -> Partition:
     """Rebuild every person link from the clusters the recorded links imply.
 
     Every member of a cluster is pointed straight at that cluster's canonical
@@ -203,14 +232,16 @@ def apply_clusters(session: Session) -> Clustering:
 
     Rebuilding the whole partition rather than patching the pairs that changed
     is what keeps it consistent: one new link can join two existing clusters,
-    and the canonical of the merged group is not necessarily the canonical of
-    either.
+    the canonical of the merged group is not necessarily the canonical of
+    either, and a cannot-link can only be checked against a whole group.
     """
     entities = {
         entity.id: entity for entity in session.scalars(select(Entity).where(Entity.kind == "person"))
     }
     names = {entity_id: parse_name(entity.label) for entity_id, entity in entities.items()}
-    clustering = build_clusters(*_cluster_edges(session))
+    links, rejected = _cluster_edges(session)
+    constraints = authority_constraints(load_records(session, list(entities.values())), links)
+    clustering = build_clusters(links, [*rejected, *constraints.cannot_link])
 
     wanted: dict[uuid.UUID, uuid.UUID | None] = {}
     for members in clustering.clusters:
@@ -223,17 +254,19 @@ def apply_clusters(session: Session) -> Clustering:
             entity.canonical_entity_id = target
     session.commit()
     log.info(
-        "%d cluster(s), %d member(s), largest %d, %d merge(s) refused",
+        "%d cluster(s), %d member(s), largest %d; %d merge(s) refused, "
+        "%d authority conflict(s) discharged as corroborated",
         len(clustering.clusters),
         clustering.members,
         clustering.largest,
         len(clustering.refused),
+        len(constraints.discharged),
     )
-    return clustering
+    return Partition(clustering=clustering, constraints=constraints)
 
 
-def dedupe_persons(session: Session) -> tuple[int, int]:
-    """Run the dedupe pass. Returns (auto-linked count, needs-review count)."""
+def dedupe_persons(session: Session) -> DedupeResult:
+    """Run the dedupe pass over every person entity."""
     entities = list(session.scalars(select(Entity).where(Entity.kind == "person")))
     records = load_records(session, entities)
     scorer = PersonScorer(default_model(), build_corpus(records))
@@ -249,6 +282,6 @@ def dedupe_persons(session: Session) -> tuple[int, int]:
         _decide_pair(state, a, b)
 
     session.commit()
-    apply_clusters(session)
+    partition = apply_clusters(session)
     log.info("auto-linked %d, queued %d for review", state.auto, state.review)
-    return state.auto, state.review
+    return DedupeResult(auto=state.auto, review=state.review, partition=partition)

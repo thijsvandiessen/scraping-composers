@@ -14,6 +14,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 
 from composer_models import Claim, Entity
+from composer_models.normalize import wikidata_id
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -44,6 +45,9 @@ class PersonRecord:
     birth_sources: frozenset[int] = frozenset()
     death_sources: frozenset[int] = frozenset()
     musicbrainz_ids: frozenset[str] = frozenset()
+    # An entity carries at most one QID — it is part of its dedup key — but the
+    # set shape lets :mod:`constraints` compare both authorities the same way.
+    wikidata_ids: frozenset[str] = frozenset()
     sources: frozenset[int] = frozenset()
     birth_years: frozenset[int] = field(default_factory=frozenset[int])
     death_years: frozenset[int] = field(default_factory=frozenset[int])
@@ -132,6 +136,7 @@ def load_records(session: Session, entities: Sequence[Entity] | None = None) -> 
     for entity in entities:
         born = index.years["born_on"].get(entity.id, {})
         died = index.years["died_on"].get(entity.id, {})
+        qid = wikidata_id(entity.dedup_key)
         records.append(
             PersonRecord(
                 entity_id=entity.id,
@@ -145,6 +150,7 @@ def load_records(session: Session, entities: Sequence[Entity] | None = None) -> 
                 birth_years=frozenset(born.values()),
                 death_years=frozenset(died.values()),
                 musicbrainz_ids=frozenset(index.musicbrainz.get(entity.id, ())),
+                wikidata_ids=frozenset({qid} if qid else ()),
                 sources=frozenset(entity_sources.get(entity.id, ())),
             )
         )
@@ -155,6 +161,32 @@ def given_keys(record: PersonRecord) -> set[str]:
     """Every spelled-out given-name string this record can be compared on."""
     keys = {" ".join(name.given) for name in (record.name, *record.aliases) if name.given}
     return {key for key in keys if key}
+
+
+def _name_key(name: PersonName) -> tuple[str, tuple[str, ...]]:
+    """Identity of a name ignoring word order, so "Bach, Johann" and "Johann
+    Bach" are recognised as the same surface name rather than two."""
+    return name.surname, tuple(sorted(name.given))
+
+
+def alias_identity(a: PersonRecord, b: PersonRecord) -> bool:
+    """One side's full name is listed as an alias of the other, spelled
+    differently.
+
+    Wikidata's own alias curation, which is why it serves two callers: it
+    labels a match for :mod:`evaluation`, and it is half of what discharges an
+    authority-id cannot-link in :mod:`constraints`.
+
+    Pairs whose names differ only in word order are excluded along with exactly
+    equal ones: "Beethoven, Ludwig van" against "Ludwig van Beethoven" is the
+    trivial case every scorer gets right, and counting it as ground truth would
+    flatter all of them equally.
+    """
+    if _name_key(a.name) == _name_key(b.name):
+        return False
+    a_aliases = {alias.normalized for alias in a.aliases}
+    b_aliases = {alias.normalized for alias in b.aliases}
+    return b.name.normalized in a_aliases or a.name.normalized in b_aliases
 
 
 def build_corpus(records: Sequence[PersonRecord]) -> Corpus:

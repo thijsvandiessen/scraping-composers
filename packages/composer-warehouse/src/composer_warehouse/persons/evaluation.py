@@ -45,8 +45,8 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
-from .corpus import PersonRecord, candidate_pairs
-from .extract import PersonName, parse_name
+from .corpus import PersonRecord, alias_identity, candidate_pairs
+from .extract import parse_name
 from .match import PersonProfile, PersonScorer, comparison_levels
 
 MATCH = "match"
@@ -95,28 +95,6 @@ def _dates_corroborated(a: PersonRecord, b: PersonRecord) -> bool:
     return len(corroborating) >= MIN_CORROBORATING_SOURCES
 
 
-def _name_key(name: PersonName) -> tuple[str, tuple[str, ...]]:
-    """Identity of a name ignoring word order, so "Bach, Johann" and "Johann
-    Bach" are recognised as the same surface name rather than two."""
-    return name.surname, tuple(sorted(name.given))
-
-
-def _alias_identity(a: PersonRecord, b: PersonRecord) -> bool:
-    """One side's full name is listed as an alias of the other, spelled
-    differently.
-
-    Pairs whose names differ only in word order are excluded along with exactly
-    equal ones: "Beethoven, Ludwig van" against "Ludwig van Beethoven" is the
-    trivial case every scorer gets right, and counting it as ground truth would
-    flatter all of them equally.
-    """
-    if _name_key(a.name) == _name_key(b.name):
-        return False
-    a_aliases = {alias.normalized for alias in a.aliases}
-    b_aliases = {alias.normalized for alias in b.aliases}
-    return b.name.normalized in a_aliases or a.name.normalized in b_aliases
-
-
 def label_pair(a: PersonRecord, b: PersonRecord) -> tuple[str, str] | None:
     """``(label, provenance)`` for a pair, or ``None`` if it can't be judged."""
     # Ordered by preference, not by strength: a pair that trips both rules is
@@ -131,7 +109,7 @@ def label_pair(a: PersonRecord, b: PersonRecord) -> tuple[str, str] | None:
     positives: list[str] = []
     if _dates_corroborated(a, b):
         positives.append("dates_corroborated")
-    if _alias_identity(a, b):
+    if alias_identity(a, b):
         positives.append("alias_identity")
 
     if negatives and positives:

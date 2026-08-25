@@ -46,10 +46,15 @@ class FakeSource(SourceAdapter):
             yield record
 
 
-def person(name: str, *claims: SourceClaim, external_id: str | None = None) -> EntityDocument:
+def person(
+    name: str, *claims: SourceClaim, external_id: str | None = None, url: str | None = None
+) -> EntityDocument:
+    """A person document. Pass a ``wikidata.org/wiki/Q...`` ``url`` to give the
+    entity a QID, which ingest folds into its dedup key — the authority id the
+    dedupe pass reads as "this is a specific wikidata item"."""
     return EntityDocument(
         id=external_id or f"Category:{name}",
-        url=None,
+        url=url,
         source_name="fake",
         ingested_at=_INGESTED_AT,
         name=name,

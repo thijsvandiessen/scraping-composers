@@ -62,6 +62,7 @@ class RebuildStats:
     records_seen: int = 0
     records_new: int = 0
     persons_auto_linked: int = 0
+    person_merges_refused: int = 0
     person_decisions_applied: int = 0
     person_decisions_dropped: int = 0
     work_decisions_applied: int = 0
@@ -265,7 +266,7 @@ def _replay(
             new += run.records_new
 
         person_applied, person_dropped = _apply_person_decisions(session, person_decisions)
-        auto_linked, _needs_review = dedupe_persons(session)
+        deduped = dedupe_persons(session)
         work_applied, work_dropped = _apply_work_decisions(session, work_decisions)
         concert_stats = derive_concerts(session)
         recording_stats = derive_recordings(session)
@@ -274,7 +275,8 @@ def _replay(
         sources_replayed=replayed,
         records_seen=seen,
         records_new=new,
-        persons_auto_linked=auto_linked,
+        persons_auto_linked=deduped.auto,
+        person_merges_refused=len(deduped.partition.clustering.refused),
         person_decisions_applied=person_applied,
         person_decisions_dropped=person_dropped,
         work_decisions_applied=work_applied,

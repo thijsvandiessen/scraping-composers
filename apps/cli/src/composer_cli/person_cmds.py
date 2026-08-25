@@ -1,10 +1,17 @@
 import argparse
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
 from composer_models import PersonMatch
 from composer_models.db import get_engine, init_db
-from composer_warehouse.persons import MODEL_PATH, apply_clusters, dedupe_persons, reset_person_links
+from composer_warehouse.persons import (
+    MODEL_PATH,
+    Partition,
+    apply_clusters,
+    dedupe_persons,
+    reset_person_links,
+)
 from composer_warehouse.persons.evaluation import (
     LabelledPair,
     downsample,
@@ -29,18 +36,36 @@ def cmd_dedupe_persons(args: argparse.Namespace) -> int:
         if args.recluster_only:
             # Scoring is the expensive half and its verdicts are already in
             # person_matches; rebuilding the partition from them is seconds.
-            clustering = apply_clusters(session)
-            print(
-                f"{len(clustering.clusters)} cluster(s), {clustering.members} member(s), "
-                f"largest {clustering.largest}, {len(clustering.refused)} merge(s) refused"
-            )
+            print(_partition_summary(apply_clusters(session)))
             return 0
         if args.reset:
             deleted, unlinked = reset_person_links(session)
             print(f"reset {deleted} machine match(es), unlinked {unlinked} entity/ies")
-        auto, review = dedupe_persons(session)
-    print(f"auto-linked {auto} duplicate(s), {review} pair(s) need review")
+        result = dedupe_persons(session)
+        summary = _partition_summary(result.partition)
+    print(f"auto-linked {result.auto} duplicate(s), {result.review} pair(s) need review")
+    print(summary)
     return 0
+
+
+def _partition_summary(partition: Partition) -> str:
+    """The clustering counts, plus what the authority constraints did to them.
+
+    Refusals are reported rather than dropped: a cannot-link that fires on a
+    pair the model scored above the auto threshold says something about the
+    model, not just about the pair.
+    """
+    clustering, constraints = partition.clustering, partition.constraints
+    authorities = Counter(
+        authority for conflict in constraints.conflicts for authority in conflict.authorities
+    )
+    return (
+        f"{len(clustering.clusters)} cluster(s), {clustering.members} member(s), "
+        f"largest {clustering.largest}, {len(clustering.refused)} merge(s) refused\n"
+        f"{len(constraints.conflicts)} authority conflict(s) "
+        f"({', '.join(f'{name} {count}' for name, count in sorted(authorities.items())) or 'none'}), "
+        f"{len(constraints.discharged)} discharged as corroborated"
+    )
 
 
 def cmd_person_train(args: argparse.Namespace) -> int:

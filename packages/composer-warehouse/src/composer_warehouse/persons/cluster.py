@@ -16,8 +16,8 @@ chains to walk, nowhere for a cycle to hide.
 pairwise pass had nowhere to put such a fact: it can decline the pair ``A~B``,
 but it cannot stop ``A~C`` and ``C~B`` from merging ``A`` with ``B`` anyway.
 Here the constraint is checked against the whole cluster, so a transitive merge
-is refused too. The only producer today is a human ``rejected`` review row, of
-which the corpus has none; #204 fills the set from authority ids.
+is refused too. Two producers: a human ``rejected`` review row, and
+:mod:`constraints`, which derives them from Wikidata and MusicBrainz ids.
 """
 
 from __future__ import annotations

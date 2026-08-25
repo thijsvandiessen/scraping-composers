@@ -17,6 +17,9 @@ The pipeline is four layers, each testable on its own:
 ``cluster``
     turns the recorded pairs into disjoint duplicate groups, so a link is one
     hop to a cluster canonical and a constraint has a group to apply to.
+``constraints``
+    derives the cannot-links from authority ids — two Wikidata QIDs are two
+    people unless corroboration says otherwise.
 
 ``training`` fits the model offline, ``evaluation`` builds an automatically
 labelled holdout and measures any scorer against it. See ``MODEL.md`` for the
@@ -27,8 +30,9 @@ from __future__ import annotations
 
 from .cluster import Clustering, Edge, build_clusters
 from .compare import GivenLevel, YearLevel, given_level, year_level
-from .corpus import PersonRecord, build_corpus, candidate_pairs, load_records
-from .dedupe import apply_clusters, dedupe_persons, reset_person_links
+from .constraints import Conflict, Constraints, authority_constraints
+from .corpus import PersonRecord, alias_identity, build_corpus, candidate_pairs, load_records
+from .dedupe import DedupeResult, Partition, apply_clusters, dedupe_persons, reset_person_links
 from .extract import PersonName, parse_name
 from .fellegi_sunter import LinkageModel, TermFrequencyTable, probability
 from .match import (
@@ -49,17 +53,23 @@ __all__ = [
     "MODEL_PATH",
     "REVIEW_THRESHOLD",
     "Clustering",
+    "Conflict",
+    "Constraints",
     "Corpus",
+    "DedupeResult",
     "Edge",
     "GivenLevel",
     "LinkageModel",
+    "Partition",
     "PersonName",
     "PersonProfile",
     "PersonRecord",
     "PersonScorer",
     "TermFrequencyTable",
     "YearLevel",
+    "alias_identity",
     "apply_clusters",
+    "authority_constraints",
     "build_clusters",
     "build_corpus",
     "candidate_pairs",
