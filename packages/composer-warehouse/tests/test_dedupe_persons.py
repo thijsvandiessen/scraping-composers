@@ -1,7 +1,8 @@
 """Tests for the post-hoc person dedupe pass."""
 
 from composer_models import Entity, PersonMatch
-from composer_schema import SourceClaim
+from composer_models.normalize import wikidata_id
+from composer_schema import EntityDocument, SourceClaim
 from composer_warehouse.persons import apply_clusters, dedupe_persons, reset_person_links
 from composer_warehouse.testing import FakeSource, ingest_source, person
 from sqlalchemy import func, select
@@ -14,6 +15,16 @@ def _ingest(session: Session, *people: object) -> None:
 
 def _by_label(session: Session) -> dict[str, Entity]:
     return {e.label: e for e in session.scalars(select(Entity).where(Entity.kind == "person"))}
+
+
+def _counts(session: Session) -> tuple[int, int]:
+    """Run the pass and keep only its pair counts.
+
+    Most tests here are about which pairs were decided, not about the partition
+    the pass returns alongside them; the constraint tests read that.
+    """
+    result = dedupe_persons(session)
+    return result.auto, result.review
 
 
 def _linked(session: Session) -> int:
@@ -41,7 +52,7 @@ def test_corroborated_dates_auto_link_a_pair(session: Session) -> None:
         person("Bach, J.S.", *_dates("1685-03-31", "1750-07-28")),
         person("Bach, Johann Sebastian", *_dates("1685", "1750")),
     )
-    auto, review = dedupe_persons(session)
+    auto, review = _counts(session)
 
     assert (auto, review) == (1, 0)
     people = _by_label(session)
@@ -65,7 +76,7 @@ def test_initials_alone_no_longer_auto_link(session: Session) -> None:
     review queue instead.
     """
     _ingest(session, person("Bach, J.S."), person("Bach, Johann Sebastian"), *_crowd())
-    auto, review = dedupe_persons(session)
+    auto, review = _counts(session)
 
     assert (auto, review) == (0, 1)
     assert _linked(session) == 0
@@ -77,7 +88,7 @@ def test_conflicting_given_names_are_never_proposed(session: Session) -> None:
     # The pair the issue leads with. Both reduce to the initial "j", which is
     # why the old scorer auto-linked it. Not even a rare surname rescues it.
     _ingest(session, person("Jordan, Jules"), person("Jordan, Julius"), *_crowd())
-    assert dedupe_persons(session) == (0, 0)
+    assert _counts(session) == (0, 0)
     assert session.scalar(select(func.count(PersonMatch.id))) == 0
 
 
@@ -88,7 +99,7 @@ def test_a_corroborated_surname_only_pair_is_queued_for_review(session: Session)
         person("Beethoven, Ludwig van", SourceClaim("born_on", value="1770")),
         *_crowd(),
     )
-    auto, review = dedupe_persons(session)
+    auto, review = _counts(session)
 
     assert (auto, review) == (0, 1)
     assert _linked(session) == 0
@@ -107,7 +118,7 @@ def test_a_bare_surname_on_its_own_is_not_proposed_at_all(session: Session) -> N
     below the review threshold and they are simply not raised.
     """
     _ingest(session, person("Beethoven"), person("Beethoven, Ludwig van"), *_crowd())
-    assert dedupe_persons(session) == (0, 0)
+    assert _counts(session) == (0, 0)
 
 
 def test_birth_year_conflict_keeps_namesakes_separate(session: Session) -> None:
@@ -117,7 +128,7 @@ def test_birth_year_conflict_keeps_namesakes_separate(session: Session) -> None:
         person("Strauss, Johann", *_dates("1804", "1849")),
         person("Strauss, Johann", SourceClaim("born_on", value="1825")),
     )
-    auto, review = dedupe_persons(session)
+    auto, review = _counts(session)
     assert (auto, review) == (0, 0)
     assert _linked(session) == 0
 
@@ -128,8 +139,8 @@ def test_reingest_pass_is_idempotent(session: Session) -> None:
         person("Bach, J.S.", *_dates("1685", "1750")),
         person("Bach, Johann Sebastian", *_dates("1685", "1750")),
     )
-    first = dedupe_persons(session)
-    second = dedupe_persons(session)
+    first = _counts(session)
+    second = _counts(session)
 
     assert first == (1, 0)
     assert second == (0, 0)  # the decided pair is skipped on re-run
@@ -138,7 +149,7 @@ def test_reingest_pass_is_idempotent(session: Session) -> None:
 
 def test_different_surnames_are_not_compared(session: Session) -> None:
     _ingest(session, person("Bach, Johann Sebastian"), person("Handel, George Frideric"))
-    assert dedupe_persons(session) == (0, 0)
+    assert _counts(session) == (0, 0)
 
 
 def test_aliases_are_used_for_matching(session: Session) -> None:
@@ -151,7 +162,7 @@ def test_aliases_are_used_for_matching(session: Session) -> None:
         ),
         person("Beethoven, Louis van", *_dates("1770", "1827")),
     )
-    auto, review = dedupe_persons(session)
+    auto, review = _counts(session)
     assert (auto, review) == (1, 0)
     people = _by_label(session)
     assert people["Beethoven, Louis van"].canonical_entity_id == people["Beethoven, Ludwig van"].id
@@ -165,14 +176,14 @@ def test_reset_discards_machine_links_so_the_pass_can_re_decide(session: Session
         person("Bach, J.S.", *_dates("1685", "1750")),
         person("Bach, Johann Sebastian", *_dates("1685", "1750")),
     )
-    assert dedupe_persons(session) == (1, 0)
+    assert _counts(session) == (1, 0)
 
     deleted, unlinked = reset_person_links(session)
     assert (deleted, unlinked) == (1, 1)
     assert session.scalar(select(func.count(PersonMatch.id))) == 0
     assert _linked(session) == 0
 
-    assert dedupe_persons(session) == (1, 0)  # free to decide the pair again
+    assert _counts(session) == (1, 0)  # free to decide the pair again
 
 
 def test_reset_keeps_reviewed_decisions_and_the_links_they_justify(session: Session) -> None:
@@ -278,6 +289,95 @@ def test_an_accepted_decision_joins_the_cluster(session: Session) -> None:
     assert canonical.canonical_entity_id is None
     assert people["Beethoven"].canonical_entity_id == canonical.id
     assert people["Beethoven, Ludwig"].canonical_entity_id == canonical.id
+
+
+def _wikidata(label: str, qid: str, *claims: SourceClaim) -> EntityDocument:
+    """A person record keyed by its QID, as ingest keys a wikidata page.
+
+    ``external_id`` has to differ too: two documents with the same source id are
+    the same record, and these tests turn on two *items* wearing one name.
+    """
+    return person(label, *claims, external_id=qid, url=f"https://www.wikidata.org/wiki/{qid}")
+
+
+def test_distinct_qids_are_not_merged(session: Session) -> None:
+    """The #204 defect: 862 clusters spanned two or more QIDs.
+
+    Two wikidata items are two people unless something says otherwise, and
+    these two agree on everything the *scorer* can see — same name, same dates
+    — which is exactly why the score alone cannot be what decides it. The
+    ``PersonMatch`` row is still written: it is the audit trail of what was
+    scored, and the refusal is a fact about the clustering, not about the score.
+    """
+    _ingest(
+        session,
+        _wikidata("Bach, Johann Sebastian", "Q1339", *_dates("1685", "1750")),
+        _wikidata("Bach, Johann Sebastian", "Q76428", *_dates("1685", "1750")),
+    )
+    result = dedupe_persons(session)
+
+    assert result.auto == 1
+    assert _linked(session) == 0
+    assert result.partition.clustering.clusters == ()
+    assert len(result.partition.clustering.refused) == 1
+    assert result.partition.constraints.cannot_link != ()
+    assert session.scalars(select(PersonMatch)).one().status == "auto_linked"
+
+
+def test_no_cluster_holds_two_uncorroborated_qids(session: Session) -> None:
+    """The acceptance criterion, over a corpus with something of everything.
+
+    A bare-name record is free to join either wikidata item; what it must not
+    do is carry one into the other's cluster.
+    """
+    _ingest(
+        session,
+        _wikidata("Bach, Johann Sebastian", "Q1339", *_dates("1685", "1750")),
+        _wikidata("Bach, Johann Sebastian", "Q76428", *_dates("1685", "1750")),
+        person("Bach, Johann Sebastian", *_dates("1685", "1750"), external_id="plain"),
+        _wikidata("Bach, Johann Christian", "Q57226", *_dates("1735", "1782")),
+        *_crowd(),
+    )
+    result = dedupe_persons(session)
+
+    qids = {
+        entity.id: wikidata_id(entity.dedup_key)
+        for entity in session.scalars(select(Entity).where(Entity.kind == "person"))
+    }
+    clusters = result.partition.clustering.clusters
+    assert clusters, "nothing merged at all, so the constraint is untested"
+    for cluster in clusters:
+        found = {qids[member] for member in cluster if qids[member]}
+        assert len(found) <= 1, f"cluster spans {found}"
+    # The bare-name record did join one of them — the constraint bounds the
+    # cluster, it does not stop the pass from linking.
+    assert result.partition.clustering.members == 2
+    assert len(result.partition.clustering.refused) == 2
+
+
+def test_corroboration_lets_a_wikidata_duplicate_merge(session: Session) -> None:
+    """The other half of #204: some of those merges were right.
+
+    Wikidata records "Aaron Aachen" as Norbert Linke's pseudonym and the birth
+    years agree, so wikidata has contradicted its own id and the constraint is
+    discharged.
+    """
+    _ingest(
+        session,
+        _wikidata("Aaron Aachen", "Q139217390", *_dates("1933", "2020")),
+        _wikidata(
+            "Norbert Linke",
+            "Q1796591",
+            SourceClaim("also_known_as", value="Aaron Aachen"),
+            *_dates("1933-03-05", "2020-11-10"),
+        ),
+    )
+    result = dedupe_persons(session)
+
+    people = _by_label(session)
+    assert people["Aaron Aachen"].canonical_entity_id == people["Norbert Linke"].id
+    assert result.partition.clustering.refused == ()
+    assert len(result.partition.constraints.discharged) == 1
 
 
 def test_a_rejected_decision_is_not_undone_by_a_transitive_merge(session: Session) -> None:

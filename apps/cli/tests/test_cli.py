@@ -251,6 +251,9 @@ def test_cmd_rematch_processes_pending_mentions(tmp_path: Path, capsys: pytest.C
 # ---------------------------------------------------------------------------
 
 
+_WIKIDATA = "https://www.wikidata.org/wiki/%s"
+
+
 def _ingest_varied_people(db_url: str) -> None:
     # The dates are load-bearing: the linkage model weighs evidence, so neither
     # compatible initials nor a bare surname is enough on its own.
@@ -284,6 +287,28 @@ def test_cmd_dedupe_persons_reports_links_and_reviews(
         assert (
             session.scalar(select(func.count(Entity.id)).where(Entity.canonical_entity_id.is_not(None))) == 1
         )
+
+
+def test_cmd_dedupe_persons_reports_refused_merges(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A refusal is part of the pass's output, not a silent drop (#204).
+
+    Two wikidata items wearing one name and one set of dates: the model scores
+    the pair a link, and the authority ids refuse it.
+    """
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    dates = (SourceClaim("born_on", value="1685"), SourceClaim("died_on", value="1750"))
+    _ingest(
+        db_url,
+        person("Bach, Johann Sebastian", *dates, external_id="Q1339", url=_WIKIDATA % "Q1339"),
+        person("Bach, Johann Sebastian", *dates, external_id="Q76428", url=_WIKIDATA % "Q76428"),
+    )
+
+    assert cmd_dedupe_persons(_ns(database_url=db_url)) == 0
+    out = capsys.readouterr().out
+    assert "0 cluster(s), 0 member(s), largest 0, 1 merge(s) refused" in out
+    assert "1 authority conflict(s) (wikidata 1), 0 discharged as corroborated" in out
 
 
 def test_cmd_stats_shows_person_dedup_counts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

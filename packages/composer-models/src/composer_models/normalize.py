@@ -33,6 +33,11 @@ def entity_uuid(kind: str, key: str) -> uuid.UUID:
     return uuid.uuid5(_NAMESPACE, f"{kind}:{key}")
 
 
+# A dedup key's wikidata suffix. The base is punctuation-stripped, so the pipe
+# can only be the separator this module wrote.
+_WIKIDATA_SUFFIX = re.compile(r"\|(Q\d+)$")
+
+
 def dedup_key(name: str, wikidata_id: str | None = None) -> str:
     name = name.strip()
     if "," in name:
@@ -47,3 +52,15 @@ def dedup_key(name: str, wikidata_id: str | None = None) -> str:
     if wikidata_id:
         return f"{base}|{wikidata_id}"
     return base
+
+
+def wikidata_id(key: str) -> str | None:
+    """The QID :func:`dedup_key` folded into ``key``, if it carried one.
+
+    The inverse belongs next to the forward direction: the suffix is how an
+    entity records *which* wikidata item it is, and a caller that has to know
+    that — the dedupe pass, which treats two QIDs as two people — should not
+    have to re-derive the encoding.
+    """
+    found = _WIKIDATA_SUFFIX.search(key)
+    return found.group(1) if found else None

@@ -51,6 +51,53 @@ on both axes; `REVIEW_THRESHOLD = 0.50` catches the rest for `person-review`.
 Raise the auto cut-point to 0.999 if 99% precision is wanted and a third of
 the true links can wait in the review queue.
 
+## What the authority ids refuse
+
+Scores decide pairs; `constraints.py` gets a veto (#204). Two records carrying
+distinct Wikidata QIDs or distinct MusicBrainz ids are two people unless the
+two items agree on a birth year *and* one names the other in `also_known_as`,
+and the constraint is checked against the whole cluster — so the merge is
+refused even when it arrives transitively through a bare-name record, which is
+how most of them arrived.
+
+Measured over the 15,826 recorded links on the 2026-08-25 database:
+
+| | before | after |
+|---|---|---|
+| clusters | 14,409 | 13,802 |
+| members | 29,866 | 28,480 |
+| largest cluster | 7 | 6 |
+| clusters spanning two QIDs | 862 | 102, all corroborated |
+| clusters spanning conflicting MusicBrainz ids | 77 | 4, all corroborated |
+
+897 authority conflicts were found (892 wikidata, 86 MusicBrainz; some pairs
+trip both). 104 were discharged as corroborated — Wikidata's own duplicate
+items, 99 of which the `alias_identity` rule independently labels a match — and
+793 became hard cannot-links, which refused 864 merges. More merges than
+cannot-links, because 115 of the refusals are a *bare-name* record that would
+otherwise have joined two wikidata items into one cluster: it now attaches to
+whichever of them scored highest and the weaker edge is dropped.
+
+Judged by the label rules above, the 864 refusals split 67 non-matches to 71
+matches (53 `alias_identity`, 18 `dates_corroborated`), with 726 unlabellable.
+So the refusals are slightly net-positive on the pairs there is evidence about,
+and the ~71 lost links are the price of the rule being conservative:
+
+- **A curated alias with no agreeing birth year does not discharge.** 37 of the
+  refused alias-identity pairs have no birth year on one side and 33 disagree
+  on it. Wikidata lists exonyms and near-namesakes as aliases too, so the
+  alias alone is not enough — but "neither side contradicts" would be a
+  defensible weaker rule, and it is where the 71 would mostly come back.
+- **An identical name and one agreeing birth year does not discharge.** 312 of
+  the refusals look like that (`aarne mannik|Q139027755` against
+  `aarne mannik|Q12358097`, both born 1947, neither with an alias). Some are
+  duplicate items and some are two people born the same year, and nothing in
+  the corpus separates them.
+
+Refusals are counted in the pass's output, not dropped: a cannot-link firing on
+a pair the model scored 1.00 — 526 of the 864 did — is a report about the
+model, not just about the pair.
+
 ## Where the labels come from
 
 No pair was judged by hand. Each label comes from evidence outside the
