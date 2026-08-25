@@ -1,0 +1,75 @@
+{
+  "comparisons": [
+    {
+      "levels": [
+        "CONFLICT",
+        "ABSENT",
+        "INITIALS",
+        "PREFIX",
+        "EXACT"
+      ],
+      "m": {
+        "CONFLICT": 0.15901213171577122,
+        "EXACT": 0.7491334488734835,
+        "INITIALS": 0.01025418833044483,
+        "PREFIX": 0.0816002310803004
+      },
+      "name": "given",
+      "null_level": "ABSENT",
+      "u": {
+        "CONFLICT": 0.9804332587780786,
+        "EXACT": 0.014552989523024732,
+        "INITIALS": 0.0014059373093757693,
+        "PREFIX": 0.0036078143895208843
+      }
+    },
+    {
+      "levels": [
+        "CONFLICT",
+        "DISTANT",
+        "CLOSE",
+        "EXACT",
+        "ABSENT"
+      ],
+      "m": {
+        "CLOSE": 0.07065217391304347,
+        "CONFLICT": 0.016304347826086956,
+        "DISTANT": 0.21195652173913043,
+        "EXACT": 0.7010869565217391
+      },
+      "name": "birth_year",
+      "null_level": "ABSENT",
+      "u": {
+        "CLOSE": 0.036896228185400635,
+        "CONFLICT": 0.8098292362544568,
+        "DISTANT": 0.14389566522799774,
+        "EXACT": 0.009378870332144868
+      }
+    },
+    {
+      "levels": [
+        "CONFLICT",
+        "DISTANT",
+        "CLOSE",
+        "EXACT",
+        "ABSENT"
+      ],
+      "m": {
+        "CLOSE": 0.140625,
+        "CONFLICT": 0.015625,
+        "DISTANT": 0.203125,
+        "EXACT": 0.640625
+      },
+      "name": "death_year",
+      "null_level": "ABSENT",
+      "u": {
+        "CLOSE": 0.035172216664284696,
+        "CONFLICT": 0.8305988280691725,
+        "DISTANT": 0.1250678862369587,
+        "EXACT": 0.009161069029584107
+      }
+    }
+  ],
+  "prior": 0.020415598930625944,
+  "trained_on_pairs": 397913
+}

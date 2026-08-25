@@ -1,17 +1,105 @@
 import argparse
+from collections.abc import Callable
+from pathlib import Path
 
 from composer_models import PersonMatch
 from composer_models.db import get_engine, init_db
-from composer_warehouse.persons import dedupe_persons
+from composer_warehouse.persons import MODEL_PATH, dedupe_persons, reset_person_links
+from composer_warehouse.persons.evaluation import (
+    LabelledPair,
+    downsample,
+    legacy_score,
+    model_scorer,
+    write_dataset,
+)
+from composer_warehouse.persons.match import PersonScorer, default_model
+from composer_warehouse.persons.training import TrainingResult
 from sqlalchemy import select
+
+# How many rows of each label provenance the committed evaluation set keeps.
+# The negatives run to hundreds of thousands; sampling them keeps the file
+# reviewable, and the recorded weights restore the true balance when scoring.
+EVAL_CAPS = {"year_conflict": 20000, "distinct_musicbrainz": 20000}
 
 
 def cmd_dedupe_persons(args: argparse.Namespace) -> int:
     engine = get_engine(args.database_url)
     session_factory = init_db(engine)
     with session_factory() as session:
+        if args.reset:
+            deleted, unlinked = reset_person_links(session)
+            print(f"reset {deleted} machine match(es), unlinked {unlinked} entity/ies")
         auto, review = dedupe_persons(session)
     print(f"auto-linked {auto} duplicate(s), {review} pair(s) need review")
+    return 0
+
+
+def cmd_person_train(args: argparse.Namespace) -> int:
+    """Refit the linkage model and regenerate the evaluation set."""
+    from composer_warehouse.persons.training import train
+
+    engine = get_engine(args.database_url)
+    session_factory = init_db(engine)
+    with session_factory() as session:
+        result = train(session)
+
+    model_path = Path(args.model_out or MODEL_PATH)
+    result.model.dump(model_path)
+    print(f"wrote {model_path} (prior {result.model.prior:.5f})")
+    for comparison in result.model.comparisons:
+        bits = {level: round(comparison.bits(level), 2) for level in comparison.levels}
+        print(f"  {comparison.name}: {bits}")
+
+    if args.dataset_out:
+        rows = write_dataset(
+            Path(args.dataset_out),
+            downsample(result.labelled, EVAL_CAPS, protect=_contested(result)),
+        )
+        print(f"wrote {args.dataset_out} ({rows} labelled pairs)")
+    return 0
+
+
+def _contested(result: TrainingResult) -> Callable[[LabelledPair], bool]:
+    """Rows either scorer rates as a possible link, and so must be kept whole.
+
+    These are the only rows that can ever turn into a false positive; sampling
+    them would make the precision estimate a coin flip. See
+    :func:`~composer_warehouse.persons.evaluation.downsample`.
+    """
+    scorer = PersonScorer(result.model, result.corpus)
+    scored = (model_scorer(scorer), model_scorer(scorer, with_years=False))
+
+    def contested(pair: LabelledPair) -> bool:
+        # Every scorer person-eval reports on, so each one's false positives are
+        # counted exactly rather than extrapolated from a sample.
+        return any(score(pair) >= 0.5 for score in scored) or legacy_score(pair) >= 0.70
+
+    return contested
+
+
+def cmd_person_eval(args: argparse.Namespace) -> int:
+    """Score the model and the pre-#173 baseline against the labelled set."""
+    from composer_warehouse.persons.evaluation import evaluate, read_dataset, split
+
+    pairs = read_dataset(Path(args.dataset))
+    if not args.all:
+        # Report on the holdout only: the training half set the parameters, so
+        # its numbers say how well the model memorised, not how well it works.
+        _, pairs = split(pairs)
+    print(f"{len(pairs)} labelled pair(s) ({'full set' if args.all else 'held-out test split'})")
+    scorer = PersonScorer(default_model())
+    runs = (
+        ("fellegi-sunter", model_scorer(scorer), args.threshold),
+        ("fellegi-sunter (names only)", model_scorer(scorer, with_years=False), args.threshold),
+        ("legacy scorer (baseline)", legacy_score, 0.90),
+    )
+    for name, score_fn, threshold in runs:
+        print(f"\n{name} @ {threshold}")
+        for provenance, metrics in sorted(evaluate(pairs, score_fn, threshold).items()):
+            print(
+                f"  {provenance:22s} precision={metrics.precision:.4f} recall={metrics.recall:.4f}"
+                f" f1={metrics.f1:.4f} fp={metrics.false_positive:.0f}"
+            )
     return 0
 
 
@@ -47,7 +135,15 @@ def cmd_person_review(args: argparse.Namespace) -> int:
         print("person matches needing review (resolve with --accept ID or --reject ID):")
         for match in rows:
             print(
-                f"\n#{match.id} [{match.score:.2f} {match.method}]"
+                f"\n#{match.id} [{match.score:.3f} {match.method}]"
                 f" {match.entity.label!r} -> {match.canonical.label!r}"
             )
     return 0
+
+
+__all__ = [
+    "cmd_dedupe_persons",
+    "cmd_person_eval",
+    "cmd_person_review",
+    "cmd_person_train",
+]

@@ -1,26 +1,64 @@
-"""Score two person names (with optional birth years) and classify the result.
+"""Score two person records and classify the result.
 
-A few starting heuristics, ordered by strength:
-1. Surname gate — a different surname means different people.
-2. Given-name compatibility — exact given names, or one side's initials being a
-   prefix of the other's ("J. S." vs "Johann Sebastian"), or one side having no
-   given names at all (surname-only — plausible but ambiguous, so review).
-3. Birth-year corroboration — a conflicting year overrides everything (different
-   people); an agreeing year nudges toward auto.
+The scoring itself lives in :mod:`fellegi_sunter`; this module is the domain
+wiring — which comparison columns exist for a person, how a pair of parsed
+names maps onto their levels, and where the trained parameters come from.
 
-Thresholds are stricter than the work matcher because a wrong person-merge is
-costlier. Everything here is a pure function of the parsed names, so the dedupe
-pass and the tests can call it directly.
+Scores are posterior probabilities of being the same person, so the thresholds
+below are calibrated cut-points rather than the bare constants they replaced
+(#173): each is the operating point measured against the labelled evaluation
+set built by :mod:`evaluation`. Re-derive them with ``composer person-eval``
+after retraining.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 
+from .compare import GivenLevel, YearLevel, given_level, year_level
 from .extract import PersonName
+from .fellegi_sunter import Comparison, LinkageModel, TermFrequencyTable
 
-AUTO_THRESHOLD = 0.90
-REVIEW_THRESHOLD = 0.70
+MODEL_PATH = Path(__file__).with_name("model.json")
+
+# Calibrated against tests/data/person_eval_pairs.jsonl.gz — see MODEL.md for
+# the precision/recall each operating point buys.
+AUTO_THRESHOLD = 0.99
+REVIEW_THRESHOLD = 0.50
+
+GIVEN = "given"
+BIRTH_YEAR = "birth_year"
+DEATH_YEAR = "death_year"
+
+
+def person_comparisons() -> tuple[Comparison, ...]:
+    """The untrained comparison columns for a person pair.
+
+    Surname is absent on purpose: it is the blocking key, so every pair the
+    model ever sees already agrees on it and the column would carry no
+    information. What surname agreement *is* worth for a given pair comes from
+    the term-frequency adjustment instead, which is where the signal actually
+    lives — see :class:`~.fellegi_sunter.TermFrequencyTable`.
+    """
+    return (
+        Comparison(
+            name=GIVEN,
+            levels=tuple(level.name for level in GivenLevel),
+            null_level=GivenLevel.ABSENT.name,
+        ),
+        Comparison(
+            name=BIRTH_YEAR,
+            levels=tuple(level.name for level in YearLevel),
+            null_level=YearLevel.ABSENT.name,
+        ),
+        Comparison(
+            name=DEATH_YEAR,
+            levels=tuple(level.name for level in YearLevel),
+            null_level=YearLevel.ABSENT.name,
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -31,58 +69,117 @@ class PersonProfile:
     name: PersonName
     birth_year: int | None = None
     aliases: tuple[PersonName, ...] = ()
+    death_year: int | None = None
 
 
-def _initials_compatible(a: tuple[str, ...], b: tuple[str, ...]) -> bool:
-    """True if the shorter initials sequence is a prefix of the longer one."""
-    if not a or not b:
-        return False
-    short, long = sorted((a, b), key=len)
-    return long[: len(short)] == short
+@dataclass(frozen=True)
+class Corpus:
+    """Corpus-level term frequencies the model needs at scoring time.
+
+    Kept out of :class:`~.fellegi_sunter.LinkageModel` because they are a
+    property of the data being deduped, not of the trained parameters: a
+    rebuild changes the frequencies without invalidating the model.
+    """
+
+    surnames: TermFrequencyTable
+    given_names: TermFrequencyTable
+
+    @classmethod
+    def empty(cls) -> Corpus:
+        return cls(
+            surnames=TermFrequencyTable(0.0, {}),
+            given_names=TermFrequencyTable(0.0, {}),
+        )
 
 
-def _given_score(a: PersonName, b: PersonName) -> tuple[float, str]:
-    if a.given and b.given and a.given == b.given:
-        return 0.95, "exact_given"
-    if _initials_compatible(a.given_initials, b.given_initials):
-        return 0.90, "initials"
-    if not a.given or not b.given:
-        return 0.70, "surname_only"
-    return 0.20, "given_conflict"
+def _shared_given_key(a: PersonName, b: PersonName, level: GivenLevel) -> str | None:
+    """The given-name string whose rarity the pair actually shares, if any."""
+    if level not in (GivenLevel.EXACT, GivenLevel.PREFIX):
+        return None  # nothing spelled out is shared, so rarity says nothing
+    shorter = a.given if len(a.given) <= len(b.given) else b.given
+    return " ".join(shorter) or None
 
 
-def _score_pair(
-    a: PersonName, b: PersonName, a_year: int | None = None, b_year: int | None = None
-) -> tuple[float, str]:
-    if a.surname != b.surname:
-        return 0.0, "surname_gate"
+def comparison_levels(a: PersonName, b: PersonName, pa: PersonProfile, pb: PersonProfile) -> tuple[str, ...]:
+    """The level names for one (name, name) comparison of two profiles."""
+    return (
+        given_level(a, b).name,
+        year_level(pa.birth_year, pb.birth_year).name,
+        year_level(pa.death_year, pb.death_year).name,
+    )
 
-    base, method = _given_score(a, b)
 
-    if a_year is not None and b_year is not None:
-        if abs(a_year - b_year) > 1:
-            return 0.05, "year_conflict"  # same name, different lifetime -> different people
-        # a matching birth year is strong corroboration: enough to lift a
-        # surname-only pair (0.70) over the auto threshold (round to dodge float
-        # error: 0.70 + 0.2 == 0.8999...).
-        return round(min(1.0, base + 0.2), 4), method
+def _method(levels: tuple[str, ...]) -> str:
+    """A compact description of what decided the pair, for the review queue."""
+    given, birth, death = levels
+    parts = [f"given:{given.lower()}"]
+    if birth != YearLevel.ABSENT.name:
+        parts.append(f"born:{birth.lower()}")
+    if death != YearLevel.ABSENT.name:
+        parts.append(f"died:{death.lower()}")
+    return "+".join(parts)[:50]
 
-    return base, method
+
+@dataclass(frozen=True)
+class PersonScorer:
+    """A trained model plus the corpus frequencies it needs to apply."""
+
+    model: LinkageModel
+    corpus: Corpus = Corpus.empty()
+
+    def score_names(self, a: PersonName, b: PersonName, pa: PersonProfile, pb: PersonProfile) -> float:
+        levels = comparison_levels(a, b, pa, pb)
+        return self.model.match_probability(levels, self.tf_bits(a, b, levels))
+
+    def tf_bits(self, a: PersonName, b: PersonName, levels: tuple[str, ...]) -> float:
+        bits = self.corpus.surnames.bits(a.surname) if a.surname == b.surname else 0.0
+        shared = _shared_given_key(a, b, GivenLevel[levels[0]])
+        if shared is not None:
+            bits += self.corpus.given_names.bits(shared)
+        return bits
+
+    def score(self, a: PersonProfile, b: PersonProfile) -> tuple[float, str]:
+        """Posterior P(same person) in [0, 1] with the method that decided it.
+
+        Aliases are tried alongside the primary names and the strongest pairing
+        wins — a record filed under a stage name can still match the legal name
+        of the same person.
+
+        Only pairings that agree on the surname are considered. Blocking
+        guarantees that of the *primary* names, but an alias list can contain
+        any surname at all, and comparing given names across two unrelated ones
+        is meaningless: it let "Béla Balázs" match the alias "B. V. Asaf'ev" on
+        initials, because nothing required `balazs` and `asaf'ev` to be the same
+        surname. A pair with no surname in common is not comparable.
+        """
+        best_score = 0.0
+        best_levels: tuple[str, ...] = ()
+        for an in (a.name, *a.aliases):
+            for bn in (b.name, *b.aliases):
+                if not an.surname or an.surname != bn.surname:
+                    continue
+                levels = comparison_levels(an, bn, a, b)
+                value = self.model.match_probability(levels, self.tf_bits(an, bn, levels))
+                if not best_levels or value > best_score:
+                    best_score, best_levels = value, levels
+        return (best_score, _method(best_levels)) if best_levels else (0.0, "surname_gate")
+
+
+@lru_cache(maxsize=1)
+def default_model() -> LinkageModel:
+    """The parameters trained by ``composer person-train``, loaded once."""
+    return LinkageModel.load(MODEL_PATH)
 
 
 def score(a: PersonProfile, b: PersonProfile) -> tuple[float, str]:
-    """Similarity of two people in [0, 1] with the method that decided it."""
-    best_score = -1.0
-    best_method = ""
+    """Score a pair with the shipped model and no corpus frequencies.
 
-    for an in (a.name, *a.aliases):
-        for bn in (b.name, *b.aliases):
-            val, meth = _score_pair(an, bn, a.birth_year, b.birth_year)
-            if val > best_score:
-                best_score = val
-                best_method = meth
-
-    return best_score, best_method
+    Convenience for callers with a single pair in hand. The dedupe pass builds
+    a :class:`PersonScorer` with real frequencies instead — without them every
+    surname is treated as equally rare, which is precisely the weakness this
+    model exists to fix, so treat these scores as a floor.
+    """
+    return PersonScorer(default_model()).score(a, b)
 
 
 def classify(value: float) -> str:

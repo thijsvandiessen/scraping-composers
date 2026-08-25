@@ -52,6 +52,12 @@ def _initials(tokens: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _is_surname_first(tokens: list[str]) -> bool:
+    """True for the "Surname I. I." form: a name whose tokens after the first
+    are all single letters, and so are initials rather than name parts."""
+    return len(tokens) > 1 and all(len(token) == 1 for token in tokens[1:])
+
+
 def parse_name(label: str) -> PersonName:
     normalized = " ".join(_tokens(label))
 
@@ -65,10 +71,15 @@ def parse_name(label: str) -> PersonName:
         surname_tokens = [t for t in before_toks if t not in _PARTICLES]
         given = tuple(t for t in after_toks if t not in _PARTICLES)
         particles = tuple(t for t in (*before_toks, *after_toks) if t in _PARTICLES)
+    elif _is_surname_first(toks := _tokens(label)):
+        # "Surname I. I." — the trailing tokens are all initials, so the
+        # surname leads. Taking the last token instead made the *initial* the
+        # surname: "Асафьев Б." and "Балаш Б." both keyed on "б", which blocked
+        # two unrelated people into the same candidate group.
+        surname_tokens, given, particles = toks[:1], tuple(toks[1:]), ()
     else:
         # "First Middle Last": the trailing token is the surname; particles right
         # before it bind to the surname but are dropped from the surname key.
-        toks = _tokens(label)
         surname_tokens = toks[-1:]
         i = len(toks) - 1
         while i - 1 >= 0 and toks[i - 1] in _PARTICLES:

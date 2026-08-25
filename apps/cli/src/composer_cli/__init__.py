@@ -14,6 +14,7 @@ from composer_gold import (
     DEFAULT_RULE1_CONFIG_PATH,
 )
 from composer_scrapers import REGISTRY
+from composer_warehouse.persons import AUTO_THRESHOLD, MODEL_PATH
 
 from .crawl_cmds import cmd_crawl, crawl_choices
 from .export_cmds import cmd_export_kumu
@@ -26,7 +27,12 @@ from .ingest_cmds import (
     cmd_promote,
     cmd_rebuild_silver,
 )
-from .person_cmds import cmd_dedupe_persons, cmd_person_review
+from .person_cmds import (
+    cmd_dedupe_persons,
+    cmd_person_eval,
+    cmd_person_review,
+    cmd_person_train,
+)
 from .pipeline_cmds import cmd_run
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
@@ -265,9 +271,34 @@ def _add_export_parsers(sub: _SubParsers) -> None:
 
 def _add_person_parsers(sub: _SubParsers) -> None:
     p_dedupe = sub.add_parser(
-        "dedupe-persons", help="link near-duplicate person entities (surname/initials/birth-year heuristics)"
+        "dedupe-persons", help="link duplicate person entities with the probabilistic linkage model"
+    )
+    p_dedupe.add_argument(
+        "--reset",
+        action="store_true",
+        help="discard existing machine-made links first (keeps reviewed decisions); "
+        "needed to re-decide pairs an earlier run already ruled on",
     )
     p_dedupe.set_defaults(func=cmd_dedupe_persons)
+
+    p_train = sub.add_parser(
+        "person-train", help="refit the person linkage model from the warehouse (writes model.json)"
+    )
+    p_train.add_argument("--model-out", help=f"where to write the model (default {MODEL_PATH})")
+    p_train.add_argument("--dataset-out", help="also regenerate the labelled evaluation set here")
+    p_train.set_defaults(func=cmd_person_train)
+
+    p_eval = sub.add_parser(
+        "person-eval", help="precision/recall for the linkage model and the pre-#173 baseline"
+    )
+    p_eval.add_argument("dataset", help="path to the labelled evaluation set (.jsonl.gz)")
+    p_eval.add_argument(
+        "--threshold", type=float, default=AUTO_THRESHOLD, help="auto-link cut-point to report at"
+    )
+    p_eval.add_argument(
+        "--all", action="store_true", help="score the whole set, not just the held-out test split"
+    )
+    p_eval.set_defaults(func=cmd_person_eval)
 
     p_concerts = sub.add_parser(
         "derive-concerts", help="rebuild the concert tables from the work mentions' performance context"

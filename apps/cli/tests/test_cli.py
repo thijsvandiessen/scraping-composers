@@ -12,21 +12,24 @@ import pytest
 from composer_cli import _log_level, main
 from composer_cli.export_cmds import cmd_export_kumu
 from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
-from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_review
+from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_eval, cmd_person_review
 from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
 from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work
 from composer_models.db import get_engine, init_db
 from composer_schema import SourceClaim
 from composer_warehouse.concerts import derive_concerts
+from composer_warehouse.persons import AUTO_THRESHOLD
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 
 def _ns(**kwargs: object) -> argparse.Namespace:
     """Build a minimal Namespace with defaults a CLI command expects."""
-    return argparse.Namespace(**{"database_url": None, "verbose": False, **kwargs})
+    return argparse.Namespace(**{"database_url": None, "verbose": False, "reset": False, **kwargs})
 
 
 def _ingest_two_sources_disagreeing(session: Session) -> None:
@@ -241,12 +244,19 @@ def test_cmd_rematch_processes_pending_mentions(tmp_path: Path, capsys: pytest.C
 
 
 def _ingest_varied_people(db_url: str) -> None:
+    # The dates are load-bearing: the linkage model weighs evidence, so neither
+    # compatible initials nor a bare surname is enough on its own.
+    born = SourceClaim("born_on", value="1770")
     _ingest(
         db_url,
-        person("Bach, J.S."),  # auto-links to the full name (initials)
-        person("Bach, Johann Sebastian"),
-        person("Beethoven"),  # surname-only -> review
-        person("Beethoven, Ludwig van"),
+        person("Bach, J.S.", SourceClaim("born_on", value="1685"), SourceClaim("died_on", value="1750")),
+        person(
+            "Bach, Johann Sebastian",
+            SourceClaim("born_on", value="1685"),
+            SourceClaim("died_on", value="1750"),
+        ),  # corroborated -> auto-links to the full name
+        person("Beethoven", born),  # surname-only, one date agreeing -> review
+        person("Beethoven, Ludwig van", born),
     )
 
 
@@ -278,6 +288,36 @@ def test_cmd_stats_shows_person_dedup_counts(tmp_path: Path, capsys: pytest.Capt
     out = capsys.readouterr().out
     assert "person duplicates linked: 1" in out
     assert "person matches to review: 1" in out
+
+
+def test_cmd_dedupe_persons_reset_lets_the_pass_re_decide(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#173's links are already in the database and the pass skips decided
+    pairs, so re-running it needs --reset to have any effect."""
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_varied_people(db_url)
+    cmd_dedupe_persons(_ns(database_url=db_url))
+    capsys.readouterr()
+
+    assert cmd_dedupe_persons(_ns(database_url=db_url)) == 0
+    assert "auto-linked 0" in capsys.readouterr().out  # nothing left to decide
+
+    assert cmd_dedupe_persons(_ns(database_url=db_url, reset=True)) == 0
+    out = capsys.readouterr().out
+    assert "reset 2 machine match(es)" in out
+    assert "auto-linked 1" in out
+
+
+def test_cmd_person_eval_reports_the_model_against_the_baseline(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    dataset = REPO_ROOT / "packages/composer-warehouse/tests/data/person_eval_pairs.jsonl.gz"
+    assert cmd_person_eval(_ns(dataset=str(dataset), threshold=AUTO_THRESHOLD, all=False)) == 0
+    out = capsys.readouterr().out
+    assert "held-out test split" in out
+    assert "fellegi-sunter" in out
+    assert "legacy scorer (baseline)" in out
 
 
 def test_cmd_person_review_lists_and_accepts(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
