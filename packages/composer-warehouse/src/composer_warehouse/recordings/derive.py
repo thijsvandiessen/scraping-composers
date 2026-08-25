@@ -5,9 +5,9 @@ silver database. LLM-extracted work mentions from a *recordings* crawl carry the
 release payload in ``raw_work_mentions.raw`` (marked ``_source: "llm"``,
 ``_kind: "recording"``); this pass groups them into recordings per source,
 folds the page-scoped groups into one row per release (see ``cluster``),
-resolves artist names to person entities by normalized name, and links each
-recording to the works on it. Re-running rebuilds the recording tables from
-scratch, so the pass can be repeated after new loads.
+resolves artist names to person and ensemble entities by normalized name, and
+links each recording to the works on it. Re-running rebuilds the recording
+tables from scratch, so the pass can be repeated after new loads.
 """
 
 from __future__ import annotations
@@ -164,11 +164,17 @@ class _RowBatch:
     unresolved_names: set[str] = field(default_factory=set)
 
     def _resolve(self, role: str, key: str) -> uuid.UUID | None:
-        """An ensemble credit prefers an ``ensemble`` entity and falls back to a
-        person (the LLM records orchestras as persons); other roles are people."""
+        """The entity a credited name refers to.
+
+        Both maps are consulted whatever the role: a credit's slot says how the
+        source filed the name, not what the name is — sources list choirs and
+        piano trios among the soloists — and ingest kinds a name that reads as
+        an ensemble as one (see :func:`~composer_schema.resolve_entity_kind`).
+        The role only decides which map is asked first.
+        """
         if role == "ensemble":
             return self.ensemble_by_key.get(key) or self.person_by_key.get(key)
-        return self.person_by_key.get(key)
+        return self.person_by_key.get(key) or self.ensemble_by_key.get(key)
 
     def add_participant(self, recording_id: int, role: str, name: str, discipline: str | None) -> None:
         resolved = self._resolve(role, dedup_key(name))

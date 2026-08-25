@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from composer_models import Claim, Entity, EntityRecord, IngestRun
 from composer_schema import EntityDocument, SourceClaim
-from composer_warehouse.testing import FakeSource, ingest_source, person
+from composer_warehouse.testing import FakeSource, ingest_source, mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -215,3 +215,40 @@ def test_two_records_for_one_person_union_their_claims(session: Session) -> None
     assert session.scalar(select(func.count()).select_from(EntityRecord)) == 2
     predicates = {c.predicate for c in session.scalars(select(Claim).where(Claim.subject_id == entity.id))}
     assert {"has_profession", "composed"} <= predicates
+
+
+def test_ensemble_named_person_records_land_as_ensembles(session: Session) -> None:
+    """Sources credit an orchestra the same way they credit a violinist, so a
+    participant reaches ingest as a ``person`` whatever it names (#174). The
+    label settles it before the kind is baked into the entity's uuid."""
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                person("Malmö Symphony Orchestra", external_id="p:mso"),
+                person("Tölzer Knabenchor", external_id="p:tk"),
+                person(
+                    "Rattle, Sir Simon",
+                    SourceClaim("performed_with", "person", "Berliner Philharmoniker"),
+                    external_id="p:rattle",
+                ),
+            )
+        ),
+    )
+
+    assert entities_by_kind(session) == {
+        "ensemble": ["Berliner Philharmoniker", "Malmö Symphony Orchestra", "Tölzer Knabenchor"],
+        "person": ["Rattle, Sir Simon"],
+    }
+
+
+def test_ensemble_named_mention_composer_lands_as_an_ensemble(session: Session) -> None:
+    """The composer credit on a work mention mints an entity too, and an album
+    that credits the orchestra in that slot must not mint a person for it."""
+    ingest_source(
+        session,
+        FakeSource(records=(mention("Symphony No. 5", "Boston Symphony Orchestra", external_id="m:1"),)),
+    )
+
+    entity = session.scalars(select(Entity).where(Entity.label == "Boston Symphony Orchestra")).one()
+    assert entity.kind == "ensemble"

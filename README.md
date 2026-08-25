@@ -270,9 +270,10 @@ every promote): mentions are grouped into concerts per source (berlinphil by
 its concert id, nyphil by program + date, concertgebouw by date + city, rco by
 its concert id, dates normalized to ISO) with season and event type;
 conductors, soloists (with their instrument/voice) _and the orchestra_ are
-resolved to entities by normalized name — an ensemble credit prefers an
-`ensemble` entity and falls back to a person; and each concert keeps its
-programme. Promotion copies the concert
+resolved to entities by normalized name — against the person **and** ensemble
+entities whatever the credit's role, because a credit's slot says how the
+source filed the name, not what the name is (choirs turn up among the
+soloists); and each concert keeps its programme. Promotion copies the concert
 tables into gold, collapsing participant links to canonical entities. That
 powers the concert browser, per-person concert lists, and concert-count
 sorting in both APIs.
@@ -533,6 +534,20 @@ resolution happen downstream when data is promoted into gold.
   normalized label (see `normalize.py`: name-order flipping, diacritic
   stripping, case/punctuation folding) — so adding a second source later
   attaches to existing entities instead of duplicating them.
+  `person` is the one kind ingest does not take on trust: every source that
+  credits concert or recording participants mints one entity per credited
+  *name* and files it as a person, whether it names a violinist or an
+  orchestra. So the label decides at write time — a name carrying an ensemble
+  word ("Symphony Orchestra", "Knabenchor", "String Quartet"; see
+  `composer_schema.kinds`) is stored as an `ensemble`, which keeps it out of
+  the person dedupe pass and out of every `kind='person'` read. The word list
+  is deliberately narrow: re-kinding a real person is the worse error, so an
+  ensemble whose name says nothing about being one ("Academy of St Martin in
+  the Fields") stays a person until the list earns another word.
+  Existing rows predating the guard are corrected by `rebuild-silver`, which
+  replays the bucket through the current heuristics — entity ids are
+  `uuid5(kind + dedup_key)`, so a re-kinded entity gets a new id and no
+  in-place update would do.
 - **`claims`** — typed edges between entities, e.g.
   `person --has_profession--> profession`, `person --born_in--> place`,
   `person --composed--> work`. The object is either another entity
