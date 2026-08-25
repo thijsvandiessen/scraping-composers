@@ -121,10 +121,15 @@ labels available for free, counting them is both more robust and more direct.
   labelled population over-represents wikidata-vs-wikidata pairs, which are the
   hard case, so the true corpus precision is probably better than the table
   says — but that is an argument, not a measurement.
-- **The year columns' weights are weakly evidenced.** They are fitted from
-  `alias_identity` and `distinct_musicbrainz` alone, and the corpus offers no
-  date-independent way to check whether "more than a decade apart" is the right
-  place to put the line.
+- **The year columns' weights rest on very little.** Excluding the date-derived
+  labels leaves only `alias_identity` to supply matches, and few of those pairs
+  carry dates on both sides: `m` for `birth_year` is fitted on 90 informative
+  observations and `death_year` on 30, against 3,460 for `given`. Jeffreys
+  smoothing keeps the resulting weights bounded and they land where intuition
+  says they should (about -5.7 bits for a conflict, +6.2 for an exact match),
+  but they would move on a modest amount of new evidence. The corpus also
+  offers no date-independent way to check whether "more than a decade apart" is
+  the right place to put the line.
 - **Precision on the pairs no rule can label is lower than the table.** Spot-
   checking the auto-link set by hand turns up roughly one wrong pair in seven,
   against the one in fifty the labelled population reports. Both are a long way

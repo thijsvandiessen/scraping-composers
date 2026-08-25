@@ -184,7 +184,6 @@ class LinkageModel:
     comparisons: tuple[Comparison, ...]
     prior: float = 0.001
     trained_on_pairs: int = 0
-    em_iterations: int = 0
 
     def by_name(self, name: str) -> Comparison:
         for comparison in self.comparisons:
@@ -207,7 +206,6 @@ class LinkageModel:
         return {
             "prior": self.prior,
             "trained_on_pairs": self.trained_on_pairs,
-            "em_iterations": self.em_iterations,
             "comparisons": [
                 {
                     "name": c.name,
@@ -240,7 +238,6 @@ class LinkageModel:
             comparisons=tuple(comparisons),
             prior=float(data["prior"]),  # type: ignore[arg-type]
             trained_on_pairs=int(data.get("trained_on_pairs", 0)),  # type: ignore[arg-type]
-            em_iterations=int(data.get("em_iterations", 0)),  # type: ignore[arg-type]
         )
 
     def dump(self, path: Path) -> None:
