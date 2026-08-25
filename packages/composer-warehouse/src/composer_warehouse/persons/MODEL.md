@@ -9,42 +9,42 @@ composer-ingest person-train --dataset-out packages/composer-warehouse/tests/dat
 composer-ingest person-eval packages/composer-warehouse/tests/data/person_eval_pairs.jsonl.gz
 ```
 
-Fitted 2026-08-25 against `composers.db` (212,328 person entities, 2,006,563
+Fitted 2026-08-25 against `composers.db` (211,153 person entities, 1,969,041
 candidate pairs after surname blocking).
 
 ## Results
 
-Held-out test split, 28,770 labelled pairs. "Names only" hides the birth and
+Held-out test split, 28,649 labelled pairs. "Names only" hides the birth and
 death years from the scorer but keeps the term-frequency adjustment.
 
 | scorer | threshold | precision | recall | F1 | false positives |
 |---|---|---|---|---|---|
-| Fellegi-Sunter | 0.99 | **0.979** | **0.793** | 0.876 | 64 |
-| Fellegi-Sunter, names only | 0.99 | 0.900 | 0.292 | 0.441 | 120 |
-| pre-#173 scorer (baseline) | 0.90 | 0.782 | 0.778 | 0.780 | 799 |
-| pre-#173 scorer, names only | 0.90 | 0.176 | 0.778 | 0.286 | 13,456 |
+| Fellegi-Sunter | 0.99 | **0.978** | **0.793** | 0.876 | 65 |
+| Fellegi-Sunter, names only | 0.99 | 0.898 | 0.293 | 0.441 | 122 |
+| pre-#173 scorer (baseline) | 0.90 | 0.782 | 0.778 | 0.780 | 798 |
+| pre-#173 scorer, names only | 0.90 | 0.176 | 0.778 | 0.287 | 13,380 |
 
 The model beats the baseline on precision *and* recall at once, cutting false
 positives by 92%. The names-only rows are the sharper comparison, because the
-labels there are independent of everything the scorer can see: 0.900 against
+labels there are independent of everything the scorer can see: 0.898 against
 0.176 is the size of the defect #173 reported.
 
-Run over the whole warehouse, the pass now auto-links **15,818** pairs where
+Run over the whole warehouse, the pass now auto-links **15,826** pairs where
 the old scorer linked 364,389 — and none of them on initials alone, which
-accounted for 340,650 of the old total. Another 13,440 land in the review
+accounted for 340,650 of the old total. Another 13,405 land in the review
 queue.
 
 Operating points on the full model, for choosing a different cut-point:
 
 | threshold | precision | recall |
 |---|---|---|
-| 0.50 | 0.773 | 0.850 |
-| 0.90 | 0.911 | 0.837 |
-| 0.95 | 0.929 | 0.811 |
-| 0.99 | 0.979 | 0.793 |
+| 0.50 | 0.773 | 0.849 |
+| 0.90 | 0.911 | 0.836 |
+| 0.95 | 0.927 | 0.811 |
+| 0.99 | 0.978 | 0.793 |
 | 0.995 | 0.987 | 0.778 |
 | 0.999 | 0.994 | 0.715 |
-| 0.9999 | 1.000 | 0.674 |
+| 0.9999 | 1.000 | 0.675 |
 
 `AUTO_THRESHOLD = 0.99` is the point where the model dominates the old scorer
 on both axes; `REVIEW_THRESHOLD = 0.50` catches the rest for `person-review`.
@@ -59,7 +59,7 @@ matcher, and is refused when two rules disagree:
 | provenance | label | rule | pairs |
 |---|---|---|---|
 | `dates_corroborated` | match | birth *and* death year agree, backed by >= 2 distinct sources | 6,303 |
-| `alias_identity` | match | one record's name is a curated wikidata alias of the other, and the two names differ by more than word order | 1,166 |
+| `alias_identity` | match | one record's name is a curated wikidata alias of the other, and the two names differ by more than word order | 1,162 |
 | `distinct_musicbrainz` | non-match | both carry MusicBrainz ids and they differ | ~351,000 |
 | `year_conflict` | non-match | lifetimes more than a decade apart | ~521,000 |
 
@@ -81,7 +81,7 @@ runs.
 The prior — P(match | the pair survived surname blocking) — uses no labels at
 all. Blocked pairs share a full given name 1.6% of the time, random pairs
 0.08%; since `observed = L*m + (1-L)*u` and `m` cannot be negative, that gap
-bounds `L` from below, and the bound taken as an equality gives **L = 0.0204**.
+bounds `L` from below, and the bound taken as an equality gives **L = 0.0209**.
 
 Two rules keep this honest:
 
@@ -124,7 +124,7 @@ labels available for free, counting them is both more robust and more direct.
 - **The year columns' weights rest on very little.** Excluding the date-derived
   labels leaves only `alias_identity` to supply matches, and few of those pairs
   carry dates on both sides: `m` for `birth_year` is fitted on 90 informative
-  observations and `death_year` on 30, against 3,460 for `given`. Jeffreys
+  observations and `death_year` on 30, against 3,461 for `given`. Jeffreys
   smoothing keeps the resulting weights bounded and they land where intuition
   says they should (about -5.7 bits for a conflict, +6.2 for an exact match),
   but they would move on a modest amount of new evidence. The corpus also
