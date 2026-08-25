@@ -4,7 +4,7 @@ from pathlib import Path
 
 from composer_models import PersonMatch
 from composer_models.db import get_engine, init_db
-from composer_warehouse.persons import MODEL_PATH, dedupe_persons, reset_person_links
+from composer_warehouse.persons import MODEL_PATH, apply_clusters, dedupe_persons, reset_person_links
 from composer_warehouse.persons.evaluation import (
     LabelledPair,
     downsample,
@@ -26,6 +26,15 @@ def cmd_dedupe_persons(args: argparse.Namespace) -> int:
     engine = get_engine(args.database_url)
     session_factory = init_db(engine)
     with session_factory() as session:
+        if args.recluster_only:
+            # Scoring is the expensive half and its verdicts are already in
+            # person_matches; rebuilding the partition from them is seconds.
+            clustering = apply_clusters(session)
+            print(
+                f"{len(clustering.clusters)} cluster(s), {clustering.members} member(s), "
+                f"largest {clustering.largest}, {len(clustering.refused)} merge(s) refused"
+            )
+            return 0
         if args.reset:
             deleted, unlinked = reset_person_links(session)
             print(f"reset {deleted} machine match(es), unlinked {unlinked} entity/ies")
@@ -115,12 +124,15 @@ def cmd_person_review(args: argparse.Namespace) -> int:
                 return 1
             if args.accept is not None:
                 match.status = "accepted"
-                match.entity.canonical_entity_id = match.canonical_entity_id
                 print(f"linked {match.entity.label!r} -> {match.canonical.label!r}")
             else:
                 match.status = "rejected"
                 print(f"rejected match #{match.id}")
             session.commit()
+            # A decision changes the partition, not just this pair: an accept
+            # can join two clusters and a reject can split one, and either way
+            # the canonical is re-chosen from the whole membership.
+            apply_clusters(session)
             return 0
 
         rows = session.scalars(

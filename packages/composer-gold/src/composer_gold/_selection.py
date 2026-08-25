@@ -66,23 +66,21 @@ def _appearance_counts(
 
 
 def _resolve_roots(silver: Session) -> dict[uuid.UUID, uuid.UUID]:
-    """Map every canonical-linked person to its transitive canonical root."""
-    links: dict[uuid.UUID, uuid.UUID] = {
+    """Map every duplicate to its cluster canonical.
+
+    A one-hop read. The dedupe pass writes the column from an explicit
+    partition (``composer_warehouse.persons.cluster``), so a canonical is never
+    itself a duplicate — this used to walk the pointer chain with a cycle
+    guard, because pairwise decisions could produce both chains and, in
+    principle, cycles.
+    """
+    return {
         entity_id: canonical_id
         for entity_id, canonical_id in silver.execute(
             select(Entity.id, Entity.canonical_entity_id).where(Entity.canonical_entity_id.is_not(None))
         ).tuples()
         if canonical_id is not None  # guaranteed by the WHERE; narrows the type
     }
-    roots: dict[uuid.UUID, uuid.UUID] = {}
-    for start in links:
-        node = start
-        seen = {node}
-        while node in links and links[node] not in seen:
-            node = links[node]
-            seen.add(node)
-        roots[start] = node
-    return roots
 
 
 def _sitelink_roots(

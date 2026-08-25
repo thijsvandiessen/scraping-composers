@@ -591,11 +591,19 @@ Sebastian"), and other variants. The `dedupe-persons` pass
 each person name (surname / given / initials / particles), groups by surname,
 and scores pairs with a few heuristics — given-name compatibility plus
 birth-year corroboration (a conflicting `born_on` year rules a pair out; a
-matching one confirms it). High-confidence pairs set the duplicate's
-`Entity.canonical_entity_id` to the fuller name; ambiguous ones land in
-**`person_matches`** for `person-review`. Nothing is deleted and ids stay
-stable, so the pass is re-runnable as the heuristics grow (phonetic matching,
-nickname maps, external ids, …).
+matching one confirms it). High-confidence pairs and human `accepted` reviews
+are recorded in **`person_matches`**; ambiguous ones wait there for
+`person-review`.
+
+The links themselves are then derived from those pairs as *clusters*, not pair
+by pair: `persons/cluster.py` merges the pairs strongest-first into disjoint
+groups, picks one canonical per group (the fullest given names, chosen from the
+whole membership), and points every member straight at it. So
+`Entity.canonical_entity_id` is always one hop to a canonical — no chains, no
+cycles — and a `rejected` review becomes a cannot-link the group honours even
+when the merge arrives transitively through a third record. Nothing is deleted
+and ids stay stable, so the pass is re-runnable as the heuristics grow
+(phonetic matching, nickname maps, external ids, …).
 
 ## Adding a source
 
