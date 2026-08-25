@@ -38,15 +38,31 @@ def base_url_for(source: str) -> str:
     return BASE_URLS.get(source, "")
 
 
+def _born(year: str) -> tuple[SourceClaim, ...]:
+    return (SourceClaim("born_on", value=year),)
+
+
+def _lifetime(born: str, died: str) -> tuple[SourceClaim, ...]:
+    return SourceClaim("born_on", value=born), SourceClaim("died_on", value=died)
+
+
 def _seed_bucket(bucket: LocalBucket) -> None:
     archive = FakeSource(
         records=(
-            person("Bach, Johann Sebastian", SourceClaim("has_profession", "profession", "composer")),
-            person("Bach, J.S.", external_id="a:bach-short"),
-            person("Beethoven, Ludwig van", external_id="a:beethoven"),
-            person("Beethoven", external_id="a:beethoven-short"),
-            person("Mozart, Wolfgang Amadeus", external_id="a:mozart"),
-            person("Mozart", external_id="a:mozart-short"),
+            # The dates are what make these pairs decidable: the linkage model
+            # weighs evidence rather than matching on names alone, so a bare
+            # "Beethoven" or an initialled "Bach, J.S." needs corroboration
+            # before it is auto-linked (or even raised for review).
+            person(
+                "Bach, Johann Sebastian",
+                SourceClaim("has_profession", "profession", "composer"),
+                *_lifetime("1685", "1750"),
+            ),
+            person("Bach, J.S.", *_lifetime("1685", "1750"), external_id="a:bach-short"),
+            person("Beethoven, Ludwig van", *_born("1770"), external_id="a:beethoven"),
+            person("Beethoven", *_born("1770"), external_id="a:beethoven-short"),
+            person("Mozart, Wolfgang Amadeus", *_born("1756"), external_id="a:mozart"),
+            person("Mozart", *_born("1756"), external_id="a:mozart-short"),
             # similar-but-not-identical titles: the second scores in the review band
             mention("Songs of a Wayfarer", "Mahler, Gustav", "m1"),
             mention("Songs of a Traveller", "Mahler, Gustav", "m2"),
