@@ -85,6 +85,7 @@ def test_fetch_yields_mentions_then_people(monkeypatch: pytest.MonkeyPatch) -> N
         "perf:8057:2",
         "perf:9001:0",
         "perf:9001:1",
+        "perf:1264:0",
     ]
 
 
@@ -179,4 +180,4 @@ def test_a_short_read_is_reported(monkeypatch: pytest.MonkeyPatch, caplog: pytes
     _serve(monkeypatch, _landing_with(999), FRAGMENT)
     with caplog.at_level(logging.WARNING):
         list(WienerPhilAdapter().fetch())
-    assert "reports 999 concerts, parsed 3" in caplog.text
+    assert "reports 999 concerts, parsed 4" in caplog.text

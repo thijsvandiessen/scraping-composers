@@ -75,6 +75,13 @@ data-works="Symphony No. 6 in C Major, D. 589;-- INTERMISSION --;Symphony No. 4 
 data-performers="" data-location="Stefaniensaal, Graz, Austria" data-date="2013-02-14">\
 <h2><a href="/en/konzerte/concert-in-graz/9001/">Concert in Graz</a></h2>\
 </div>\
+<div class="event-module"data-title="Radio Concert" \
+data-composers="Wolfgang Amadeus Mozart;" \
+data-works="Concerto for Clarinet in A major, KV 622;" \
+data-performers="Leopold Wlach;None;" data-location="Vienna, Austria" data-date="1946-01-06">\
+<h2><a href="/en/konzerte/radio-concert/1264/">Radio Concert</a></h2>\
+<div class="c cell small-6"><h3>CONDUCTOR</h3><p>None</p></div>\
+</div>\
 """
 
 
@@ -83,7 +90,7 @@ def parsed() -> list[Concert]:
 
 
 def test_parses_every_block_of_a_fragment() -> None:
-    assert [concert.concert_id for concert in parsed()] == ["2465", "8057", "9001"]
+    assert [concert.concert_id for concert in parsed()] == ["2465", "8057", "9001", "1264"]
 
 
 def test_concert_identity_and_place() -> None:
@@ -134,9 +141,17 @@ def test_soloists_are_the_performers_left_over() -> None:
 
 def test_the_literal_none_performer_is_not_a_musician() -> None:
     # the site renders a performer slot it has no performer for as "None"
-    concert = parsed()[0]
+    concert = parsed()[3]
     assert "None" not in [name for name, _ in concert.soloists]
     assert "None" not in concert.ensembles
+
+
+def test_a_credit_block_naming_none_credits_nobody() -> None:
+    # concerts 1264 and 1265 render <h3>CONDUCTOR</h3><p>None</p>: the site has
+    # no conductor for them, not a conductor called None
+    concert = parsed()[3]
+    assert concert.conductors == ()
+    assert concert.conductor_labels == ()
 
 
 def test_subtitle_is_read_where_a_concert_has_one() -> None:

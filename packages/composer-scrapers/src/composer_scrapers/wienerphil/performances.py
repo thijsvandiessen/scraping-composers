@@ -39,9 +39,10 @@ and voice types come from and where a conductor the credit block omitted
 reappears. A concert whose detail page could not be fetched keeps this reading
 unchanged.
 
-One quirk of the field is worth naming because it reads as a performer: the site
-renders a missing performer as the literal string ``None`` (873 concerts carry
-one), which is dropped rather than credited to a musician of that name.
+One quirk is worth naming because it reads as a person: the site renders a
+performer it does not have as the literal string ``None`` — 873 concerts carry
+one in the performer list, and two credit a *conductor* of that name — which is
+dropped rather than credited to a musician called None.
 """
 
 from __future__ import annotations
@@ -208,7 +209,7 @@ def _credits(body: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
     labels: list[str] = []
     for label, name in _CREDIT.findall(body):
         credited = _text(name)
-        if credited:
+        if credited and credited != _MISSING:
             names.append(credited)
             labels.append(_text(label))
     return tuple(names), tuple(labels)
