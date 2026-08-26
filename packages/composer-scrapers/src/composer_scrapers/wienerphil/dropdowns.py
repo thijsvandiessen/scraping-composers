@@ -12,14 +12,17 @@ the way :mod:`composer_scrapers.concertgebouw.dropdowns` uses that archive's
 Only the concerts say what anyone *did*, though: the archive files conductors
 and soloists together under one "Interpret" heading. A performer is therefore
 credited as a conductor when the concerts ever credited them as one, and as a
-soloist otherwise, which the adapter decides once it has read them all.
+soloist otherwise, which the adapter decides once it has read them all — along
+with the instruments and voices they were labelled with on the concerts' own
+detail pages (see :mod:`.details`), recorded as ``performs_as`` disciplines the
+way :mod:`composer_scrapers.berlinphil.artists` records that source's.
 """
 
 from __future__ import annotations
 
 import html
 import re
-from collections.abc import Container
+from collections.abc import Container, Mapping
 
 from composer_schema.kinds import ENSEMBLE_KIND, PERSON_KIND, looks_like_ensemble
 
@@ -64,8 +67,16 @@ def composer_record(name: str) -> SourceRecord:
     )
 
 
-def performer_record(name: str, conductors: Container[str]) -> SourceRecord:
+def performer_record(
+    name: str,
+    conductors: Container[str],
+    disciplines: Mapping[str, set[str]] | None = None,
+) -> SourceRecord:
     """A performer, as a conductor if the concerts ever credited them as one.
+
+    ``disciplines`` maps a performer to every instrument or voice a concert
+    detail page labelled them with; each becomes a ``performs_as`` claim. It is
+    optional so a run that read no detail page still produces the record.
 
     Ensembles share the Interpret list with the musicians and are recorded as
     such — an orchestra or a choir has no profession to claim, and letting one
@@ -80,11 +91,20 @@ def performer_record(name: str, conductors: Container[str]) -> SourceRecord:
             kind=ENSEMBLE_KIND,
         )
     profession = "conductor" if name in conductors else "soloist"
+    played = sorted((disciplines or {}).get(name, ()))
     return SourceRecord(
         external_id=f"{PERFORMERS}:{name}",
         name=name,
         url=None,
-        raw={"filter": PERFORMERS, "label": name, "profession": profession},
+        raw={
+            "filter": PERFORMERS,
+            "label": name,
+            "profession": profession,
+            "disciplines": played,
+        },
         kind=PERSON_KIND,
-        claims=(SourceClaim("has_profession", "profession", profession),),
+        claims=(
+            SourceClaim("has_profession", "profession", profession),
+            *(SourceClaim("performs_as", value=discipline) for discipline in played),
+        ),
     )

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+from composer_scrapers.wienerphil.details import ConcertDetail
 from composer_scrapers.wienerphil.dropdowns import (
     COMPOSERS,
     PERFORMERS,
@@ -14,7 +15,7 @@ from composer_scrapers.wienerphil.dropdowns import (
     performer_record,
     vocabularies,
 )
-from composer_scrapers.wienerphil.performances import Concert, concerts, mentions, programme
+from composer_scrapers.wienerphil.performances import Concert, concerts, mentions, merge, programme
 
 # The archive's own filter vocabulary, rendered twice (desktop and mobile). Only
 # the titles matter to the parser: they are what rejoins a title split across
@@ -49,7 +50,7 @@ FRAGMENT = """\
 <div class="event-module"data-title="Philharmonic Concert" \
 data-composers="Ludwig van Beethoven;Luigi Cherubini;" \
 data-works="Symphony No. 7 in A Major, op. 92;Arie aus der Oper &quot;Fanisca&quot;;" \
-data-performers="Otto Nicolai;Jenny Lutzer;Vienna Philharmonic;" \
+data-performers="Otto Nicolai;Jenny Lutzer;Vienna Philharmonic;None;" \
 data-location="Hofburg Palace, Vienna, Austria" data-date="1842-03-28">\
 <div class="short-date">Mon, March 28, 1842</div>\
 <h2><a href="/en/konzerte/philharmonic-concert/2465/" target="_blank">Philharmonic Concert</a></h2>\
@@ -63,6 +64,7 @@ data-works="Symphony No. 6 in F Major, op. 68;Five Pieces for Orchestra, op. 16;
 Variationen f&uuml;r Orchester, op. 31;" \
 data-performers="Daniel Barenboim;" data-location="Musikverein, Vienna, Austria" data-date="2010-01-09">\
 <h2><a href="/en/konzerte/5th-subscription-concert/8057/">5th Subscription Concert</a></h2>\
+<p class="st" role="doc-subtitle">Mozart Week 2010</p>\
 <div class="cell h">0:00</div>\
 <div class="cell medium-9 event-area">Musikverein, Golden Hall, Vienna, Austria</div>\
 <div class="c cell small-6"><h3>DIRIGENTIN</h3><p>Daniel Barenboim</p></div>\
@@ -124,9 +126,22 @@ def test_concert_without_a_credit_block_has_no_conductor() -> None:
 
 def test_soloists_are_the_performers_left_over() -> None:
     concert = parsed()[0]
-    # Otto Nicolai conducted and the orchestra is an ensemble; only Lutzer is left
-    assert concert.soloists == ("Jenny Lutzer",)
+    # Otto Nicolai conducted and the orchestra is an ensemble; only Lutzer is left,
+    # with no discipline — the result listing labels nobody but the conductor
+    assert concert.soloists == (("Jenny Lutzer", None),)
     assert concert.ensembles == ("Vienna Philharmonic",)
+
+
+def test_the_literal_none_performer_is_not_a_musician() -> None:
+    # the site renders a performer slot it has no performer for as "None"
+    concert = parsed()[0]
+    assert "None" not in [name for name, _ in concert.soloists]
+    assert "None" not in concert.ensembles
+
+
+def test_subtitle_is_read_where_a_concert_has_one() -> None:
+    assert parsed()[1].subtitle == "Mozart Week 2010"
+    assert parsed()[0].subtitle is None
 
 
 def test_blank_composer_slot_continues_the_previous_composer() -> None:
@@ -226,3 +241,69 @@ def test_ensemble_in_the_performer_list_is_not_a_person() -> None:
     assert record.kind == "ensemble"
     # an orchestra has no profession to claim
     assert record.claims == ()
+
+
+# --- folding a concert's own detail page back over the listing's reading ------
+
+
+def test_merge_takes_the_disciplines_the_listing_could_not_give() -> None:
+    merged = merge(
+        parsed()[0],
+        ConcertDetail(
+            credits=(("Conductor", "Otto Nicolai"), ("Soprano", "Jenny Lutzer")),
+            conductors=("Otto Nicolai",),
+            soloists=(("Jenny Lutzer", "Soprano"),),
+            ensembles=(),
+            programme=(),
+        ),
+    )
+    assert merged.soloists == (("Jenny Lutzer", "Soprano"),)
+    assert merged.credits == (("Conductor", "Otto Nicolai"), ("Soprano", "Jenny Lutzer"))
+
+
+def test_merge_recovers_a_conductor_the_credit_block_dropped() -> None:
+    # the fragments only render CONDUCTOR-headed blocks, so a concert credited
+    # "Musikalische Leitung" has no conductor at all until its page is read
+    listed = parsed()[2]
+    assert listed.conductors == ()
+    merged = merge(
+        listed,
+        ConcertDetail(
+            credits=(("Musikalische Leitung", "Rainer Honeck"),),
+            conductors=("Rainer Honeck",),
+            soloists=(),
+            ensembles=(),
+            programme=(),
+        ),
+    )
+    assert merged.conductors == ("Rainer Honeck",)
+
+
+def test_merge_keeps_a_performer_the_detail_page_does_not_name() -> None:
+    merged = merge(
+        parsed()[0],
+        ConcertDetail(credits=(), conductors=(), soloists=(), ensembles=(), programme=()),
+    )
+    # Lutzer was in the fragment and is not on the page: she keeps her place,
+    # with no discipline, rather than disappearing
+    assert merged.soloists == (("Jenny Lutzer", None),)
+
+
+def test_merge_prefers_the_detail_pages_programme() -> None:
+    merged = merge(
+        parsed()[0],
+        ConcertDetail(
+            credits=(),
+            conductors=(),
+            soloists=(),
+            ensembles=(),
+            programme=(("Ludwig van Beethoven", "Symphony No. 7 in A Major, op. 92"),),
+        ),
+    )
+    assert merged.programme == (("Ludwig van Beethoven", "Symphony No. 7 in A Major, op. 92"),)
+
+
+def test_merge_falls_back_to_the_listing_when_the_page_has_no_programme() -> None:
+    listed = parsed()[0]
+    merged = merge(listed, ConcertDetail(credits=(), conductors=(), soloists=(), ensembles=(), programme=()))
+    assert merged.programme == listed.programme
