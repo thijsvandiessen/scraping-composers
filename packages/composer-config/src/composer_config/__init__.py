@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     # --no-ledger` bypasses it once; `--no-cache` bypasses both (see extract_cmds).
     extract_ledger_enabled: bool = True
 
+    # Pages already fetched by a scraper, so a source whose archive never changes
+    # is fetched once. Deleting the file is the hard reset; PAGE_CACHE_ENABLED=false
+    # bypasses it for a run (see composer_http.pages).
+    page_cache_path: str = "./page-cache.db"
+    page_cache_enabled: bool = True
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 

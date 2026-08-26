@@ -11,6 +11,10 @@ need them, and neither package depends on the other:
 
 The crawler only uses the identity half (crawl4ai does its own fetching,
 retrying and rate limiting); the adapters use all of it.
+
+:mod:`composer_http.pages` adds a third thing that only the adapters need: a
+mirror of pages already fetched, for the sources that spend one request per
+record.
 """
 
 from __future__ import annotations
@@ -21,6 +25,22 @@ from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 
 import httpx
+
+from .pages import PageCache, open_page_cache
+
+__all__ = [
+    "DEFAULT_RETRIES",
+    "DEFAULT_TIMEOUT_S",
+    "PageCache",
+    "browser_user_agent",
+    "call_with_retries",
+    "contact_email",
+    "get_json",
+    "get_text",
+    "new_client",
+    "open_page_cache",
+    "user_agent",
+]
 
 DEFAULT_RETRIES = 3
 

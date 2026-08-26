@@ -2,6 +2,7 @@ composers.db*
 gold.db*
 kumu.json
 extract-cache.db*
+page-cache.db*
 raw-data/
 crawl_configs.json
 apps/dashboard/dashboard.sqlite3

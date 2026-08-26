@@ -7,10 +7,14 @@ archive holds and requesting them.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 import pytest
+from composer_http import PageCache
 from composer_scrapers.wienerphil.fetch import (
     ARCHIVE_URL,
+    fetch_detail,
     fetch_fragments,
     fetch_landing,
     page_count,
@@ -82,3 +86,44 @@ def test_fetch_landing_requests_the_archive_page() -> None:
 
     with _client(httpx.MockTransport(handler)) as client:
         assert fetch_landing(client) == "<html>archive</html>"
+
+
+CONCERT_URL = "https://www.wienerphilharmoniker.at/en/konzerte/philharmonic-concert/2465/"
+
+
+def test_fetch_detail_mirrors_the_page_it_fetched(tmp_path: Path) -> None:
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(200, text="<html>the concert</html>")
+
+    cache = PageCache(tmp_path / "pages.db")
+    with _client(httpx.MockTransport(handler)) as client:
+        assert fetch_detail(client, CONCERT_URL, cache) == "<html>the concert</html>"
+        # the second read is served from the mirror: an archive of concerts
+        # already given does not change, so it is never fetched twice
+        assert fetch_detail(client, CONCERT_URL, cache) == "<html>the concert</html>"
+    assert requested == [CONCERT_URL]
+    assert (cache.hits, cache.misses) == (1, 1)
+
+
+def test_fetch_detail_without_a_cache_fetches_every_time() -> None:
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(200, text="page")
+
+    with _client(httpx.MockTransport(handler)) as client:
+        assert fetch_detail(client, CONCERT_URL) == "page"
+        assert fetch_detail(client, CONCERT_URL) == "page"
+    assert requested == [CONCERT_URL, CONCERT_URL]
+
+
+def test_one_unreachable_concert_does_not_end_the_sweep() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404)
+
+    with _client(httpx.MockTransport(handler)) as client:
+        assert fetch_detail(client, CONCERT_URL) is None

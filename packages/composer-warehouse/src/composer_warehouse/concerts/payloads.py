@@ -125,8 +125,9 @@ def _wienerphil_fields(raw: dict[str, Any]) -> ConcertFields | None:
     """Wiener Philharmoniker mentions repeat the concert on each of its works.
 
     The archive's own concert id keys the concert; its dates are already ISO.
-    Soloists carry no discipline — the list view the adapter reads labels only
-    the conductor.
+    A soloist's discipline comes from the concert's own detail page, so it is
+    None for the few concerts whose page could not be read — the result listing
+    the rest of the payload comes from labels only the conductor.
     """
     concert_id = raw.get("concert_id")
     if not concert_id:

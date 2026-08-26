@@ -31,9 +31,17 @@ concert that still does not line up is emitted with no composer attribution at
 all rather than a guessed one — a wrong composer is worse than a missing one.
 
 The performer field is one flat list with no roles: only the conductor is
-labelled, in the credit block. Soloists are therefore whatever is left once the
-conductors and the ensembles are taken out, and carry no discipline — the
-instrument and voice types live only on the per-concert detail pages.
+labelled, in the credit block, and only when the site renders one. Soloists are
+therefore whatever is left once the conductors and the ensembles are taken out,
+and carry no discipline. That is what :mod:`.details` is for: :func:`merge`
+folds a concert's own page back over this reading, which is where the instrument
+and voice types come from and where a conductor the credit block omitted
+reappears. A concert whose detail page could not be fetched keeps this reading
+unchanged.
+
+One quirk of the field is worth naming because it reads as a performer: the site
+renders a missing performer as the literal string ``None`` (873 concerts carry
+one), which is dropped rather than credited to a musician of that name.
 """
 
 from __future__ import annotations
@@ -42,11 +50,12 @@ import html
 import logging
 import re
 from collections.abc import Container, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from composer_schema.kinds import looks_like_ensemble
 
 from .. import SourceWorkMention
+from .details import ConcertDetail
 from .fetch import BASE_URL
 
 log = logging.getLogger(__name__)
@@ -58,6 +67,9 @@ _ATTR = re.compile(r'\bdata-(title|composers|works|performers|location|date)="([
 _LINK = re.compile(r'<h2><a href="([^"]+)"')
 _CONCERT_ID = re.compile(r"/(\d+)/?$")
 _TIME = re.compile(r'<div class="cell h">([^<]*)</div>')
+# <p class="st" role="doc-subtitle">Salzburg Festival 2026</p> — the series or
+# festival a concert belongs to, where it belongs to one.
+_SUBTITLE = re.compile(r'<p class="st" role="doc-subtitle">([^<]*)</p>')
 _VENUE = re.compile(r'<div class="cell medium-9 event-area">([^<]*)</div>')
 # the sole credit block: <div class="c cell small-6"><h3>CONDUCTOR</h3><p>Otto Nicolai</p>
 _CREDIT = re.compile(r'<div class="c cell[^"]*"><h3>([^<]*)</h3><p>(.*?)</p>', re.DOTALL)
@@ -69,6 +81,9 @@ _INTERMISSION = re.compile(r"^\s*-{2,}\s*(?:INTERMISSION|PAUSE)\s*-{2,}\s*$", re
 #: Most fragments any one ';'-bearing title in the archive splits into.
 _MAX_TITLE_FRAGMENTS = 4
 
+#: How the site renders a performer slot it has no performer for.
+_MISSING = "None"
+
 
 @dataclass(frozen=True)
 class Concert:
@@ -77,15 +92,19 @@ class Concert:
     concert_id: str
     url: str
     title: str
+    subtitle: str | None
     date: str
     time: str | None
     venue: str | None
     location: str | None
     conductors: tuple[str, ...]
     conductor_labels: tuple[str, ...]
-    soloists: tuple[str, ...]
+    soloists: tuple[tuple[str, str | None], ...]  # (name, discipline)
     ensembles: tuple[str, ...]
     programme: tuple[tuple[str | None, str], ...]  # (composer, work title)
+    #: Every ``(label, name)`` the concert's own page credited, verbatim; empty
+    #: until :func:`merge` has folded that page in.
+    credits: tuple[tuple[str, str], ...] = ()
 
 
 def _text(markup: str) -> str:
@@ -207,22 +226,57 @@ def _concert(body: str, titles: Container[str]) -> Concert | None:
         return None
 
     conductors, labels = _credits(body)
-    performers = [name.strip() for name in _slots(attributes.get("performers", "")) if name.strip()]
+    performers = [
+        name.strip()
+        for name in _slots(attributes.get("performers", ""))
+        if name.strip() and name.strip() != _MISSING
+    ]
     ensembles = tuple(name for name in performers if looks_like_ensemble(name))
     credited = set(conductors) | set(ensembles)
     return Concert(
         concert_id=identifier.group(1),
         url=BASE_URL + href if href.startswith("/") else href,
         title=attributes.get("title", "").strip(),
+        subtitle=_find(_SUBTITLE, body),
         date=date.strip(),
         time=_find(_TIME, body),
         venue=_find(_VENUE, body),
         location=attributes.get("location", "").strip() or None,
         conductors=conductors,
         conductor_labels=labels,
-        soloists=tuple(name for name in performers if name not in credited),
+        soloists=tuple((name, None) for name in performers if name not in credited),
         ensembles=ensembles,
         programme=tuple(programme(attributes.get("composers", ""), attributes.get("works", ""), titles)),
+    )
+
+
+def merge(concert: Concert, detail: ConcertDetail) -> Concert:
+    """*concert* as its own detail page corrects and completes it.
+
+    The detail page wins wherever the two disagree, because it is the fuller
+    record: it labels every credit where the fragment labels at most the
+    conductor, and it pairs each work with its composer as siblings in the
+    markup, where the fragment leaves that to be reconstructed from two
+    positionally aligned attributes.
+
+    Nothing the fragment knew is dropped, though. A performer the detail page
+    does not name keeps its place, with no discipline — the two never disagreed
+    on *who* played in any concert sampled, but losing a name to a markup change
+    would be silent, and an undisciplined soloist is what the source gave us
+    before this page was read anyway.
+    """
+    named = {name for name, _ in detail.soloists} | set(detail.conductors) | set(detail.ensembles)
+    return replace(
+        concert,
+        conductors=tuple(dict.fromkeys(concert.conductors + detail.conductors)),
+        soloists=tuple(
+            dict.fromkeys(
+                detail.soloists + tuple((name, None) for name, _ in concert.soloists if name not in named)
+            )
+        ),
+        ensembles=tuple(dict.fromkeys(concert.ensembles + detail.ensembles)),
+        programme=detail.programme or concert.programme,
+        credits=detail.credits,
     )
 
 
@@ -251,6 +305,7 @@ def mentions(concert: Concert) -> Iterator[SourceWorkMention]:
                 "url": concert.url,
                 "index": index,
                 "title": concert.title,
+                "subtitle": concert.subtitle,
                 "date": concert.date,
                 "time": concert.time,
                 "venue": concert.venue,
@@ -259,8 +314,14 @@ def mentions(concert: Concert) -> Iterator[SourceWorkMention]:
                 "work": title,
                 "conductors": list(concert.conductors),
                 "conductor_labels": list(concert.conductor_labels),
-                # the archive labels no soloist: disciplines are detail-page only
-                "soloists": [{"name": name, "discipline": None} for name in concert.soloists],
+                # a discipline is None for a soloist the concert's own page did
+                # not name; the result listing labels nobody
+                "soloists": [
+                    {"name": name, "discipline": discipline} for name, discipline in concert.soloists
+                ],
                 "ensembles": list(concert.ensembles),
+                # every credit of the detail page, verbatim: the label vocabulary
+                # is the site's, spans two languages, and is recorded, not mapped
+                "credits": [list(credit) for credit in concert.credits],
             },
         )
