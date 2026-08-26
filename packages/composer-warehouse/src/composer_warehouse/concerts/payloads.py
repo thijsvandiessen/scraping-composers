@@ -121,6 +121,29 @@ def _rco_fields(raw: dict[str, Any]) -> ConcertFields | None:
     )
 
 
+def _wienerphil_fields(raw: dict[str, Any]) -> ConcertFields | None:
+    """Wiener Philharmoniker mentions repeat the concert on each of its works.
+
+    The archive's own concert id keys the concert; its dates are already ISO.
+    Soloists carry no discipline — the list view the adapter reads labels only
+    the conductor.
+    """
+    concert_id = raw.get("concert_id")
+    if not concert_id:
+        return None
+    return ConcertFields(
+        external_key=str(concert_id),
+        date=raw.get("date"),
+        venue=raw.get("venue") or raw.get("location") or None,
+        season=None,
+        event_type=raw.get("title") or None,
+        url=raw.get("url") or None,
+        conductors=tuple(name for name in raw.get("conductors") or () if name),
+        soloists=_soloists(raw),
+        ensembles=tuple(name for name in raw.get("ensembles") or () if name),
+    )
+
+
 def _llm_fields(raw: dict[str, Any]) -> ConcertFields | None:
     """Concert fields from an LLM-extracted mention (composer_extract writes a
     normalized, source-independent payload marked ``_source: "llm"``)."""
@@ -150,6 +173,7 @@ _SOURCE_FIELDS = {
     "nyphil": _nyphil_fields,
     "berlinphil": _berlinphil_fields,
     "rco": _rco_fields,
+    "wienerphil": _wienerphil_fields,
 }
 
 

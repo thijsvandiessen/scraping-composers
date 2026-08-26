@@ -288,6 +288,54 @@ def test_derive_concerts_handles_rco_source(session: Session) -> None:
     assert (stats.concerts, stats.participant_links) == (1, 2)
 
 
+def test_derive_concerts_handles_wienerphil_source(session: Session) -> None:
+    """The Vienna Philharmonic repeats the concert on each of its works."""
+    payload = {
+        "concert_id": "2465",
+        "date": "1842-03-28",
+        "time": "12:30",
+        "venue": "Hofburg Palace, Redoutensaal, Vienna, Austria",
+        "location": "Hofburg Palace, Vienna, Austria",
+        "title": "Philharmonic Concert",
+        "url": "https://www.wienerphilharmoniker.at/en/konzerte/philharmonic-concert/2465/",
+        "conductors": ["Otto Nicolai"],
+        "conductor_labels": ["CONDUCTOR"],
+        # the archive labels no soloist: disciplines are detail-page only
+        "soloists": [{"name": "Jenny Lutzer", "discipline": None}],
+        "ensembles": ["Vienna Philharmonic"],
+    }
+    wienerphil = FakeSource(
+        records=(
+            perf_mention("perf:2465:0", "Symphony No. 7 in A Major, op. 92", "Beethoven", payload),
+            perf_mention("perf:2465:1", 'Arie aus der Oper "Fanisca"', "Cherubini", payload),
+            person("Otto Nicolai", external_id="interpret:Otto Nicolai"),
+            person("Jenny Lutzer", external_id="interpret:Jenny Lutzer"),
+            ensemble("Vienna Philharmonic", external_id="interpret:Vienna Philharmonic"),
+        ),
+        name="wienerphil",
+        base_url="https://www.wienerphilharmoniker.at",
+    )
+    ingest_source(session, wienerphil)
+
+    stats = derive_concerts(session)
+
+    concert = session.scalars(select(Concert)).one()  # both works grouped by concert id
+    assert concert.external_key == "2465"
+    assert concert.date == "1842-03-28"
+    assert concert.venue == "Hofburg Palace, Redoutensaal, Vienna, Austria"
+    assert concert.event_type == "Philharmonic Concert"
+    assert concert.url == payload["url"]
+    assert len(concert.works) == 2
+    assert {(p.role, p.name) for p in concert.participants} == {
+        ("conductor", "Otto Nicolai"),
+        ("soloist", "Jenny Lutzer"),
+        ("ensemble", "Vienna Philharmonic"),
+    }
+    assert stats.concerts == 1
+    # every credit resolves: the credits and the entities are the same strings
+    assert stats.unresolved_participant_names == 0
+
+
 def test_derive_concerts_is_rerunnable(session: Session) -> None:
     _seed_performances(session)
     first = derive_concerts(session)
