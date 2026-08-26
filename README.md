@@ -267,13 +267,13 @@ schema is dropped just after the rename, not before it.
 **Concerts are derived in silver** from the mentions' raw performance
 context (`composer-ingest derive-concerts`, also run automatically before
 every promote): mentions are grouped into concerts per source (berlinphil by
-its concert id, nyphil by program + date, concertgebouw by date + city, rco by
-its concert id, dates normalized to ISO) with season and event type;
-conductors, soloists (with their instrument/voice) _and the orchestra_ are
-resolved to entities by normalized name — against the person **and** ensemble
-entities whatever the credit's role, because a credit's slot says how the
-source filed the name, not what the name is (choirs turn up among the
-soloists); and each concert keeps its programme. Promotion copies the concert
+its concert id, nyphil by program + date, concertgebouw by date + city, rco
+and wienerphil by their own concert ids, dates normalized to ISO) with season
+and event type; conductors, soloists (with their instrument/voice) _and the
+orchestra_ are resolved to entities by normalized name — against the person
+**and** ensemble entities whatever the credit's role, because a credit's slot
+says how the source filed the name, not what the name is (choirs turn up among
+the soloists); and each concert keeps its programme. Promotion copies the concert
 tables into gold, collapsing participant links to canonical entities. That
 powers the concert browser, per-person concert lists, and concert-count
 sorting in both APIs.
@@ -520,7 +520,8 @@ say, verbatim, plus the matching passes over it; curation and conflict
 resolution happen downstream when data is promoted into gold.
 
 - **`sources`** — where data comes from (`imslp`, `wikidata`, `openopus`,
-  `concertgebouw`, `nyphil`, `berlinphil`, `classicalmusiconline`, `boosey`, ...).
+  `concertgebouw`, `nyphil`, `berlinphil`, `wienerphil`,
+  `classicalmusiconline`, `boosey`, ...).
 - **`ingest_runs`** — the collection log: one row per ingest, with source,
   timestamps, status, and seen/new counts.
 - **`entity_records`** — raw records per source, unique on
