@@ -7,7 +7,7 @@ dependencies = [
     "composer-models",
     "composer-gold",
     "fastapi>=0.141.1",
-    "uvicorn[standard]>=0.52.3",
+    "uvicorn[standard]>=0.52.4",
     "python-dotenv>=1.2.3",
     "composer-config",
 ]
