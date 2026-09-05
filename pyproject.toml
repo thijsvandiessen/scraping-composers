@@ -97,7 +97,7 @@ extraPaths = [
 ]
 # Trivial per-member conftests share the module name "conftest"; nothing to type-check there.
 exclude = ["**/conftest.py", "**/.venv", "**/__pycache__", "**/migrations/versions/**"]
-# django, pandas, docling, unfold and kagglehub ship no type information. Don't
+# django, unfold and kagglehub ship no type information. Don't
 # infer half-typed signatures from their source (which produces false positives
 # on e.g. the Django test client and request objects); treat them as untyped,
 # matching how the previous mypy config silenced them with ignore_missing_imports.
@@ -108,7 +108,7 @@ reportMissingModuleSource = false
 reportMissingTypeStubs = false
 # The checks below have no equivalent under the mypy --strict config this replaces:
 # they flag values whose type is `Unknown` because it flows in from an untyped
-# dependency (pandas, django, docling, ...), tests reaching into a module's
+# dependency (django, kagglehub, ...), tests reaching into a module's
 # private helpers, and fixtures pyright reads as unused. Keeping them on would
 # hold the code to a strictness it was never written against, so leave them off
 # and rely on the rest of strict mode for real type safety.
@@ -121,6 +121,15 @@ reportPrivateUsage = false
 reportUnusedFunction = false
 
 [tool.uv]
+# Floors for transitive dependencies nothing here depends on directly, raised to
+# clear advisories `pip-audit` fails CI on. Each is a resolver hint, not a feature
+# requirement: drop it once the package pulling the dependency in raises its own
+# floor past ours.
 constraint-dependencies = [
     "setuptools>=83.0.0",
+    # via crawl4ai. 3.10.3 is the current release and clears every nltk advisory
+    # that has a fix version. PYSEC-2026-3740 has none — it reads "NLTK through
+    # 3.10.3" — so the audit job stays red on that one alone, deliberately
+    # unsuppressed, until nltk ships a fix and this floor can be raised again.
+    "nltk>=3.10.3",
 ]
