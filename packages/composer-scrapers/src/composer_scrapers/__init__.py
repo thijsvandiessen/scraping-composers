@@ -71,6 +71,7 @@ from .classicfm import ClassicFmAdapter  # noqa: E402
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
 from .imslp import ImslpAdapter  # noqa: E402
 from .imslp_works import ImslpWorksAdapter  # noqa: E402
+from .laphil import LaPhilAdapter  # noqa: E402
 from .nyphil import NyPhilAdapter  # noqa: E402
 from .openopus import OpenOpusAdapter  # noqa: E402
 from .rco import RcoAdapter  # noqa: E402
@@ -90,4 +91,5 @@ REGISTRY: dict[str, SourceAdapter] = {
     "boosey": BooseyAdapter(),
     "classicfm": ClassicFmAdapter(),
     "wienerphil": WienerPhilAdapter(),
+    "laphil": LaPhilAdapter(),
 }

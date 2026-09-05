@@ -520,7 +520,7 @@ say, verbatim, plus the matching passes over it; curation and conflict
 resolution happen downstream when data is promoted into gold.
 
 - **`sources`** — where data comes from (`imslp`, `wikidata`, `openopus`,
-  `concertgebouw`, `nyphil`, `berlinphil`, `wienerphil`,
+  `concertgebouw`, `nyphil`, `berlinphil`, `wienerphil`, `laphil`,
   `classicalmusiconline`, `boosey`, ...).
 - **`ingest_runs`** — the collection log: one row per ingest, with source,
   timestamps, status, and seen/new counts.
