@@ -188,8 +188,10 @@ def concert_fields(source_name: str, raw: dict[str, Any]) -> ConcertFields | Non
     # they were crawled from, so they resolve by marker rather than source name.
     # Every extract kind shares the "llm" marker and is told apart by "_kind":
     # recordings belong to derive_recordings, work profiles to no derive pass at
-    # all. Matched positively, the way derive_recordings does it, so a kind added
-    # later is ignored here rather than mistaken for a concert.
+    # all. Matched positively, so a kind added later is ignored here rather than
+    # mistaken for a concert. Unlike derive_recordings this does still require
+    # the "llm" marker, because no scraper writes a concert payload yet — the
+    # marker is the only thing telling a crawl's concert from anything else.
     if raw.get("_source") == "llm" and raw.get("_kind") in _CONCERT_KINDS:
         return _llm_fields(raw)
     return None

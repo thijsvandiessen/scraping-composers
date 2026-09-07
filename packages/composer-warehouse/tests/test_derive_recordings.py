@@ -236,3 +236,55 @@ def test_derive_recordings_is_rerunnable(session: Session) -> None:
     assert session.scalar(select(func.count(Recording.id))) == 1
     assert session.scalar(select(func.count(RecordingWork.id))) == 2
     assert session.scalar(select(func.count(RecordingParticipant.id))) == 2
+
+
+def _scraped_raw() -> dict[str, object]:
+    """The same normalized payload, written by a scraper instead of an LLM.
+
+    ``composer_scrapers.decca`` reads its release context out of a structured
+    API rather than a model's reading of a page, but what it writes into
+    ``raw_work_mentions.raw`` is the shape this pass already understands.
+    """
+    return {
+        "_source": "scraper",
+        "_kind": "recording",
+        "record_key": "product:95920",
+        "url": "https://www.deccaclassics.com/en/catalogue/products/verdi-ballo-7",
+        "title": "VERDI Un ballo in maschera Karajan",
+        "release_date": "2006-03-14",
+        "label": "Deutsche Grammophon (DG)",
+        "catalogue_number": "00028947756415",
+        "format": "CD album",
+        "artists": [
+            {"name": "Herbert von Karajan", "role": "conductor", "discipline": "Conductor"},
+            {"name": "Wiener Philharmoniker", "role": "ensemble", "discipline": "Orchestra"},
+        ],
+    }
+
+
+def test_derive_recordings_reads_a_scraped_payload(session: Session) -> None:
+    """Gating on ``_source: "llm"`` here derived zero recordings from every
+    deterministic source — the marker says how the payload was produced, which
+    is not this pass's business."""
+    raw = _scraped_raw()
+    decca = FakeSource(
+        records=(
+            perf_mention("/products/95920/works/449306", "Un ballo in maschera", "Giuseppe Verdi", raw),
+            perf_mention("/products/95920/works/551435", "Requiem", "Giuseppe Verdi", raw),
+            person("Herbert von Karajan", external_id="/artists/3"),
+            ensemble("Wiener Philharmoniker", external_id="/artists/4"),
+        ),
+        name="decca",
+        base_url="https://www.deccaclassics.com/en",
+    )
+    ingest_source(session, decca)
+
+    derive_recordings(session)
+
+    recording = session.scalars(select(Recording)).one()  # both works, one release
+    assert recording.external_key == "product:95920"
+    assert recording.catalogue_number == "00028947756415"
+    assert recording.label == "Deutsche Grammophon (DG)"
+    assert session.scalar(select(func.count()).select_from(RecordingWork)) == 2
+    roles = session.scalars(select(RecordingParticipant.role)).all()
+    assert sorted(roles) == ["conductor", "ensemble"]
