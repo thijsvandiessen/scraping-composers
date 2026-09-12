@@ -1,13 +1,15 @@
 """Derive recordings from the mentions' raw release context.
 
 The album/release counterpart to ``derive_concerts``: a post-hoc pass over the
-silver database. LLM-extracted work mentions from a *recordings* crawl carry the
-release payload in ``raw_work_mentions.raw`` (marked ``_source: "llm"``,
-``_kind: "recording"``); this pass groups them into recordings per source,
-folds the page-scoped groups into one row per release (see ``cluster``),
-resolves artist names to person and ensemble entities by normalized name, and
-links each recording to the works on it. Re-running rebuilds the recording
-tables from scratch, so the pass can be repeated after new loads.
+silver database. Work mentions that describe a release carry the release
+payload in ``raw_work_mentions.raw``, marked ``_kind: "recording"`` — whether an
+LLM extracted it from a crawl (``_source: "llm"``) or a scraper read it
+structurally (``_source: "scraper"``, as :mod:`composer_scrapers.decca` does).
+This pass groups them into recordings per source, folds the page-scoped groups
+into one row per release (see ``cluster``), resolves artist names to person and
+ensemble entities by normalized name, and links each recording to the works on
+it. Re-running rebuilds the recording tables from scratch, so the pass can be
+repeated after new loads.
 """
 
 from __future__ import annotations
@@ -63,8 +65,14 @@ def _participants(raw: dict[str, Any]) -> tuple[tuple[str, str, str | None], ...
 
 def _recording_fields(source_name: str, raw: dict[str, Any]) -> _RecordingFields | None:
     """Recording identity and fields for one mention's payload, or None when the
-    payload is not an LLM-extracted recording with a usable identity."""
-    if raw.get("_source") != "llm" or raw.get("_kind") != "recording":
+    payload is not a recording with a usable identity.
+
+    Keyed on ``_kind`` alone. How the payload was produced is not this pass's
+    business — a deterministic scraper writes the same normalized shape an LLM
+    extractor does, and gating on ``_source: "llm"`` here silently derived zero
+    recordings from every scraped source.
+    """
+    if raw.get("_kind") != "recording":
         return None
     key = raw.get("record_key")
     if not key:

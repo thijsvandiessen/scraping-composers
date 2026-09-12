@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from composer_http import new_client
 
 from .. import EntityDocument, RefreshCadence, SourceAdapter
-from .fetch import BASE_URL, PAGE_SIZE, REQUEST_DELAY_S, _fetch_page
+from .fetch import BASE_URL, PAGE_SIZE, REQUEST_DELAY_S, worklist_page
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ class ImslpAdapter(SourceAdapter):
         pages = 0
         with new_client() as client:
             while True:
-                data = _fetch_page(client, start)
+                data = worklist_page(client, start)
                 meta = data.pop("metadata", {})
                 pages += 1
                 log.info("imslp page %d: %d records (start=%d)", pages, len(data), start)
