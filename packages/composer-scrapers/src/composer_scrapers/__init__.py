@@ -70,6 +70,7 @@ from .classicalmusiconline import ClassicalMusicOnlineAdapter  # noqa: E402
 from .classicfm import ClassicFmAdapter  # noqa: E402
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
 from .decca import DeccaAdapter  # noqa: E402
+from .harmoniamundi import HarmoniaMundiAdapter  # noqa: E402
 from .imslp import ImslpAdapter  # noqa: E402
 from .imslp_recordings import ImslpRecordingsAdapter  # noqa: E402
 from .imslp_works import ImslpWorksAdapter  # noqa: E402
@@ -96,4 +97,5 @@ REGISTRY: dict[str, SourceAdapter] = {
     "wienerphil": WienerPhilAdapter(),
     "laphil": LaPhilAdapter(),
     "decca": DeccaAdapter(),
+    "harmoniamundi": HarmoniaMundiAdapter(),
 }
