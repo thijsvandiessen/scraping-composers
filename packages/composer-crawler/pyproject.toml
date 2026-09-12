@@ -7,7 +7,7 @@ dependencies = [
     "composer-bronze",
     "composer-config",
     "composer-http",
-    "crawl4ai>=0.9",
+    "crawl4ai>=0.9.3",
 ]
 
 [build-system]

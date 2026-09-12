@@ -10,7 +10,7 @@ dependencies = [
     "composer-http",
     "ollama>=0.4",
     "httpx",
-    "pydantic>=2",
+    "pydantic>=2.13.5",
 ]
 
 [build-system]

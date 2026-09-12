@@ -14,10 +14,11 @@ the infobox's own labels — so, as in ``boosey/works.py``, reading every
 ``<th>``/``<td>`` pair on the page with first-occurrence-wins is enough; no
 separate table boundary needs to be found.
 
-The title is passed through exactly as the page's ``<title>`` states it
-(with composer suffix stripped, since the composer is already known from
-which category page this work was found on) — nothing is ever appended to
-it. One composer's catalogue routinely shares opus numbers across distinct
+The title is not read from the page at all: the bulk worklist already stated
+it, and the parser output ``api.php`` serves carries no ``<title>`` tag to read
+it from. It is passed through exactly as the worklist states it (with composer
+suffix stripped, since the worklist names the composer too) — nothing is ever
+appended to it. One composer's catalogue routinely shares opus numbers across distinct
 works ("11 Bagatelles, Op.119" vs "6 Bagatelles, Op.126"), and the work
 matcher (``composer_warehouse.works.match``) treats a matching parsed opus as
 near-proof of identity, so folding extra text into the title risks the same
@@ -34,7 +35,6 @@ from html import unescape
 _TH_TD = re.compile(r"<th[^>]*>(.*?)</th>\s*<td[^>]*>(.*?)</td>", re.IGNORECASE | re.DOTALL)
 _MS555_SPAN = re.compile(r'<span class="ms555">.*?</span>', re.IGNORECASE | re.DOTALL)
 _TAG = re.compile(r"<[^>]+>")
-_TITLE_TAG = re.compile(r"<title\b[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 #: Infobox label -> canonical field name. Matching is on the whole label (not
 #: a substring), read straight off the page rather than guessed at.
@@ -52,9 +52,6 @@ _LABELS: dict[str, str] = {
     "Genre Categories": "genre_categories",
     "Instrumentation": "instrumentation",
 }
-
-# " - IMSLP" trailing the <title>.
-_TITLE_SUFFIX = re.compile(r"\s*-\s*imslp\s*$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -86,19 +83,11 @@ def _labelled_values(html: str) -> dict[str, str]:
     return found
 
 
-def _title(html: str) -> str:
-    if match := _TITLE_TAG.search(html):
-        title = _clean(match.group(1))
-        return _TITLE_SUFFIX.sub("", title).strip()
-    return ""
-
-
 def strip_composer_suffix(title: str, composer_label: str) -> str:
     """The page title with the trailing composer disambiguation removed.
 
-    IMSLP titles every work page "Title (Composer)"; the composer is already
-    known from which category page this work was found on, so this is a
-    plain string strip, not a parse.
+    IMSLP titles every work page "Title (Composer)"; the worklist names the
+    composer separately, so this is a plain string strip, not a parse.
     """
     suffix = f" ({composer_label})"
     if title.endswith(suffix):
@@ -106,9 +95,13 @@ def strip_composer_suffix(title: str, composer_label: str) -> str:
     return title
 
 
-def parse_work(html: str) -> ParsedWork | None:
-    """Parse a work detail page, or ``None`` when it carries no usable title."""
-    title = _title(html)
+def parse_work(html: str, title: str) -> ParsedWork | None:
+    """The fields *html* states about the work called *title*.
+
+    ``None`` without a usable title — the worklist row is what names the work,
+    so a row that named nothing has nothing to attach the page's fields to.
+    """
+    title = title.strip()
     if not title:
         return None
     return ParsedWork(title=title, fields=_labelled_values(html))
