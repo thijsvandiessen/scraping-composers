@@ -288,3 +288,59 @@ def test_derive_recordings_reads_a_scraped_payload(session: Session) -> None:
     assert session.scalar(select(func.count()).select_from(RecordingWork)) == 2
     roles = session.scalars(select(RecordingParticipant.role)).all()
     assert sorted(roles) == ["conductor", "ensemble"]
+
+
+def _imslp_raw() -> dict[str, object]:
+    """One album as ``composer_scrapers.imslp_recordings`` writes it.
+
+    Thinner than the other two — IMSLP publishes no release date, label or
+    format, and the catalogue number is read off the cover URL — which is the
+    case worth pinning: a payload can be mostly empty and still be a recording.
+    """
+    return {
+        "_source": "scraper",
+        "_kind": "recording",
+        "record_key": "61682",
+        "url": "https://imslp.org/wiki/10_Blake_Songs_(Vaughan_Williams,_Ralph)",
+        "title": "VAUGHAN WILLIAMS, R.: 10 Blake Songs (Banfalvi)",
+        "release_date": None,
+        "label": None,
+        "catalogue_number": "C5035",
+        "format": None,
+        "artists": [
+            {"name": "Andreas Weller", "role": "soloist", "discipline": "tenor"},
+            {"name": "Bela Banfalvi", "role": "conductor", "discipline": None},
+        ],
+    }
+
+
+def test_derive_recordings_reads_an_imslp_payload(session: Session) -> None:
+    """One album listed on two IMSLP work pages is one recording, not two."""
+    raw = _imslp_raw()
+    imslp = FakeSource(
+        records=(
+            perf_mention("49198#61682", "10 Blake Songs", "Vaughan Williams, Ralph", raw),
+            perf_mention("49199#61682", "Oboe Concerto", "Vaughan Williams, Ralph", raw),
+            person("Andreas Weller", external_id="/names/Andreas%20Weller"),
+            person("Bela Banfalvi", external_id="/names/Bela%20Banfalvi"),
+        ),
+        name="imslp_recordings",
+        base_url="https://imslp.org",
+    )
+    ingest_source(session, imslp)
+
+    derive_recordings(session)
+
+    recording = session.scalars(select(Recording)).one()
+    assert recording.external_key == "61682"
+    assert recording.catalogue_number == "C5035"
+    assert recording.release_date is None
+    assert session.scalar(select(func.count()).select_from(RecordingWork)) == 2
+    participants = session.scalars(select(RecordingParticipant)).all()
+    assert sorted((p.role, p.name) for p in participants) == [
+        ("conductor", "Bela Banfalvi"),
+        ("soloist", "Andreas Weller"),
+    ]
+    # The person documents the adapter emits are what let a credit resolve; an
+    # unresolved credit never reaches gold's selection.
+    assert all(participant.entity_id is not None for participant in participants)

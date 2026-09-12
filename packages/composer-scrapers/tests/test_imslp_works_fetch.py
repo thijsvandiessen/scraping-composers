@@ -1,12 +1,13 @@
-"""Tests for the imslp_works HTTP fetch layer: category resolution, section
-splitting, per-section pagination, and the gold-driven work-page walk.
+"""Tests for the imslp_works HTTP layer: the bulk worklist, and the bounded
+detail pass over it.
 
-The page shapes below mirror what was confirmed live against a real
-multi-page composer (Bach) while building this source: a composer's category
-page holds several ``<h3 class='nojs'>Section (count)</h3>`` sections, and a
-followed "next 200" pagination link can land back on a full composer page
-(same title, re-split by section) or on a bare single-category listing (no
-section markers at all, handled as a fallback).
+The response shapes mirror what the two IMSLP endpoints answer live. The
+worklist is the awkward one — rows keyed by stringified index alongside a
+``metadata`` entry carrying the pagination flag, with the fields that identify
+a work buried in ``intvals`` — and the detail endpoint is MediaWiki 1.18, which
+reports an unknown page id as a 200 with an error object rather than a 404.
+A stale worklist row pointing at a deleted page is not hypothetical: the live
+catalogue has them.
 """
 
 from __future__ import annotations
@@ -17,13 +18,11 @@ import httpx
 import pytest
 from composer_scrapers.imslp_works.fetch import (
     BASE_URL,
-    category_url,
-    iter_section_work_paths,
-    iter_work_pages,
-    resolve_category_url,
-    work_paths,
+    WorkRow,
+    iter_worklist,
+    iter_works,
+    parse_url,
 )
-from composer_scrapers.imslp_works.gold import GoldComposer
 
 
 @pytest.fixture(autouse=True)
@@ -33,267 +32,188 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
 
-def _client(handler: Any) -> httpx.Client:
-    return httpx.Client(transport=httpx.MockTransport(handler))
+def _work(index: int, page_id: int, title: str, composer: str, icatno: str = "") -> dict[str, Any]:
+    return {
+        "id": title,
+        "type": "2",
+        "intvals": {
+            "composer": composer,
+            "worktitle": title.split(" (")[0],
+            "icatno": icatno,
+            "pageid": str(page_id),
+        },
+        "permlink": f"{BASE_URL}/wiki/{title.replace(' ', '_')}",
+    }
 
 
-# A composer whose Compositions section spans two "next 200" pages, plus a
-# Collaborations section (excluded) and a one-page Collected Works section.
-CATEGORY_PAGE = """
-<h3 class='nojs'>Compositions (2)</h3>
-<h2>Compositions by: Test, Composer</h2>
-<a href="/wiki/Work_A_(Test,_Composer)">Work A</a>
-<a href="/index.php?title=Category:Test,_Composer&amp;pagefrom=X" class="categorypaginglink">next 200</a>
-<h3 class='nojs'>Collaborations (1)</h3>
-<h2>Collaborations with: Test, Composer</h2>
-<a href="/wiki/Other_Work_(Someone_Else)">Other Work</a>
-<h3 class='nojs'>Collected Works (1)</h3>
-<h2>Collected works: Test, Composer</h2>
-<a href="/wiki/Complete_Works_(Test,_Composer)">Complete Works</a>
-<a href="/wiki/Category:Somewhere">not a work</a>
-"""
-
-# The main-title continuation: MediaWiki re-renders the *whole* composer page
-# again, with the Compositions section advanced and no further "next 200".
-CONTINUATION_SAME_TITLE = """
-<h3 class='nojs'>Compositions (2)</h3>
-<h2>Compositions by: Test, Composer</h2>
-<a href="/wiki/Work_B_(Test,_Composer)">Work B</a>
-<h3 class='nojs'>Collaborations (1)</h3>
-<h2>Collaborations with: Test, Composer</h2>
-<a href="/wiki/Other_Work_(Someone_Else)">Other Work</a>
-<h3 class='nojs'>Collected Works (1)</h3>
-<h2>Collected works: Test, Composer</h2>
-<a href="/wiki/Complete_Works_(Test,_Composer)">Complete Works</a>
-"""
-
-CATEGORY_KEY = "/wiki/Category:Test,_Composer"
-CONTINUATION_KEY = "/index.php?title=Category:Test,_Composer&pagefrom=X"
+def _worklist(rows: list[dict[str, Any]], more: bool = False) -> dict[str, Any]:
+    body: dict[str, Any] = {str(i): row for i, row in enumerate(rows)}
+    body["metadata"] = {"start": 0, "limit": 1000, "moreresultsavailable": more}
+    return body
 
 
-def _category_handler(request: httpx.Request) -> httpx.Response:
-    key = request.url.path + (f"?{request.url.query.decode()}" if request.url.query else "")
-    if key == CATEGORY_KEY:
-        return httpx.Response(200, text=CATEGORY_PAGE)
-    if key == CONTINUATION_KEY:
-        return httpx.Response(200, text=CONTINUATION_SAME_TITLE)
-    return httpx.Response(404, text="not found")
+def _parsed(document: str) -> dict[str, Any]:
+    return {"parse": {"title": "ignored", "text": {"*": document}}}
 
 
-# ---------------------------------------------------------------------------
-# category_url / resolve_category_url
-# ---------------------------------------------------------------------------
+PAGE_ONE = _worklist(
+    [
+        _work(0, 101, "Sonata (Alpha, A)", "Alpha, A", "IAA 1"),
+        _work(1, 102, "Rondo (Beta, B)", "Beta, B"),
+    ],
+    more=True,
+)
+PAGE_TWO = _worklist([_work(0, 103, "Fugue (Gamma, G)", "Gamma, G", "IGG 3")])
+
+INFOBOX = "<table><tr><th>Instrumentation</th><td>organ</td></tr></table>"
 
 
-def test_category_url_matches_imslps_surname_given_convention() -> None:
-    assert category_url("Beethoven, Ludwig van") == BASE_URL + "/wiki/Category:Beethoven,_Ludwig_van"
+def _handler(details: dict[int, httpx.Response] | None = None) -> Any:
+    pages = details if details is not None else {}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        if "API.ISCR.php" in request.url.path:
+            start = request.url.query.decode()
+            return httpx.Response(200, json=PAGE_TWO if "start=1000" in start else PAGE_ONE)
+        page_id = int(request.url.params["pageid"])
+        return pages.get(page_id, httpx.Response(200, json=_parsed(INFOBOX)))
+
+    return handle
 
 
-def test_resolve_category_url_prefers_the_known_url() -> None:
-    seen: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(str(request.url))
-        return httpx.Response(200, text="ok")
-
-    client = _client(handler)
-    known = BASE_URL + "/wiki/Category:Known,_Composer"
-    url = resolve_category_url(client, "Unused, Label", known)
-
-    assert url == known
-    assert seen == [known]
-
-
-def test_resolve_category_url_constructs_and_verifies_when_unknown() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, text="ok")
-
-    client = _client(handler)
-    url = resolve_category_url(client, "New, Composer", None)
-
-    assert url == BASE_URL + "/wiki/Category:New,_Composer"
-
-
-def test_resolve_category_url_is_none_when_the_guess_does_not_resolve() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(404, text="not found")
-
-    client = _client(handler)
-    assert resolve_category_url(client, "Nobody, Really", None) is None
-
-
-# ---------------------------------------------------------------------------
-# work_paths: link discovery within a section
-# ---------------------------------------------------------------------------
-
-
-def test_work_paths_extracts_wiki_links() -> None:
-    html = '<a href="/wiki/Work_A_(X)">Work A</a><a href="/wiki/Work_B_(X)">Work B</a>'
-    assert work_paths(html) == ["Work_A_(X)", "Work_B_(X)"]
-
-
-def test_work_paths_excludes_non_work_namespaces() -> None:
-    html = (
-        '<a href="/wiki/Category:Sonatas">cat</a>'
-        '<a href="/wiki/Special:Search">search</a>'
-        '<a href="/wiki/Work_A_(X)">Work A</a>'
-    )
-    assert work_paths(html) == ["Work_A_(X)"]
-
-
-def test_work_paths_deduplicates() -> None:
-    html = '<a href="/wiki/Work_A_(X)">Work A</a><a href="/wiki/Work_A_(X)">again</a>'
-    assert work_paths(html) == ["Work_A_(X)"]
-
-
-# ---------------------------------------------------------------------------
-# iter_section_work_paths: section scoping + pagination
-# ---------------------------------------------------------------------------
-
-
-def test_iter_section_work_paths_only_walks_compositions_and_collected_works() -> None:
-    client = _client(_category_handler)
-    paths = list(iter_section_work_paths(client, BASE_URL + CATEGORY_KEY))
-
-    assert "Other_Work_(Someone_Else)" not in paths
-
-
-def test_iter_section_work_paths_follows_next_200_within_a_section() -> None:
-    client = _client(_category_handler)
-    paths = list(iter_section_work_paths(client, BASE_URL + CATEGORY_KEY))
-
-    assert paths == ["Work_A_(Test,_Composer)", "Work_B_(Test,_Composer)", "Complete_Works_(Test,_Composer)"]
-
-
-def test_iter_section_work_paths_stops_when_next_link_repeats(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A self-referential "next 200" link would otherwise loop until MAX_SECTION_PAGES."""
-    requests: list[str] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(str(request.url))
-        return httpx.Response(
-            200,
-            text=(
-                "<h3 class='nojs'>Compositions (1)</h3><h2>Compositions by: X</h2>"
-                '<a href="/wiki/Work_(X)">Work</a>'
-                '<a href="/wiki/Category:X" class="categorypaginglink">next 200</a>'
-            ),
-        )
-
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    paths = list(iter_section_work_paths(client, BASE_URL + "/wiki/Category:X"))
-
-    assert paths == ["Work_(X)"]
-    assert len(requests) == 1
-
-
-# ---------------------------------------------------------------------------
-# iter_work_pages: gold-driven walk
-# ---------------------------------------------------------------------------
-
-
-def _fake_gold_composers(monkeypatch: pytest.MonkeyPatch, people: list[GoldComposer]) -> None:
-    monkeypatch.setattr("composer_scrapers.imslp_works.fetch.gold_composers", lambda _path: people)
-
-
-def _fake_new_client(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
+def _use(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
+    """Point the source's client at *handler*, with the page mirror off."""
     monkeypatch.setattr(
         "composer_scrapers.imslp_works.fetch.new_client",
         lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
+    monkeypatch.setattr("composer_scrapers.imslp_works.fetch.open_page_cache", lambda: None)
 
 
-def _full_handler(request: httpx.Request) -> httpx.Response:
-    key = request.url.path + (f"?{request.url.query.decode()}" if request.url.query else "")
-    if key == CATEGORY_KEY:
-        return httpx.Response(200, text=CATEGORY_PAGE)
-    if key == CONTINUATION_KEY:
-        return httpx.Response(200, text=CONTINUATION_SAME_TITLE)
-    if key.startswith("/wiki/Work_") or key.startswith("/wiki/Complete_Works"):
-        return httpx.Response(200, text=f"<title>{key.rsplit('/', 1)[1]} - IMSLP</title>")
-    return httpx.Response(404, text="not found")
+def test_a_work_page_is_requested_the_way_imslp_recordings_requests_it() -> None:
+    """The mirror is keyed by URL, so the two IMSLP sources only share their
+    overlap while they ask for pages identically."""
+    from composer_scrapers.imslp_recordings.fetch import parse_url as recordings_parse_url
+
+    assert parse_url(207061) == recordings_parse_url(207061)
 
 
-COMPOSER = GoldComposer(entity_id="c1", label="Test, Composer", known_imslp_url=BASE_URL + CATEGORY_KEY)
+class TestWorklist:
+    def test_pages_the_bulk_endpoint_until_it_is_exhausted(self) -> None:
+        with httpx.Client(transport=httpx.MockTransport(_handler())) as client:
+            rows = list(iter_worklist(client))
+        assert [row.page_id for row in rows] == [101, 102, 103]
+
+    def test_reads_the_fields_that_identify_a_work_out_of_intvals(self) -> None:
+        with httpx.Client(transport=httpx.MockTransport(_handler())) as client:
+            first = next(iter(iter_worklist(client)))
+        assert first == WorkRow(
+            page_id=101,
+            title="Sonata (Alpha, A)",
+            composer="Alpha, A",
+            catalogue_number="IAA 1",
+            url=f"{BASE_URL}/wiki/Sonata_(Alpha,_A)",
+        )
+
+    def test_an_empty_catalogue_number_is_no_catalogue_number(self) -> None:
+        with httpx.Client(transport=httpx.MockTransport(_handler())) as client:
+            rows = {row.page_id: row for row in iter_worklist(client)}
+        assert rows[102].catalogue_number is None
+
+    def test_a_row_missing_what_identifies_a_work_is_skipped(self) -> None:
+        def handle(request: httpx.Request) -> httpx.Response:
+            rows = [{"id": "No intvals"}, {"id": "T (C, C)", "intvals": {"composer": "C, C"}}]
+            body = _worklist([])
+            body.update({str(i): row for i, row in enumerate(rows)})
+            body["2"] = _work(2, 900, "Kept (D, D)", "D, D")
+            return httpx.Response(200, json=body)
+
+        with httpx.Client(transport=httpx.MockTransport(handle)) as client:
+            assert [row.page_id for row in iter_worklist(client)] == [900]
 
 
-def test_iter_work_pages_yields_composer_path_url_html_per_work(monkeypatch: pytest.MonkeyPatch) -> None:
-    _fake_gold_composers(monkeypatch, [COMPOSER])
-    _fake_new_client(monkeypatch, _full_handler)
+class TestDetailPass:
+    def test_every_work_is_yielded_even_when_nothing_is_enriched(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The catalogue is the point; the detail pass is an optional second one."""
+        _use(monkeypatch, _handler())
+        results = list(iter_works(max_details=0))
+        assert [row.page_id for row, _ in results] == [101, 102, 103]
+        assert all(document is None for _, document in results)
 
-    pages = list(iter_work_pages("unused-gold.db"))
+    def test_max_details_bounds_the_fetching_not_the_catalogue(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _use(monkeypatch, _handler())
+        results = list(iter_works(max_details=2))
+        assert len(results) == 3
+        assert [document is not None for _, document in results] == [True, True, False]
 
-    assert [p for _, p, _, _ in pages] == [
-        "Work_A_(Test,_Composer)",
-        "Work_B_(Test,_Composer)",
-        "Complete_Works_(Test,_Composer)",
-    ]
-    assert all(composer == COMPOSER for composer, _, _, _ in pages)
-    assert pages[0][2] == BASE_URL + "/wiki/Work_A_(Test,_Composer)"
-    assert "Work_A_(Test,_Composer)" in pages[0][3]
+    def test_an_uncapped_run_enriches_everything(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _use(monkeypatch, _handler())
+        assert all(document is not None for _, document in iter_works())
 
+    def test_a_stale_worklist_row_costs_its_page_not_the_sweep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """1.18 answers a deleted page id with a 200 and an error object."""
+        gone = httpx.Response(200, json={"error": {"code": "nosuchpageid", "info": "no page 102"}})
+        _use(monkeypatch, _handler({102: gone}))
+        results = list(iter_works())
+        assert [row.page_id for row, _ in results] == [101, 102, 103]
+        assert [document is not None for _, document in results] == [True, False, True]
 
-def test_iter_work_pages_skips_composers_whose_category_does_not_resolve(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    unresolved = GoldComposer(entity_id="c2", label="Nobody, Really", known_imslp_url=None)
-    _fake_gold_composers(monkeypatch, [unresolved])
-    _fake_new_client(monkeypatch, lambda request: httpx.Response(404, text="not found"))
+    def test_an_http_error_costs_its_page_not_the_sweep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _use(monkeypatch, _handler({102: httpx.Response(500)}))
+        assert [document is not None for _, document in iter_works()] == [True, False, True]
 
-    assert list(iter_work_pages("unused-gold.db")) == []
-
-
-def test_iter_work_pages_honours_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    _fake_gold_composers(monkeypatch, [COMPOSER])
-    _fake_new_client(monkeypatch, _full_handler)
-
-    pages = list(iter_work_pages("unused-gold.db", max_pages=2))
-
-    assert [p for _, p, _, _ in pages] == ["Work_A_(Test,_Composer)", "Work_B_(Test,_Composer)"]
-
-
-def test_iter_work_pages_caps_across_composers_combined(monkeypatch: pytest.MonkeyPatch) -> None:
-    other = GoldComposer(entity_id="c2", label="Other, Composer", known_imslp_url=BASE_URL + CATEGORY_KEY)
-    _fake_gold_composers(monkeypatch, [COMPOSER, other])
-    _fake_new_client(monkeypatch, _full_handler)
-
-    pages = list(iter_work_pages("unused-gold.db", max_pages=1))
-
-    assert len(pages) == 1
+    def test_a_failing_page_still_spends_its_budget(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Counting successes would let a run of failures outgrow its budget."""
+        _use(monkeypatch, _handler({101: httpx.Response(500)}))
+        results = list(iter_works(max_details=1))
+        assert [document is not None for _, document in results] == [False, False, False]
 
 
-def test_iter_work_pages_skips_to_next_composer_after_a_bot_check_redirect(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Mirrors the real IMSLP failure: a "next 200" continuation redirects to
-    the site's own bot-check interstitial (/friendlytest.html) instead of
-    serving the page. That must not abort composers after the broken one."""
-    blocked = GoldComposer(entity_id="c1", label="Blocked, Composer", known_imslp_url=BASE_URL + CATEGORY_KEY)
-    other = GoldComposer(
-        entity_id="c2", label="Other, Composer", known_imslp_url=BASE_URL + "/wiki/Category:Other,_Composer"
-    )
+class TestPageMirror:
+    def test_a_mirrored_page_is_not_fetched_twice(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[int] = []
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        key = request.url.path + (f"?{request.url.query.decode()}" if request.url.query else "")
-        if key == CATEGORY_KEY:
-            return httpx.Response(200, text=CATEGORY_PAGE)
-        if key == CONTINUATION_KEY:
-            return httpx.Response(302, headers={"Location": "/friendlytest.html"})
-        if key == "/wiki/Category:Other,_Composer":
-            return httpx.Response(
-                200,
-                text=(
-                    "<h3 class='nojs'>Compositions (1)</h3><h2>Compositions by: Other, Composer</h2>"
-                    '<a href="/wiki/Work_C_(Other,_Composer)">Work C</a>'
-                ),
-            )
-        if key.startswith("/wiki/Work_"):
-            return httpx.Response(200, text=f"<title>{key.rsplit('/', 1)[1]} - IMSLP</title>")
-        return httpx.Response(404, text="not found")
+        def handle(request: httpx.Request) -> httpx.Response:
+            if "API.ISCR.php" in request.url.path:
+                return httpx.Response(200, json=_worklist([_work(0, 101, "S (A, A)", "A, A")]))
+            calls.append(int(request.url.params["pageid"]))
+            return httpx.Response(200, json=_parsed(INFOBOX))
 
-    _fake_gold_composers(monkeypatch, [blocked, other])
-    _fake_new_client(monkeypatch, handler)
+        _use(monkeypatch, handle)
+        cache = _FakeCache()
+        monkeypatch.setattr("composer_scrapers.imslp_works.fetch.open_page_cache", lambda: cache)
+        assert [d is not None for _, d in iter_works()] == [True]
+        assert [d is not None for _, d in iter_works()] == [True]
+        assert calls == [101]
 
-    pages = list(iter_work_pages("unused-gold.db"))
+    def test_a_page_that_failed_is_not_mirrored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Storing an error would mean never retrying the page that produced it."""
 
-    assert [p for _, p, _, _ in pages] == ["Work_A_(Test,_Composer)", "Work_C_(Other,_Composer)"]
+        def handle(request: httpx.Request) -> httpx.Response:
+            if "API.ISCR.php" in request.url.path:
+                return httpx.Response(200, json=_worklist([_work(0, 101, "S (A, A)", "A, A")]))
+            return httpx.Response(200, json={"error": {"code": "nosuchpageid"}})
+
+        _use(monkeypatch, handle)
+        cache = _FakeCache()
+        monkeypatch.setattr("composer_scrapers.imslp_works.fetch.open_page_cache", lambda: cache)
+        assert [d is not None for _, d in iter_works()] == [False]
+        assert cache.stored == {}
+
+
+class _FakeCache:
+    """Enough of PageCache to see what a sweep would have mirrored."""
+
+    def __init__(self) -> None:
+        self.stored: dict[str, str] = {}
+
+    def get(self, url: str) -> str | None:
+        return self.stored.get(url)
+
+    def put(self, url: str, body: str) -> None:
+        self.stored[url] = body
+
+    def summary(self) -> str:
+        return f"{len(self.stored)} stored"

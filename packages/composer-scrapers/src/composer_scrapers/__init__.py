@@ -73,6 +73,7 @@ from .classicfm import ClassicFmAdapter  # noqa: E402
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
 from .decca import DeccaAdapter  # noqa: E402
 from .imslp import ImslpAdapter  # noqa: E402
+from .imslp_recordings import ImslpRecordingsAdapter  # noqa: E402
 from .imslp_works import ImslpWorksAdapter  # noqa: E402
 from .nyphil import NyPhilAdapter  # noqa: E402
 from .openopus import OpenOpusAdapter  # noqa: E402
@@ -83,6 +84,7 @@ from .wikidata import WikidataAdapter  # noqa: E402
 REGISTRY: dict[str, SourceAdapter] = {
     "imslp": ImslpAdapter(),
     "imslp_works": ImslpWorksAdapter(),
+    "imslp_recordings": ImslpRecordingsAdapter(),
     "wikidata": WikidataAdapter(),
     "concertgebouw_archive": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),
