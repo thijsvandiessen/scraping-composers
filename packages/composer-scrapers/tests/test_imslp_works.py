@@ -5,16 +5,22 @@ imslp.org/wiki/Piano_Sonata_No.32,_Op.111_(Beethoven,_Ludwig_van) while
 building this source: a ``<tr><th>Label</th><td>Value</td></tr>`` infobox,
 some labels wrapping a long/short form in ``mh555``/``ms555`` spans, and a
 later "Sheet Music" table reusing unrelated ``<th>`` labels per uploaded file.
+
+The infobox is identical in the rendered page and in the parser output
+``api.php`` serves — verified field-for-field over six random works — which is
+what lets this source read the cheaper of the two. What the parser output does
+*not* carry is a ``<title>`` tag, so the title is passed in from the worklist
+row rather than read from the page.
 """
 
 from __future__ import annotations
 
 from composer_scrapers.imslp_works.works import parse_work, strip_composer_suffix
 
+SONATA_TITLE = "Piano Sonata No.32, Op.111 (Beethoven, Ludwig van)"
+
+# The parser output api.php serves: the page's body, with no <title> tag.
 WORK_PAGE = """
-<html>
-<head><title>Piano Sonata No.32, Op.111 (Beethoven, Ludwig van) - IMSLP</title></head>
-<body>
 <h1 id="firstHeading" class="firstHeading pagetitle page-header">Piano Sonata No.32, Op.111
 (Beethoven, Ludwig van)</h1>
 <table>
@@ -44,33 +50,27 @@ WORK_PAGE = """
 <tr><th>Publisher Info.</th><td>Peter Bradley-Fulgoni</td></tr>
 <tr><th>Copyright</th><td>Creative Commons Attribution-NonCommercial-NoDerivs 4.0</td></tr>
 </table>
-</body>
-</html>
 """
 
-WORK_PAGE_SPARSE = """
-<html>
-<head><title>Fragment (Anonymous) - IMSLP</title></head>
-<body><table><tr><th>Composer</th><td>Anonymous</td></tr></table></body>
-</html>
-"""
+WORK_PAGE_SPARSE = """<table><tr><th>Composer</th><td>Anonymous</td></tr></table>"""
 
 
-def test_parse_work_reads_the_title_from_the_title_tag_and_strips_the_site_suffix() -> None:
-    work = parse_work(WORK_PAGE)
+def test_parse_work_takes_its_title_from_the_worklist_not_the_page() -> None:
+    """The parser output carries no <title>; the worklist row is the name."""
+    work = parse_work(WORK_PAGE, SONATA_TITLE)
     assert work is not None
     assert work.title == "Piano Sonata No.32, Op.111 (Beethoven, Ludwig van)"
 
 
 def test_parse_work_reads_instrumentation() -> None:
     """The field the user actually asked for."""
-    work = parse_work(WORK_PAGE)
+    work = parse_work(WORK_PAGE, SONATA_TITLE)
     assert work is not None
     assert work.fields["instrumentation"] == "piano"
 
 
 def test_parse_work_reads_the_long_form_label_dropping_the_short_form() -> None:
-    work = parse_work(WORK_PAGE)
+    work = parse_work(WORK_PAGE, SONATA_TITLE)
     assert work is not None
     assert work.fields["opus_catalogue_number"] == "Op.111"
     assert work.fields["internal_reference_number"] == "ILB 193"
@@ -78,7 +78,7 @@ def test_parse_work_reads_the_long_form_label_dropping_the_short_form() -> None:
 
 
 def test_parse_work_reads_key_and_genre_categories() -> None:
-    work = parse_work(WORK_PAGE)
+    work = parse_work(WORK_PAGE, SONATA_TITLE)
     assert work is not None
     assert work.fields["key"] == "C minor"
     assert work.fields["genre_categories"] == "Sonatas ; For piano"
@@ -87,21 +87,23 @@ def test_parse_work_reads_key_and_genre_categories() -> None:
 def test_parse_work_does_not_bleed_into_the_sheet_music_table() -> None:
     """ "Publisher Info." / "Copyright" belong to the per-file scores table,
     not the infobox, and must not overwrite/appear as recognised fields."""
-    work = parse_work(WORK_PAGE)
+    work = parse_work(WORK_PAGE, SONATA_TITLE)
     assert work is not None
     assert "publisher_info" not in work.fields
     assert "copyright" not in work.fields
 
 
 def test_parse_work_omits_fields_the_page_does_not_state() -> None:
-    work = parse_work(WORK_PAGE_SPARSE)
+    work = parse_work(WORK_PAGE_SPARSE, "Fragment (Anonymous)")
     assert work is not None
     assert "instrumentation" not in work.fields
     assert "key" not in work.fields
 
 
 def test_parse_work_returns_none_without_a_title() -> None:
-    assert parse_work("<html><body><table></table></body></html>") is None
+    """A worklist row that named nothing has nothing to attach fields to."""
+    assert parse_work(WORK_PAGE, "") is None
+    assert parse_work(WORK_PAGE, "   ") is None
 
 
 def test_strip_composer_suffix_removes_the_trailing_composer_qualifier() -> None:

@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 from composer_scrapers.imslp import ImslpAdapter
-from composer_scrapers.imslp.fetch import _fetch_page
+from composer_scrapers.imslp.fetch import worklist_page
 
 
 def _page(*names: str, more: bool = False) -> dict[str, Any]:
@@ -21,23 +21,23 @@ def _page(*names: str, more: bool = False) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# _fetch_page unit tests
+# worklist_page unit tests
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_page_returns_parsed_json() -> None:
+def testworklist_page_returns_parsed_json() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_page("Bach, Johann Sebastian", "Beethoven, Ludwig van"))
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        result = _fetch_page(client, start=0)
+        result = worklist_page(client, start=0)
 
     assert result["0"]["id"] == "Category:Bach, Johann Sebastian"
     assert result["1"]["id"] == "Category:Beethoven, Ludwig van"
     assert "metadata" in result
 
 
-def test_fetch_page_includes_start_in_url() -> None:
+def testworklist_page_includes_start_in_url() -> None:
     seen_urls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -45,12 +45,12 @@ def test_fetch_page_includes_start_in_url() -> None:
         return httpx.Response(200, json=_page())
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        _fetch_page(client, start=2000)
+        worklist_page(client, start=2000)
 
     assert "start=2000" in seen_urls[0]
 
 
-def test_fetch_page_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def testworklist_page_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
     attempts: list[int] = []
 
@@ -61,13 +61,13 @@ def test_fetch_page_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> No
         return httpx.Response(200, json=_page("Bach, Johann Sebastian"))
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        result = _fetch_page(client, start=0)
+        result = worklist_page(client, start=0)
 
     assert len(attempts) == 3
     assert "0" in result
 
 
-def test_fetch_page_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
+def testworklist_page_raises_after_all_retries_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -75,11 +75,11 @@ def test_fetch_page_raises_after_all_retries_exhausted(monkeypatch: pytest.Monke
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(httpx.HTTPStatusError):
-            _fetch_page(client, start=0)
+            worklist_page(client, start=0)
 
 
 # ---------------------------------------------------------------------------
-# ImslpAdapter.fetch integration tests (network fully mocked via _fetch_page)
+# ImslpAdapter.fetch integration tests (network fully mocked via worklist_page)
 # ---------------------------------------------------------------------------
 
 
@@ -87,7 +87,7 @@ def test_fetch_records_yields_source_records(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("composer_scrapers.imslp.time.sleep", lambda _: None)
     page = _page("Bach, Johann Sebastian", "Beethoven, Ludwig van", more=False)
 
-    monkeypatch.setattr("composer_scrapers.imslp._fetch_page", lambda client, start: dict(page))
+    monkeypatch.setattr("composer_scrapers.imslp.worklist_page", lambda client, start: dict(page))
 
     records = list(ImslpAdapter().fetch())
     assert len(records) == 2
@@ -101,7 +101,7 @@ def test_fetch_records_sets_url_from_permlink(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr("composer_scrapers.imslp.time.sleep", lambda _: None)
     page = _page("Bach, Johann Sebastian", more=False)
 
-    monkeypatch.setattr("composer_scrapers.imslp._fetch_page", lambda client, start: dict(page))
+    monkeypatch.setattr("composer_scrapers.imslp.worklist_page", lambda client, start: dict(page))
 
     (record,) = list(ImslpAdapter().fetch())
     assert record.url == "https://imslp.org/Bach, Johann Sebastian"
@@ -115,7 +115,7 @@ def test_fetch_records_stops_when_no_more_results(monkeypatch: pytest.MonkeyPatc
         calls.append(start)
         return _page("Composer A", more=False)
 
-    monkeypatch.setattr("composer_scrapers.imslp._fetch_page", fake_fetch)
+    monkeypatch.setattr("composer_scrapers.imslp.worklist_page", fake_fetch)
 
     list(ImslpAdapter().fetch())
     assert len(calls) == 1
@@ -130,7 +130,7 @@ def test_fetch_records_pages_until_exhausted(monkeypatch: pytest.MonkeyPatch) ->
         more = len(calls) < 3
         return _page(f"Composer {start}", more=more)
 
-    monkeypatch.setattr("composer_scrapers.imslp._fetch_page", fake_fetch)
+    monkeypatch.setattr("composer_scrapers.imslp.worklist_page", fake_fetch)
 
     list(ImslpAdapter().fetch())
     assert len(calls) == 3
@@ -144,7 +144,7 @@ def test_fetch_records_stops_at_max_pages(monkeypatch: pytest.MonkeyPatch) -> No
         calls.append(start)
         return _page(f"Composer {start}", more=True)
 
-    monkeypatch.setattr("composer_scrapers.imslp._fetch_page", fake_fetch)
+    monkeypatch.setattr("composer_scrapers.imslp.worklist_page", fake_fetch)
 
     list(ImslpAdapter().fetch(max_pages=2))
     assert len(calls) == 2
@@ -159,7 +159,7 @@ def test_fetch_records_skips_rows_with_empty_name(monkeypatch: pytest.MonkeyPatc
         "metadata": {"moreresultsavailable": False},
     }
 
-    monkeypatch.setattr("composer_scrapers.imslp._fetch_page", lambda client, start: dict(page))
+    monkeypatch.setattr("composer_scrapers.imslp.worklist_page", lambda client, start: dict(page))
 
     records = list(ImslpAdapter().fetch())
     assert len(records) == 1
