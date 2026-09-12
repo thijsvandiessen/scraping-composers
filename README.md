@@ -521,7 +521,8 @@ resolution happen downstream when data is promoted into gold.
 
 - **`sources`** — where data comes from (`imslp`, `imslp_works`,
   `imslp_recordings`, `wikidata`, `openopus`, `concertgebouw`, `nyphil`,
-  `berlinphil`, `wienerphil`, `decca`, `classicalmusiconline`, `boosey`, ...).
+  `berlinphil`, `wienerphil`, `laphil`, `decca`, `classicalmusiconline`,
+  `boosey`, ...).
 - **`ingest_runs`** — the collection log: one row per ingest, with source,
   timestamps, status, and seen/new counts.
 - **`entity_records`** — raw records per source, unique on

@@ -64,10 +64,8 @@ class SourceWorkMention:
     raw: dict[str, Any]
 
 
-from ._pdf import PdfSourceAdapter as PdfSourceAdapter  # noqa: E402
 from .berlinphil import BerlinPhilAdapter  # noqa: E402
 from .boosey import BooseyAdapter  # noqa: E402
-from .classicalcomposersposter import ClassicalComposersPosterAdapter  # noqa: E402
 from .classicalmusiconline import ClassicalMusicOnlineAdapter  # noqa: E402
 from .classicfm import ClassicFmAdapter  # noqa: E402
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
@@ -75,6 +73,7 @@ from .decca import DeccaAdapter  # noqa: E402
 from .imslp import ImslpAdapter  # noqa: E402
 from .imslp_recordings import ImslpRecordingsAdapter  # noqa: E402
 from .imslp_works import ImslpWorksAdapter  # noqa: E402
+from .laphil import LaPhilAdapter  # noqa: E402
 from .nyphil import NyPhilAdapter  # noqa: E402
 from .openopus import OpenOpusAdapter  # noqa: E402
 from .rco import RcoAdapter  # noqa: E402
@@ -89,12 +88,12 @@ REGISTRY: dict[str, SourceAdapter] = {
     "concertgebouw_archive": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),
     "berlinphil": BerlinPhilAdapter(),
-    "classicalcomposersposter": ClassicalComposersPosterAdapter(),
     "rco": RcoAdapter(),
     "openopus": OpenOpusAdapter(),
     "classicalmusiconline": ClassicalMusicOnlineAdapter(),
     "boosey": BooseyAdapter(),
     "classicfm": ClassicFmAdapter(),
     "wienerphil": WienerPhilAdapter(),
+    "laphil": LaPhilAdapter(),
     "decca": DeccaAdapter(),
 }
