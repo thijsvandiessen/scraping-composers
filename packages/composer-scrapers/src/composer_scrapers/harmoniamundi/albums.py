@@ -303,7 +303,9 @@ def parse_album(page_html: str, url: str) -> Album | None:
         credits=album_credits,
         contents=(
             parse_contents(
-                fragment, [credit.name for credit in album_credits if credit.column == "composers"]
+                fragment,
+                [credit.name for credit in album_credits if credit.column == "composers"],
+                title,
             )
             if fragment
             else ()

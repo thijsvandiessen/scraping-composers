@@ -57,7 +57,7 @@ _DURATION_RE = re.compile(r"\s*\((\d{1,2})['’](\d{2})\)\s*$")
 
 #: A year as the editors write it: ``1750``, ``1562/1563``, ``1622/23``, and the
 #: occasional full date ``01/01/1621``.
-_YEAR = r"(?:\d{1,2}/){0,2}\d{3,4}(?:/\d{2,4})?"
+_YEAR = r"(?:\d{1,2}/){0,2}\d{3,4}(?:/\d{2,4})?\??"
 
 #: A hedge before a year: ``fl.`` (floruit), ``ca.``, ``c.``.
 _QUALIFIER = r"(?:[a-zA-Z]{1,2}\.?\s*)?"
@@ -71,6 +71,19 @@ _LIFE_RE = re.compile(
     rf"{_QUALIFIER}(?P<born>{_YEAR})?\s*[-\u2013\u2014]\s*{_QUALIFIER}(?P<died>{_YEAR})?\s*"
     rf"[)\]]$"
 )
+
+#: A heading that states one date rather than a span: ``STEVE REICH (b.1936)``
+#: for a living composer, ``(d. 1750)`` where only a death is recorded. These
+#: carry no dash, so ``_LIFE_RE`` cannot see them.
+_SINGLE_DATE_RE = re.compile(
+    rf"^(?P<name>[^()\[\]]{{2,80}}?)\s*[(\[]\s*(?P<mark>[bd])\.?\s*(?P<year>{_YEAR})\s*[)\]]$"
+)
+
+#: A carrier marker: ``CD2``, ``FACE B``, ``SIDE B``. The editors use these to
+#: head a disc or a vinyl side. They are packaging, not music, and read as work
+#: headings they mint canonical works called "FACE B". A trailing number or
+#: letter is required, so a piece actually titled "Face" survives.
+_CARRIER_RE = re.compile(r"^(?:CD|DISC|DISQUE|DISK|FACE|SIDE|LP)\s*\.?\s*(?:\d+|[IVX]+|[A-D])$", re.I)
 
 #: A line that is wholly a parenthetical — ``(Pièces de viole, 1685)``,
 #: ``(Manuscrit de Cracovie)``. The editors use these to cite the source or
@@ -188,11 +201,18 @@ def _classify(raw_line: str, known: dict[str, str]) -> _Line:
     if match is not None and (match.group("born") or match.group("died")):
         name = match.group("name").strip(" ,;:-\u2013\u2014")
         return _Line("composer", name, born=_year(match.group("born")), died=_year(match.group("died")))
+    single = _SINGLE_DATE_RE.match(body)
+    if single is not None:
+        year = _year(single.group("year"))
+        born = year if single.group("mark").lower() == "b" else None
+        return _Line("composer", single.group("name").strip(), born=born, died=None if born else year)
     if body and fold(body) in known:
         return _Line("composer", known[fold(body)])
     if bulleted:
         return _Line("track", body, duration=duration)
-    return _Line("note" if _NOTE_RE.match(body) else "work", body)
+    if _NOTE_RE.match(body) or _CARRIER_RE.match(body):
+        return _Line("note", body)
+    return _Line("work", body)
 
 
 def _add_track(block: ComposerBlock, track: Track) -> None:
@@ -234,6 +254,40 @@ def _add_work(block: ComposerBlock, title: str) -> None:
     block.under_heading = True
 
 
+@dataclass
+class _TitleEcho:
+    """The release title, matched off the front of the blob as the editors echo it.
+
+    Matched as a *token prefix* rather than the whole string, and across as many
+    lines as it takes: the page titled "Assassin's Creed: The Piano Collection"
+    opens with ``ASSASSIN'S CREED`` on one line and ``THE PIANO COLLECTION`` on
+    the next, and ``Corde di luna. Romantic songs and canzonette`` opens with
+    ``Corde di Luna`` then ``Romantic Songs and canzonette``. Read as works those
+    mint canonical works named after the album.
+
+    Only consumed from the very start of the blob, which is the only place the
+    echo appears — without that a release named after the work it opens with
+    would lose that work.
+    """
+
+    tokens: list[str]
+    consumed: int = 0
+
+    def consumes(self, title: str) -> bool:
+        """Whether *title* is the next stretch of the echoed release title."""
+        if self.consumed >= len(self.tokens):
+            return False
+        words = fold(title).split()
+        if not words or self.tokens[self.consumed : self.consumed + len(words)] != words:
+            return False
+        self.consumed += len(words)
+        return True
+
+    def close(self) -> None:
+        """Stop matching: the blob has moved on to its contents."""
+        self.consumed = len(self.tokens)
+
+
 def _open_block(
     blocks: list[ComposerBlock], current: ComposerBlock, line: _Line, known: dict[str, str]
 ) -> ComposerBlock:
@@ -245,7 +299,9 @@ def _open_block(
     return ComposerBlock(name=name, born=line.born, died=line.died)
 
 
-def parse_contents(fragment: str, credited: Iterable[str] = ()) -> tuple[ComposerBlock, ...]:
+def parse_contents(
+    fragment: str, credited: Iterable[str] = (), album_title: str | None = None
+) -> tuple[ComposerBlock, ...]:
     """The blob as composer blocks, in listing order.
 
     *credited* is the album's Composers-column credits. They are the site's own
@@ -253,20 +309,31 @@ def parse_contents(fragment: str, credited: Iterable[str] = ()) -> tuple[Compose
     the headings are styled (``CLAUDE DEBUSSY``) and the credits are not
     (``Claude Debussy``), and the mention's composer should read as a name.
 
+    *album_title* is dropped where it appears as a heading: the editors often
+    open the blob by repeating the release title, and read as a work it becomes
+    a composer-less mention that mints a canonical work named after the album.
+    Dropping it is safe even on a single-work release — the caller falls back to
+    the album title when the blob yields no works at all, so the same mention
+    comes out either way.
+
     Lines before the first composer heading go into a leading block with no
     name; a blob with no heading at all yields exactly that one block, so its
     works are still reported, just unattributed.
     """
     known = {fold(name): name for name in credited if name}
+    echo = _TitleEcho(fold(album_title).split() if album_title else [])
     blocks: list[ComposerBlock] = []
     current = ComposerBlock()
     for raw_line in lines(fragment):
         line = _classify(raw_line, known)
         if line.kind == "composer":
+            echo.close()
             current = _open_block(blocks, current, line, known)
         elif line.kind == "track":
+            echo.close()
             _add_track(current, Track(line.body, line.duration))
-        elif line.kind == "work" and line.body:
+        elif line.kind == "work" and line.body and not echo.consumes(line.body):
+            echo.close()
             _add_work(current, line.body)
     if current.name is not None or current.works:
         blocks.append(current)

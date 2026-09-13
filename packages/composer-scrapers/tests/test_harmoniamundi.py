@@ -400,6 +400,103 @@ def test_a_heading_broken_over_two_lines_stays_one_work() -> None:
     assert len(work.tracks) == 1
 
 
+def test_a_carrier_marker_is_not_a_work() -> None:
+    """`CD2`, `FACE B` and `SIDE B` head a disc or a vinyl side. Read as works
+    they mint canonical works called "FACE B"."""
+    blocks = parse_contents(
+        "KYD (1978-)<br>· Ezio's Family (3'22)<br>FACE B<br>· Venice Rooftops (2'10)<br>"
+        "CD2<br>· Chant of Eden (4'00)"
+    )
+    assert [work.title for work in blocks[0].works] == [
+        "Ezio's Family",
+        "Venice Rooftops",
+        "Chant of Eden",
+    ]
+
+
+def test_a_piece_actually_titled_face_survives_the_carrier_rule() -> None:
+    """The marker needs a trailing number or letter, so a bare word is a work."""
+    blocks = parse_contents("MUHLY (1981 - )<br>Face<br>· I. Opening (2'00)")
+    assert [work.title for work in blocks[0].works] == ["Face"]
+
+
+def test_a_death_year_may_be_hedged_with_a_question_mark() -> None:
+    blocks = parse_contents("Charles-Antoine BRANCHE (1722-1779?)<br>· Sonata (5'00)")
+    assert [(b.name, b.born, b.died) for b in blocks] == [
+        ("Charles-Antoine BRANCHE", "1722", "1779"),
+    ]
+
+
+def test_a_heading_stating_only_a_birth_year_opens_a_composer() -> None:
+    """`STEVE REICH (b.1936)` carries no dash, so the span pattern cannot see it."""
+    blocks = parse_contents("STEVE REICH (b.1936)<br>Radio Rewrite (2007)<br>· I. Fast (4'00)")
+    assert [(b.name, b.born, b.died) for b in blocks] == [("STEVE REICH", "1936", None)]
+    assert blocks[0].works[0].title == "Radio Rewrite (2007)"
+
+
+def test_a_heading_stating_only_a_death_year_opens_a_composer() -> None:
+    blocks = parse_contents("ANON (d. 1750)<br>· Kyrie (3'00)")
+    assert [(b.name, b.born, b.died) for b in blocks] == [("ANON", None, "1750")]
+
+
+def test_the_album_title_echoed_as_a_heading_is_not_a_work() -> None:
+    """The editors open the blob by repeating the release title; read as a work
+    it becomes a composer-less mention that mints a work named after the album."""
+    blocks = parse_contents(
+        "Corde di Luna<br>· Toccata (2'10)<br>· Ricercar (3'05)", album_title="Corde di Luna"
+    )
+    assert [work.title for work in blocks[0].works] == ["Toccata", "Ricercar"]
+
+
+def test_the_album_title_echo_is_matched_past_its_styling() -> None:
+    blocks = parse_contents("ASSASSIN'S CREED<br>· Ezio's Family (3'22)", album_title="Assassin's Creed")
+    assert [work.title for work in blocks[0].works] == ["Ezio's Family"]
+
+
+def test_only_the_leading_segment_of_the_album_title_need_be_repeated() -> None:
+    """`"Élégance". French music for flute and harp` opens with just `Élégance`."""
+    blocks = parse_contents(
+        "Élégance<br>· Sicilienne (4'10)", album_title='"Élégance". French music for flute and harp'
+    )
+    assert [work.title for work in blocks[0].works] == ["Sicilienne"]
+
+
+def test_the_echo_is_consumed_across_as_many_lines_as_it_takes() -> None:
+    """The editors break the repeated title over two lines as readily as one."""
+    blocks = parse_contents(
+        "ASSASSIN'S CREED<br>THE PIANO COLLECTION<br>· Ezio's Family (3'22)",
+        album_title="Assassin's Creed: The Piano Collection",
+    )
+    assert [work.title for work in blocks[0].works] == ["Ezio's Family"]
+
+
+def test_the_echo_stops_at_the_first_line_that_is_not_part_of_the_title() -> None:
+    """Once the blob has moved on to its contents, a line that happens to repeat a
+    later word of the title is a work like any other."""
+    blocks = parse_contents(
+        "Corde di Luna<br>Toccata<br>· I. Adagio (2'10)<br>Romantic Songs<br>· II. Allegro (1'40)",
+        album_title="Corde di luna. Romantic songs and canzonette",
+    )
+    assert [work.title for work in blocks[0].works] == ["Toccata", "Romantic Songs"]
+
+
+def test_a_work_the_album_is_named_after_is_not_dropped_as_an_echo() -> None:
+    """The echo only ever opens the blob; under a composer the same line is a work."""
+    blocks = parse_contents(
+        "BRITTEN (1913-1976)<br>Les Illuminations<br>· I. Fanfare (2'00)",
+        album_title="Les Illuminations. Serenade for tenor, horn and strings",
+    )
+    assert [work.title for work in blocks[0].works] == ["Les Illuminations"]
+
+
+def test_a_partial_word_match_is_not_an_echo() -> None:
+    """Matched on whole tokens, so "Cor" is not read as "Corde di luna" and
+    survives as a work, with the bullet below it as its movement."""
+    blocks = parse_contents("Cor<br>· Toccata (2'10)", album_title="Corde di luna. Romantic songs")
+    assert [work.title for work in blocks[0].works] == ["Cor"]
+    assert [track.title for track in blocks[0].works[0].tracks] == ["Toccata"]
+
+
 def test_a_line_that_is_wholly_a_parenthetical_is_a_note_not_a_work() -> None:
     blocks = parse_contents("COUPERIN (1668-1733)<br>· Musette (2'10)<br>(Pièces de clavecin, 1722)")
     assert [work.title for work in blocks[0].works] == ["Musette"]
@@ -439,6 +536,19 @@ def test_a_blob_with_no_composer_heading_still_yields_its_works() -> None:
     assert len(blocks) == 1
     assert blocks[0].name is None
     assert blocks[0].works[0].title == "Suite in G"
+
+
+def test_an_album_hands_its_own_title_to_the_tracklist_parser() -> None:
+    """The echo rule needs the release title; parsing the blob without it is a
+    wiring gap the contents-level tests cannot see."""
+    echoed = ALBUM_HTML.replace(
+        "  SERGEI PROKOFIEV (1891-1953)",
+        "  Chout (complete ballet) - Symphony No. 1 'Classical'\n  SERGEI PROKOFIEV (1891-1953)",
+    )
+    album = parse_album(echoed, ALBUM_URL)
+    assert album is not None
+    titles = [work.title for block in album.contents for work in block.works]
+    assert "Chout (complete ballet) - Symphony No. 1 'Classical'" not in titles
 
 
 def test_an_album_parses_its_tracklist_and_keeps_it_verbatim() -> None:
