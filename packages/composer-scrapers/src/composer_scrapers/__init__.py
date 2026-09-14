@@ -78,6 +78,7 @@ from .laphil import LaPhilAdapter  # noqa: E402
 from .nyphil import NyPhilAdapter  # noqa: E402
 from .openopus import OpenOpusAdapter  # noqa: E402
 from .rco import RcoAdapter  # noqa: E402
+from .roh import RohAdapter  # noqa: E402
 from .wienerphil import WienerPhilAdapter  # noqa: E402
 from .wikidata import WikidataAdapter  # noqa: E402
 
@@ -98,4 +99,5 @@ REGISTRY: dict[str, SourceAdapter] = {
     "laphil": LaPhilAdapter(),
     "decca": DeccaAdapter(),
     "harmoniamundi": HarmoniaMundiAdapter(),
+    "roh": RohAdapter(),
 }
