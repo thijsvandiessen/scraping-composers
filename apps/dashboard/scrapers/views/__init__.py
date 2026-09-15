@@ -6,6 +6,7 @@ from .data import data_overview, entities, entity_detail, review, works
 from .gold import (
     concert_detail,
     concerts_list,
+    gold_work_detail,
     gold_works,
     people,
     person_concerts,
@@ -34,6 +35,7 @@ __all__ = [
     "entity_detail",
     "fetch_due",
     "gold",
+    "gold_work_detail",
     "gold_works",
     "index",
     "load_index",

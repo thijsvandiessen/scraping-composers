@@ -19,6 +19,26 @@ class AdminAPIError(Exception):
     """A failed API call, with a message fit to show on the page."""
 
 
+@dataclass(frozen=True)
+class Filters:
+    """The ``q`` (free text) and ``source`` (scraper name) filters the list
+    endpoints share. Grouped so the client methods stay under the argument cap,
+    mirroring ``composer_api.deps.Filters`` on the other side of the wire."""
+
+    q: str | None = None
+    source: str | None = None
+
+    def add_to(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.q:
+            params["q"] = self.q
+        if self.source:
+            params["source"] = self.source
+        return params
+
+
+NO_FILTERS = Filters()
+
+
 @dataclass
 class _BaseAPI:
     base_url: str
@@ -170,26 +190,18 @@ class DataAPI(_BaseAPI):
         return self._json_dict("GET", f"/v1/entities/{entity_id}")
 
     def list_people(
-        self, role: str, q: str | None = None, page: int = 1, limit: int = 20, sort: str = "label"
+        self, role: str, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20, sort: str = "label"
     ) -> dict[str, Any]:
         """People by role: ``role`` is "composers", "soloists", or "conductors"."""
-        params: dict[str, Any] = {"page": page, "limit": limit, "sort": sort}
-        if q:
-            params["q"] = q
+        params = filters.add_to({"page": page, "limit": limit, "sort": sort})
         return self._json_dict("GET", f"/v1/{role}", params=params)
 
     def person_concerts(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
         params = {"page": page, "limit": limit}
         return self._json_dict("GET", f"/v1/people/{person_id}/concerts", params=params)
 
-    def list_concerts(
-        self, q: str | None = None, source: str | None = None, page: int = 1, limit: int = 20
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {"page": page, "limit": limit}
-        if q:
-            params["q"] = q
-        if source:
-            params["source"] = source
+    def list_concerts(self, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20) -> dict[str, Any]:
+        params = filters.add_to({"page": page, "limit": limit})
         return self._json_dict("GET", "/v1/concerts", params=params)
 
     def get_concert(self, concert_id: int) -> dict[str, Any]:
@@ -200,13 +212,9 @@ class DataAPI(_BaseAPI):
         return self._json_dict("GET", f"/v1/people/{person_id}/recordings", params=params)
 
     def list_recordings(
-        self, q: str | None = None, source: str | None = None, page: int = 1, limit: int = 20
+        self, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"page": page, "limit": limit}
-        if q:
-            params["q"] = q
-        if source:
-            params["source"] = source
+        params = filters.add_to({"page": page, "limit": limit})
         return self._json_dict("GET", "/v1/recordings", params=params)
 
     def get_recording(self, recording_id: int) -> dict[str, Any]:
@@ -214,18 +222,19 @@ class DataAPI(_BaseAPI):
 
     def list_works(
         self,
-        q: str | None = None,
+        filters: Filters = NO_FILTERS,
         page: int = 1,
         limit: int = 20,
         performed_only: bool = False,
         sort: str = "label",
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"page": page, "limit": limit, "sort": sort}
-        if q:
-            params["q"] = q
+        params = filters.add_to({"page": page, "limit": limit, "sort": sort})
         if performed_only:
             params["performed"] = "true"
         return self._json_dict("GET", "/v1/works", params=params)
+
+    def get_work(self, work_id: str) -> dict[str, Any]:
+        return self._json_dict("GET", f"/v1/works/{work_id}")
 
     def list_mentions(self, status: str | None = None, page: int = 1, limit: int = 20) -> dict[str, Any]:
         params: dict[str, Any] = {"page": page, "limit": limit}

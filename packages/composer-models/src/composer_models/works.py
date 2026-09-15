@@ -34,6 +34,7 @@ class Work(Base):
     catalogue_number: Mapped[str | None] = mapped_column(String(50))
     musical_key: Mapped[str | None] = mapped_column(String(50))
     number: Mapped[int | None] = mapped_column(Integer)
+    premiere_date: Mapped[str | None] = mapped_column(String(50))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     first_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

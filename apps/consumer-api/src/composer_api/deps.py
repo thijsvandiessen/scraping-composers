@@ -29,3 +29,18 @@ class Pagination:
 
 
 PageQuery = Annotated[Pagination, Depends()]
+
+
+@dataclass(frozen=True)
+class Filters:
+    """The shared ``q``/``source`` query parameters of the list endpoints.
+
+    Grouped the way ``Pagination`` groups ``page``/``limit``: every list
+    endpoint accepts both, and the crud functions stay under the argument cap.
+    """
+
+    q: str | None = None
+    source: str | None = None
+
+
+FilterQuery = Annotated[Filters, Depends()]

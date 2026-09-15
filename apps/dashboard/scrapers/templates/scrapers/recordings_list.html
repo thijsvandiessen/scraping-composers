@@ -7,7 +7,9 @@
 
 <form method="get" action="" class="sc-toolbar">
   <input type="text" name="q" value="{{ q }}" placeholder="search by title or artist…" class="sc-btn" style="cursor: text; min-width: 22rem;">
+  {% if request.GET.source %}<input type="hidden" name="source" value="{{ request.GET.source }}">{% endif %}
   <button type="submit" class="sc-btn sc-btn-primary">Search</button>
+  {% if request.GET.source %}<span class="sc-badge sc-unknown">source: {{ request.GET.source }} <a href="?{% if q %}q={{ q|urlencode }}&amp;{% endif %}{% if sort and sort != 'label' %}sort={{ sort|urlencode }}{% endif %}">clear</a></span>{% endif %}
   <span class="sc-muted">{{ total }} recording{{ total|pluralize }} — page {{ page }} of {{ pages }}</span>
 </form>
 

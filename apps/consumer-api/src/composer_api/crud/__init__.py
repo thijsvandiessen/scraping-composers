@@ -2,7 +2,7 @@ from .concerts import get_concert, list_concerts, person_concerts
 from .entities import get_entity, get_stats, list_entities
 from .people import get_person, list_people
 from .recordings import get_recording, list_recordings, person_recordings
-from .works import composer_works, list_mentions, list_works
+from .works import composer_works, get_work, list_mentions, list_works
 
 __all__ = [
     "composer_works",
@@ -11,6 +11,7 @@ __all__ = [
     "get_person",
     "get_recording",
     "get_stats",
+    "get_work",
     "list_concerts",
     "list_entities",
     "list_mentions",

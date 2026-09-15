@@ -9,6 +9,7 @@ class ComposerSummary(BaseModel):
     label: str
     created_at: datetime
     concert_count: int = 0  # concerts participated in (populated in gold)
+    recording_count: int = 0  # recordings credited on (populated in gold)
 
     model_config = {"from_attributes": True}
 
@@ -98,6 +99,7 @@ class WorkSummary(BaseModel):
     catalogue: str | None
     musical_key: str | None
     number: int | None
+    premiere_date: str | None
     mention_count: int
     aliases: list[str]
 
@@ -116,6 +118,22 @@ class WorkProofOut(BaseModel):
     venue: str | None = None
 
 
+class WorkDetail(BaseModel):
+    id: uuid.UUID
+    canonical_title: str
+    composer_id: uuid.UUID | None
+    composer_label: str | None
+    work_type: str | None
+    opus_number: str | None
+    catalogue: str | None
+    musical_key: str | None
+    number: int | None
+    premiere_date: str | None
+    mention_count: int
+    aliases: list[str]
+    proof: list[WorkProofOut]
+
+
 class ComposerWorkOut(BaseModel):
     id: uuid.UUID
     canonical_title: str
@@ -124,6 +142,7 @@ class ComposerWorkOut(BaseModel):
     catalogue: str | None
     musical_key: str | None
     number: int | None
+    premiere_date: str | None
     mention_count: int
     proof: list[WorkProofOut]
 

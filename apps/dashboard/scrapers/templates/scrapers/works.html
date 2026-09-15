@@ -7,13 +7,15 @@
 
 <form method="get" class="sc-toolbar">
   <input type="text" name="q" value="{{ q }}" placeholder="search by title or composer…" class="sc-btn" style="cursor: text; min-width: 22rem;">
+  {% if request.GET.source %}<input type="hidden" name="source" value="{{ request.GET.source }}">{% endif %}
   {% if sort == "mentions" %}<input type="hidden" name="sort" value="mentions">{% endif %}
   <button type="submit" class="sc-btn sc-btn-primary">Search</button>
+  {% if request.GET.source %}<span class="sc-badge sc-unknown">source: {{ request.GET.source }} <a href="?{% if q %}q={{ q|urlencode }}&amp;{% endif %}{% if sort and sort != 'label' %}sort={{ sort|urlencode }}{% endif %}">clear</a></span>{% endif %}
   {% if sort %}
     {% if sort == "mentions" %}
-    <a class="sc-btn" href="?q={{ q|urlencode }}">sort by title</a>
+    <a class="sc-btn" href="?q={{ q|urlencode }}{% if request.GET.source %}&source={{ request.GET.source|urlencode }}{% endif %}">sort by title</a>
     {% else %}
-    <a class="sc-btn" href="?q={{ q|urlencode }}&sort=mentions">sort by mentions</a>
+    <a class="sc-btn" href="?q={{ q|urlencode }}&sort=mentions{% if request.GET.source %}&source={{ request.GET.source|urlencode }}{% endif %}">sort by mentions</a>
     {% endif %}
   {% endif %}
   <span class="sc-muted">{{ total }} works — page {{ page }} of {{ pages }}</span>
@@ -27,7 +29,9 @@
   {% for work in items %}
   <tr>
     <td>
-      <strong>{{ work.canonical_title }}</strong>
+      {% if detail_url %}
+      <a href="{% url detail_url work.id %}"><strong>{{ work.canonical_title }}</strong></a>
+      {% else %}<strong>{{ work.canonical_title }}</strong>{% endif %}
       {% for alias in work.aliases %}
       <div class="sc-muted" style="font-size: 0.8rem;">alias: {{ alias }}</div>
       {% endfor %}
@@ -42,7 +46,8 @@
       {% if work.opus_number %}opus={{ work.opus_number }} {% endif %}
       {% if work.catalogue %}cat={{ work.catalogue }} {% endif %}
       {% if work.musical_key %}key={{ work.musical_key }} {% endif %}
-      {% if work.number is not None %}no={{ work.number }}{% endif %}
+      {% if work.number is not None %}no={{ work.number }} {% endif %}
+      {% if work.premiere_date %}premiere={{ work.premiere_date }}{% endif %}
     </td>
     <td class="sc-num">{{ work.mention_count }}</td>
   </tr>

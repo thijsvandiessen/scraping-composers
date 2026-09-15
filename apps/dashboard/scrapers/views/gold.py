@@ -6,10 +6,27 @@ from django.contrib import admin
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from ..api import AdminAPIError, DataAPI
+from ..api import AdminAPIError, DataAPI, Filters
 from .common import page_context, page_number
 
 PEOPLE_ROLES = ("composers", "soloists", "conductors")
+
+
+def _filters(request: HttpRequest) -> Filters:
+    """The ``q``/``source`` pair the list pages share, read off the query string."""
+    return Filters(
+        q=request.GET.get("q", "").strip() or None,
+        source=request.GET.get("source", "").strip() or None,
+    )
+
+
+def _params(request: HttpRequest, sort: str = "label") -> dict[str, str]:
+    """The same pair (plus a non-default sort) as pagination-link parameters."""
+    filters = _filters(request)
+    params = {key: value for key, value in (("q", filters.q), ("source", filters.source)) if value}
+    if sort != "label":
+        params["sort"] = sort
+    return params
 
 
 def people(request: HttpRequest, role: str) -> HttpResponse:
@@ -18,15 +35,17 @@ def people(request: HttpRequest, role: str) -> HttpResponse:
         raise Http404(f"unknown role {role!r}")
     api = DataAPI.gold()
     q = request.GET.get("q", "").strip()
-    sort = "concerts" if request.GET.get("sort") == "concerts" else "label"
+    sort = request.GET.get("sort", "")
+    if sort not in ("concerts", "recordings"):
+        sort = "label"
     page = page_number(request)
     result: dict[str, object] = {}
     error: str | None = None
     try:
-        result = api.list_people(role, q=q or None, page=page, sort=sort)
+        result = api.list_people(role, _filters(request), page=page, sort=sort)
     except AdminAPIError as exc:
         error = f"{exc} — is the gold API running, and has the gold database been promoted?"
-    params = {key: value for key, value in (("q", q), ("sort", sort)) if value and value != "label"}
+    params = _params(request, sort=sort)
     context = {
         **admin.site.each_context(request),
         "title": role.capitalize(),
@@ -78,10 +97,10 @@ def concerts_list(request: HttpRequest) -> HttpResponse:
     result: dict[str, object] = {}
     error: str | None = None
     try:
-        result = api.list_concerts(q=q or None, page=page)
+        result = api.list_concerts(_filters(request), page=page)
     except AdminAPIError as exc:
         error = f"{exc} — is the gold API running, and has the gold database been promoted?"
-    params = {"q": q} if q else {}
+    params = _params(request)
     context = {
         **admin.site.each_context(request),
         "title": "Concerts",
@@ -148,10 +167,10 @@ def recordings_list(request: HttpRequest) -> HttpResponse:
     result: dict[str, object] = {}
     error: str | None = None
     try:
-        result = api.list_recordings(q=q or None, page=page)
+        result = api.list_recordings(_filters(request), page=page)
     except AdminAPIError as exc:
         error = f"{exc} — is the gold API running, and has the gold database been promoted?"
-    params = {"q": q} if q else {}
+    params = _params(request)
     context = {
         **admin.site.each_context(request),
         "title": "Recordings",
@@ -190,17 +209,37 @@ def gold_works(request: HttpRequest) -> HttpResponse:
     result: dict[str, object] = {}
     error: str | None = None
     try:
-        result = api.list_works(q=q or None, page=page, performed_only=True, sort=sort)
+        result = api.list_works(_filters(request), page=page, performed_only=True, sort=sort)
     except AdminAPIError as exc:
         error = f"{exc} — is the gold API running, and has the gold database been promoted?"
-    params = {key: value for key, value in (("q", q), ("sort", sort)) if value and value != "label"}
+    params = _params(request, sort=sort)
     context = {
         **admin.site.each_context(request),
         "title": "Works",
         "items": result.get("items", []),
         "q": q,
         "sort": sort,
+        "detail_url": "gold_work_detail",
         "error": error,
         **page_context(result, request.path, params),
     }
     return render(request, "scrapers/works.html", context)
+
+
+def gold_work_detail(request: HttpRequest, work_id: uuid.UUID) -> HttpResponse:
+    """One performed work: its aliases and the proofs of performance/mentions, from gold."""
+    api = DataAPI.gold()
+    work: dict[str, object] | None = None
+    error: str | None = None
+    try:
+        work = api.get_work(str(work_id))
+    except AdminAPIError as exc:
+        error = f"{exc} — is the gold API running, and has the gold database been promoted?"
+    title = str(work.get("canonical_title") or work_id) if work else f"Work {work_id}"
+    context = {
+        **admin.site.each_context(request),
+        "title": title,
+        "work": work,
+        "error": error,
+    }
+    return render(request, "scrapers/work_detail.html", context)

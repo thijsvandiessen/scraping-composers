@@ -9,7 +9,7 @@ import httpx
 import pytest
 import scrapers.views as views
 from django.test import Client
-from scrapers.api import AdminAPI, AdminAPIError, DataAPI
+from scrapers.api import NO_FILTERS, AdminAPI, AdminAPIError, DataAPI, Filters
 
 # ---------------------------------------------------------------------------
 # AdminAPI client
@@ -388,6 +388,7 @@ WORKS_PAYLOAD: dict[str, Any] = {
             "catalogue": None,
             "musical_key": "C minor",
             "number": 5,
+            "premiere_date": None,
             "mention_count": 12,
             "aliases": ["Sinfonie Nr. 5 c-moll, op. 67"],
         }
@@ -395,6 +396,31 @@ WORKS_PAYLOAD: dict[str, Any] = {
     "total": 1,
     "page": 1,
     "limit": 20,
+}
+
+WORK_ID = "7f9d3c1e-0000-0000-0000-000000000004"
+
+WORK_DETAIL_PAYLOAD: dict[str, Any] = {
+    "id": WORK_ID,
+    "canonical_title": "Symphony No. 5, Op. 67",
+    "composer_id": ENTITY_ID,
+    "composer_label": "Beethoven, Ludwig van",
+    "work_type": "symphony",
+    "opus_number": "67",
+    "catalogue": None,
+    "musical_key": "C minor",
+    "number": 5,
+    "premiere_date": None,
+    "mention_count": 12,
+    "aliases": ["Sinfonie Nr. 5 c-moll, op. 67"],
+    "proof": [
+        {
+            "source": "berlinphil",
+            "source_url": "https://dch.example/1",
+            "date": "1985-03-01",
+            "venue": "Philharmonie",
+        }
+    ],
 }
 
 
@@ -425,7 +451,7 @@ def test_data_client_endpoints_and_params() -> None:
     assert api.stats() == STATS_PAYLOAD
     assert api.list_entities(q="bach", kind="person", page=2)["total"] == 0
     assert api.get_entity(ENTITY_ID)["label"] == "Bach, Johann Sebastian"
-    assert api.list_works(q="symphony")["items"][0]["mention_count"] == 12
+    assert api.list_works(Filters(q="symphony"))["items"][0]["mention_count"] == 12
 
 
 def test_data_client_wraps_errors() -> None:
@@ -472,7 +498,7 @@ class StubDataAPI:
         return ENTITY_DETAIL_PAYLOAD
 
     def list_people(
-        self, role: str, q: str | None = None, page: int = 1, limit: int = 20, sort: str = "label"
+        self, role: str, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20, sort: str = "label"
     ) -> dict[str, Any]:
         self._maybe_fail()
         items = [
@@ -481,6 +507,7 @@ class StubDataAPI:
                 "label": "Bach, Johann Sebastian",
                 "created_at": "2026-06-11",
                 "concert_count": 27,
+                "recording_count": 9,
             }
         ]
         return {"items": items, "total": 1, "page": page, "limit": limit}
@@ -516,13 +543,22 @@ class StubDataAPI:
             "limit": limit,
         }
 
-    def list_works(self, q: str | None = None, page: int = 1, limit: int = 20) -> dict[str, Any]:
+    def list_works(
+        self,
+        filters: Filters = NO_FILTERS,
+        page: int = 1,
+        limit: int = 20,
+        performed_only: bool = False,
+        sort: str = "label",
+    ) -> dict[str, Any]:
         self._maybe_fail()
         return WORKS_PAYLOAD
 
-    def list_concerts(
-        self, q: str | None = None, source: str | None = None, page: int = 1, limit: int = 20
-    ) -> dict[str, Any]:
+    def get_work(self, work_id: str) -> dict[str, Any]:
+        self._maybe_fail()
+        return WORK_DETAIL_PAYLOAD
+
+    def list_concerts(self, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20) -> dict[str, Any]:
         self._maybe_fail()
         items = [
             {
@@ -588,7 +624,7 @@ class StubDataAPI:
         }
 
     def list_recordings(
-        self, q: str | None = None, source: str | None = None, page: int = 1, limit: int = 20
+        self, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20
     ) -> dict[str, Any]:
         self._maybe_fail()
         items = [
@@ -723,6 +759,68 @@ def test_works_page_renders_aliases_and_composer_link(
     assert "opus=67" in page
 
 
+def test_silver_works_page_does_not_link_to_the_gold_detail_page(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    """Silver works mostly never survive promote, so a gold link would 404."""
+    _install_data(monkeypatch, StubDataAPI())
+    page = staff_client.get("/admin/data/works/").content.decode()
+    assert "Symphony No. 5, Op. 67" in page
+    assert f"/admin/data/gold/works/{WORK_ID}/" not in page
+
+
+def test_gold_works_page_links_each_title_to_its_detail_page(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install_data(monkeypatch, StubDataAPI())
+    page = staff_client.get("/admin/data/gold/works/").content.decode()
+    assert f"/admin/data/gold/works/{WORK_ID}/" in page
+
+
+def test_gold_work_detail_renders_aliases_and_proof(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install_data(monkeypatch, StubDataAPI())
+    page = staff_client.get(f"/admin/data/gold/works/{WORK_ID}/").content.decode()
+    assert "Symphony No. 5, Op. 67" in page
+    assert "Sinfonie Nr. 5 c-moll, op. 67" in page  # alias
+    assert "opus=67" in page
+    assert "https://dch.example/1" in page  # proof link
+    assert "1985-03-01" in page
+    assert f"/admin/data/entities/{ENTITY_ID}/" in page  # composer links to entity
+
+
+def test_gold_work_detail_shows_error_banner_when_api_unreachable(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install_data(monkeypatch, StubDataAPI("gold api down"))
+    page = staff_client.get(f"/admin/data/gold/works/{WORK_ID}/").content.decode()
+    assert "gold api down" in page
+
+
+def test_source_filter_is_shown_with_a_way_to_clear_it(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install_data(monkeypatch, StubDataAPI())
+    for path in ("/admin/data/gold/works/", "/admin/data/concerts/", "/admin/data/recordings/"):
+        page = staff_client.get(f"{path}?source=roh").content.decode()
+        assert "source: roh" in page
+        assert ">clear</a>" in page
+        # and the filter survives a search from the same page
+        assert 'name="source" value="roh"' in page
+
+
+def test_scrapers_index_links_each_source_to_its_data(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install(monkeypatch, StubAPI(scrapers=SCRAPERS_PAYLOAD))
+    page = staff_client.get("/admin/scrapers/").content.decode()
+    name = SCRAPERS_PAYLOAD[0]["name"]
+    for path in ("concerts", "recordings", "gold/works"):
+        assert f"/admin/data/{path}/?source={name}" in page
+    assert f"/admin/data/people/composers/?source={name}" in page
+
+
 def test_entity_kind_page_shows_tabs_and_random_sample(
     monkeypatch: pytest.MonkeyPatch, staff_client: Client
 ) -> None:
@@ -777,7 +875,7 @@ def test_data_client_list_people_hits_role_endpoint() -> None:
         assert request.url.params["q"] == "doe"
         return httpx.Response(200, json={"items": [], "total": 0, "page": 1, "limit": 20})
 
-    assert _data_api(handler).list_people("soloists", q="doe")["total"] == 0
+    assert _data_api(handler).list_people("soloists", Filters(q="doe"))["total"] == 0
 
 
 def test_people_page_shows_concert_counts_and_sort_toggle(
@@ -790,19 +888,26 @@ def test_people_page_shows_concert_counts_and_sort_toggle(
     assert "sort=concerts" in page  # toggle offered
 
 
-def test_people_page_forwards_concert_sort(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+def test_people_page_forwards_sort_and_source(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     calls: list[str] = []
 
     class RecordingStub(StubDataAPI):
         def list_people(
-            self, role: str, q: str | None = None, page: int = 1, limit: int = 20, sort: str = "label"
+            self,
+            role: str,
+            filters: Filters = NO_FILTERS,
+            page: int = 1,
+            limit: int = 20,
+            sort: str = "label",
         ) -> dict[str, Any]:
-            calls.append(f"{role}:{sort}")
-            return super().list_people(role, q=q, page=page, limit=limit, sort=sort)
+            calls.append(f"{role}:{sort}:{filters.source}")
+            return super().list_people(role, filters, page=page, limit=limit, sort=sort)
 
     _install_data(monkeypatch, RecordingStub())
     staff_client.get("/admin/data/people/conductors/?sort=concerts")
-    assert calls == ["conductors:concerts"]
+    staff_client.get("/admin/data/people/conductors/?sort=recordings&source=roh")
+    staff_client.get("/admin/data/people/conductors/?sort=bogus")  # falls back to the default
+    assert calls == ["conductors:concerts:None", "conductors:recordings:roh", "conductors:label:None"]
 
 
 def test_person_concerts_page_renders(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:

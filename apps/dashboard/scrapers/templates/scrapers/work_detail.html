@@ -1,0 +1,61 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+{% if work %}
+<div class="sc-toolbar">
+  <a class="sc-btn" href="{% url 'gold_works' %}">← works</a>
+  <span><strong>{{ work.canonical_title }}</strong></span>
+  {% if work.composer_id %}
+  <a class="sc-btn" href="{% url 'entity_detail' work.composer_id %}">{{ work.composer_label }}</a>
+  {% endif %}
+  <span class="sc-badge sc-unknown">{{ work.mention_count }} mentions</span>
+</div>
+
+<div style="margin-bottom: 2rem;">
+  <div class="sc-muted">
+    {% if work.work_type %}type={{ work.work_type }} {% endif %}
+    {% if work.opus_number %}opus={{ work.opus_number }} {% endif %}
+    {% if work.catalogue %}cat={{ work.catalogue }} {% endif %}
+    {% if work.musical_key %}key={{ work.musical_key }} {% endif %}
+    {% if work.number is not None %}no={{ work.number }} {% endif %}
+    {% if work.premiere_date %}premiere={{ work.premiere_date }}{% endif %}
+  </div>
+
+  {% if work.aliases %}
+  <div style="margin-top: 1rem;">
+    <strong>Aliases:</strong>
+    <ul class="sc-muted" style="margin-top: 0.5rem; font-size: 0.9rem;">
+      {% for alias in work.aliases %}
+      <li>{{ alias }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+
+<h2 class="sc-heading">References (Performances & Recordings)</h2>
+<table class="sc-table" style="max-width: 60rem;">
+  <tr><th>source</th><th>date</th><th>venue</th></tr>
+  {% for p in work.proof %}
+  <tr>
+    <td>
+      {% if p.source_url %}
+      <a href="{{ p.source_url }}" target="_blank">{{ p.source }}</a>
+      {% else %}
+      {{ p.source }}
+      {% endif %}
+    </td>
+    <td>{{ p.date|default:"—" }}</td>
+    <td>{{ p.venue|default:"—" }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="3" class="sc-muted">no references found</td></tr>
+  {% endfor %}
+</table>
+
+{% endif %}
+{% endblock %}
