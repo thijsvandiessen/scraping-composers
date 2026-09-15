@@ -11,21 +11,32 @@ from composer_models import (
     Work,
     WorkTitle,
 )
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.orm import Session, aliased
 
-from ..deps import Pagination
+from ..deps import Filters, Pagination
 from ..errors import NotFoundError
 from ..schemas import (
     ComposerWorkOut,
     ComposerWorksPage,
     MentionOut,
     MentionPage,
+    WorkDetail,
     WorkPage,
     WorkProofOut,
     WorkSummary,
 )
 from .common import WORK_PROOF_CAP
+
+
+def source_filter(source: str) -> ColumnElement[bool]:
+    # Uncorrelated IN, matching ``performed_only`` below: joining raw mentions
+    # in directly would fan the outer query out by mention count.
+    return Work.id.in_(
+        select(RawWorkMention.work_id)
+        .join(Source, Source.id == RawWorkMention.source_id)
+        .where(Source.name == source, RawWorkMention.work_id.is_not(None))
+    )
 
 
 def list_mentions(db: Session, status: str | None, page: int, limit: int) -> MentionPage:
@@ -72,12 +83,24 @@ def list_mentions(db: Session, status: str | None, page: int, limit: int) -> Men
 
 
 def list_works(
-    db: Session, q: str | None, pager: Pagination, performed_only: bool = False, sort: str = "label"
+    db: Session, filters: Filters, pager: Pagination, performed_only: bool = False, sort: str = "label"
 ) -> WorkPage:
     composer = aliased(Entity)
     base = select(Work).outerjoin(composer, composer.id == Work.composer_entity_id)
-    if q:
-        base = base.where(or_(Work.canonical_title.ilike(f"%{q}%"), composer.label.ilike(f"%{q}%")))
+    if filters.source:
+        # Filter on mentions, not on work_titles: ``add_work_title_alias``
+        # dedupes aliases by (work, title key) across sources, so a source that
+        # re-sights a title another source already recorded gets no work_titles
+        # row and its works would go missing here. Every mention carries its
+        # source, so this is the complete link.
+        base = base.where(source_filter(filters.source))
+    if filters.q:
+        base = base.where(
+            or_(
+                Work.canonical_title.ilike(f"%{filters.q}%"),
+                composer.label.ilike(f"%{filters.q}%"),
+            )
+        )
     if performed_only:
         base = base.where(
             Work.id.in_(
@@ -132,6 +155,7 @@ def list_works(
                 catalogue=catalogue,
                 musical_key=work.musical_key,
                 number=work.number,
+                premiere_date=work.premiere_date,
                 mention_count=mention_count or 0,
                 aliases=aliases,
             )
@@ -229,6 +253,7 @@ def composer_works(
             catalogue=f"{work.catalogue_prefix or ''} {work.catalogue_number or ''}".strip() or None,
             musical_key=work.musical_key,
             number=work.number,
+            premiere_date=work.premiere_date,
             mention_count=mention_count or 0,
             proof=proofs_by_work.get(work.id, []),
         )
@@ -242,4 +267,83 @@ def composer_works(
         total=total,
         page=pager.page,
         limit=pager.limit,
+    )
+
+
+def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
+    work = db.get(Work, work_id)
+    if work is None:
+        raise NotFoundError("work not found")
+
+    composer_label = None
+    if work.composer_entity_id:
+        composer = db.get(Entity, work.composer_entity_id)
+        if composer:
+            composer_label = composer.label
+
+    mention_count = (
+        db.scalar(select(func.count(RawWorkMention.id)).where(RawWorkMention.work_id == work_id)) or 0
+    )
+
+    titles = db.scalars(select(WorkTitle.title).where(WorkTitle.work_id == work_id).distinct()).all()
+    aliases = [t for t in titles if t != work.canonical_title]
+
+    catalogue = f"{work.catalogue_prefix or ''} {work.catalogue_number or ''}".strip() or None
+
+    proofs: list[WorkProofOut] = []
+    seen = set()
+    proof_rows = db.execute(
+        select(
+            Source.name,
+            Source.base_url,
+            Concert.url,
+            Concert.date,
+            Concert.venue,
+            Recording.url,
+            Recording.release_date,
+        )
+        # Explicit left side: without it the leading Source columns make Source
+        # the inferred FROM and the join below is ambiguous.
+        .select_from(RawWorkMention)
+        .join(Source, Source.id == RawWorkMention.source_id)
+        .outerjoin(ConcertWork, ConcertWork.mention_id == RawWorkMention.id)
+        .outerjoin(Concert, Concert.id == ConcertWork.concert_id)
+        .outerjoin(RecordingWork, RecordingWork.mention_id == RawWorkMention.id)
+        .outerjoin(Recording, Recording.id == RecordingWork.recording_id)
+        .where(RawWorkMention.work_id == work_id)
+        .order_by(
+            Concert.date.desc().nulls_last(),
+            Recording.release_date.desc().nulls_last(),
+            RawWorkMention.id,
+        )
+    ).all()
+    for src_name, src_base, c_url, c_date, c_venue, r_url, r_date in proof_rows:
+        if len(proofs) >= WORK_PROOF_CAP:
+            break
+        if c_url or c_date or c_venue:
+            proof = WorkProofOut(source=src_name, source_url=c_url or src_base, date=c_date, venue=c_venue)
+        elif r_url or r_date:
+            proof = WorkProofOut(source=src_name, source_url=r_url or src_base, date=r_date, venue=None)
+        else:
+            proof = WorkProofOut(source=src_name, source_url=src_base, date=None, venue=None)
+        key = (proof.source, proof.source_url)
+        if key in seen:
+            continue
+        seen.add(key)
+        proofs.append(proof)
+
+    return WorkDetail(
+        id=work.id,
+        canonical_title=work.canonical_title,
+        composer_id=work.composer_entity_id,
+        composer_label=composer_label,
+        work_type=work.work_type,
+        opus_number=work.opus_number,
+        catalogue=catalogue,
+        musical_key=work.musical_key,
+        number=work.number,
+        premiere_date=work.premiere_date,
+        mention_count=mention_count,
+        aliases=aliases,
+        proof=proofs,
     )

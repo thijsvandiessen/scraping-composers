@@ -26,7 +26,15 @@
   </tr>
   {% for scraper in scrapers %}
   <tr>
-    <td><strong>{{ scraper.name }}</strong></td>
+    <td>
+      <strong>{{ scraper.name }}</strong>
+      <div style="font-size: 0.85em; margin-top: 4px;">
+        <a href="{% url 'concerts_list' %}?source={{ scraper.name|urlencode }}">concerts</a> &middot;
+        <a href="{% url 'recordings_list' %}?source={{ scraper.name|urlencode }}">recordings</a> &middot;
+        <a href="{% url 'people' 'composers' %}?source={{ scraper.name|urlencode }}">people</a> &middot;
+        <a href="{% url 'gold_works' %}?source={{ scraper.name|urlencode }}">works</a>
+      </div>
+    </td>
     <td>{{ scraper.cadence }}</td>
     <td>
       {% if scraper.due %}<span class="sc-badge sc-due">due</span>

@@ -7,26 +7,35 @@
 
 <div class="sc-tabs">
   {% for r in roles %}
-  <a class="sc-tab {% if r == role %}sc-tab-active{% endif %}" href="{% url 'people' r %}">{{ r }}</a>
+  <a class="sc-tab {% if r == role %}sc-tab-active{% endif %}" href="{% url 'people' r %}{% if request.GET.source %}?source={{ request.GET.source|urlencode }}{% endif %}">{{ r }}</a>
   {% endfor %}
 </div>
 
 <form method="get" action="" class="sc-toolbar">
   <input type="text" name="q" value="{{ q }}" placeholder="search {{ role }} by name…" class="sc-btn" style="cursor: text; min-width: 18rem;">
-  {% if sort == "concerts" %}<input type="hidden" name="sort" value="concerts">{% endif %}
+  {% if request.GET.source %}<input type="hidden" name="source" value="{{ request.GET.source }}">{% endif %}
+  {% if sort and sort != 'label' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
   <button type="submit" class="sc-btn sc-btn-primary">Search</button>
+  {% if request.GET.source %}<span class="sc-badge sc-unknown">source: {{ request.GET.source }} <a href="?{% if q %}q={{ q|urlencode }}&amp;{% endif %}{% if sort and sort != 'label' %}sort={{ sort|urlencode }}{% endif %}">clear</a></span>{% endif %}
+
   {% if sort == "concerts" %}
-  <a class="sc-btn" href="?q={{ q|urlencode }}">sort by name</a>
+    <a class="sc-btn" href="?q={{ q|urlencode }}{% if request.GET.source %}&source={{ request.GET.source|urlencode }}{% endif %}">sort by name</a>
+    <a class="sc-btn" href="?q={{ q|urlencode }}&sort=recordings{% if request.GET.source %}&source={{ request.GET.source|urlencode }}{% endif %}">sort by recordings</a>
+  {% elif sort == "recordings" %}
+    <a class="sc-btn" href="?q={{ q|urlencode }}{% if request.GET.source %}&source={{ request.GET.source|urlencode }}{% endif %}">sort by name</a>
+    <a class="sc-btn" href="?q={{ q|urlencode }}&sort=concerts{% if request.GET.source %}&source={{ request.GET.source|urlencode }}{% endif %}">sort by concerts</a>
   {% else %}
-  <a class="sc-btn" href="?q={{ q|urlencode }}&sort=concerts">sort by concerts</a>
+    <a class="sc-btn" href="?q={{ q|urlencode }}&sort=concerts{% if request.GET.source %}&source={{ request.GET.source|urlencode }}{% endif %}">sort by concerts</a>
+    <a class="sc-btn" href="?q={{ q|urlencode }}&sort=recordings{% if request.GET.source %}&source={{ request.GET.source|urlencode }}{% endif %}">sort by recordings</a>
   {% endif %}
+
   <span class="sc-muted">{{ total }} {{ role }} — page {{ page }} of {{ pages }} —
     curated gold data (people with concerts/recordings/works; rebuild via
     <a href="{% url 'promote' %}">Promote</a>)</span>
 </form>
 
 <table class="sc-table">
-  <tr><th>name</th><th class="sc-num">concerts</th><th>first seen</th></tr>
+  <tr><th>name</th><th class="sc-num">concerts</th><th class="sc-num">recordings</th><th>first seen</th></tr>
   {% for person in items %}
   <tr>
     <td><a href="{% url 'entity_detail' person.id %}"><strong>{{ person.label }}</strong></a></td>
@@ -35,10 +44,15 @@
       <a href="{% url 'person_concerts' role person.id %}">{{ person.concert_count }}</a>
       {% else %}<span class="sc-muted">0</span>{% endif %}
     </td>
+    <td class="sc-num">
+      {% if person.recording_count %}
+      <a href="{% url 'person_recordings' role person.id %}">{{ person.recording_count }}</a>
+      {% else %}<span class="sc-muted">0</span>{% endif %}
+    </td>
     <td>{{ person.created_at|slice:":10" }}</td>
   </tr>
   {% empty %}
-  <tr><td colspan="3" class="sc-muted">no {{ role }} match</td></tr>
+  <tr><td colspan="4" class="sc-muted">no {{ role }} match</td></tr>
   {% endfor %}
 </table>
 

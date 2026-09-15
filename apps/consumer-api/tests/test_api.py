@@ -1,6 +1,7 @@
 """Consumer API tests: the silver app over staging seed data, the gold app over
 its promoted copy — both using in-memory/tmp databases, no network."""
 
+import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -483,6 +484,88 @@ def test_list_works_searches_by_composer(client: TestClient) -> None:
     assert client.get("/v1/works?q=Nobody").json()["total"] == 0
 
 
+@pytest.fixture
+def two_source_client() -> Iterator[TestClient]:
+    """Two sources reporting the *same* title, plus one title only ``roh`` has.
+
+    The shared title is the interesting case: ``add_work_title_alias`` dedupes
+    aliases by (work, title key) across sources, so filtering works by
+    ``work_titles.source_id`` would lose the second source's works entirely.
+    """
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    factory = init_db(engine)
+    programmes = FakeSource(
+        records=(mention("Symphony No. 5, Op. 67", "Beethoven, Ludwig van", "p1"),),
+        name="programmes",
+        base_url="https://programmes.example",
+    )
+    roh = FakeSource(
+        records=(
+            mention("Symphony No. 5, Op. 67", "Beethoven, Ludwig van", "r1"),
+            mention("Die Walküre", "Wagner, Richard", "r2"),
+        ),
+        name="roh",
+        base_url="https://roh.example",
+    )
+    with factory() as s:
+        ingest_source(s, programmes)
+        ingest_source(s, roh)
+    yield TestClient(create_app("test-silver", lambda: factory))
+
+
+def test_list_works_filters_by_source(two_source_client: TestClient) -> None:
+    titles = {w["canonical_title"] for w in two_source_client.get("/v1/works").json()["items"]}
+    assert titles == {"Symphony No. 5, Op. 67", "Die Walküre"}
+
+    roh = two_source_client.get("/v1/works?source=roh").json()
+    # The shared title is reported by roh too, even though programmes recorded
+    # the work_titles row first.
+    assert {w["canonical_title"] for w in roh["items"]} == {"Symphony No. 5, Op. 67", "Die Walküre"}
+    assert roh["total"] == 2
+
+    programmes = two_source_client.get("/v1/works?source=programmes").json()
+    assert {w["canonical_title"] for w in programmes["items"]} == {"Symphony No. 5, Op. 67"}
+    assert programmes["total"] == 1
+
+    assert two_source_client.get("/v1/works?source=nobody").json()["total"] == 0
+
+
+def test_list_works_combines_source_and_search(two_source_client: TestClient) -> None:
+    assert two_source_client.get("/v1/works?source=roh&q=Walküre").json()["total"] == 1
+    assert two_source_client.get("/v1/works?source=programmes&q=Walküre").json()["total"] == 0
+
+
+# --- /v1/works/{work_id} ---
+
+
+def test_work_detail_returns_metadata_aliases_and_proof(client: TestClient) -> None:
+    work_id = client.get("/v1/works").json()["items"][0]["id"]
+    r = client.get(f"/v1/works/{work_id}")
+    assert r.status_code == 200
+    work = r.json()
+    assert work["id"] == work_id
+    assert work["canonical_title"] == "Symphony No. 5, Op. 67"
+    assert work["composer_label"] == "Beethoven, Ludwig van"
+    assert work["opus_number"] == "67"
+    assert work["mention_count"] == 2
+    assert work["aliases"] == ["Sinfonie Nr. 5, op. 67"]
+    assert work["premiere_date"] is None  # nothing populates it yet — see #244
+    assert [p["source"] for p in work["proof"]] == ["programmes"]
+    assert work["proof"][0]["source_url"] == "https://programmes.example"
+
+
+def test_work_detail_unknown_id_is_404(client: TestClient) -> None:
+    assert client.get(f"/v1/works/{uuid.uuid4()}").status_code == 404
+
+
+def test_work_detail_rejects_a_non_uuid(client: TestClient) -> None:
+    assert client.get("/v1/works/not-a-uuid").status_code == 422
+
+
 # --- concerts (gold app) ---
 
 
@@ -757,6 +840,33 @@ def test_recordings_list_search_by_participant_and_source(recordings_client: Tes
     assert recordings_client.get("/v1/recordings?q=Jansen").json()["total"] == 2  # artist on both
     assert recordings_client.get("/v1/recordings?source=deutschegrammophon").json()["total"] == 2
     assert recordings_client.get("/v1/recordings?source=nyphil").json()["total"] == 0
+
+
+def test_people_carry_recording_counts_and_sort_by_them(recordings_client: TestClient) -> None:
+    data = recordings_client.get("/v1/soloists?sort=recordings").json()
+    assert [(i["label"], i["recording_count"]) for i in data["items"]] == [("Jansen, Janine", 2)]
+    # conductors are on both albums too, and the counts survive the default sort
+    by_label = recordings_client.get("/v1/conductors").json()
+    assert [(i["label"], i["recording_count"]) for i in by_label["items"]] == [("Rattle, Simon", 2)]
+
+
+def test_people_without_recordings_report_zero(client: TestClient) -> None:
+    jane = next(i for i in client.get("/v1/soloists").json()["items"] if i["label"] == "Doe, Jane")
+    assert jane["recording_count"] == 0
+    assert jane["concert_count"] == 0
+
+
+def test_people_reject_an_unknown_sort(client: TestClient) -> None:
+    assert client.get("/v1/soloists?sort=nope").status_code == 422
+
+
+def test_people_filter_by_source(client: TestClient) -> None:
+    # the person records all come from "fake"; "programmes" only reported works
+    assert client.get("/v1/composers?source=fake").json()["total"] == 2
+    assert client.get("/v1/composers?source=programmes").json()["total"] == 0
+    assert client.get("/v1/composers?source=nobody").json()["total"] == 0
+    # and the filter composes with the search term
+    assert client.get("/v1/composers?source=fake&q=Bach").json()["total"] == 1
 
 
 def test_recording_detail_has_artists_and_works(recordings_client: TestClient) -> None:

@@ -6,7 +6,7 @@ from django.contrib import admin
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
-from ..api import AdminAPIError, DataAPI
+from ..api import AdminAPIError, DataAPI, Filters
 from .common import page_context, page_number
 
 
@@ -122,19 +122,23 @@ def works(request: HttpRequest) -> HttpResponse:
     """Searchable resolved-works browser (by title or composer)."""
     api = DataAPI.silver()
     q = request.GET.get("q", "").strip()
+    source = request.GET.get("source", "").strip()
     page = page_number(request)
     result: dict[str, object] = {}
     error: str | None = None
     try:
-        result = api.list_works(q=q or None, page=page)
+        result = api.list_works(Filters(q=q or None, source=source or None), page=page)
     except AdminAPIError as exc:
         error = str(exc)
-    params = {"q": q} if q else {}
+    params = {key: value for key, value in (("q", q), ("source", source)) if value}
     context = {
         **admin.site.each_context(request),
         "title": "Works",
         "items": result.get("items", []),
         "q": q,
+        # Silver works have no gold detail page: the titles here stay plain
+        # text, since most of these works never make it through promote.
+        "detail_url": None,
         "error": error,
         **page_context(result, request.path, params),
     }

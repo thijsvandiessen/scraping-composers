@@ -10,6 +10,7 @@ from .crud import (
     get_person,
     get_recording,
     get_stats,
+    get_work,
     list_concerts,
     list_entities,
     list_mentions,
@@ -19,7 +20,7 @@ from .crud import (
     person_concerts,
     person_recordings,
 )
-from .deps import DbSession, PageQuery
+from .deps import DbSession, FilterQuery, PageQuery
 from .schemas import (
     ComposerDetail,
     ComposerPage,
@@ -34,6 +35,7 @@ from .schemas import (
     RecordingListPage,
     RecordingPage,
     StatsOut,
+    WorkDetail,
     WorkPage,
 )
 
@@ -65,11 +67,17 @@ def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
 def works(
     db: DbSession,
     pager: PageQuery,
-    q: str | None = None,
+    filters: FilterQuery,
     performed: bool = False,
     sort: Annotated[str, Query(pattern="^(label|mentions)$")] = "label",
 ) -> WorkPage:
-    return list_works(db, q, pager, performed_only=performed, sort=sort)
+    return list_works(db, filters, pager, performed_only=performed, sort=sort)
+
+
+@v1.get("/works/{work_id}", response_model=WorkDetail)
+def work_detail(work_id: uuid.UUID, db: DbSession) -> WorkDetail:
+    """One work with its aliases and the proof behind it."""
+    return get_work(db, work_id)
 
 
 @v1.get("/mentions", response_model=MentionPage)
@@ -144,10 +152,10 @@ def get_person_recordings(
 def list_composers(
     db: DbSession,
     pager: PageQuery,
-    q: str | None = None,
-    sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
+    filters: FilterQuery,
+    sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, q, pager, profession="composer", sort=sort)
+    return list_people(db, filters, pager, profession="composer", sort=sort)
 
 
 @v1.get("/composers/{composer_id}", response_model=ComposerDetail)
@@ -170,10 +178,10 @@ def get_composer_works(
 def list_soloists(
     db: DbSession,
     pager: PageQuery,
-    q: str | None = None,
-    sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
+    filters: FilterQuery,
+    sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, q, pager, profession="soloist", sort=sort)
+    return list_people(db, filters, pager, profession="soloist", sort=sort)
 
 
 @v1.get("/soloists/{soloist_id}", response_model=ComposerDetail)
@@ -185,10 +193,10 @@ def get_soloist(soloist_id: uuid.UUID, db: DbSession) -> ComposerDetail:
 def list_conductors(
     db: DbSession,
     pager: PageQuery,
-    q: str | None = None,
-    sort: Annotated[str, Query(pattern="^(label|concerts)$")] = "label",
+    filters: FilterQuery,
+    sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, q, pager, profession="conductor", sort=sort)
+    return list_people(db, filters, pager, profession="conductor", sort=sort)
 
 
 @v1.get("/conductors/{conductor_id}", response_model=ComposerDetail)
