@@ -2,15 +2,17 @@
 its promoted copy — both using in-memory/tmp databases, no network."""
 
 import uuid
+from collections import Counter
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from composer_api import create_app
 from composer_gold import promote
 from composer_models.db import init_db
-from composer_schema import EntityDocument, SourceAdapter, SourceClaim
+from composer_schema import EntityDocument, SourceAdapter, SourceClaim, WorkMentionDocument
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
@@ -965,3 +967,185 @@ def test_gold_stats_reflect_curation(gold_client: TestClient) -> None:
     stats = gold_client.get("/v1/stats").json()
     assert stats["entities_by_kind"]["person"] == 1
     assert stats["entities_by_kind"].get("profession") == 1  # only the referenced "composer" survives
+
+
+# --- /v1/entities/{id}/connections ---
+
+
+def _connections(client: TestClient, entity_id: str, query: str = "") -> dict[str, Any]:
+    r = client.get(f"/v1/entities/{entity_id}/connections{query}")
+    assert r.status_code == 200
+    return r.json()
+
+
+def _entity_id(client: TestClient, label: str) -> str:
+    listing = client.get(f"/v1/entities?q={label}").json()
+    return next(i["id"] for i in listing["items"] if i["label"] == label)
+
+
+def test_connections_composer_reaches_its_performers(concerts_client: TestClient) -> None:
+    strauss = _entity_id(concerts_client, "Richard Strauss")
+    data = _connections(concerts_client, strauss)
+    performed_by = {i["label"]: i for i in data["items"] if i["relation"] == "performed_by"}
+    assert "Karajan, Herbert von" in performed_by
+    assert "Mutter, Anne-Sophie" in performed_by
+    assert performed_by["Karajan, Herbert von"]["weight"] == 1
+    assert performed_by["Karajan, Herbert von"]["roles"] == ["conductor"]
+
+
+def test_connections_performer_reaches_its_composers(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    data = _connections(concerts_client, karajan)
+    performed = {i["label"]: i for i in data["items"] if i["relation"] == "performed"}
+    assert set(performed) == {"Richard Strauss", "Hector Berlioz"}
+    # Abbado's Mahler concert is not Karajan's, so Mahler must not appear
+    assert "Gustav Mahler" not in performed
+
+
+def test_connections_carry_the_works_that_prove_them(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    data = _connections(concerts_client, karajan)
+    strauss = next(i for i in data["items"] if i["label"] == "Richard Strauss")
+    assert strauss["via"] == ["Ein Heldenleben (1985)"]
+
+
+def test_connections_include_stage_partners(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    data = _connections(concerts_client, karajan)
+    partners = {i["label"] for i in data["items"] if i["relation"] == "appeared_with"}
+    assert partners == {"Mutter, Anne-Sophie"}
+
+
+def test_connections_never_link_an_entity_to_itself(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    data = _connections(concerts_client, karajan)
+    assert all(i["entity_id"] != karajan for i in data["items"])
+
+
+def test_connections_drop_the_profession_hub(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    data = _connections(concerts_client, karajan)
+    assert all(i["relation"] != "has_profession" for i in data["items"])
+
+
+def test_connections_min_weight_drops_one_off_pairings(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    assert _connections(concerts_client, karajan, "?min_weight=2")["items"] == []
+
+
+def test_connections_per_relation_budget_is_per_relation(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    data = _connections(concerts_client, karajan, "?per_relation=1")
+    by_relation = Counter(i["relation"] for i in data["items"])
+    assert all(count == 1 for count in by_relation.values())
+    # the budget is spent per relation, so both kinds of edge survive it
+    assert set(by_relation) == {"performed", "appeared_with"}
+
+
+def test_connections_limit_caps_the_whole_graph(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    data = _connections(concerts_client, karajan, "?limit=1")
+    assert len(data["items"]) == 1
+    # total counts what cleared min_weight, so a caller can see it was truncated
+    assert data["total"] == 3
+
+
+def test_connections_relation_filter(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    data = _connections(concerts_client, karajan, "?relation=performed")
+    assert {i["relation"] for i in data["items"]} == {"performed"}
+
+
+@pytest.fixture
+def affinity_client(tmp_path: Path) -> Iterator[TestClient]:
+    """A dataset with a hub composer, to exercise the affinity discount.
+
+    One conductor programmes two Beethoven works and two by an unknown; three
+    other conductors programme nothing but Beethoven. Both edges out of the
+    focused conductor therefore weigh the same, and only the discount can tell
+    the distinctive pairing from the unremarkable one.
+    """
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    factory = init_db(engine)
+
+    def concert(cid: str, title: str, composer: str, conductor: str) -> WorkMentionDocument:
+        return perf_mention(
+            f"perf:{cid}",
+            title,
+            composer,
+            {"concert_id": cid, "date": f"20{cid.zfill(2)}-01-01", "conductors": [conductor]},
+        )
+
+    # "berlinphil" because derive_concerts dispatches its payload parsing on
+    # the source name — an invented source's mentions never become concerts.
+    hall = FakeSource(
+        records=(
+            concert("1", "Symphony No. 5", "Ludwig van Beethoven", "Focus, Conductor"),
+            concert("2", "Symphony No. 7", "Ludwig van Beethoven", "Focus, Conductor"),
+            concert("3", "Nocturne in Grey", "Obscure, Anna", "Focus, Conductor"),
+            concert("4", "Prelude in Dust", "Obscure, Anna", "Focus, Conductor"),
+            # the same Beethoven works again, under other batons: the hub forms
+            concert("5", "Symphony No. 5", "Ludwig van Beethoven", "Other, One"),
+            concert("6", "Symphony No. 7", "Ludwig van Beethoven", "Other, Two"),
+            concert("7", "Symphony No. 5", "Ludwig van Beethoven", "Other, Three"),
+            # conductors become entities through their own records, not through
+            # the billing on a mention
+            _person("Focus, Conductor", SourceClaim("has_profession", "profession", "conductor")),
+            _person("Other, One", SourceClaim("has_profession", "profession", "conductor")),
+            _person("Other, Two", SourceClaim("has_profession", "profession", "conductor")),
+            _person("Other, Three", SourceClaim("has_profession", "profession", "conductor")),
+        ),
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    with factory() as s:
+        ingest_source(s, hall)
+        derive_concerts(s)
+        gold_path = tmp_path / "gold.db"
+        promote(s, gold_path)
+    gold_factory = init_db(create_engine(f"sqlite:///{gold_path}"))
+    yield TestClient(create_app("test-gold-affinity", lambda: gold_factory))
+
+
+def test_connections_weight_ranking_cannot_separate_the_two(affinity_client: TestClient) -> None:
+    """Both composers were programmed twice, so raw weight calls it a tie."""
+    focus = _entity_id(affinity_client, "Focus, Conductor")
+    data = _connections(affinity_client, focus, "?rank=weight&relation=performed")
+    weights = {i["label"]: i["weight"] for i in data["items"]}
+    assert weights == {"Ludwig van Beethoven": 2, "Obscure, Anna": 2}
+    assert all(i["score"] == i["weight"] for i in data["items"])
+
+
+def test_connections_affinity_demotes_the_most_performed(affinity_client: TestClient) -> None:
+    """The discount breaks that tie in favour of the distinctive pairing."""
+    focus = _entity_id(affinity_client, "Focus, Conductor")
+    data = _connections(affinity_client, focus, "?relation=performed")
+    assert [i["label"] for i in data["items"]] == ["Obscure, Anna", "Ludwig van Beethoven"]
+    scores = {i["label"]: i["score"] for i in data["items"]}
+    assert scores["Obscure, Anna"] > scores["Ludwig van Beethoven"]
+    # the weights it is ranking are untouched — only the ordering changed
+    assert {i["label"]: i["weight"] for i in data["items"]} == {
+        "Obscure, Anna": 2,
+        "Ludwig van Beethoven": 2,
+    }
+
+
+def test_connections_rank_is_rejected_when_unknown(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    assert concerts_client.get(f"/v1/entities/{karajan}/connections?rank=magic").status_code == 422
+
+
+def test_connections_404_for_unknown_entity(concerts_client: TestClient) -> None:
+    r = concerts_client.get("/v1/entities/00000000-0000-0000-0000-000000000000/connections")
+    assert r.status_code == 404
+
+
+def test_connections_include_claim_edges(gold_client: TestClient) -> None:
+    """Claim edges are weighted by how many sources assert them."""
+    beethoven = _entity_id(gold_client, "Beethoven, Ludwig van")
+    data = _connections(gold_client, beethoven, "?relation=born_in")
+    assert data["items"] == []

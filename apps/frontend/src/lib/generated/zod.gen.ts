@@ -33,7 +33,8 @@ export const zComposerSummary = z.object({
     concert_count: z.int().optional().default(0),
     created_at: z.iso.datetime({ offset: true, local: true }),
     id: z.uuid(),
-    label: z.string()
+    label: z.string(),
+    recording_count: z.int().optional().default(0)
 });
 
 /**
@@ -129,6 +130,36 @@ export const zConcertDetail = z.object({
     url: z.string().nullable(),
     venue: z.string().nullable(),
     works: z.array(zConcertWorkOut)
+});
+
+/**
+ * ConnectionOut
+ *
+ * One neighbour of the focused entity, with the evidence behind the edge.
+ */
+export const zConnectionOut = z.object({
+    direction: z.string(),
+    entity_id: z.uuid(),
+    kind: z.string(),
+    label: z.string(),
+    relation: z.string(),
+    roles: z.array(z.string()),
+    score: z.number(),
+    via: z.array(z.string()),
+    weight: z.int()
+});
+
+/**
+ * ConnectionsOut
+ */
+export const zConnectionsOut = z.object({
+    entity_id: z.uuid(),
+    items: z.array(zConnectionOut),
+    kind: z.string(),
+    label: z.string(),
+    limit: z.int(),
+    rank: z.string(),
+    total: z.int()
 });
 
 /**
@@ -347,6 +378,7 @@ export const zComposerWorkOut = z.object({
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
+    premiere_date: z.string().nullable(),
     proof: z.array(zWorkProofOut),
     work_type: z.string().nullable()
 });
@@ -364,6 +396,25 @@ export const zComposerWorksPage = z.object({
 });
 
 /**
+ * WorkDetail
+ */
+export const zWorkDetail = z.object({
+    aliases: z.array(z.string()),
+    canonical_title: z.string(),
+    catalogue: z.string().nullable(),
+    composer_id: z.uuid().nullable(),
+    composer_label: z.string().nullable(),
+    id: z.uuid(),
+    mention_count: z.int(),
+    musical_key: z.string().nullable(),
+    number: z.int().nullable(),
+    opus_number: z.string().nullable(),
+    premiere_date: z.string().nullable(),
+    proof: z.array(zWorkProofOut),
+    work_type: z.string().nullable()
+});
+
+/**
  * WorkSummary
  */
 export const zWorkSummary = z.object({
@@ -377,6 +428,7 @@ export const zWorkSummary = z.object({
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
+    premiere_date: z.string().nullable(),
     work_type: z.string().nullable()
 });
 
@@ -391,10 +443,11 @@ export const zWorkPage = z.object({
 });
 
 export const zListComposersV1ComposersGetQuery = z.object({
-    q: z.string().nullish(),
-    sort: z.string().regex(/^(label|concerts)$/).optional().default('label'),
+    sort: z.string().regex(/^(label|concerts|recordings)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20)
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish()
 });
 
 /**
@@ -448,10 +501,11 @@ export const zConcertDetailV1ConcertsConcertIdGetPath = z.object({
 export const zConcertDetailV1ConcertsConcertIdGetResponse = zConcertDetail;
 
 export const zListConductorsV1ConductorsGetQuery = z.object({
-    q: z.string().nullish(),
-    sort: z.string().regex(/^(label|concerts)$/).optional().default('label'),
+    sort: z.string().regex(/^(label|concerts|recordings)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20)
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish()
 });
 
 /**
@@ -489,6 +543,23 @@ export const zEntityDetailV1EntitiesEntityIdGetPath = z.object({
  * Successful Response
  */
 export const zEntityDetailV1EntitiesEntityIdGetResponse = zEntityDetail;
+
+export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetPath = z.object({
+    entity_id: z.uuid()
+});
+
+export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetQuery = z.object({
+    limit: z.int().gte(1).lte(100).optional().default(24),
+    per_relation: z.int().gte(1).lte(50).optional().default(6),
+    min_weight: z.int().gte(1).optional().default(1),
+    rank: z.string().regex(/^(affinity|weight)$/).optional().default('affinity'),
+    relation: z.string().nullish()
+});
+
+/**
+ * Successful Response
+ */
+export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetResponse = zConnectionsOut;
 
 export const zMentionsV1MentionsGetQuery = z.object({
     status: z.string().nullish(),
@@ -551,10 +622,11 @@ export const zRecordingDetailV1RecordingsRecordingIdGetPath = z.object({
 export const zRecordingDetailV1RecordingsRecordingIdGetResponse = zRecordingDetail;
 
 export const zListSoloistsV1SoloistsGetQuery = z.object({
-    q: z.string().nullish(),
-    sort: z.string().regex(/^(label|concerts)$/).optional().default('label'),
+    sort: z.string().regex(/^(label|concerts|recordings)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20)
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish()
 });
 
 /**
@@ -577,14 +649,24 @@ export const zGetSoloistV1SoloistsSoloistIdGetResponse = zComposerDetail;
 export const zStatsV1StatsGetResponse = zStatsOut;
 
 export const zWorksV1WorksGetQuery = z.object({
-    q: z.string().nullish(),
     performed: z.boolean().optional().default(false),
     sort: z.string().regex(/^(label|mentions)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20)
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish()
 });
 
 /**
  * Successful Response
  */
 export const zWorksV1WorksGetResponse = zWorkPage;
+
+export const zWorkDetailV1WorksWorkIdGetPath = z.object({
+    work_id: z.uuid()
+});
+
+/**
+ * Successful Response
+ */
+export const zWorkDetailV1WorksWorkIdGetResponse = zWorkDetail;

@@ -1,0 +1,206 @@
+---
+import Base from "../../layouts/Base.astro";
+import { GRAPH_LIMIT, getConnections, type ConnectionRank } from "../../lib/api";
+import { layout, relationLabel, weightLabel } from "../../lib/graph";
+import type { Connections } from "../../lib/schemas";
+
+const { id } = Astro.params;
+
+// The three knobs a reader actually turns. They are query parameters rather
+// than client-side state so every view of the graph is a URL someone can share
+// or bookmark — and so the page needs no JavaScript at all.
+const rankParam = Astro.url.searchParams.get("rank");
+const rank: ConnectionRank = rankParam === "weight" ? "weight" : "affinity";
+
+const rawMinWeight = Number(Astro.url.searchParams.get("min") ?? "1");
+const minWeight = Number.isInteger(rawMinWeight) && rawMinWeight >= 1 ? Math.min(rawMinWeight, 50) : 1;
+
+const rawLimit = Number(Astro.url.searchParams.get("limit") ?? String(GRAPH_LIMIT));
+const limit = Number.isInteger(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 60) : GRAPH_LIMIT;
+
+let connections: Connections | null = null;
+let error: string | null = null;
+try {
+  connections = id ? await getConnections(id, { rank, minWeight, limit }) : null;
+} catch (err) {
+  error = err instanceof Error ? err.message : String(err);
+}
+
+if (!connections && !error) {
+  return new Response("Entity not found", { status: 404 });
+}
+
+const graph = connections ? layout(connections.items) : null;
+const truncated = connections ? connections.total > connections.items.length : false;
+
+function viewUrl(overrides: { rank?: ConnectionRank; min?: number; limit?: number }): string {
+  const params = new URLSearchParams();
+  const nextRank = overrides.rank ?? rank;
+  const nextMin = overrides.min ?? minWeight;
+  const nextLimit = overrides.limit ?? limit;
+  if (nextRank !== "affinity") params.set("rank", nextRank);
+  if (nextMin > 1) params.set("min", String(nextMin));
+  if (nextLimit !== GRAPH_LIMIT) params.set("limit", String(nextLimit));
+  const query = params.toString();
+  return query ? `/connections/${id}?${query}` : `/connections/${id}`;
+}
+
+// Neighbour pages inherit the current view, so walking the graph doesn't
+// silently reset the reader's filters.
+function neighbourUrl(entityId: string): string {
+  return viewUrl({}).replace(`/connections/${id}`, `/connections/${entityId}`);
+}
+
+const title = connections ? `${connections.label} — Connections` : "Connections";
+---
+
+<Base title={title}>
+  {error && (
+    <div class="error-box">
+      <strong>The composer API is unavailable.</strong>
+      <p>{error}</p>
+    </div>
+  )}
+
+  {connections && graph && (
+    <>
+      <p class="back-link">
+        {/* Only people have a detail page; a place or an ensemble reached by
+            walking the graph would 404 there. */}
+        {connections.kind === "person"
+          ? <a href={`/composers/${connections.entity_id}`}>← {connections.label}</a>
+          : <a href="/composers">← All composers</a>}
+      </p>
+      <h1>{connections.label}</h1>
+      <p class="meta">
+        {connections.total > 0
+          ? `${connections.total} connection${connections.total === 1 ? "" : "s"} found, showing the strongest ${connections.items.length}.`
+          : minWeight > 1
+            ? `Nothing reaches ${minWeight} — lower the threshold to see the weaker connections.`
+            : "No connections recorded yet."}
+      </p>
+
+      <div class="graph-controls">
+        <span class="control-group" role="group" aria-label="Ranking">
+          <span class="control-label">Rank by</span>
+          <a class={rank === "affinity" ? "control on" : "control"} href={viewUrl({ rank: "affinity" })}>
+            distinctiveness
+          </a>
+          <a class={rank === "weight" ? "control on" : "control"} href={viewUrl({ rank: "weight" })}>
+            raw count
+          </a>
+        </span>
+        <span class="control-group" role="group" aria-label="Minimum weight">
+          <span class="control-label">At least</span>
+          {[1, 2, 5, 10].map((value) => (
+            <a class={minWeight === value ? "control on" : "control"} href={viewUrl({ min: value })}>
+              {value}×
+            </a>
+          ))}
+        </span>
+        <span class="control-group" role="group" aria-label="Number of nodes">
+          <span class="control-label">Show</span>
+          {[12, 24, 48].map((value) => (
+            <a class={limit === value ? "control on" : "control"} href={viewUrl({ limit: value })}>
+              {value}
+            </a>
+          ))}
+        </span>
+      </div>
+
+      <p class="rank-note">
+        {rank === "affinity"
+          ? "Ranked by distinctiveness: each connection is discounted by how widely performed or referenced the other end is, so the pairings particular to this figure rise above the ones everybody shares."
+          : "Ranked by raw count: the most performances or shared events, undiscounted. Expect the household names to dominate."}
+      </p>
+
+      {graph.nodes.length === 0 && (
+        <p class="empty">
+          Nothing to draw{minWeight > 1 ? " at this threshold — try lowering it" : " yet"}.
+        </p>
+      )}
+
+      {graph.nodes.length > 0 && (
+        <>
+          <figure class="graph">
+            <svg
+              viewBox={graph.viewBox}
+              role="img"
+              aria-label={`Connection graph for ${connections.label}, with ${graph.nodes.length} neighbours`}
+            >
+              <g class="edges">
+                {graph.nodes.map((node) => (
+                  <line
+                    x1={graph.centre.x}
+                    y1={graph.centre.y}
+                    x2={node.x}
+                    y2={node.y}
+                    stroke-width={node.strokeWidth}
+                    data-group={node.group}
+                  />
+                ))}
+              </g>
+              <g class="nodes">
+                {graph.nodes.map((node) => (
+                  <a href={neighbourUrl(node.connection.entity_id)}>
+                    <title>
+                      {`${node.connection.label} — ${relationLabel(node.connection.relation)}, ${weightLabel(node.connection.relation, node.connection.weight)}`}
+                    </title>
+                    <circle cx={node.x} cy={node.y} r={node.radius} data-group={node.group} />
+                    <text x={node.x + node.labelOffset} y={node.y + 4} text-anchor={node.anchor}>
+                      {node.connection.label}
+                    </text>
+                  </a>
+                ))}
+              </g>
+              <g class="centre">
+                <circle cx={graph.centre.x} cy={graph.centre.y} r={graph.centre.radius} />
+                <text x={graph.centre.x} y={graph.centre.y + graph.centre.radius + 20} text-anchor="middle">
+                  {connections.label}
+                </text>
+              </g>
+            </svg>
+            <figcaption>
+              Distance from the centre is rank — the closest node is the strongest connection. Size and
+              line weight show how much evidence there is. Select any name to centre the graph on it.
+            </figcaption>
+          </figure>
+
+          <ul class="legend">
+            {graph.relations.map((relation, index) => (
+              <li data-group={index}>{relationLabel(relation)}</li>
+            ))}
+          </ul>
+
+          <h2>The evidence</h2>
+          <ul class="connection-list">
+            {graph.nodes.map((node) => (
+              <li>
+                <a class="connection-name" href={neighbourUrl(node.connection.entity_id)}>
+                  {node.connection.label}
+                </a>
+                <span class="connection-relation" data-group={node.group}>
+                  {relationLabel(node.connection.relation)}
+                </span>
+                <span class="connection-weight">
+                  {weightLabel(node.connection.relation, node.connection.weight)}
+                  {node.connection.roles.length > 0 && ` · ${node.connection.roles.join(", ")}`}
+                </span>
+                {node.connection.via.length > 0 && (
+                  <span class="connection-via">{node.connection.via.join(" · ")}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {truncated && (
+            <p class="meta">
+              {connections.total - connections.items.length} further connection
+              {connections.total - connections.items.length === 1 ? "" : "s"} did not make the cut.
+            </p>
+          )}
+        </>
+      )}
+    </>
+  )}
+</Base>

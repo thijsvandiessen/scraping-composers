@@ -307,3 +307,28 @@ class RecordingDetail(BaseModel):
     url: str | None
     participants: list[RecordingParticipantOut]
     works: list[RecordingWorkOut]
+
+
+class ConnectionOut(BaseModel):
+    """One neighbour of the focused entity, with the evidence behind the edge."""
+
+    entity_id: uuid.UUID
+    label: str
+    kind: str
+    # performed | performed_by | appeared_with, or the claim predicate itself
+    relation: str
+    direction: str  # out = this entity is the claim's subject, in = its object
+    weight: int  # performances, shared events, or sources asserting the claim
+    score: float  # the value the ranking used; equals weight when rank=weight
+    roles: list[str]  # conductor | soloist | ensemble, for performance edges
+    via: list[str]  # up to three proof snippets: works performed, or source names
+
+
+class ConnectionsOut(BaseModel):
+    entity_id: uuid.UUID
+    label: str
+    kind: str
+    items: list[ConnectionOut]
+    total: int  # edges above min_weight, before the per-relation and overall budgets
+    limit: int
+    rank: str
