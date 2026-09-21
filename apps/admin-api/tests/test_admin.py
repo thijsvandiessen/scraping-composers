@@ -413,6 +413,8 @@ def test_put_rule1_config_writes_file_and_is_read_back(
             "min_concert_appearances": 2,
             "min_recording_appearances": 1,
             "min_appearances_for_composers": 1,
+            "min_works_for_composers": 2,
+            "min_programmes_for_composers": 3,
             "min_sitelinks": None,
         },
         "ensembles": {"min_concert_appearances": 1, "min_recording_appearances": 4},
@@ -424,6 +426,8 @@ def test_put_rule1_config_writes_file_and_is_read_back(
     # the file on disk now reflects the new thresholds
     on_disk = Rule1Config.from_json(rule1_path)
     assert on_disk.persons.min_appearances_for_composers == 1
+    assert on_disk.persons.min_works_for_composers == 2
+    assert on_disk.persons.min_programmes_for_composers == 3
     assert on_disk.ensembles.min_recording_appearances == 4
     # and a later GET reads the same values back, with no server restart needed
     assert client.get("/admin/v1/rule1-config").json() == body

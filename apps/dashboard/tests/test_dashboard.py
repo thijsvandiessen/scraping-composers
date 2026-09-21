@@ -120,6 +120,8 @@ RULE1_CONFIG_PAYLOAD: dict[str, Any] = {
         "min_concert_appearances": 1,
         "min_recording_appearances": 1,
         "min_appearances_for_composers": 0,
+        "min_works_for_composers": 2,
+        "min_programmes_for_composers": 3,
         "min_sitelinks": None,
     },
     "ensembles": {"min_concert_appearances": 1, "min_recording_appearances": 1},
@@ -1052,6 +1054,8 @@ def test_rule1_config_page_renders_current_values(
             "min_concert_appearances": 2,
             "min_recording_appearances": 3,
             "min_appearances_for_composers": 1,
+            "min_works_for_composers": 2,
+            "min_programmes_for_composers": 3,
             "min_sitelinks": 150,
         },
         "ensembles": {"min_concert_appearances": 4, "min_recording_appearances": 5},
@@ -1060,6 +1064,7 @@ def test_rule1_config_page_renders_current_values(
     page = staff_client.get("/admin/promote/rule1-config/").content.decode()
     assert 'name="persons_min_concert_appearances" min="0" required\n             value="2"' in page
     assert 'name="persons_min_sitelinks"' in page and 'value="150"' in page
+    assert 'name="persons_min_programmes_for_composers" min="1" required\n             value="3"' in page
     assert 'name="ensembles_min_recording_appearances"' in page and 'value="5"' in page
 
 
@@ -1072,6 +1077,8 @@ def test_rule1_config_form_submits_payload(monkeypatch: pytest.MonkeyPatch, staf
             "persons_min_concert_appearances": "2",
             "persons_min_recording_appearances": "1",
             "persons_min_appearances_for_composers": "1",
+            "persons_min_works_for_composers": "2",
+            "persons_min_programmes_for_composers": "3",
             "persons_min_sitelinks": "",
             "ensembles_min_concert_appearances": "1",
             "ensembles_min_recording_appearances": "4",
@@ -1085,6 +1092,8 @@ def test_rule1_config_form_submits_payload(monkeypatch: pytest.MonkeyPatch, staf
             "min_concert_appearances": 2,
             "min_recording_appearances": 1,
             "min_appearances_for_composers": 1,
+            "min_works_for_composers": 2,
+            "min_programmes_for_composers": 3,
             "min_sitelinks": None,
         },
         "ensembles": {"min_concert_appearances": 1, "min_recording_appearances": 4},

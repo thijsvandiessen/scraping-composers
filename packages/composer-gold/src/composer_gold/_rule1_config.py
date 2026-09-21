@@ -32,6 +32,11 @@ class PersonRule1Config:
     # A person who composed a work some source mentioned needs only this many
     # combined concert+recording credits (0 = fully exempt, today's behaviour).
     min_appearances_for_composers: int = 0
+    # A composer must also have at least this many distinct mentioned works OR
+    # have their works on this many distinct concerts+recordings (either
+    # suffices). 1/1 keeps any composer of a mentioned work, today's behaviour.
+    min_works_for_composers: int = 1
+    min_programmes_for_composers: int = 1
     # Wikipedia sitelink count that promotes a person even without the
     # evidence above; None leaves this extra signal off.
     min_sitelinks: int | None = None
