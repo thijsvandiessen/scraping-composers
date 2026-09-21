@@ -1,12 +1,11 @@
 ---
 import Base from "../../layouts/Base.astro";
-import { listComposers, type ComposerSort } from "../../lib/api";
+import { listComposers } from "../../lib/api";
+import { activityCounts, composerListUrl, parseComposerListQuery } from "../../lib/composers";
 import type { ComposerPage } from "../../lib/schemas";
 
-const q = Astro.url.searchParams.get("q")?.trim() ?? "";
-const sort: ComposerSort = Astro.url.searchParams.get("sort") === "concerts" ? "concerts" : "label";
-const rawPage = Number(Astro.url.searchParams.get("page") ?? "1");
-const page = Number.isInteger(rawPage) && rawPage >= 1 ? rawPage : 1;
+const query = parseComposerListQuery(Astro.url);
+const { q, sort, page } = query;
 
 let data: ComposerPage | null = null;
 let error: string | null = null;
@@ -17,15 +16,6 @@ try {
 }
 
 const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
-
-function pageUrl(target: number): string {
-  const params = new URLSearchParams();
-  if (q) params.set("q", q);
-  if (sort !== "label") params.set("sort", sort);
-  if (target > 1) params.set("page", String(target));
-  const query = params.toString();
-  return query ? `/composers?${query}` : "/composers";
-}
 ---
 
 <Base title="Composers">
@@ -36,6 +26,7 @@ function pageUrl(target: number): string {
     <select name="sort" aria-label="Sort order">
       <option value="label" selected={sort === "label"}>By name</option>
       <option value="concerts" selected={sort === "concerts"}>By concerts</option>
+      <option value="recordings" selected={sort === "recordings"}>By albums</option>
     </select>
     <button type="submit">Search</button>
   </form>
@@ -55,17 +46,13 @@ function pageUrl(target: number): string {
         {data.items.map((composer) => (
           <li>
             <a href={`/composers/${composer.id}`}>{composer.label}</a>
-            <span class="concert-count">
-              {composer.concert_count > 0
-                ? `${composer.concert_count} concert${composer.concert_count === 1 ? "" : "s"}`
-                : ""}
-            </span>
+            <span class="concert-count">{activityCounts(composer.concert_count, composer.recording_count)}</span>
           </li>
         ))}
       </ul>
       <nav class="pagination" aria-label="Pagination">
-        {page > 1 && <a href={pageUrl(page - 1)}>← Previous</a>}
-        {page < totalPages && <a href={pageUrl(page + 1)}>Next →</a>}
+        {page > 1 && <a href={composerListUrl({ ...query, page: page - 1 })}>← Previous</a>}
+        {page < totalPages && <a href={composerListUrl({ ...query, page: page + 1 })}>Next →</a>}
         <span class="spacer" />
         <span class="summary">
           page {page} of {totalPages} — {data.total} composer{data.total === 1 ? "" : "s"}

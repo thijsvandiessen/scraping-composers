@@ -33,7 +33,8 @@ export const zComposerSummary = z.object({
     concert_count: z.int().optional().default(0),
     created_at: z.iso.datetime({ offset: true, local: true }),
     id: z.uuid(),
-    label: z.string()
+    label: z.string(),
+    recording_count: z.int().optional().default(0)
 });
 
 /**
@@ -347,6 +348,7 @@ export const zComposerWorkOut = z.object({
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
+    premiere_date: z.string().nullable(),
     proof: z.array(zWorkProofOut),
     work_type: z.string().nullable()
 });
@@ -364,6 +366,25 @@ export const zComposerWorksPage = z.object({
 });
 
 /**
+ * WorkDetail
+ */
+export const zWorkDetail = z.object({
+    aliases: z.array(z.string()),
+    canonical_title: z.string(),
+    catalogue: z.string().nullable(),
+    composer_id: z.uuid().nullable(),
+    composer_label: z.string().nullable(),
+    id: z.uuid(),
+    mention_count: z.int(),
+    musical_key: z.string().nullable(),
+    number: z.int().nullable(),
+    opus_number: z.string().nullable(),
+    premiere_date: z.string().nullable(),
+    proof: z.array(zWorkProofOut),
+    work_type: z.string().nullable()
+});
+
+/**
  * WorkSummary
  */
 export const zWorkSummary = z.object({
@@ -377,6 +398,7 @@ export const zWorkSummary = z.object({
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
+    premiere_date: z.string().nullable(),
     work_type: z.string().nullable()
 });
 
@@ -391,10 +413,11 @@ export const zWorkPage = z.object({
 });
 
 export const zListComposersV1ComposersGetQuery = z.object({
-    q: z.string().nullish(),
-    sort: z.string().regex(/^(label|concerts)$/).optional().default('label'),
+    sort: z.string().regex(/^(label|concerts|recordings)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20)
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish()
 });
 
 /**
@@ -448,10 +471,11 @@ export const zConcertDetailV1ConcertsConcertIdGetPath = z.object({
 export const zConcertDetailV1ConcertsConcertIdGetResponse = zConcertDetail;
 
 export const zListConductorsV1ConductorsGetQuery = z.object({
-    q: z.string().nullish(),
-    sort: z.string().regex(/^(label|concerts)$/).optional().default('label'),
+    sort: z.string().regex(/^(label|concerts|recordings)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20)
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish()
 });
 
 /**
@@ -551,10 +575,11 @@ export const zRecordingDetailV1RecordingsRecordingIdGetPath = z.object({
 export const zRecordingDetailV1RecordingsRecordingIdGetResponse = zRecordingDetail;
 
 export const zListSoloistsV1SoloistsGetQuery = z.object({
-    q: z.string().nullish(),
-    sort: z.string().regex(/^(label|concerts)$/).optional().default('label'),
+    sort: z.string().regex(/^(label|concerts|recordings)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20)
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish()
 });
 
 /**
@@ -577,14 +602,24 @@ export const zGetSoloistV1SoloistsSoloistIdGetResponse = zComposerDetail;
 export const zStatsV1StatsGetResponse = zStatsOut;
 
 export const zWorksV1WorksGetQuery = z.object({
-    q: z.string().nullish(),
     performed: z.boolean().optional().default(false),
     sort: z.string().regex(/^(label|mentions)$/).optional().default('label'),
     page: z.int().gte(1).optional().default(1),
-    limit: z.int().gte(1).lte(100).optional().default(20)
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish()
 });
 
 /**
  * Successful Response
  */
 export const zWorksV1WorksGetResponse = zWorkPage;
+
+export const zWorkDetailV1WorksWorkIdGetPath = z.object({
+    work_id: z.uuid()
+});
+
+/**
+ * Successful Response
+ */
+export const zWorkDetailV1WorksWorkIdGetResponse = zWorkDetail;

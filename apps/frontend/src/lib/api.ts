@@ -11,7 +11,7 @@ import {
 
 export const PAGE_SIZE = 25;
 
-export type ComposerSort = "label" | "concerts";
+export type ComposerSort = "label" | "concerts" | "recordings";
 export type WorkSort = "label" | "mentions";
 
 export class ApiError extends Error {
