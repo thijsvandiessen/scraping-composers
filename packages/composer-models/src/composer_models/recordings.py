@@ -70,7 +70,10 @@ class RecordingWork(Base):
     """A work (mention) that appears on a recording."""
 
     __tablename__ = "recording_works"
-    __table_args__ = (Index("ix_recording_works_recording", "recording_id"),)
+    __table_args__ = (
+        Index("ix_recording_works_recording", "recording_id"),
+        Index("ix_recording_works_mention", "mention_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     recording_id: Mapped[int] = mapped_column(ForeignKey("recordings.id"))

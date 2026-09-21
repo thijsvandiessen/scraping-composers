@@ -13,7 +13,7 @@ import {
 
 export const PAGE_SIZE = 25;
 
-export type ComposerSort = "label" | "concerts";
+export type ComposerSort = "label" | "concerts" | "recordings";
 export type ConnectionRank = "affinity" | "weight";
 
 /** Graph defaults. Kept here rather than in the page so the API and the

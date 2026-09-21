@@ -68,7 +68,10 @@ class ConcertWork(Base):
     """A work-performance (mention) that took place at a concert."""
 
     __tablename__ = "concert_works"
-    __table_args__ = (Index("ix_concert_works_concert", "concert_id"),)
+    __table_args__ = (
+        Index("ix_concert_works_concert", "concert_id"),
+        Index("ix_concert_works_mention", "mention_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     concert_id: Mapped[int] = mapped_column(ForeignKey("concerts.id"))

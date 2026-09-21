@@ -112,6 +112,8 @@ class Rule1PersonThresholds(BaseModel):
     min_concert_appearances: int = Field(ge=0)
     min_recording_appearances: int = Field(ge=0)
     min_appearances_for_composers: int = Field(ge=0)
+    min_works_for_composers: int = Field(default=1, ge=1)
+    min_programmes_for_composers: int = Field(default=1, ge=1)
     min_sitelinks: int | None = Field(default=None, ge=0)
 
 

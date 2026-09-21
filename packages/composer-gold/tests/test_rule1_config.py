@@ -15,6 +15,8 @@ def test_from_json_round_trips_all_fields(tmp_path: Path) -> None:
                     "min_concert_appearances": 2,
                     "min_recording_appearances": 3,
                     "min_appearances_for_composers": 1,
+                    "min_works_for_composers": 2,
+                    "min_programmes_for_composers": 3,
                     "min_sitelinks": 100,
                 },
                 "ensembles": {
@@ -31,6 +33,8 @@ def test_from_json_round_trips_all_fields(tmp_path: Path) -> None:
         min_concert_appearances=2,
         min_recording_appearances=3,
         min_appearances_for_composers=1,
+        min_works_for_composers=2,
+        min_programmes_for_composers=3,
         min_sitelinks=100,
     )
     assert config.ensembles == EnsembleRule1Config(min_concert_appearances=4, min_recording_appearances=5)
