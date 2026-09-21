@@ -133,6 +133,36 @@ export const zConcertDetail = z.object({
 });
 
 /**
+ * ConnectionOut
+ *
+ * One neighbour of the focused entity, with the evidence behind the edge.
+ */
+export const zConnectionOut = z.object({
+    direction: z.string(),
+    entity_id: z.uuid(),
+    kind: z.string(),
+    label: z.string(),
+    relation: z.string(),
+    roles: z.array(z.string()),
+    score: z.number(),
+    via: z.array(z.string()),
+    weight: z.int()
+});
+
+/**
+ * ConnectionsOut
+ */
+export const zConnectionsOut = z.object({
+    entity_id: z.uuid(),
+    items: z.array(zConnectionOut),
+    kind: z.string(),
+    label: z.string(),
+    limit: z.int(),
+    rank: z.string(),
+    total: z.int()
+});
+
+/**
  * EntitySummary
  */
 export const zEntitySummary = z.object({
@@ -513,6 +543,23 @@ export const zEntityDetailV1EntitiesEntityIdGetPath = z.object({
  * Successful Response
  */
 export const zEntityDetailV1EntitiesEntityIdGetResponse = zEntityDetail;
+
+export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetPath = z.object({
+    entity_id: z.uuid()
+});
+
+export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetQuery = z.object({
+    limit: z.int().gte(1).lte(100).optional().default(24),
+    per_relation: z.int().gte(1).lte(50).optional().default(6),
+    min_weight: z.int().gte(1).optional().default(1),
+    rank: z.string().regex(/^(affinity|weight)$/).optional().default('affinity'),
+    relation: z.string().nullish()
+});
+
+/**
+ * Successful Response
+ */
+export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetResponse = zConnectionsOut;
 
 export const zMentionsV1MentionsGetQuery = z.object({
     status: z.string().nullish(),

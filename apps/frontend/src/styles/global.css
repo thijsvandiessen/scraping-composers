@@ -274,3 +274,238 @@ a.source-chip:hover {
   font-style: italic;
   padding: 1rem 0;
 }
+
+/* --- connection graph --- */
+
+/* One hue per relation slot, matched by the data-group index the layout
+   assigns. Chosen to stay distinguishable in greyscale (the lightness steps
+   differ, not just the hue) and to sit alongside the accent brown. */
+.graph,
+.legend,
+.connection-list {
+  --group-0: #7a4f2c;
+  --group-1: #2f6b6b;
+  --group-2: #6b4a86;
+  --group-3: #8a6d1f;
+  --group-4: #4a5f8a;
+}
+
+.graph {
+  margin: 1.5rem 0 1rem;
+}
+
+.graph svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.graph .edges line {
+  stroke: var(--group-0);
+  opacity: 0.3;
+}
+
+.graph .edges line[data-group="1"],
+.graph .nodes circle[data-group="1"] {
+  stroke: var(--group-1);
+  fill: var(--group-1);
+}
+
+.graph .edges line[data-group="2"],
+.graph .nodes circle[data-group="2"] {
+  stroke: var(--group-2);
+  fill: var(--group-2);
+}
+
+.graph .edges line[data-group="3"],
+.graph .nodes circle[data-group="3"] {
+  stroke: var(--group-3);
+  fill: var(--group-3);
+}
+
+.graph .edges line[data-group="4"],
+.graph .nodes circle[data-group="4"] {
+  stroke: var(--group-4);
+  fill: var(--group-4);
+}
+
+.graph .nodes circle {
+  fill: var(--group-0);
+  opacity: 0.85;
+}
+
+.graph .nodes text {
+  font-size: 13px;
+  fill: var(--fg);
+}
+
+.graph .nodes a {
+  text-decoration: none;
+}
+
+.graph .nodes a:hover circle,
+.graph .nodes a:focus circle {
+  opacity: 1;
+  stroke: var(--fg);
+  stroke-width: 2;
+}
+
+.graph .nodes a:hover text,
+.graph .nodes a:focus text {
+  font-weight: 600;
+}
+
+.graph .centre circle {
+  fill: var(--fg);
+}
+
+.graph .centre text {
+  font-size: 15px;
+  font-weight: 600;
+  fill: var(--fg);
+}
+
+.graph figcaption {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.graph-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.25rem;
+  margin: 1rem 0 0.75rem;
+  font-size: 0.9rem;
+}
+
+.control-group {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.control-label {
+  color: var(--muted);
+}
+
+.control {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-decoration: none;
+}
+
+.control.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.rank-note {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 0 0 0.5rem;
+}
+
+.legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  font-size: 0.88rem;
+}
+
+.legend li::before {
+  content: "";
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.35rem;
+  border-radius: 50%;
+  background: var(--group-0);
+}
+
+.legend li[data-group="1"]::before {
+  background: var(--group-1);
+}
+
+.legend li[data-group="2"]::before {
+  background: var(--group-2);
+}
+
+.legend li[data-group="3"]::before {
+  background: var(--group-3);
+}
+
+.legend li[data-group="4"]::before {
+  background: var(--group-4);
+}
+
+.connection-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.connection-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.15rem 1rem;
+  padding: 0.6rem 0.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.connection-name {
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.connection-name:hover {
+  text-decoration: underline;
+}
+
+.connection-relation {
+  color: var(--group-0);
+  font-size: 0.85rem;
+  text-align: right;
+}
+
+.connection-relation[data-group="1"] {
+  color: var(--group-1);
+}
+
+.connection-relation[data-group="2"] {
+  color: var(--group-2);
+}
+
+.connection-relation[data-group="3"] {
+  color: var(--group-3);
+}
+
+.connection-relation[data-group="4"] {
+  color: var(--group-4);
+}
+
+.connection-weight,
+.connection-via {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.connection-via {
+  font-style: italic;
+}
+
+/* Labels sit on top of the edges, so they get a background-coloured halo
+   rather than a box: the line stays visible either side of the text. */
+.graph text {
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}

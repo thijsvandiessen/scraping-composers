@@ -738,6 +738,114 @@
         "title": "ConcertWorkOut",
         "type": "object"
       },
+      "ConnectionOut": {
+        "description": "One neighbour of the focused entity, with the evidence behind the edge.",
+        "properties": {
+          "direction": {
+            "title": "Direction",
+            "type": "string"
+          },
+          "entity_id": {
+            "format": "uuid",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "score": {
+            "title": "Score",
+            "type": "number"
+          },
+          "via": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Via",
+            "type": "array"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entity_id",
+          "label",
+          "kind",
+          "relation",
+          "direction",
+          "weight",
+          "score",
+          "roles",
+          "via"
+        ],
+        "title": "ConnectionOut",
+        "type": "object"
+      },
+      "ConnectionsOut": {
+        "properties": {
+          "entity_id": {
+            "format": "uuid",
+            "title": "Entity Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "entity_id",
+          "label",
+          "kind",
+          "items",
+          "total",
+          "limit",
+          "rank"
+        ],
+        "title": "ConnectionsOut",
+        "type": "object"
+      },
       "EntityDetail": {
         "properties": {
           "canonical_entity_id": {
@@ -2579,6 +2687,109 @@
           }
         },
         "summary": "Entity Detail"
+      }
+    },
+    "/v1/entities/{entity_id}/connections": {
+      "get": {
+        "description": "The strongest neighbours of one entity, budgeted so a graph can draw them.\n\nThe whole neighbourhood is unusable \u2014 a busy conductor reaches thousands of\npeople, and the heaviest edges (everyone performs Beethoven) are the least\ntelling. ``rank=affinity`` discounts each neighbour by how much it is\nperformed or referenced overall, ``per_relation`` keeps the performance\nedges from crowding out the biographical ones, and ``min_weight`` drops the\none-off co-occurrences that are mostly matcher noise.",
+        "operationId": "entity_connections_route_v1_entities__entity_id__connections_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entity_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Entity Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 24,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_relation",
+            "required": false,
+            "schema": {
+              "default": 6,
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Per Relation",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_weight",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Min Weight",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rank",
+            "required": false,
+            "schema": {
+              "default": "affinity",
+              "pattern": "^(affinity|weight)$",
+              "title": "Rank",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "relation",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Relation"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Entity Connections Route"
       }
     },
     "/v1/mentions": {

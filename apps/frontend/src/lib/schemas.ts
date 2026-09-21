@@ -7,6 +7,8 @@ import {
   zComposerSummary,
   zComposerWorkOut,
   zComposerWorksPage,
+  zConnectionOut,
+  zConnectionsOut,
   zWorkProofOut,
 } from "./generated/zod.gen";
 
@@ -25,6 +27,8 @@ export const ComposerDetailSchema = zComposerDetail;
 export const WorkProofSchema = zWorkProofOut;
 export const ComposerWorkSchema = zComposerWorkOut;
 export const ComposerWorksPageSchema = zComposerWorksPage;
+export const ConnectionSchema = zConnectionOut;
+export const ConnectionsSchema = zConnectionsOut;
 
 export type ComposerSummary = z.infer<typeof ComposerSummarySchema>;
 export type ComposerPage = z.infer<typeof ComposerPageSchema>;
@@ -33,3 +37,5 @@ export type ComposerDetail = z.infer<typeof ComposerDetailSchema>;
 export type WorkProof = z.infer<typeof WorkProofSchema>;
 export type ComposerWork = z.infer<typeof ComposerWorkSchema>;
 export type ComposerWorksPage = z.infer<typeof ComposerWorksPageSchema>;
+export type Connection = z.infer<typeof ConnectionSchema>;
+export type Connections = z.infer<typeof ConnectionsSchema>;

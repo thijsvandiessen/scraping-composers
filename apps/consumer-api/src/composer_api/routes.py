@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query
 
 from .crud import (
     composer_works,
+    entity_connections,
     get_concert,
     get_entity,
     get_person,
@@ -20,7 +21,7 @@ from .crud import (
     person_concerts,
     person_recordings,
 )
-from .deps import DbSession, FilterQuery, PageQuery
+from .deps import DbSession, FilterQuery, GraphQuery, PageQuery
 from .schemas import (
     ComposerDetail,
     ComposerPage,
@@ -28,6 +29,7 @@ from .schemas import (
     ConcertDetail,
     ConcertListPage,
     ConcertPage,
+    ConnectionsOut,
     EntityDetail,
     EntityPage,
     MentionPage,
@@ -61,6 +63,20 @@ def entities(
 @v1.get("/entities/{entity_id}", response_model=EntityDetail)
 def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
     return get_entity(db, entity_id)
+
+
+@v1.get("/entities/{entity_id}/connections", response_model=ConnectionsOut)
+def entity_connections_route(entity_id: uuid.UUID, db: DbSession, budget: GraphQuery) -> ConnectionsOut:
+    """The strongest neighbours of one entity, budgeted so a graph can draw them.
+
+    The whole neighbourhood is unusable — a busy conductor reaches thousands of
+    people, and the heaviest edges (everyone performs Beethoven) are the least
+    telling. ``rank=affinity`` discounts each neighbour by how much it is
+    performed or referenced overall, ``per_relation`` keeps the performance
+    edges from crowding out the biographical ones, and ``min_weight`` drops the
+    one-off co-occurrences that are mostly matcher noise.
+    """
+    return entity_connections(db, entity_id, budget)
 
 
 @v1.get("/works", response_model=WorkPage)

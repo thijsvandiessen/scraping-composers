@@ -4,14 +4,22 @@ import {
   ComposerDetailSchema,
   ComposerPageSchema,
   ComposerWorksPageSchema,
+  ConnectionsSchema,
   type ComposerDetail,
   type ComposerPage,
   type ComposerWorksPage,
+  type Connections,
 } from "./schemas";
 
 export const PAGE_SIZE = 25;
 
 export type ComposerSort = "label" | "concerts" | "recordings";
+export type ConnectionRank = "affinity" | "weight";
+
+/** Graph defaults. Kept here rather than in the page so the API and the
+ * drawing agree on how many nodes a picture is allowed to carry. */
+export const GRAPH_LIMIT = 24;
+export const GRAPH_PER_RELATION = 6;
 export type WorkSort = "label" | "mentions";
 
 export class ApiError extends Error {
@@ -98,4 +106,31 @@ export function listComposerWorks(
     `/v1/composers/${encodeURIComponent(composerId)}/works?${params.toString()}`,
     ComposerWorksPageSchema,
   );
+}
+
+/**
+ * One entity's neighbourhood, already budgeted by the API.
+ *
+ * The caps travel with the request because they are a property of the
+ * *drawing*, not of the data: the endpoint will happily return a hundred
+ * edges, and a hundred edges is not a picture anyone can read.
+ */
+export async function getConnections(
+  entityId: string,
+  opts: { limit?: number; perRelation?: number; minWeight?: number; rank?: ConnectionRank } = {},
+): Promise<Connections | null> {
+  const params = new URLSearchParams();
+  params.set("limit", String(opts.limit ?? GRAPH_LIMIT));
+  params.set("per_relation", String(opts.perRelation ?? GRAPH_PER_RELATION));
+  if (opts.minWeight && opts.minWeight > 1) params.set("min_weight", String(opts.minWeight));
+  if (opts.rank) params.set("rank", opts.rank);
+  try {
+    return await apiFetch(
+      `/v1/entities/${encodeURIComponent(entityId)}/connections?${params.toString()}`,
+      ConnectionsSchema,
+    );
+  } catch (err) {
+    if (err instanceof ApiError && (err.status === 404 || err.status === 422)) return null;
+    throw err;
+  }
 }
