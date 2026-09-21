@@ -27,16 +27,21 @@ from .kumu import (
     build_blueprint,
     export_kumu,
 )
-from .promote import GoldManifest, PromoteConfig, PromoteStats, promote, read_gold_manifest
-
-DEFAULT_GOLD_DB_PATH = settings.gold_db_path
+from .promote import (
+    GoldManifest,
+    PromoteConfig,
+    PromoteStats,
+    gold_engine,
+    gold_target,
+    promote,
+    read_gold_manifest,
+)
 
 # Rule 3 threshold: keep entities referenced by at least this many distinct kept
 # persons. Defaults to 1, i.e. keep anything referenced at all.
 DEFAULT_MIN_REFERRERS: int = settings.gold_min_referrers
 
 __all__ = [
-    "DEFAULT_GOLD_DB_PATH",
     "DEFAULT_MIN_REFERRERS",
     "DEFAULT_PERFORMER_LIMIT",
     "DEFAULT_RULE1_CONFIG_PATH",
@@ -51,6 +56,8 @@ __all__ = [
     "Rule1Config",
     "build_blueprint",
     "export_kumu",
+    "gold_engine",
+    "gold_target",
     "promote",
     "read_gold_manifest",
 ]

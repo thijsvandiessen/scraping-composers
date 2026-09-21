@@ -101,7 +101,7 @@ class PromoteOptions(BaseModel):
     ``GET``/``PUT /admin/v1/rule1-config`` (see ``Rule1ConfigBody``).
     """
 
-    gold_path: str | None = None  # None: the server's configured gold path
+    gold_url: str | None = None  # None: the server's GOLD_DATABASE_URL
     min_referrers: int = Field(default=1, ge=1)  # rule 3 threshold
     drop_unevidenced_persons: bool = True  # rule 1
     collapse_duplicates: bool = True  # rule 2
@@ -132,22 +132,23 @@ class Rule1ConfigBody(BaseModel):
     ensembles: Rule1EnsembleThresholds
 
 
-class GoldStatus(BaseModel):
-    exists: bool  # whether the gold database file is present
-    status: str | None  # running | completed | failed | None (never promoted)
-    started_at: str | None
-    finished_at: str | None
-    error: str | None
-    stats: dict[str, int]
+class BuildStatus(BaseModel):
+    """A derived database's state: its last build, stats and current activity."""
 
-
-class SilverStatus(BaseModel):
-    backend: str  # sqlite | postgres — how the atomic swap is performed
-    # whether silver has actually been built: the file is present (sqlite) or
-    # the schema holds the tables (postgres)
+    backend: str  # sqlite | postgres | unsupported — how the atomic swap is performed
+    # whether it has actually been built: the file is present (sqlite) or the
+    # schema holds the tables (postgres)
     exists: bool
-    status: str | None  # running | completed | failed | None (never rebuilt)
+    status: str | None  # running | completed | failed | None (never built)
     started_at: str | None
     finished_at: str | None
     error: str | None
     stats: dict[str, int]
+
+
+class GoldStatus(BuildStatus):
+    pass
+
+
+class SilverStatus(BuildStatus):
+    pass

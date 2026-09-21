@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH
 from composer_config import settings
 from composer_gold import (
-    DEFAULT_GOLD_DB_PATH,
     DEFAULT_MIN_REFERRERS,
     DEFAULT_PERFORMER_LIMIT,
     DEFAULT_RULE1_CONFIG_PATH,
@@ -189,7 +188,7 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_promote = sub.add_parser(
         "promote", help="rebuild the curated gold database from the silver (staging) database"
     )
-    p_promote.add_argument("--gold-path", default=DEFAULT_GOLD_DB_PATH, help="path of the gold SQLite file")
+    _add_gold_url_arg(p_promote)
     p_promote.add_argument(
         "--rule1-config",
         default=str(DEFAULT_RULE1_CONFIG_PATH),
@@ -233,6 +232,14 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     p_rebuild.set_defaults(func=cmd_rebuild_silver)
 
 
+def _add_gold_url_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--gold-url",
+        default=settings.gold_database_url,
+        help="the gold database: a sqlite:/// file or a Postgres URL (default: $GOLD_DATABASE_URL)",
+    )
+
+
 def _add_export_parsers(sub: _SubParsers) -> None:
     p_kumu = sub.add_parser(
         "export-kumu",
@@ -240,7 +247,7 @@ def _add_export_parsers(sub: _SubParsers) -> None:
         "(elements + connections JSON, drag-and-drop onto a Kumu map)",
     )
     p_kumu.add_argument("-o", "--output", default="kumu.json", help="path of the blueprint to write")
-    p_kumu.add_argument("--gold-path", default=DEFAULT_GOLD_DB_PATH, help="path of the gold SQLite file")
+    _add_gold_url_arg(p_kumu)
     p_kumu.add_argument(
         "--limit",
         type=int,

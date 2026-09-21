@@ -1,21 +1,25 @@
 """Consumer API tests: the silver app over staging seed data, the gold app over
-its promoted copy — both using in-memory/tmp databases, no network."""
+its promoted copy — no network. Silver is in-memory SQLite; every gold fixture
+runs twice, promoted into a SQLite file and into Postgres (the latter only
+with ``COMPOSER_TEST_POSTGRES_URL`` set)."""
 
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from composer_api import create_app
-from composer_gold import promote
+from composer_gold import gold_engine, promote
 from composer_models.db import init_db
+from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import requires_postgres
 from composer_schema import EntityDocument, SourceAdapter, SourceClaim
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -100,14 +104,40 @@ def client() -> Iterator[TestClient]:
     yield TestClient(create_app("test-silver", lambda: factory))
 
 
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=requires_postgres)])
+def gold_url(request: pytest.FixtureRequest, tmp_path: Path) -> str:
+    """Where the gold fixtures promote to: a SQLite file, or Postgres."""
+    if request.param == "sqlite":
+        return f"sqlite:///{tmp_path / 'gold.db'}"
+    # pg_url gives this test its own gold schema on the test server.
+    return request.getfixturevalue("pg_url")
+
+
+PromoteGold = Callable[[Session], sessionmaker[Session]]
+
+
 @pytest.fixture
-def gold_client(tmp_path: Path) -> Iterator[TestClient]:
+def promote_gold(gold_url: str) -> Iterator[PromoteGold]:
+    """Promote a silver session into ``gold_url``; a factory reading the result
+    the way ``gold_app`` does."""
+    engines: list[Engine] = []
+
+    def _promote(silver: Session) -> sessionmaker[Session]:
+        promote(silver, gold_url)
+        engines.append(engine := gold_engine(gold_url))
+        return init_db(engine)
+
+    yield _promote
+    for engine in engines:
+        engine.dispose()  # before pg_url drops the schema under them
+
+
+@pytest.fixture
+def gold_client(promote_gold: PromoteGold) -> Iterator[TestClient]:
     """Client over the gold app: the same seed, promoted."""
     factory = _seeded_factory()
-    gold_path = tmp_path / "gold.db"
     with factory() as s:
-        promote(s, gold_path)
-    gold_factory = init_db(create_engine(f"sqlite:///{gold_path}"))
+        gold_factory = promote_gold(s)
     yield TestClient(create_app("test-gold", lambda: gold_factory))
 
 
@@ -570,7 +600,7 @@ def test_work_detail_rejects_a_non_uuid(client: TestClient) -> None:
 
 
 @pytest.fixture
-def concerts_client(tmp_path: Path) -> Iterator[TestClient]:
+def concerts_client(promote_gold: PromoteGold) -> Iterator[TestClient]:
     """Gold client over a dataset with derived concerts."""
     engine = create_engine(
         "sqlite://",
@@ -625,9 +655,7 @@ def concerts_client(tmp_path: Path) -> Iterator[TestClient]:
     with factory() as s:
         ingest_source(s, berlinphil)
         derive_concerts(s)
-        gold_path = tmp_path / "gold.db"
-        promote(s, gold_path)
-    gold_factory = init_db(create_engine(f"sqlite:///{gold_path}"))
+        gold_factory = promote_gold(s)
     yield TestClient(create_app("test-gold-concerts", lambda: gold_factory))
 
 
@@ -700,7 +728,7 @@ def test_person_concerts_404_and_invalid_sort(concerts_client: TestClient) -> No
 
 
 @pytest.fixture
-def composer_works_client(tmp_path: Path) -> Iterator[TestClient]:
+def composer_works_client(promote_gold: PromoteGold) -> Iterator[TestClient]:
     """Gold client with one composer credited on a concert-backed work and a catalogue-only work."""
     engine = create_engine(
         "sqlite://",
@@ -738,9 +766,7 @@ def composer_works_client(tmp_path: Path) -> Iterator[TestClient]:
         ingest_source(s, berlinphil)
         ingest_source(s, imslp)
         derive_concerts(s)
-        gold_path = tmp_path / "gold.db"
-        promote(s, gold_path)
-    gold_factory = init_db(create_engine(f"sqlite:///{gold_path}"))
+        gold_factory = promote_gold(s)
     yield TestClient(create_app("test-gold-composer-works", lambda: gold_factory))
 
 
@@ -794,7 +820,7 @@ def _recording_raw(catalogue: str, works_title: str) -> dict[str, object]:
 
 
 @pytest.fixture
-def recordings_client(tmp_path: Path) -> Iterator[TestClient]:
+def recordings_client(promote_gold: PromoteGold) -> Iterator[TestClient]:
     """Gold client over a dataset with derived recordings."""
     engine = create_engine(
         "sqlite://",
@@ -815,9 +841,7 @@ def recordings_client(tmp_path: Path) -> Iterator[TestClient]:
     with factory() as s:
         ingest_source(s, dg)
         derive_recordings(s)
-        gold_path = tmp_path / "gold.db"
-        promote(s, gold_path)
-    gold_factory = init_db(create_engine(f"sqlite:///{gold_path}"))
+        gold_factory = promote_gold(s)
     yield TestClient(create_app("test-gold-recordings", lambda: gold_factory))
 
 

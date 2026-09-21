@@ -3,17 +3,18 @@
 import logging
 from dataclasses import asdict
 from pathlib import Path
+from typing import TypeVar
 
+from composer_config import settings
 from composer_gold import (
-    DEFAULT_GOLD_DB_PATH,
     DEFAULT_MIN_REFERRERS,
     DEFAULT_RULE1_CONFIG_PATH,
     EnsembleRule1Config,
     PersonRule1Config,
     PromoteConfig,
     Rule1Config,
+    gold_target,
     promote,
-    read_gold_manifest,
 )
 from composer_warehouse.build import BuildTarget
 from composer_warehouse.concerts import derive_concerts
@@ -24,14 +25,16 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from . import snapshots
 from .deps import dispose_db, require_admin_key, session_scope
-from .schemas import GoldStatus, PromoteOptions, Rule1ConfigBody, SilverStatus
+from .schemas import BuildStatus, GoldStatus, PromoteOptions, Rule1ConfigBody, SilverStatus
 
 log = logging.getLogger(__name__)
+
+StatusT = TypeVar("StatusT", bound=BuildStatus)
 
 builds = APIRouter(prefix="/admin/v1", dependencies=[Depends(require_admin_key)])
 
 
-def _promote_in_background(gold_path: str, config: PromoteConfig) -> None:
+def _promote_in_background(gold_url: str, config: PromoteConfig) -> None:
     """Rebuild the gold database; status lives in the gold manifest."""
     with session_scope() as session:
         try:
@@ -40,7 +43,7 @@ def _promote_in_background(gold_path: str, config: PromoteConfig) -> None:
             # stale derivations.
             derive_concerts(session)
             derive_recordings(session)
-            promote(session, gold_path, config)
+            promote(session, gold_url, config)
         except Exception:
             # Recorded as a failed manifest by promote; log for the server console.
             log.exception("background promote failed")
@@ -60,7 +63,7 @@ def _rule1_config_body(config: Rule1Config) -> Rule1ConfigBody:
 
 
 def _promote_config(options: PromoteOptions | None) -> tuple[str, PromoteConfig]:
-    """Resolve the request body (or its absence) into a gold path and config.
+    """Resolve the request body (or its absence) into a gold URL and config.
 
     ``min_referrers`` left out of the body falls back to the configured
     default. Rule 1's thresholds always come from the server's current
@@ -68,7 +71,7 @@ def _promote_config(options: PromoteOptions | None) -> tuple[str, PromoteConfig]
     ``GET``/``PUT /admin/v1/rule1-config`` instead.
     """
     opts = options or PromoteOptions()
-    gold_path = opts.gold_path or DEFAULT_GOLD_DB_PATH
+    gold_url = opts.gold_url or settings.gold_database_url
     min_referrers = opts.min_referrers if "min_referrers" in opts.model_fields_set else DEFAULT_MIN_REFERRERS
     config = PromoteConfig(
         rule1=_current_rule1_config(),
@@ -77,20 +80,57 @@ def _promote_config(options: PromoteOptions | None) -> tuple[str, PromoteConfig]
         collapse_duplicates=opts.collapse_duplicates,
         prune_unreferenced=opts.prune_unreferenced,
     )
-    return str(gold_path), config
+    return gold_url, config
 
 
-def _gold_status(gold_path: str | None = None) -> GoldStatus:
-    path = gold_path or DEFAULT_GOLD_DB_PATH
-    manifest = read_gold_manifest(path)
-    return GoldStatus(
-        exists=Path(path).exists(),
+def _target_status(target: BuildTarget | None, model: type[StatusT]) -> StatusT:
+    """What a build target reports about itself, silver or gold alike."""
+    if target is None:
+        return model(
+            backend="unsupported",
+            exists=False,
+            status=None,
+            started_at=None,
+            finished_at=None,
+            error=None,
+            stats={},
+        )
+    try:
+        manifest = target.read_manifest()
+        exists = target.exists()
+    except SQLAlchemyError as exc:
+        # Reading the manifest can fail on Postgres (the server is down, the
+        # credentials are wrong); a file-backed manifest never could.
+        return model(
+            backend=target.backend(),
+            exists=False,
+            status=None,
+            started_at=None,
+            finished_at=None,
+            error=str(exc),
+            stats={},
+        )
+    return model(
+        backend=target.backend(),
+        exists=exists,
         status=manifest.status if manifest else None,
         started_at=manifest.started_at if manifest else None,
         finished_at=manifest.finished_at if manifest else None,
         error=manifest.error if manifest else None,
         stats=manifest.stats if manifest else {},
     )
+
+
+def _gold_target(gold_url: str | None = None) -> BuildTarget | None:
+    """The gold build target, or None when the URL supports no swap."""
+    try:
+        return gold_target(gold_url)
+    except ValueError:
+        return None
+
+
+def _gold_status(gold_url: str | None = None) -> GoldStatus:
+    return _target_status(_gold_target(gold_url), GoldStatus)
 
 
 @builds.get("/gold", response_model=GoldStatus)
@@ -106,12 +146,18 @@ def start_promote(background: BackgroundTasks, options: PromoteOptions | None = 
     The optional body tunes the run (see ``PromoteOptions``); a bodiless POST
     runs the full curation with the configured defaults.
     """
-    gold_path, config = _promote_config(options)
-    manifest = read_gold_manifest(gold_path)
+    gold_url, config = _promote_config(options)
+    target = _gold_target(gold_url)
+    if target is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "promote requires a sqlite file or a Postgres GOLD_DATABASE_URL",
+        )
+    manifest = target.read_manifest()
     if manifest is not None and manifest.status == "running":
         raise HTTPException(status.HTTP_409_CONFLICT, "a promote is already in progress")
-    background.add_task(_promote_in_background, gold_path, config)
-    current = _gold_status(gold_path)
+    background.add_task(_promote_in_background, gold_url, config)
+    current = _gold_status(gold_url)
     current.status = "running"
     return current
 
@@ -135,8 +181,6 @@ def update_rule1_config(body: Rule1ConfigBody) -> Rule1ConfigBody:
 
 def _silver_target() -> BuildTarget | None:
     """The silver build target, or None when DATABASE_URL supports no swap."""
-    from composer_config import settings
-
     try:
         return silver_target(settings.database_url)
     except ValueError:
@@ -164,41 +208,7 @@ def _rebuild_silver_in_background() -> None:
 
 
 def _silver_status() -> SilverStatus:
-    target = _silver_target()
-    if target is None:
-        return SilverStatus(
-            backend="unsupported",
-            exists=False,
-            status=None,
-            started_at=None,
-            finished_at=None,
-            error=None,
-            stats={},
-        )
-    try:
-        manifest = target.read_manifest()
-        exists = target.exists()
-    except SQLAlchemyError as exc:
-        # Reading the manifest can fail on Postgres (the server is down, the
-        # credentials are wrong); a file-backed manifest never could.
-        return SilverStatus(
-            backend=target.backend(),
-            exists=False,
-            status=None,
-            started_at=None,
-            finished_at=None,
-            error=str(exc),
-            stats={},
-        )
-    return SilverStatus(
-        backend=target.backend(),
-        exists=exists,
-        status=manifest.status if manifest else None,
-        started_at=manifest.started_at if manifest else None,
-        finished_at=manifest.finished_at if manifest else None,
-        error=manifest.error if manifest else None,
-        stats=manifest.stats if manifest else {},
-    )
+    return _target_status(_silver_target(), SilverStatus)
 
 
 @builds.get("/silver", response_model=SilverStatus)

@@ -87,7 +87,7 @@ def _gold(session: Session, tmp_path: Path) -> Session:
     """Promote the seeded silver and open a session on the resulting gold."""
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
-    promote(session, gold_path)
+    promote(session, f"sqlite:///{gold_path}")
     return init_db(create_engine(f"sqlite:///{gold_path}"))()
 
 

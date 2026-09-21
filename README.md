@@ -116,9 +116,20 @@ Silver lives in its own schema (`SILVER_SCHEMA`, default `silver`), never in
 needs `CREATE` on the database — `GRANT CREATE ON DATABASE composers TO app` —
 and nothing more; no superuser, no ownership of `public`.
 
-**Gold stays SQLite** either way. It is a single-file artifact shipped and read
-as one (`gold.db` plus its manifest), and `promote` reads silver through a
-normal session, so it builds correctly from either backend.
+Gold is configured separately: `GOLD_DATABASE_URL` (default
+`sqlite:///gold.db`, a single file). To serve gold from Postgres instead, give it
+a server of its own:
+
+```sh
+docker compose up -d postgres-gold
+export GOLD_DATABASE_URL="postgresql+psycopg://composers:composers@localhost:5434/composers_gold"
+```
+
+Like silver, it lives in a dedicated schema (`GOLD_SCHEMA`, default `gold`) that
+`promote` swaps in by rename, and the gold API picks up each new build without a
+restart. `promote` reads silver through a normal session, so any combination of
+backends works. While it reads a Postgres silver it holds off `rebuild-silver`,
+and the other way round.
 
 ## Bronze, silver & gold
 
@@ -141,7 +152,8 @@ concerts or recordings — or composed a work some source mentioned; duplicate p
 (linked by `dedupe-persons`) are collapsed into their canonical row with claims,
 works, and mentions re-pointed; entities left unreferenced are pruned. Silver is
 never modified by promotion, so it is repeatable at any time; status and
-stats land in `gold.db.manifest.json`.
+stats land in `gold.db.manifest.json` (on Postgres, a row in
+`composer_meta.build_manifest`).
 
 Being *listed* by a source is deliberately not evidence. Archives publish full
 artist and ensemble indexes, and taking those at face value is what filled gold
@@ -151,7 +163,7 @@ recording tables are the only thing rule 1 believes.
 Each run is configurable: every rule can be switched off (CLI
 `--no-drop-unevidenced-persons`, `--no-collapse-duplicates`,
 `--no-prune-unreferenced`; the same toggles appear in the dashboard's promote
-form and in the `POST /admin/v1/promote` body), and `--gold-path` writes the
+form and in the `POST /admin/v1/promote` body), and `--gold-url` writes the
 gold database elsewhere. Rule 1's concert/recording/composer/sitelink
 thresholds live in `rule1_config.json` (CLI `--rule1-config PATH`, default the
 repo's `packages/composer-gold/rule1_config.json`) rather than CLI flags, so

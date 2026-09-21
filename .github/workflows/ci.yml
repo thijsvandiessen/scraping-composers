@@ -48,13 +48,16 @@ jobs:
       fail-fast: false
       matrix:
         # Only the members with a Postgres-specific surface: the schema and its
-        # migrations, the rebuild's schema swap, and the admin API that reports
-        # on it. Everything else is dialect-agnostic and covered by the matrix
-        # above, which runs on SQLite.
+        # migrations, the silver and gold schema swaps, the admin API that
+        # reports on them, and the consumer API served from a Postgres gold.
+        # Everything else is dialect-agnostic and covered by the matrix above,
+        # which runs on SQLite.
         include:
           - { member: packages/composer-models,    cov: "--cov=composer_models" }
           - { member: packages/composer-warehouse, cov: "--cov=composer_warehouse" }
+          - { member: packages/composer-gold,      cov: "--cov=composer_gold" }
           - { member: apps/admin-api,              cov: "--cov=composer_admin" }
+          - { member: apps/consumer-api,           cov: "--cov=composer_api" }
     services:
       postgres:
         image: postgres:17

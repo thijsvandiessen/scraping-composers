@@ -28,6 +28,8 @@ from __future__ import annotations
 import json
 import logging
 import uuid
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 
 from composer_models.db import get_engine
@@ -38,11 +40,37 @@ from .build import BuildManifest
 
 log = logging.getLogger(__name__)
 
-# One rebuild at a time per database. The value is arbitrary but must stay
-# fixed: it is the identity of the lock, not a payload.
+# One build at a time per live schema: the lock is the pair (this key, a hash of
+# the schema name), so silver and gold sharing a server never block each other.
+# The value is arbitrary but must stay fixed: it is the identity of the lock,
+# not a payload.
 _REBUILD_LOCK_KEY = 0x51_1E_00_01
+_LOCK_ARGS = ":key, hashtext(:schema)"
 
 _META_SCHEMA = "composer_meta"
+
+
+@contextmanager
+def schema_read_lock(url: URL, schema: str) -> Generator[None]:
+    """Hold off any rebuild of ``schema`` while the block reads from it.
+
+    A rebuild holds the exclusive form of the same advisory lock, so this
+    raises at once if one is running and otherwise keeps one from starting.
+    Promote needs it: it reads silver by schema name over many statements, and
+    a swap in between would feed it a mix of old and new silver.
+    """
+    engine = get_engine(url.render_as_string(hide_password=False), schema="public")
+    try:
+        with engine.connect() as conn:
+            args = {"key": _REBUILD_LOCK_KEY, "schema": schema}
+            if not conn.scalar(text(f"SELECT pg_try_advisory_lock_shared({_LOCK_ARGS})"), args):
+                raise RuntimeError(f"{schema!r} is being rebuilt; try again once the rebuild finishes")
+            try:
+                yield
+            finally:
+                conn.execute(text(f"SELECT pg_advisory_unlock_shared({_LOCK_ARGS})"), args)
+    finally:
+        engine.dispose()
 
 
 @dataclass
@@ -76,9 +104,12 @@ class PostgresSchemaTarget:
         # A session-scoped advisory lock, not a manifest check: it is a real
         # mutex, and it is released even if this process is killed.
         connection = admin.connect()
-        if not connection.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": _REBUILD_LOCK_KEY}):
+        args = {"key": _REBUILD_LOCK_KEY, "schema": self.live}
+        if not connection.scalar(text(f"SELECT pg_try_advisory_lock({_LOCK_ARGS})"), args):
             connection.close()
-            raise RuntimeError(f"a rebuild of {self.live!r} is already in progress")
+            raise RuntimeError(
+                f"a rebuild of {self.live!r} is already in progress, or a promote is reading it"
+            )
         self._lock_connection = connection
 
         with admin.begin() as conn:
