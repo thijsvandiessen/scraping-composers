@@ -21,7 +21,7 @@ from composer_models import (
     Work,
 )
 from composer_models.db import init_db
-from composer_schema import EntityDocument, SourceClaim
+from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import (
@@ -748,6 +748,105 @@ def test_composer_min_appearances_requires_a_matching_credit(session: Session, t
         labels = {e.label for e in gold.scalars(select(Entity))}
         assert "Beethoven, Ludwig van" not in labels  # no concert/recording credit to clear the bar
     assert threshold_stats.persons_kept == 0
+
+
+def _nyphil_perf(external_id: str, title: str, composer: str, program: str, date: str) -> WorkMentionDocument:
+    return perf_mention(
+        external_id,
+        title,
+        composer,
+        {"programID": program, "date": date, "season": "2010-11", "conductors": []},
+    )
+
+
+def _seed_composer_reach_silver(session: Session) -> None:
+    """Composers at the edges of the works/programmes thresholds:
+
+    - "ACT,": one work on one programme played twice (2 concerts) — the NY Phil
+      act-divider placeholder that motivated the rule
+    - "Two, Works": two distinct works, never programmed
+    - "Three, Concerts": one work on three concerts
+    """
+    nyphil = FakeSource(
+        records=(
+            _nyphil_perf("perf:1:0:0", ".", "ACT,", "1", "2011-04-05"),
+            _nyphil_perf("perf:1:1:0", ".", "ACT,", "1", "2011-04-06"),
+            *(
+                _nyphil_perf(f"perf:{p}:0:0", "Overture", "Three, Concerts", str(p), f"2011-05-0{p}")
+                for p in (2, 3, 4)
+            ),
+        ),
+        name="nyphil",
+        base_url="https://nyp.example",
+    )
+    catalogue = FakeSource(
+        records=(
+            mention("String Quartet No. 1", "Two, Works", "w1"),
+            mention("Piano Sonata in A", "Two, Works", "w2"),
+        ),
+        name="catalogue",
+        base_url="https://catalogue.example",
+    )
+    ingest_source(session, nyphil)
+    ingest_source(session, catalogue)
+    derive_concerts(session)
+
+
+def test_composer_min_works_or_programmes(session: Session, tmp_path: Path) -> None:
+    """A composer needs enough distinct works OR enough concerts+recordings of
+    their works; either alone suffices. The 1/1 defaults keep every composer."""
+    _seed_composer_reach_silver(session)
+    composers = {"ACT,", "Two, Works", "Three, Concerts"}
+
+    default_path = tmp_path / "default.db"
+    promote(session, default_path)
+    with _gold_session(default_path) as gold:
+        assert composers <= {e.label for e in gold.scalars(select(Entity))}
+
+    strict_path = tmp_path / "strict.db"
+    promote(
+        session,
+        strict_path,
+        PromoteConfig(
+            rule1=Rule1Config(
+                persons=PersonRule1Config(min_works_for_composers=2, min_programmes_for_composers=3)
+            )
+        ),
+    )
+    with _gold_session(strict_path) as gold:
+        labels = {e.label for e in gold.scalars(select(Entity))}
+        assert "ACT," not in labels  # 1 work, 2 concerts
+        assert "Two, Works" in labels  # works threshold
+        assert "Three, Concerts" in labels  # programmes threshold
+
+
+def test_composer_reach_is_counted_per_dedup_cluster(session: Session, tmp_path: Path) -> None:
+    """Two spellings with one work each are one composer with two works."""
+    archive = FakeSource(
+        records=(
+            mention("String Quartet No. 1", "Hensel, Fanny", "f1"),
+            mention("Das Jahr", "Mendelssohn, Fanny", "f2"),
+        )
+    )
+    ingest_source(session, archive)
+    canonical = session.scalars(select(Entity).where(Entity.label == "Hensel, Fanny")).one()
+    duplicate = session.scalars(select(Entity).where(Entity.label == "Mendelssohn, Fanny")).one()
+    duplicate.canonical_entity_id = canonical.id
+    session.commit()
+    gold_path = tmp_path / "gold.db"
+
+    promote(
+        session,
+        gold_path,
+        PromoteConfig(
+            rule1=Rule1Config(
+                persons=PersonRule1Config(min_works_for_composers=2, min_programmes_for_composers=99)
+            )
+        ),
+    )
+
+    with _gold_session(gold_path) as gold:
+        assert "Hensel, Fanny" in {e.label for e in gold.scalars(select(Entity))}
 
 
 def _seed_ensemble_silver(session: Session) -> None:

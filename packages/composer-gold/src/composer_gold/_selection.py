@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING, Any
 from composer_models import (
     Claim,
     ConcertParticipant,
+    ConcertWork,
     Entity,
     RawWorkMention,
     RecordingParticipant,
+    RecordingWork,
 )
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 if TYPE_CHECKING:
@@ -62,6 +64,49 @@ def _appearance_counts(
             recordings=len(recording_events.get(entity_id, ())),
         )
         for entity_id in roots
+    }
+
+
+@dataclass(frozen=True)
+class ComposerReach:
+    works: int = 0
+    programmes: int = 0
+
+
+def _composer_reach(
+    silver: Session, root: Callable[[uuid.UUID], uuid.UUID]
+) -> dict[uuid.UUID, ComposerReach]:
+    """How far each composer's mentioned works reach: distinct works, and
+    distinct concerts+recordings those works were programmed on.
+
+    Counted per dedup cluster, like ``_appearance_counts``. A mention not yet
+    matched to a work counts by its lowercased title, so unmatched mentions of
+    one piece still count once. Concert and recording ids live in separate id
+    spaces, so they are tagged before being pooled into one programme count.
+    """
+    works: dict[uuid.UUID, set[str]] = {}
+    programmes: dict[uuid.UUID, set[tuple[str, int]]] = {}
+    for composer_id, work_id, title in silver.execute(
+        select(
+            RawWorkMention.composer_entity_id, RawWorkMention.work_id, func.lower(RawWorkMention.raw_title)
+        ).where(RawWorkMention.composer_entity_id.is_not(None))
+    ).tuples():
+        if composer_id is not None:  # guaranteed by the WHERE; narrows the type
+            works.setdefault(root(composer_id), set()).add(str(work_id) if work_id else title)
+    for tag, event, mention_id in (
+        ("c", ConcertWork.concert_id, ConcertWork.mention_id),
+        ("r", RecordingWork.recording_id, RecordingWork.mention_id),
+    ):
+        for composer_id, event_id in silver.execute(
+            select(RawWorkMention.composer_entity_id, event)
+            .join(RawWorkMention, RawWorkMention.id == mention_id)
+            .where(RawWorkMention.composer_entity_id.is_not(None))
+        ).tuples():
+            if composer_id is not None:
+                programmes.setdefault(root(composer_id), set()).add((tag, event_id))
+    return {
+        r: ComposerReach(works=len(works.get(r, ())), programmes=len(programmes.get(r, ())))
+        for r in works.keys() | programmes.keys()
     }
 
 
@@ -170,15 +215,23 @@ class GoldBuild:
                 kept.add(r)
         return kept
 
-    def _composer_roots(self, candidates: set[uuid.UUID], min_appearances: int) -> set[uuid.UUID]:
+    def _composer_roots(
+        self, candidates: set[uuid.UUID], min_appearances: int, min_works: int, min_programmes: int
+    ) -> set[uuid.UUID]:
         """Roots of ``candidates`` (persons who composed a mentioned work) whose
-        combined concert+recording credits clear ``min_appearances``. Zero (the
-        default) exempts composers from the appearance check entirely."""
+        combined concert+recording credits clear ``min_appearances`` (zero, the
+        default, exempts composers from that check) and whose works reach at
+        least ``min_works`` distinct works or ``min_programmes`` distinct
+        concerts+recordings."""
         candidate_roots = {self.root(c) for c in candidates}
+        reach = _composer_reach(self.silver, self.root)
         kept = set()
         for r in candidate_roots:
             count = self.appearance_counts.get(r, AppearanceCount())
-            if count.concerts + count.recordings >= min_appearances:
+            composer = reach.get(r, ComposerReach())
+            if count.concerts + count.recordings >= min_appearances and (
+                composer.works >= min_works or composer.programmes >= min_programmes
+            ):
                 kept.add(r)
         return kept
 
@@ -190,7 +243,9 @@ class GoldBuild:
         Evidence is a *credit*: the person is a participant on enough concerts
         or recordings to clear the configured thresholds (either alone
         suffices), or they composed a work some source mentioned and clear the
-        (separately configurable, often lower) composer threshold. Being listed
+        (separately configurable, often lower) composer threshold — plus enough
+        distinct works, or enough concerts+recordings of those works, that a
+        one-off placeholder name on a single programme doesn't pass. Being listed
         in a source's artist index is not enough — those name lists are what
         filled gold with musicians who never appear on a programme.
         """
@@ -207,7 +262,12 @@ class GoldBuild:
             )
         )
         composer_candidates = {p for p in self.all_persons if p in mention_composers}
-        composer_roots = self._composer_roots(composer_candidates, cfg.min_appearances_for_composers)
+        composer_roots = self._composer_roots(
+            composer_candidates,
+            cfg.min_appearances_for_composers,
+            cfg.min_works_for_composers,
+            cfg.min_programmes_for_composers,
+        )
         self.appearance_roots = self._appearance_roots(
             self.all_persons, cfg.min_concert_appearances, cfg.min_recording_appearances
         )

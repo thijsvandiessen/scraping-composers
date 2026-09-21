@@ -32,6 +32,14 @@
       <input type="number" name="persons_min_appearances_for_composers" min="0" required
              value="{{ config.persons.min_appearances_for_composers }}" style="width: 6rem;">
       <span class="sc-muted">0 = a composer of a mentioned work is kept regardless of credits</span></label>
+    <label>min works for composers
+      <input type="number" name="persons_min_works_for_composers" min="1" required
+             value="{{ config.persons.min_works_for_composers }}" style="width: 6rem;">
+      <span class="sc-muted">distinct mentioned works; either this or the programme threshold suffices</span></label>
+    <label>min programmes for composers
+      <input type="number" name="persons_min_programmes_for_composers" min="1" required
+             value="{{ config.persons.min_programmes_for_composers }}" style="width: 6rem;">
+      <span class="sc-muted">distinct concerts + recordings featuring their works</span></label>
     <label>min sitelinks
       <input type="number" name="persons_min_sitelinks" min="0"
              value="{{ config.persons.min_sitelinks|default_if_none:'' }}"

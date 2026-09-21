@@ -191,6 +191,8 @@ def _rule1_config_payload(request: HttpRequest) -> dict[str, object]:
             "min_concert_appearances": required("persons_min_concert_appearances"),
             "min_recording_appearances": required("persons_min_recording_appearances"),
             "min_appearances_for_composers": required("persons_min_appearances_for_composers"),
+            "min_works_for_composers": required("persons_min_works_for_composers"),
+            "min_programmes_for_composers": required("persons_min_programmes_for_composers"),
             "min_sitelinks": optional("persons_min_sitelinks"),
         },
         "ensembles": {
