@@ -87,7 +87,7 @@ def summarize(options: dict[str, ExtractOptions]) -> str:
     Names what the claims pass could not curate alongside each kind's counters —
     the predicates it coined and the scoring phrases it recognised no category in.
     An unattended run's log is the only place either surfaces, and they are the
-    queues for growing :mod:`.vocabulary` and :mod:`.instrumentation`.
+    queues for growing :mod:`.vocabulary` and :mod:`composer_schema.instrumentation`.
     """
     parts = []
     for kind, opts in options.items():

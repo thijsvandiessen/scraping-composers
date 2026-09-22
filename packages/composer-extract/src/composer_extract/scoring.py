@@ -7,9 +7,9 @@ scoring is recorded three ways over:
 
 - verbatim, as the ``orchestration`` literal — what the page actually said, always;
 - as ``written_for`` edges, for what the work is *for*: a scoring category
-  (:mod:`.instrumentation`), or ``orchestra`` when the text is shorthand;
+  (:mod:`composer_schema.instrumentation`), or ``orchestra`` when the text is shorthand;
 - as ``includes_instrument`` edges, for what is *in* the ensemble — the instruments
-  a shorthand names (:mod:`.shorthand`).
+  a shorthand names (:mod:`composer_schema.shorthand`).
 
 The last two are separate predicates on purpose. A piano sonata is *for* piano; a
 symphony merely *includes* one, and collapsing the two would put every symphony in
@@ -24,9 +24,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from composer_schema import SourceClaim
+from composer_schema.instrumentation import category_for, members_of, parse_instrumentation
+from composer_schema.shorthand import Shorthand, parse_shorthand
 
-from .instrumentation import category_for, members_of, parse_instrumentation
-from .shorthand import Shorthand, parse_shorthand
 from .values import coerce_value
 
 #: Longest literal stored as a claim. Claims are for facts you can query and

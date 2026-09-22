@@ -18,7 +18,7 @@ something else: ``3(pic)``, ``4(2pic)``, ``3(III=picc)``, ``4(III,IV=picc)`` and
 ``Dcl(=Ebcl)`` all occur.
 
 What comes out is instruments, not a scoring category: a symphony is a work *for
-orchestra* that *includes* a flute, which is why :mod:`.scoring` writes these as
+orchestra* that *includes* a flute, which is why :mod:`composer_extract.scoring` writes these as
 ``includes_instrument`` and only the ensemble itself as ``written_for``.
 
 Detection is deliberately strict, because a false positive files a work under an
@@ -249,9 +249,19 @@ def parse_shorthand(raw: str) -> Shorthand | None:
     string_parts: int | None = None
     desks = 0
     for text, tokens in scanned:
-        if desks < len(_DESKS) and _positions(tokens) == POSITIONS:
+        positions = _positions(tokens)
+        if desks < len(_DESKS) and positions == POSITIONS:
             _read_desks(found, tokens, _DESKS[desks])
             desks += 1
+            continue
+        if desks < len(_DESKS) and positions >= 2:
+            # A desk section this module cannot read ("3.2.Eh.2.Bkl.2" writes
+            # cor anglais and bass clarinet as desks of their own). Which family
+            # the *next* positional section is can then no longer be told: read
+            # as the woodwind, "4.3.3.1" would turn four horns into four flutes.
+            # So no further section is read as desks at all.
+            desks = len(_DESKS)
+            unparsed.append(text)
             continue
         understood, parts = _read_tokens(found, tokens)
         string_parts = parts if parts is not None else string_parts

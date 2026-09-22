@@ -6,7 +6,7 @@ string orchestra", "Violine und Klavier" — and that text is kept verbatim as a
 piano" over free prose is a ``LIKE`` across a dozen spellings in two languages.
 
 So the stated text is also folded onto a canonical *scoring category* here, and
-:mod:`.scoring` emits one ``written_for`` claim per category, pointing at an
+:mod:`composer_extract.scoring` emits one ``written_for`` claim per category, pointing at an
 ``instrumentation`` entity. The category — not the individual instrument — is the
 unit, because that is what the catalogues themselves are organised by: Bärenreiter
 offers "works for string orchestra" as a facet, and a string orchestra is not a
@@ -18,7 +18,7 @@ instruments — a violin sonata really is *for* the piano, so it still answers "
 for piano". :data:`MEMBERS` holds the ones that name an ensemble, whose instruments
 the work merely *includes*; :mod:`.shorthand` draws the same line for an orchestra.
 
-Nothing here guesses, on the same principle as :mod:`.values`: a phrase the tables
+Nothing here guesses, on the same principle as :mod:`composer_extract.values`: a phrase the tables
 do not recognise yields no category at all rather than an invented one. The
 ``orchestration`` literal still carries it, and the run log counts it (see
 :meth:`~.resilience.ExtractStats.unrecognised_summary`) so the tables can grow.
@@ -41,79 +41,146 @@ from collections.abc import Iterable
 #: enough to be ambiguous in prose, but a lookup is on a whole normalized string, so
 #: only a scoring reading exactly "fl" matches.
 CATEGORIES: dict[str, tuple[str, ...]] = {
-    "piano": ("klavier", "pianoforte", "pf", "pno"),
+    "piano": ("klavier", "pianoforte", "pf", "pno", "klav"),
     "fortepiano": ("hammerklavier",),
-    "violin": ("violine", "geige"),
-    "viola": ("bratsche",),
-    "cello": ("violoncello", "violoncell"),
-    "double bass": ("contrabass", "kontrabass", "doublebass", "double-bass", "db"),
-    "flute": ("flote", "floete", "querflote", "fl"),
-    "piccolo": ("pic", "picc", "pikkoloflote"),
+    "violin": ("violine", "geige", "vl", "vn", "vln"),
+    "viola": ("bratsche", "va", "vla"),
+    "viola d'amore": ("viola d amore",),
+    "viola da gamba": ("gambe", "gamba"),
+    "violone": (),
+    "cello": ("violoncello", "violoncell", "vc"),
+    "double bass": ("contrabass", "kontrabass", "doublebass", "double-bass", "db", "kb"),
+    "flute": ("flote", "floete", "querflote", "fl", "western concert flute"),
+    "piccolo": ("pic", "picc", "pikkoloflote", "piccolo flute"),
     "alto flute": ("afl", "altflote"),
     "oboe": ("ob",),
-    "english horn": ("cor anglais", "ca", "cora", "corang", "englischhorn"),
-    "clarinet": ("klarinette", "cl"),
-    "bass clarinet": ("bcl", "bassklarinette"),
-    "e-flat clarinet": ("ebcl",),
+    "oboe d'amore": ("oboe d amore", "oboe damore"),
+    "oboe da caccia": (),
+    "english horn": ("cor anglais", "ca", "cora", "corang", "englischhorn", "eh", "englhn"),
+    "clarinet": ("klarinette", "cl", "klar"),
+    "bass clarinet": ("bcl", "bassklarinette", "bklar", "bkl", "klar b"),
+    "e-flat clarinet": ("ebcl", "esklar", "es klar"),
     "d clarinet": ("dcl",),
-    "bassoon": ("fagott", "bn", "bsn"),
-    "contrabassoon": ("dbn", "cbn", "cbsn", "kontrafagott"),
+    "basset horn": ("bassetthorn", "bassethorn"),
+    "bassoon": ("fagott", "bn", "bsn", "fag", "fg"),
+    "contrabassoon": ("dbn", "cbn", "cbsn", "kontrafagott", "kfag", "kfg"),
     "saxophone": ("sax", "saxophon"),
-    "horn": ("french horn", "waldhorn", "hn"),
+    "soprano saxophone": ("sopransaxophon",),
+    "alto saxophone": ("altsaxophon",),
+    "tenor saxophone": ("tenorsaxophon",),
+    "baritone saxophone": ("baritonsaxophon",),
+    "horn": ("french horn", "waldhorn", "hn", "corno da caccia"),
     "tenor tuba": ("ttuba",),
-    "trumpet": ("trompete", "tpt"),
+    # "Clarino" is the Baroque name for the trumpet's high register and its part.
+    "trumpet": ("trompete", "tpt", "clarino", "trp"),
+    "cornet": ("kornett",),
     "bass trumpet": ("btpt",),
     "piccolo trumpet": ("pictpt", "picctpt"),
-    "trombone": ("posaune", "tbn"),
-    "bass trombone": ("btbn",),
-    "tuba": ("tba",),
-    "harp": ("harfe", "hp", "harps"),
-    "guitar": ("gitarre",),
+    "trombone": ("posaune", "tbn", "tenor trombone", "tenorposaune", "pos"),
+    "bass trombone": ("btbn", "bpos"),
+    "tuba": ("tba", "tb", "tub"),
+    "euphonium": (),
+    "harp": ("harfe", "hp", "harps", "hfe", "hf", "hrf"),
+    "guitar": ("gitarre", "git"),
+    "bass guitar": ("e bass", "bassgitarre"),
+    "lute": ("laute",),
+    "accordion": ("akkordeon", "akk"),
     "organ": ("orgel", "org"),
-    "harpsichord": ("cembalo", "hpd"),
+    "harmonium": ("harm",),
+    "harpsichord": ("cembalo", "hpd", "cemb"),
+    "clavichord": (),
+    # A generic keyboard part ("Tasteninstrument"): the page names no instrument.
+    "keyboard": ("keyboard instrument", "tasteninstrument"),
+    # A part any melody instrument may take ("Melodieinstrument"): the page names
+    # the role, not the instrument.
+    "melody instrument": ("melodieinstrument", "melodic instrument"),
+    # The bass line and its realisation; the instruments that play it are stated
+    # alongside when the page knows them ("Basso continuo (Violoncello, Organ)").
+    "basso continuo": ("continuo", "bc", "b c", "cnt", "generalbass"),
     "celesta": ("cel", "celeste"),
     "recorder": ("blockflote",),
-    "percussion": ("schlagzeug", "schlagwerk", "perc"),
-    "timpani": ("timp", "pauken", "kettledrums"),
+    "descant recorder": ("soprano recorder", "sopran blockflote", "sopranblockflote"),
+    "treble recorder": ("alto recorder", "alt blockflote", "altblockflote"),
+    "tenor recorder": ("tenor blockflote", "tenorblockflote"),
+    "bass recorder": ("bass blockflote", "bassblockflote"),
+    "percussion": ("schlagzeug", "schlagwerk", "perc", "perk", "schlg", "schlzg", "schlz", "schl"),
+    "timpani": ("timp", "tmp", "pauken", "pauke", "kettledrums", "pk"),
     "crotales": ("crot",),
     "cymbals": ("cyms", "cym", "becken"),
     "tam-tam": ("tam", "tamtam"),
     "triangle": ("tgl", "triangel"),
-    "bass drum": ("bd", "grosse trommel"),
+    "bass drum": ("bd", "grosse trommel", "concert bass drum"),
     "snare drum": ("sd", "side drum", "kleine trommel"),
     "tambourine": ("tamb", "tambourin"),
+    "tape": ("tonband",),
+    # Unpitched "drum(s)"/"Trommel", where the page does not say which.
+    "drum": ("drums", "trommel"),
     "glockenspiel": ("glock",),
     "xylophone": ("xyl", "xylophon"),
     "vibraphone": ("vib", "vibraphon"),
     "marimba": ("mar",),
     "guiro": (),
-    "voice": ("singstimme", "gesang", "vocal", "voices"),
+    "voice": (
+        "singstimme",
+        "gesang",
+        "vocal",
+        "voices",
+        "singing voice",
+        # "Solo singer": the filler word "solo" is dropped before lookup.
+        "singer",
+        # A song's range, not a voice type: all three are sung by any voice
+        # that has it, so they are one category.
+        "high voice",
+        "hohe stimme",
+        "medium voice",
+        "mittlere stimme",
+        "low voice",
+        "tiefe stimme",
+    ),
     "soprano": ("sopran",),
+    "mezzo-soprano": ("mezzo", "mezzosopran"),
     "alto": ("alt",),
     "tenor": (),
+    "baritone": ("bariton",),
     "bass": (),
-    "orchestra": ("orchester", "symphony orchestra", "sinfonieorchester", "grosses orchester"),
+    "speaker": ("sprecher", "narrator", "erzahler"),
+    # Vocal soloists, number and voices unstated ("Soloists, Choir, Orchestra").
+    "soloists": ("soli", "solisten"),
+    "orchestra": (
+        "orchester",
+        "symphony orchestra",
+        "sinfonieorchester",
+        "grosses orchester",
+        "full orchestra",
+    ),
     # Distinct from "string orchestra", and the reason "strings"/"Streicher" is
     # not a spelling of it: in an orchestral scoring those name the string
     # *section* of a full orchestra, not a work for string orchestra.
-    "strings": ("str", "streicher"),
+    "strings": ("str", "streicher", "cordes", "archi"),
     "string orchestra": ("streichorchester",),
     "chamber orchestra": ("kammerorchester",),
-    "wind ensemble": ("wind band", "blasorchester", "blaserensemble"),
+    "wind ensemble": ("wind band", "wind orchestra", "blasorchester", "blaserensemble"),
+    # Sections named as such in a scoring list, like "strings" above.
+    "winds": ("blaser", "wind instruments"),
+    "brass": ("blechblaser", "brass instruments"),
     "string quartet": ("streichquartett",),
     "string trio": ("streichtrio",),
+    "string quintet": ("streichquintett",),
+    "saxophone quartet": ("saxophonquartett",),
     "piano trio": ("klaviertrio",),
     "piano quartet": ("klavierquartett",),
     "piano quintet": ("klavierquintett",),
     "wind quintet": ("blaserquintett",),
     "piano four hands": (
         "piano 4 hands",
+        "klavier 4 handig",
         "four hands",
         "piano duet",
         "klavier zu vier handen",
         "klavier vierhandig",
         "vierhandig",
     ),
+    "piano six hands": ("piano 6 hands", "klavier 6 handig", "klavier sechshandig"),
     "two pianos": ("2 pianos", "zwei klaviere"),
     "violin and piano": ("violine und klavier",),
     "viola and piano": ("bratsche und klavier",),
@@ -121,7 +188,11 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "flute and piano": ("flote und klavier",),
     "clarinet and piano": ("klarinette und klavier",),
     "voice and piano": ("singstimme und klavier", "gesang und klavier"),
+    "choir": ("chorus", "chor"),
     "mixed choir": ("mixed chorus", "gemischter chor", "satb"),
+    "chamber choir": ("kammerchor",),
+    # Upper or lower voices only, the choir's gender unstated ("Gleiche Stimmen").
+    "equal voices": ("gleiche stimmen",),
     "male choir": ("mannerchor",),
     "female choir": ("frauenchor",),
     "children's choir": ("childrens choir", "kinderchor"),
@@ -133,6 +204,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
 #: ``written_for``.
 CONTAINS: dict[str, tuple[str, ...]] = {
     "piano four hands": ("piano",),
+    "piano six hands": ("piano",),
     "two pianos": ("piano",),
     "violin and piano": ("violin", "piano"),
     "viola and piano": ("viola", "piano"),
@@ -157,10 +229,7 @@ MEMBERS: dict[str, tuple[str, ...]] = {
     "string quartet": ("violin", "viola", "cello"),
     "string trio": ("violin", "viola", "cello"),
     "wind quintet": ("flute", "oboe", "clarinet", "bassoon", "horn"),
-}
-
-_SYNONYMS: dict[str, str] = {
-    spelling: canonical for canonical, spellings in CATEGORIES.items() for spelling in (canonical, *spellings)
+    "saxophone quartet": ("soprano saxophone", "alto saxophone", "tenor saxophone", "baritone saxophone"),
 }
 
 #: Umlauts folded rather than stripped, so "Flöte" reaches "flote" and not "flte".
@@ -183,6 +252,16 @@ def _normalize(raw: str) -> str:
     text = _PUNCTUATION.sub(" ", raw.casefold().translate(_FOLDED))
     words = [word for word in _SPACES.split(text) if word and word not in _FILLER]
     return " ".join(words)
+
+
+#: Keyed on the *normalized* spelling, because that is what a lookup holds: a key
+#: written with punctuation ("tam-tam", "children's choir") would otherwise be
+#: unreachable, since :func:`_normalize` has already turned the hyphen into a space.
+_SYNONYMS: dict[str, str] = {
+    _normalize(spelling): canonical
+    for canonical, spellings in CATEGORIES.items()
+    for spelling in (canonical, *spellings)
+}
 
 
 def category_for(raw: str) -> str | None:
