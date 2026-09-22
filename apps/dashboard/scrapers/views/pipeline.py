@@ -133,9 +133,9 @@ def _promote_options(request: HttpRequest) -> dict[str, object]:
     raw_referrers = request.POST.get("min_referrers", "").strip()
     if raw_referrers:
         options["min_referrers"] = int(raw_referrers)  # ValueError handled by the view
-    gold_path = request.POST.get("gold_path", "").strip()
-    if gold_path:
-        options["gold_path"] = gold_path
+    gold_url = request.POST.get("gold_url", "").strip()
+    if gold_url:
+        options["gold_url"] = gold_url
     return options
 
 

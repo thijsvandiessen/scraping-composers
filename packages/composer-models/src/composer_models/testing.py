@@ -32,7 +32,7 @@ requires_postgres = pytest.mark.skipif(
 
 
 def drop_test_schemas(url: str, prefix: str) -> None:
-    """Drop ``prefix``, everything a rebuild derived from it, and its manifest.
+    """Drop ``prefix``, every schema named ``{prefix}_*``, and their manifests.
 
     The build manifest deliberately lives outside the schemas a swap replaces,
     so dropping those does not reach it — a test's row would otherwise outlive
@@ -49,8 +49,11 @@ def drop_test_schemas(url: str, prefix: str) -> None:
                 conn.execute(text(f'DROP SCHEMA IF EXISTS "{name}" CASCADE'))
             if conn.scalar(text("SELECT to_regclass('composer_meta.build_manifest')")) is not None:
                 conn.execute(
-                    text("DELETE FROM composer_meta.build_manifest WHERE target = :target"),
-                    {"target": prefix},
+                    text(
+                        "DELETE FROM composer_meta.build_manifest"
+                        " WHERE target = :prefix OR target LIKE :pattern"
+                    ),
+                    {"prefix": prefix, "pattern": f"{prefix}\\_%"},
                 )
     finally:
         engine.dispose()
@@ -58,11 +61,13 @@ def drop_test_schemas(url: str, prefix: str) -> None:
 
 @pytest.fixture
 def pg_url(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
-    """A Postgres URL whose silver schema is this test's own throwaway.
+    """A Postgres URL whose silver and gold schemas are this test's own throwaways.
 
-    ``settings.silver_schema`` is patched, so ``get_engine()`` and every build
-    target derived from settings land in a schema no other test shares — tests
-    stay isolated and can run in parallel against one database.
+    ``settings.silver_schema`` and ``settings.gold_schema`` are patched, so
+    ``get_engine()`` and every build target derived from settings land in
+    schemas no other test shares — tests stay isolated and can run in parallel
+    against one database. Silver and gold share the server here; in real use
+    gold has one of its own, which the code only ever sees as a second URL.
     """
     url = postgres_test_url()
     if url is None:  # pragma: no cover - guarded by requires_postgres
@@ -70,6 +75,8 @@ def pg_url(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     schema = f"t{uuid.uuid4().hex[:10]}"
     monkeypatch.setattr(settings, "silver_schema", schema)
     monkeypatch.setattr(settings, "database_url", url)
+    monkeypatch.setattr(settings, "gold_schema", f"{schema}_gold")
+    monkeypatch.setattr(settings, "gold_database_url", url)
     try:
         yield url
     finally:

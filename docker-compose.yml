@@ -1,10 +1,15 @@
-# Local Postgres for the silver database. SQLite stays the default; this is
-# here so rebuild-silver's Postgres path and the Alembic migrations can be
-# developed and tested without a hosted database.
+# Local Postgres for the silver and gold databases, one server each. SQLite
+# stays the default; this is here so the Postgres paths of rebuild-silver and
+# promote, and the Alembic migrations, can be developed and tested without a
+# hosted database.
 #
 #   docker compose up -d postgres
 #   export DATABASE_URL=postgresql+psycopg://composers:composers@localhost:5433/composers
 #   uv run composer-ingest rebuild-silver
+#
+#   docker compose up -d postgres-gold
+#   export GOLD_DATABASE_URL=postgresql+psycopg://composers:composers@localhost:5434/composers_gold
+#   uv run composer-ingest promote
 services:
   postgres:
     # Debian rather than alpine: glibc collation, which is what a hosted
@@ -29,5 +34,25 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  postgres-gold:
+    # Gold on a server of its own: the consumer API's reads never compete with
+    # a silver rebuild for memory or IO, and gold can be sized and moved
+    # independently.
+    image: postgres:17
+    environment:
+      POSTGRES_USER: composers
+      POSTGRES_PASSWORD: composers
+      POSTGRES_DB: composers_gold
+    ports:
+      - "5434:5432"
+    volumes:
+      - pggold:/var/lib/postgresql/data
+    shm_size: 256mb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U composers -d composers_gold"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 volumes:
   pgdata:
+  pggold:

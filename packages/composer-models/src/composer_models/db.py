@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 
 from composer_config import settings
-from sqlalchemy import Engine, create_engine, make_url, text
+from sqlalchemy import Connection, Engine, create_engine, make_url, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from . import Base
@@ -64,7 +64,7 @@ def init_db(engine: Engine) -> sessionmaker[Session]:
     return sessionmaker(engine, expire_on_commit=False)
 
 
-def resync_pk_sequence(session: Session, table: str, column: str = "id") -> None:
+def resync_pk_sequence(session: Session | Connection, table: str, column: str = "id") -> None:
     """Move a serial primary key's sequence past the largest id in the table.
 
     Bulk inserts that assign integer ids explicitly (the concert and recording
@@ -72,7 +72,8 @@ def resync_pk_sequence(session: Session, table: str, column: str = "id") -> None
     at 1 — so the next ORM insert collides on the primary key. SQLite has no
     sequences and no such problem, so this is a no-op there.
     """
-    if session.bind is None or session.bind.dialect.name != "postgresql":
+    bind = session if isinstance(session, Connection) else session.bind
+    if bind is None or bind.dialect.name != "postgresql":
         return
     if not _IDENTIFIER.match(table) or not _IDENTIFIER.match(column):
         raise ValueError(f"invalid table or column name: {table!r}.{column!r}")

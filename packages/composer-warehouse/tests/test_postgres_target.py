@@ -9,9 +9,10 @@ from composer_config import settings
 from composer_models.db import get_engine
 from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
 from composer_models.testing import requires_postgres
-from composer_warehouse.build import run_build
+from composer_warehouse.build import build_target, run_build
+from composer_warehouse.postgres import schema_read_lock
 from composer_warehouse.rebuild import silver_target
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, make_url, text
 
 pytestmark = requires_postgres
 
@@ -150,6 +151,32 @@ def test_concurrent_rebuild_is_rejected(pg_url: str) -> None:
     second = silver_target(pg_url)
     second.begin()
     second.abort()
+
+
+def test_a_reader_lock_holds_off_a_rebuild_of_that_schema_only(pg_url: str) -> None:
+    with schema_read_lock(make_url(pg_url), settings.silver_schema):
+        with pytest.raises(RuntimeError, match="already in progress"):
+            silver_target(pg_url).begin()
+        # Locks are per schema: gold on the same server builds regardless.
+        other = build_target(pg_url, settings.gold_schema)
+        other.begin()
+        other.abort()
+
+    # Released with the block: the rebuild can start now.
+    rebuild = silver_target(pg_url)
+    rebuild.begin()
+    rebuild.abort()
+
+
+def test_a_running_rebuild_refuses_a_reader(pg_url: str) -> None:
+    rebuild = silver_target(pg_url)
+    rebuild.begin()
+    try:
+        with pytest.raises(RuntimeError, match="being rebuilt"):
+            with schema_read_lock(make_url(pg_url), settings.silver_schema):
+                pass
+    finally:
+        rebuild.abort()
 
 
 def test_exists_reports_a_built_database_not_a_bare_schema(pg_url: str) -> None:

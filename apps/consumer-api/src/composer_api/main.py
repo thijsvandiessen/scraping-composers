@@ -11,7 +11,7 @@ database. Same routes, different databases:
 from collections.abc import Callable, Generator
 
 from composer_config import settings
-from composer_gold import DEFAULT_GOLD_DB_PATH
+from composer_gold import gold_engine
 from composer_models.db import get_engine, init_db
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -55,16 +55,12 @@ def create_app(title: str, factory_provider: Callable[[], sessionmaker[Session]]
 
 
 def _gold_factory() -> sessionmaker[Session]:
-    # NullPool: every request opens the file fresh, so the atomic swap done by
-    # `promote` (os.replace) is picked up without restarting the app.
-    engine = create_engine(f"sqlite:///{DEFAULT_GOLD_DB_PATH}", poolclass=NullPool)
-    return init_db(engine)
+    # GOLD_DATABASE_URL, SQLite file or Postgres; gold_engine picks the pooling
+    # that lets every request see a new promote without restarting the app.
+    return init_db(gold_engine())
 
 
 def _silver_factory() -> sessionmaker[Session]:
-    # For a sqlite file, NullPool for the same reason as gold: `rebuild-silver`
-    # swaps the file with os.replace, and pooled connections would keep serving
-    # the old inode until a restart.
     # NullPool for SQLite only: there the swap replaces the file, so a pooled
     # connection still points at the old inode. A Postgres rebuild renames
     # schemas instead, and name resolution happens per statement, so pooled

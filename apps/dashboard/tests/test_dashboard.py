@@ -1042,7 +1042,7 @@ def test_promote_page_renders_config_fields(monkeypatch: pytest.MonkeyPatch, sta
     for field in ("drop_unevidenced_persons", "collapse_duplicates", "prune_unreferenced"):
         assert f'name="{field}" checked' in page
     assert 'name="min_referrers"' in page
-    assert 'name="gold_path"' in page
+    assert 'name="gold_url"' in page
     assert 'href="/admin/promote/rule1-config/"' in page
 
 
@@ -1118,7 +1118,7 @@ def test_rule1_config_form_rejects_non_numeric_input(
 def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     stub = StubAPI()
     _install(monkeypatch, stub)
-    # rule 3 unchecked (absent), the others checked; a threshold and custom path set
+    # rule 3 unchecked (absent), the others checked; a threshold and custom URL set
     response = staff_client.post(
         "/admin/promote/start",
         {
@@ -1126,7 +1126,7 @@ def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, st
             "drop_unevidenced_persons": "on",
             "collapse_duplicates": "on",
             "min_referrers": "2",
-            "gold_path": "/data/gold-alt.db",
+            "gold_url": "sqlite:////data/gold-alt.db",
         },
         follow=True,
     )
@@ -1134,7 +1134,7 @@ def test_promote_form_passes_options_through(monkeypatch: pytest.MonkeyPatch, st
     assert stub.promote_options == {
         "prune_unreferenced": False,
         "min_referrers": 2,
-        "gold_path": "/data/gold-alt.db",
+        "gold_url": "sqlite:////data/gold-alt.db",
     }
 
 
@@ -1147,7 +1147,7 @@ def test_promote_form_defaults_send_no_options(monkeypatch: pytest.MonkeyPatch, 
         "collapse_duplicates": "on",
         "prune_unreferenced": "on",
         "min_referrers": "",
-        "gold_path": "",
+        "gold_url": "",
     }
     staff_client.post("/admin/promote/start", fields, follow=True)
     assert stub.promote_options is None  # untouched form: bodiless POST, server defaults

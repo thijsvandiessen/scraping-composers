@@ -86,6 +86,10 @@ def _seed_silver(session: Session) -> None:
     derive_concerts(session)  # rule 1's evidence lives in the derived concert tables
 
 
+def _url(gold_path: Path) -> str:
+    return f"sqlite:///{gold_path}"
+
+
 def _gold_session(gold_path: Path) -> Session:
     return init_db(create_engine(f"sqlite:///{gold_path}"))()
 
@@ -93,7 +97,7 @@ def _gold_session(gold_path: Path) -> Session:
 def test_promote_applies_all_three_rules(session: Session, tmp_path: Path) -> None:
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path)
+    stats = promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -125,7 +129,7 @@ def test_zero_appearance_thresholds_keep_unevidenced_persons(session: Session, t
     gold_path = tmp_path / "gold.db"
     stats = promote(
         session,
-        gold_path,
+        _url(gold_path),
         PromoteConfig(
             rule1=Rule1Config(
                 persons=PersonRule1Config(min_concert_appearances=0, min_recording_appearances=0)
@@ -142,7 +146,7 @@ def test_zero_appearance_thresholds_keep_unevidenced_persons(session: Session, t
 def test_promote_repoints_claims_and_mentions_to_canonical(session: Session, tmp_path: Path) -> None:
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
-    promote(session, gold_path)
+    promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         beethoven = gold.scalars(select(Entity).where(Entity.label == "Beethoven, Ludwig van")).one()
@@ -235,7 +239,7 @@ def test_promote_copies_silver_derived_concerts(session: Session, tmp_path: Path
     _seed_concert_silver(session)
     derive_concerts(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path)
+    stats = promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         concerts = gold.scalars(select(Concert).order_by(Concert.date)).all()
@@ -311,7 +315,7 @@ def test_promote_copies_silver_derived_recordings(session: Session, tmp_path: Pa
     _seed_recording_silver(session)
     derive_recordings(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path)
+    stats = promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         recording = gold.scalars(select(Recording)).one()
@@ -332,13 +336,13 @@ def test_promote_copies_silver_derived_recordings(session: Session, tmp_path: Pa
 
 def test_promote_over_underived_silver_yields_no_recordings(session: Session, tmp_path: Path) -> None:
     _seed_recording_silver(session)  # deliberately no derive_recordings
-    stats = promote(session, tmp_path / "gold.db")
+    stats = promote(session, _url(tmp_path / "gold.db"))
     assert stats.recordings == 0
 
 
 def test_promote_over_underived_silver_yields_no_concerts(session: Session, tmp_path: Path) -> None:
     _seed_concert_silver(session)  # deliberately no derive_concerts
-    stats = promote(session, tmp_path / "gold.db")
+    stats = promote(session, _url(tmp_path / "gold.db"))
     assert stats.concerts == 0
 
 
@@ -400,7 +404,7 @@ def test_promote_repoints_concert_participants(session: Session, tmp_path: Path)
 
     stats = promote(
         session,
-        tmp_path / "gold.db",
+        _url(tmp_path / "gold.db"),
         PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_concert_appearances=2))),
     )
 
@@ -446,7 +450,7 @@ def _seed_sitelink_silver(session: Session) -> None:
 def test_sitelink_threshold_off_by_default(session: Session, tmp_path: Path) -> None:
     _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path)  # no threshold: promotion unchanged
+    stats = promote(session, _url(gold_path))  # no threshold: promotion unchanged
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -459,7 +463,9 @@ def test_sitelink_threshold_promotes_significant_person(session: Session, tmp_pa
     _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
     stats = promote(
-        session, gold_path, PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_sitelinks=100)))
+        session,
+        _url(gold_path),
+        PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_sitelinks=100))),
     )  # 200 >= 100
 
     with _gold_session(gold_path) as gold:
@@ -477,7 +483,9 @@ def test_sitelink_threshold_below_count_drops_person(session: Session, tmp_path:
     _seed_sitelink_silver(session)
     gold_path = tmp_path / "gold.db"
     stats = promote(
-        session, gold_path, PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_sitelinks=300)))
+        session,
+        _url(gold_path),
+        PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_sitelinks=300))),
     )  # 200 < 300
 
     with _gold_session(gold_path) as gold:
@@ -490,7 +498,7 @@ def test_sitelink_threshold_below_count_drops_person(session: Session, tmp_path:
 def test_rule1_off_keeps_unevidenced_persons(session: Session, tmp_path: Path) -> None:
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, PromoteConfig(drop_unevidenced_persons=False))
+    stats = promote(session, _url(gold_path), PromoteConfig(drop_unevidenced_persons=False))
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -508,7 +516,7 @@ def test_rule1_off_keeps_unevidenced_persons(session: Session, tmp_path: Path) -
 def test_rule2_off_judges_each_spelling_on_its_own(session: Session, tmp_path: Path) -> None:
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, PromoteConfig(collapse_duplicates=False))
+    stats = promote(session, _url(gold_path), PromoteConfig(collapse_duplicates=False))
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -523,7 +531,7 @@ def test_rules_1_and_2_off_keep_both_spellings(session: Session, tmp_path: Path)
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
     stats = promote(
-        session, gold_path, PromoteConfig(drop_unevidenced_persons=False, collapse_duplicates=False)
+        session, _url(gold_path), PromoteConfig(drop_unevidenced_persons=False, collapse_duplicates=False)
     )
 
     with _gold_session(gold_path) as gold:
@@ -539,7 +547,7 @@ def test_rules_1_and_2_off_keep_both_spellings(session: Session, tmp_path: Path)
 def test_rule3_off_keeps_unreferenced_entities(session: Session, tmp_path: Path) -> None:
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, PromoteConfig(prune_unreferenced=False))
+    stats = promote(session, _url(gold_path), PromoteConfig(prune_unreferenced=False))
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -596,7 +604,7 @@ def _seed_referrers_silver(session: Session) -> None:
 def test_min_referrers_default_keeps_single_referrer(session: Session, tmp_path: Path) -> None:
     _seed_referrers_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path)  # default min_referrers=1
+    stats = promote(session, _url(gold_path))  # default min_referrers=1
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -607,7 +615,7 @@ def test_min_referrers_default_keeps_single_referrer(session: Session, tmp_path:
 def test_min_referrers_prunes_weakly_referenced(session: Session, tmp_path: Path) -> None:
     _seed_referrers_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, PromoteConfig(min_referrers=2))
+    stats = promote(session, _url(gold_path), PromoteConfig(min_referrers=2))
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -624,7 +632,7 @@ def test_min_referrers_prunes_weakly_referenced(session: Session, tmp_path: Path
 def test_min_referrers_keeps_shared_referrer_with_its_claims(session: Session, tmp_path: Path) -> None:
     _seed_referrers_silver(session)
     gold_path = tmp_path / "gold.db"
-    promote(session, gold_path, PromoteConfig(min_referrers=2))
+    promote(session, _url(gold_path), PromoteConfig(min_referrers=2))
 
     with _gold_session(gold_path) as gold:
         popularville = gold.scalars(select(Entity).where(Entity.label == "Popularville")).one()
@@ -658,7 +666,7 @@ def test_rule1_drops_archive_listed_person_without_credits(session: Session, tmp
     ingest_source(session, archive)
     derive_concerts(session)
 
-    stats = promote(session, tmp_path / "gold.db")
+    stats = promote(session, _url(tmp_path / "gold.db"))
 
     with _gold_session(tmp_path / "gold.db") as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -671,7 +679,7 @@ def test_rule1_keeps_recording_participants(session: Session, tmp_path: Path) ->
     _seed_recording_silver(session)
     derive_recordings(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path)
+    stats = promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -687,7 +695,7 @@ def test_min_concert_appearances_drops_one_off_participants(session: Session, tm
     gold_path = tmp_path / "gold.db"
     stats = promote(
         session,
-        gold_path,
+        _url(gold_path),
         PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_concert_appearances=2))),
     )
 
@@ -708,7 +716,7 @@ def test_min_recording_appearances_drops_one_off_participants(session: Session, 
     gold_path = tmp_path / "gold.db"
     stats = promote(
         session,
-        gold_path,
+        _url(gold_path),
         PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_recording_appearances=2))),
     )
 
@@ -732,7 +740,7 @@ def test_composer_min_appearances_requires_a_matching_credit(session: Session, t
     ingest_source(session, archive)
 
     default_path = tmp_path / "default.db"
-    default_stats = promote(session, default_path)
+    default_stats = promote(session, _url(default_path))
     with _gold_session(default_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
         assert "Beethoven, Ludwig van" in labels  # zero credits, still exempt
@@ -741,7 +749,7 @@ def test_composer_min_appearances_requires_a_matching_credit(session: Session, t
     threshold_path = tmp_path / "threshold.db"
     threshold_stats = promote(
         session,
-        threshold_path,
+        _url(threshold_path),
         PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_appearances_for_composers=1))),
     )
     with _gold_session(threshold_path) as gold:
@@ -799,14 +807,14 @@ def test_composer_min_works_or_programmes(session: Session, tmp_path: Path) -> N
     composers = {"ACT,", "Two, Works", "Three, Concerts"}
 
     default_path = tmp_path / "default.db"
-    promote(session, default_path)
+    promote(session, _url(default_path))
     with _gold_session(default_path) as gold:
         assert composers <= {e.label for e in gold.scalars(select(Entity))}
 
     strict_path = tmp_path / "strict.db"
     promote(
         session,
-        strict_path,
+        _url(strict_path),
         PromoteConfig(
             rule1=Rule1Config(
                 persons=PersonRule1Config(min_works_for_composers=2, min_programmes_for_composers=3)
@@ -837,7 +845,7 @@ def test_composer_reach_is_counted_per_dedup_cluster(session: Session, tmp_path:
 
     promote(
         session,
-        gold_path,
+        _url(gold_path),
         PromoteConfig(
             rule1=Rule1Config(
                 persons=PersonRule1Config(min_works_for_composers=2, min_programmes_for_composers=99)
@@ -883,7 +891,7 @@ def _seed_ensemble_silver(session: Session) -> None:
 def test_ensembles_need_a_credit_of_their_own(session: Session, tmp_path: Path) -> None:
     _seed_ensemble_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path)
+    stats = promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -904,7 +912,7 @@ def test_ensembles_need_a_credit_of_their_own(session: Session, tmp_path: Path) 
 def test_rule1_off_keeps_unevidenced_ensembles(session: Session, tmp_path: Path) -> None:
     _seed_ensemble_silver(session)
     gold_path = tmp_path / "gold.db"
-    stats = promote(session, gold_path, PromoteConfig(drop_unevidenced_persons=False))
+    stats = promote(session, _url(gold_path), PromoteConfig(drop_unevidenced_persons=False))
 
     with _gold_session(gold_path) as gold:
         labels = {e.label for e in gold.scalars(select(Entity))}
@@ -915,11 +923,11 @@ def test_rule1_off_keeps_unevidenced_ensembles(session: Session, tmp_path: Path)
 def test_promote_writes_manifest_and_is_rerunnable(session: Session, tmp_path: Path) -> None:
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
-    first = promote(session, gold_path)
-    second = promote(session, gold_path)  # full rebuild: same result, no leftovers
+    first = promote(session, _url(gold_path))
+    second = promote(session, _url(gold_path))  # full rebuild: same result, no leftovers
 
     assert first == second
-    manifest = read_gold_manifest(gold_path)
+    manifest = read_gold_manifest(_url(gold_path))
     assert manifest is not None
     assert manifest.status == "completed"
     assert manifest.stats["persons_kept"] == 2
@@ -975,7 +983,7 @@ def test_promote_keeps_work_claims_reached_through_the_composed_edge(
     own literal claims with it — because a kept composer points at it."""
     _seed_work_claims(session, attributed=True)
     gold_path = tmp_path / "gold.db"
-    promote(session, gold_path)
+    promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         work = gold.scalars(select(Entity).where(Entity.kind == "work")).one()
@@ -996,7 +1004,7 @@ def test_promote_reaches_instrumentation_two_hops_from_the_composer(session: Ses
     it only survives because rule 3's walk expands through the work as well."""
     _seed_work_claims(session, attributed=True)
     gold_path = tmp_path / "gold.db"
-    promote(session, gold_path)
+    promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         scorings = {
@@ -1020,7 +1028,7 @@ def test_promote_drops_an_unattributed_work_entity(session: Session, tmp_path: P
     work, so rule 3 prunes it and every fact the page stated is lost."""
     _seed_work_claims(session, attributed=False)
     gold_path = tmp_path / "gold.db"
-    promote(session, gold_path)
+    promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         assert gold.scalars(select(Entity).where(Entity.kind == "work")).all() == []
@@ -1057,7 +1065,7 @@ def test_composer_with_works_but_no_credits_survives(session: Session, tmp_path:
     _seed_composer_only_silver(session)
     gold_path = tmp_path / "gold.db"
 
-    promote(session, gold_path, PromoteConfig(rule1=Rule1Config.from_json(DEFAULT_RULE1_CONFIG_PATH)))
+    promote(session, _url(gold_path), PromoteConfig(rule1=Rule1Config.from_json(DEFAULT_RULE1_CONFIG_PATH)))
 
     with _gold_session(gold_path) as gold:
         assert "Bach, Johann Sebastian" in {e.label for e in gold.scalars(select(Entity))}
@@ -1076,7 +1084,7 @@ def test_gold_never_emits_an_unresolvable_composer_id(session: Session, tmp_path
     # Force the composer out: demand credits they cannot have.
     promote(
         session,
-        gold_path,
+        _url(gold_path),
         PromoteConfig(rule1=Rule1Config(persons=PersonRule1Config(min_appearances_for_composers=1))),
     )
 
@@ -1096,7 +1104,7 @@ def test_kept_composer_keeps_the_link_on_their_works(session: Session, tmp_path:
     _seed_composer_only_silver(session)
     gold_path = tmp_path / "gold.db"
 
-    promote(session, gold_path)
+    promote(session, _url(gold_path))
 
     with _gold_session(gold_path) as gold:
         bach = gold.scalars(select(Entity).where(Entity.label == "Bach, Johann Sebastian")).one()

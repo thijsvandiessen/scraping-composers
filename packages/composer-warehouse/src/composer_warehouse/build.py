@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, ClassVar, Protocol, TypeVar
 
-from sqlalchemy import Engine, create_engine
+from sqlalchemy import Engine, create_engine, make_url
 
 log = logging.getLogger(__name__)
 
@@ -158,6 +158,25 @@ class SqliteFileTarget:
         if self._engine is not None:
             self._engine.dispose()
             self._engine = None
+
+
+def build_target(database_url: str, schema: str) -> BuildTarget:
+    """The swap target for the database at ``database_url``.
+
+    A SQLite file gets an atomic file replace; Postgres gets an atomic rename
+    of ``schema``. Raises ``ValueError`` for a URL neither can handle — an
+    in-memory SQLite database has no file to swap, and no other dialect is
+    supported.
+    """
+    url = make_url(database_url)
+    backend = url.get_backend_name()
+    if backend == "postgresql":
+        from .postgres import PostgresSchemaTarget
+
+        return PostgresSchemaTarget(url, schema)
+    if backend == "sqlite" and url.database and url.database != ":memory:":
+        return SqliteFileTarget(Path(url.database))
+    raise ValueError(f"a build needs a sqlite file or a Postgres URL, got {database_url!r}")
 
 
 def run_build(target: BuildTarget, build: Callable[[Engine], StatsT]) -> StatsT:
