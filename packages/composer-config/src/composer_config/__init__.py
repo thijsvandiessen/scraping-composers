@@ -7,7 +7,12 @@ class Settings(BaseSettings):
     # staging schema and renames it into this name, so nothing else may live
     # here — it is replaced wholesale by every rebuild.
     silver_schema: str = "silver"
-    gold_db_path: str = "./gold.db"
+    # Where promote writes gold and the gold API reads it: a SQLite file, or a
+    # Postgres server of its own (see docker-compose's postgres-gold).
+    gold_database_url: str = "sqlite:///gold.db"
+    # Postgres only: the schema holding gold, replaced wholesale by every promote
+    # just as silver_schema is by every rebuild.
+    gold_schema: str = "gold"
     gold_min_referrers: int = 1
     bucket_path: str = "./raw-data"
     crawl_configs_path: str = "./crawl_configs.json"

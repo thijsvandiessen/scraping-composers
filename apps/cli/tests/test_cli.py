@@ -957,7 +957,7 @@ def test_promote_cli_passes_thresholds(tmp_path: Path, monkeypatch: pytest.Monke
 
     captured: list[PromoteConfig] = []
 
-    def fake_promote(session: object, gold_path: str, config: PromoteConfig) -> PromoteStats:
+    def fake_promote(session: object, gold_url: str, config: PromoteConfig) -> PromoteStats:
         captured.append(config)
         return PromoteStats()
 
@@ -974,8 +974,8 @@ def test_promote_cli_passes_thresholds(tmp_path: Path, monkeypatch: pytest.Monke
             "--database-url",
             db_url,
             "promote",
-            "--gold-path",
-            str(tmp_path / "gold.db"),
+            "--gold-url",
+            f"sqlite:///{tmp_path / 'gold.db'}",
             "--min-referrers",
             "3",
             "--rule1-config",
@@ -1025,7 +1025,7 @@ def test_cmd_export_kumu_writes_a_blueprint(tmp_path: Path, capsys: pytest.Captu
 
     rc = cmd_export_kumu(
         _ns(
-            gold_path=str(gold_path),
+            gold_url=f"sqlite:///{gold_path}",
             output=str(out),
             limit=500,
             min_weight=1,
@@ -1045,11 +1045,11 @@ def test_cmd_export_kumu_writes_a_blueprint(tmp_path: Path, capsys: pytest.Captu
 def test_cmd_export_kumu_returns_1_without_a_gold_database(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A typo in --gold-path must not leave an empty database behind."""
+    """A typo in --gold-url must not leave an empty database behind."""
     missing = tmp_path / "nope.db"
     rc = cmd_export_kumu(
         _ns(
-            gold_path=str(missing),
+            gold_url=f"sqlite:///{missing}",
             output=str(tmp_path / "kumu.json"),
             limit=500,
             min_weight=1,
@@ -1072,8 +1072,8 @@ def test_main_routes_to_export_kumu_subcommand(tmp_path: Path, monkeypatch: pyte
         [
             "composer-ingest",
             "export-kumu",
-            "--gold-path",
-            str(gold_path),
+            "--gold-url",
+            f"sqlite:///{gold_path}",
             "-o",
             str(out),
             "--min-weight",

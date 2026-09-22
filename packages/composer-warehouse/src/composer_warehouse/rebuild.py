@@ -36,17 +36,16 @@ import logging
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 from composer_bronze.bucket import Bucket, all_document_run_ids
 from composer_bronze.scraper import iter_all_from_bucket
 from composer_models import Base, Entity, PersonMatch, RawWorkMention, Source, Work
 from composer_models.alembic_support import stamp_head
 from composer_models.db import get_engine, init_db
-from sqlalchemy import Engine, inspect, make_url, select
+from sqlalchemy import Engine, inspect, select
 from sqlalchemy.orm import Session
 
-from .build import BuildTarget, SqliteFileTarget, run_build
+from .build import BuildTarget, build_target, run_build
 from .concerts import derive_concerts
 from .ingestion import ingest_documents, new_work
 from .persons import dedupe_persons
@@ -98,21 +97,12 @@ class WorkDecision:
 def silver_target(database_url: str | None = None) -> BuildTarget:
     """The swap target for the silver database at ``database_url``.
 
-    A SQLite file gets an atomic file replace; Postgres gets an atomic schema
-    rename. Raises ``ValueError`` for a URL neither can handle — an in-memory
-    SQLite database has no file to swap, and no other dialect is supported.
+    See :func:`~composer_warehouse.build.build_target`; on Postgres the swapped
+    schema is ``settings.silver_schema``.
     """
     from composer_config import settings
 
-    url = make_url(database_url or settings.database_url)
-    backend = url.get_backend_name()
-    if backend == "postgresql":
-        from .postgres import PostgresSchemaTarget
-
-        return PostgresSchemaTarget(url, settings.silver_schema)
-    if backend == "sqlite" and url.database and url.database != ":memory:":
-        return SqliteFileTarget(Path(url.database))
-    raise ValueError(f"rebuild-silver needs a sqlite file or a Postgres URL, got {database_url!r}")
+    return build_target(database_url or settings.database_url, settings.silver_schema)
 
 
 def collect_decisions(session: Session) -> tuple[list[PersonDecision], list[WorkDecision]]:

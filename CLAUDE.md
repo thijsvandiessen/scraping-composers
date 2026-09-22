@@ -38,19 +38,25 @@ done
 
 ## Postgres-backed tests
 
-Three members (`composer-models`, `composer-warehouse`, `admin-api`) have tests
-that need a real Postgres; CI runs them in a separate `test-postgres` job. They
-**skip silently** when `COMPOSER_TEST_POSTGRES_URL` is unset, so the matrix
-above passes without Docker — which also means a broken Postgres path looks
-green locally unless you set it:
+Five members (`composer-models`, `composer-warehouse`, `composer-gold`,
+`admin-api`, `consumer-api`) have tests that need a real Postgres; CI runs them
+in a separate `test-postgres` job. They **skip silently** when
+`COMPOSER_TEST_POSTGRES_URL` is unset, so the matrix above passes without
+Docker — which also means a broken Postgres path looks green locally unless you
+set it:
 
 ```
 docker compose up -d postgres
 export COMPOSER_TEST_POSTGRES_URL=postgresql+psycopg://composers:composers@localhost:5433/composers
-for m in packages/composer-models packages/composer-warehouse apps/admin-api; do
+for m in packages/composer-models packages/composer-warehouse packages/composer-gold \
+         apps/admin-api apps/consumer-api; do
   uv run --directory "$m" pytest --rootdir . -q
 done
 ```
+
+The tests put silver and gold in separate schemas on this one server. In real
+use gold has a server of its own (`docker compose up -d postgres-gold`, port
+5434, `GOLD_DATABASE_URL`).
 
 ## Schema changes
 

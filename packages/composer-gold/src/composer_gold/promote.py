@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import logging
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
-from pathlib import Path
 
+from composer_config import settings
 from composer_models import Base
-from composer_warehouse.build import BuildManifest, SqliteFileTarget, read_build_manifest, run_build
-from sqlalchemy import Engine
+from composer_models.alembic_support import stamp_head
+from composer_models.db import get_engine, resync_pk_sequence
+from composer_warehouse.build import BuildManifest, BuildTarget, build_target, run_build
+from composer_warehouse.postgres import schema_read_lock
+from sqlalchemy import Connection, Engine, Integer, create_engine, make_url, text
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import NullPool
 
 from ._claims import (
     collect_other_literal_claims,
@@ -60,8 +65,8 @@ class PromoteStats:
 class PromoteConfig:
     """Per-run knobs of the promotion: the curation rules and their signals.
 
-    Every rule defaults to on; the two-argument ``promote(silver, gold_path)``
-    call is the fully curated build. ``rule1`` (concert/recording/composer/
+    Every rule defaults to on; ``promote(silver)`` with no config is the fully
+    curated build. ``rule1`` (concert/recording/composer/
     sitelink thresholds, see ``Rule1Config``) only matters while rule 1 is on —
     with rule 1 off every person and ensemble is kept anyway. ``min_referrers``
     only matters while rule 3 is on — with rule 3 off every entity is kept; at
@@ -81,25 +86,66 @@ class PromoteConfig:
 GoldManifest = BuildManifest
 
 
-def read_gold_manifest(gold_path: str | Path) -> BuildManifest | None:
-    return read_build_manifest(gold_path)
+def gold_target(gold_url: str | None = None) -> BuildTarget:
+    """The swap target for gold at ``gold_url`` (default ``GOLD_DATABASE_URL``).
+
+    A SQLite file is swapped by file replace, with its manifest beside it in
+    ``{file}.manifest.json``; Postgres by renaming ``GOLD_SCHEMA``, with its
+    manifest in ``composer_meta.build_manifest``.
+    """
+    return build_target(gold_url or settings.gold_database_url, settings.gold_schema)
 
 
-def promote(silver: Session, gold_path: str | Path, config: PromoteConfig | None = None) -> PromoteStats:
-    """Rebuild the gold database at ``gold_path`` from the silver session.
+def gold_engine(gold_url: str | None = None) -> Engine:
+    """An engine for reading gold that follows every swap without a restart.
 
-    Builds into ``{gold_path}.tmp`` and atomically swaps it in, so readers
-    never see a half-built database. Progress and outcome land in
-    ``{gold_path}.manifest.json``.
+    SQLite: NullPool, because the swap replaces the file and a pooled
+    connection would keep serving the old inode. Postgres: pinned to
+    ``GOLD_SCHEMA`` by name, and names resolve per statement, so pooled
+    connections see the renamed-in schema on their own.
+    """
+    url = gold_url or settings.gold_database_url
+    if make_url(url).get_backend_name() == "sqlite":
+        return create_engine(url, poolclass=NullPool)
+    return get_engine(url, schema=settings.gold_schema)
+
+
+def read_gold_manifest(gold_url: str | None = None) -> BuildManifest | None:
+    return gold_target(gold_url).read_manifest()
+
+
+def promote(
+    silver: Session, gold_url: str | None = None, config: PromoteConfig | None = None
+) -> PromoteStats:
+    """Rebuild gold at ``gold_url`` (default ``GOLD_DATABASE_URL``) from silver.
+
+    Builds into a staging area and atomically swaps it in, so readers never
+    see a half-built database (see :func:`gold_target`). Progress and outcome
+    land in the target's manifest.
 
     ``config`` tunes the run: the sitelink promotion signal and per-rule
     toggles (see ``PromoteConfig``). ``None`` runs the full curation with
     the sitelink signal off.
     """
     cfg = config or PromoteConfig()
-    stats = run_build(SqliteFileTarget(Path(gold_path)), lambda engine: _build(silver, engine, cfg))
-    log.info("gold promoted to %s: %s", gold_path, stats)
+    target = gold_target(gold_url)
+    with _silver_read_lock(silver):
+        stats = run_build(target, lambda engine: _build(silver, engine, cfg))
+    log.info("gold promoted to %s: %s", target.describe(), stats)
     return stats
+
+
+def _silver_read_lock(silver: Session) -> AbstractContextManager[None]:
+    """Keep silver from being swapped out while promote reads it.
+
+    Only Postgres needs this. On SQLite the open file keeps the old inode
+    alive across a rebuild's file replace, so promote finishes on the silver it
+    started with.
+    """
+    url = silver.get_bind().engine.url
+    if url.get_backend_name() != "postgresql":
+        return nullcontext()
+    return schema_read_lock(url, settings.silver_schema)
 
 
 def _stats(build: GoldBuild) -> PromoteStats:
@@ -127,13 +173,13 @@ def _stats(build: GoldBuild) -> PromoteStats:
     )
 
 
-def _build(silver: Session, gold_engine: Engine, config: PromoteConfig) -> PromoteStats:
-    Base.metadata.create_all(gold_engine)
+def _build(silver: Session, engine: Engine, config: PromoteConfig) -> PromoteStats:
+    Base.metadata.create_all(engine)
 
     build = GoldBuild(silver, config)
     build.select_persons()
     build.select_ensembles()
-    with gold_engine.begin() as gold:
+    with engine.begin() as gold:
         copy_sources_and_runs(build, gold)
         copy_entities(build, gold, build.kept_roots)  # kept person representatives
         referenced = collect_person_claims(build)
@@ -141,12 +187,43 @@ def _build(silver: Session, gold_engine: Engine, config: PromoteConfig) -> Promo
         collect_other_literal_claims(build)
         copy_entities(build, gold, build.kept_other)
         drop_pruned_object_claims(build)
-        insert_claims(build, gold)
+        # Records before claims: a claim points at the record asserting it.
+        # SQLite never checked that foreign key; Postgres does.
         copy_records(build, gold)
+        insert_claims(build, gold)
         copy_works_titles_mentions(build, gold)
         copy_concerts(build, gold)
         copy_recordings(build, gold)
+        _resync_sequences(gold)
+
+    if engine.dialect.name == "postgresql":
+        # Stamped for the same reason rebuild-silver stamps: so the swapped-in
+        # schema reads as migrated rather than hand-made.
+        stamp_head(engine)
+        _analyze(engine)
 
     # The engine belongs to the build target, which disposes it as part of the
     # swap; closing it here would pull the file handle out from under it.
     return _stats(build)
+
+
+def _analyze(engine: Engine) -> None:
+    """Give the planner statistics before the swap, not whenever autovacuum
+    gets round to it: the first requests against a fresh gold otherwise plan
+    blind. Table by table, because a bare ANALYZE covers every schema."""
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            conn.execute(text(f'ANALYZE "{table.name}"'))
+
+
+def _resync_sequences(gold: Connection) -> None:
+    """Move every serial id sequence past the ids copied over from silver.
+
+    Gold keeps silver's integer ids, which bypasses the sequences; on Postgres
+    they would stay at 1 and the first insert into a promoted gold would
+    collide. A no-op on SQLite.
+    """
+    for table in Base.metadata.sorted_tables:
+        pk = list(table.primary_key.columns)
+        if len(pk) == 1 and isinstance(pk[0].type, Integer):
+            resync_pk_sequence(gold, table.name, pk[0].name)

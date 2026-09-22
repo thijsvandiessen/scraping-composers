@@ -19,7 +19,8 @@ def _clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_defaults() -> None:
     s = Settings()
     assert s.database_url == "sqlite:///composers.db"
-    assert s.gold_db_path == "./gold.db"
+    assert s.gold_database_url == "sqlite:///gold.db"
+    assert s.gold_schema == "gold"
     assert s.gold_min_referrers == 1
     assert s.bucket_path == "./raw-data"
     assert s.crawl_configs_path == "./crawl_configs.json"

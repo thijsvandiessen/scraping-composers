@@ -17,6 +17,7 @@ import composer_admin.snapshots as admin_snapshots
 import pytest
 from composer_admin import admin_app
 from composer_bronze.bucket import LocalBucket, SnapshotManifest
+from composer_config import settings
 from composer_models.db import init_db
 from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
 from composer_models.testing import requires_postgres
@@ -93,7 +94,6 @@ def client(monkeypatch: pytest.MonkeyPatch, factory, bucket_path: Path) -> Itera
     monkeypatch.setattr(admin_routes, "REGISTRY", registry)
     monkeypatch.setattr(admin_snapshots, "REGISTRY", registry)
     monkeypatch.setattr(admin_snapshots, "DEFAULT_BUCKET_PATH", str(bucket_path))
-    from composer_config import settings
 
     monkeypatch.setattr(settings, "admin_api_key", "test-key")
     yield TestClient(admin_app, headers={"X-Admin-Key": "test-key"})
@@ -273,7 +273,7 @@ def test_unknown_run_404(client: TestClient) -> None:
 def test_gold_status_before_any_promote(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
+    monkeypatch.setattr(settings, "gold_database_url", f"sqlite:///{tmp_path / 'gold.db'}")
     data = client.get("/admin/v1/gold").json()
     assert data["exists"] is False
     assert data["status"] is None
@@ -283,7 +283,7 @@ def test_promote_builds_gold_and_reports_stats(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     gold_path = tmp_path / "gold.db"
-    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
+    monkeypatch.setattr(settings, "gold_database_url", f"sqlite:///{gold_path}")
     # seed silver through the API: fetch + process the fake source
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
     client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/process")
@@ -305,7 +305,7 @@ def test_promote_conflicts_while_running(
     from composer_warehouse.build import BuildManifest, write_build_manifest
 
     gold_path = tmp_path / "gold.db"
-    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
+    monkeypatch.setattr(settings, "gold_database_url", f"sqlite:///{gold_path}")
     write_build_manifest(gold_path, BuildManifest.start())
     assert client.post("/admin/v1/promote").status_code == 409
 
@@ -314,7 +314,7 @@ def test_promote_body_toggles_rules(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     gold_path = tmp_path / "gold.db"
-    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(gold_path))
+    monkeypatch.setattr(settings, "gold_database_url", f"sqlite:///{gold_path}")
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
     client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/process")
 
@@ -327,30 +327,30 @@ def test_promote_body_toggles_rules(
     assert data["stats"]["persons_dropped"] == 0
 
 
-def test_promote_body_resolves_path(
+def test_promote_body_resolves_url(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     from composer_gold import PromoteConfig, PromoteStats
 
     calls: list[tuple[str, PromoteConfig]] = []
 
-    def record_promote(session: object, gold_path: str, config: PromoteConfig) -> PromoteStats:
-        calls.append((str(gold_path), config))
+    def record_promote(session: object, gold_url: str, config: PromoteConfig) -> PromoteStats:
+        calls.append((gold_url, config))
         return PromoteStats()
 
     monkeypatch.setattr(build_routes, "promote", record_promote)
-    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
+    monkeypatch.setattr(settings, "gold_database_url", f"sqlite:///{tmp_path / 'gold.db'}")
 
     # bodiless: configured defaults, all rules on
     assert client.post("/admin/v1/promote").status_code == 202
     # explicit values win over the defaults
-    custom = tmp_path / "elsewhere.db"
-    body = {"gold_path": str(custom), "collapse_duplicates": False}
+    custom = f"sqlite:///{tmp_path / 'elsewhere.db'}"
+    body = {"gold_url": custom, "collapse_duplicates": False}
     assert client.post("/admin/v1/promote", json=body).status_code == 202
 
-    paths = [path for path, _ in calls]
+    urls = [url for url, _ in calls]
     configs = [config for _, config in calls]
-    assert paths == [str(tmp_path / "gold.db"), str(custom)]
+    assert urls == [f"sqlite:///{tmp_path / 'gold.db'}", custom]
     assert [c.collapse_duplicates for c in configs] == [True, False]
     assert all(c.drop_unevidenced_persons and c.prune_unreferenced for c in configs)
 
@@ -364,12 +364,12 @@ def test_promote_body_cannot_override_rule1_thresholds(
 
     configs: list[PromoteConfig] = []
 
-    def record_promote(session: object, gold_path: str, config: PromoteConfig) -> PromoteStats:
+    def record_promote(session: object, gold_url: str, config: PromoteConfig) -> PromoteStats:
         configs.append(config)
         return PromoteStats()
 
     monkeypatch.setattr(build_routes, "promote", record_promote)
-    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
+    monkeypatch.setattr(settings, "gold_database_url", f"sqlite:///{tmp_path / 'gold.db'}")
     custom_rule1 = Rule1Config(persons=PersonRule1Config(min_concert_appearances=7))
     rule1_path = tmp_path / "rule1_config.json"
     custom_rule1.write_json(rule1_path)
@@ -458,12 +458,12 @@ def test_promote_body_resolves_min_referrers(
 
     configs: list[PromoteConfig] = []
 
-    def record_promote(session: object, gold_path: str, config: PromoteConfig) -> PromoteStats:
+    def record_promote(session: object, gold_url: str, config: PromoteConfig) -> PromoteStats:
         configs.append(config)
         return PromoteStats()
 
     monkeypatch.setattr(build_routes, "promote", record_promote)
-    monkeypatch.setattr(build_routes, "DEFAULT_GOLD_DB_PATH", str(tmp_path / "gold.db"))
+    monkeypatch.setattr(settings, "gold_database_url", f"sqlite:///{tmp_path / 'gold.db'}")
     monkeypatch.setattr(build_routes, "DEFAULT_MIN_REFERRERS", 3)
 
     # omitted: the configured server default; explicit value wins over it
@@ -480,8 +480,6 @@ def test_promote_rejects_invalid_body(client: TestClient) -> None:
 def test_silver_status_before_any_rebuild(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from composer_config import settings
-
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path}/silver.db")
     data = client.get("/admin/v1/silver").json()
     assert data["exists"] is False
@@ -491,8 +489,6 @@ def test_silver_status_before_any_rebuild(
 def test_rebuild_silver_replays_bucket_and_reports_stats(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from composer_config import settings
-
     silver_path = tmp_path / "silver.db"
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{silver_path}")
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
@@ -515,7 +511,6 @@ def test_rebuild_silver_replays_bucket_sources_with_no_adapter(
     and have no adapter to look up; they used to be skipped entirely.
     """
     from composer_bronze.scraper import write_documents
-    from composer_config import settings
     from composer_crawler import CrawlConfig
     from composer_models import Source
     from composer_models.db import get_engine
@@ -543,7 +538,6 @@ def test_rebuild_silver_replays_bucket_sources_with_no_adapter(
 def test_rebuild_silver_conflicts_while_running(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    from composer_config import settings
     from composer_warehouse.build import BuildManifest, write_build_manifest
 
     silver_path = tmp_path / "silver.db"
@@ -555,8 +549,6 @@ def test_rebuild_silver_conflicts_while_running(
 def test_rebuild_silver_rejects_a_database_with_nothing_to_swap(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from composer_config import settings
-
     monkeypatch.setattr(settings, "database_url", "mysql://user:pass@host/composers")
     assert client.get("/admin/v1/silver").json()["exists"] is False
     r = client.post("/admin/v1/rebuild-silver")
@@ -567,8 +559,6 @@ def test_rebuild_silver_rejects_a_database_with_nothing_to_swap(
 def test_silver_status_reports_the_backend(
     client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from composer_config import settings
-
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'silver.db'}")
     assert client.get("/admin/v1/silver").json()["backend"] == "sqlite"
 
@@ -578,7 +568,6 @@ def test_silver_status_degrades_when_postgres_is_unreachable(
 ) -> None:
     """A Postgres manifest read can fail — the server is down, the credentials
     are wrong. A file-backed manifest never could, so this path is new."""
-    from composer_config import settings
 
     monkeypatch.setattr(settings, "database_url", "postgresql+psycopg://u:p@127.0.0.1:1/nope")
     body = client.get("/admin/v1/silver").json()
@@ -599,6 +588,26 @@ def test_rebuild_silver_accepts_a_postgres_database(client: TestClient, pg_url: 
     assert client.post("/admin/v1/rebuild-silver").status_code == 409
 
 
+@requires_postgres
+def test_promote_into_a_postgres_gold(client: TestClient, pg_url: str) -> None:
+    # pg_url points GOLD_DATABASE_URL at the test server; silver stays the
+    # client's in-memory SQLite.
+    snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
+    client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/process")
+    assert client.get("/admin/v1/gold").json()["exists"] is False
+
+    assert client.post("/admin/v1/promote").status_code == 202
+    data = client.get("/admin/v1/gold").json()
+    assert (data["backend"], data["exists"], data["status"]) == ("postgres", True, "completed")
+    assert data["stats"]["persons_dropped"] == 2
+
+
+def test_promote_rejects_an_unsupported_gold_url(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "gold_database_url", "mysql://user:pass@host/gold")
+    assert client.get("/admin/v1/gold").json()["backend"] == "unsupported"
+    assert client.post("/admin/v1/promote").status_code == 400
+
+
 def test_admin_key_guard(client: TestClient) -> None:
     # A bare client sends no X-Admin-Key header; the fixture client sends the right one.
     assert TestClient(admin_app).get("/admin/v1/scrapers").status_code == 401
@@ -607,8 +616,6 @@ def test_admin_key_guard(client: TestClient) -> None:
 
 
 def test_admin_key_unset_fails_closed(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
-    from composer_config import settings
-
     monkeypatch.setattr(settings, "admin_api_key", None)
     r = client.get("/admin/v1/scrapers")
     assert r.status_code == 503

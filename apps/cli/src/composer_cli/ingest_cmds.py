@@ -5,7 +5,7 @@ from pathlib import Path
 
 from composer_bronze.bucket import LocalBucket, all_document_run_ids
 from composer_bronze.scraper import Scraper, iter_all_from_bucket, iter_from_bucket
-from composer_gold import PromoteConfig, Rule1Config, promote
+from composer_gold import PromoteConfig, Rule1Config, gold_target, promote
 from composer_models.db import get_engine, init_db
 from composer_scrapers import REGISTRY
 from composer_warehouse.concerts import derive_concerts
@@ -72,11 +72,11 @@ def cmd_promote(args: argparse.Namespace) -> int:
                 collapse_duplicates=args.collapse_duplicates,
                 prune_unreferenced=args.prune_unreferenced,
             )
-            stats = promote(session, args.gold_path, config)
+            stats = promote(session, args.gold_url, config)
         except Exception:
             log.exception("promote failed")
             return 1
-    print(f"gold rebuilt at {args.gold_path}")
+    print(f"gold rebuilt at {gold_target(args.gold_url).describe()}")
     for key, value in asdict(stats).items():
         print(f"  {key.replace('_', ' '):<22} {value}")
     return 0
