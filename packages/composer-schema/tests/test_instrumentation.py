@@ -7,7 +7,7 @@ here is really about whether that question would be answered correctly.
 from __future__ import annotations
 
 import pytest
-from composer_extract.instrumentation import (
+from composer_schema.instrumentation import (
     CATEGORIES,
     CONTAINS,
     MEMBERS,
@@ -94,7 +94,7 @@ def test_an_unnamed_combination_is_read_from_its_conjunction() -> None:
         "2.2.2.2 - 4.2.3.1 - timp - str",
         # Half a conjunction understood is worse than none: this is not a work
         # for piano alone.
-        "piano and continuo",
+        "piano and theremin",
         "Urtext Edition, paperbound",
         "",
         "   ",
@@ -126,3 +126,30 @@ def test_no_spelling_denotes_two_categories() -> None:
     was declared last."""
     spellings = [s for canonical, ss in CATEGORIES.items() for s in (canonical, *ss)]
     assert len(spellings) == len(set(spellings))
+
+
+@pytest.mark.parametrize(
+    ("raw", "category"),
+    [
+        # Table spellings written with punctuation: reachable only because the
+        # table is keyed on the same normalized form a lookup is.
+        ("Tam-Tam", "tam-tam"),
+        ("Children's choir", "children's choir"),
+        ("Children´s choir", "children's choir"),
+        ("E-flat clarinet", "e-flat clarinet"),
+        ("Oboe d´amore", "oboe d'amore"),
+        ("Mezzo-soprano solo", "mezzo-soprano"),
+    ],
+)
+def test_a_spelling_with_punctuation_is_found(raw: str, category: str) -> None:
+    assert category_for(raw) == category
+
+
+def test_no_two_categories_share_a_normalized_spelling() -> None:
+    from composer_schema.instrumentation import CATEGORIES, _normalize
+
+    owners: dict[str, set[str]] = {}
+    for canonical, spellings in CATEGORIES.items():
+        for spelling in (canonical, *spellings):
+            owners.setdefault(_normalize(spelling), set()).add(canonical)
+    assert {key: names for key, names in owners.items() if len(names) > 1} == {}

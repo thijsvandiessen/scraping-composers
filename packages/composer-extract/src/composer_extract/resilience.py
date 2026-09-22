@@ -73,7 +73,7 @@ class ExtractStats:
     ``unknown_predicates`` is the review queue for open claim extraction: the
     predicates the model coined that :mod:`.predicates` did not recognise, and how
     often each came up. ``unrecognised_scoring`` is the same queue for
-    :data:`~.instrumentation.CATEGORIES` — the scoring phrases that stayed literals
+    :data:`~composer_schema.instrumentation.CATEGORIES` — the scoring phrases that stayed literals
     because no category was recognised in them. ``carried_forward`` counts pages
     the extraction ledger (:mod:`.ledger`) served from a prior run instead of
     sending to the model at all — never chunked, so they add nothing to ``chunks``.
@@ -109,7 +109,7 @@ class ExtractStats:
 
     def unrecognised_summary(self) -> str:
         """The scoring phrases no category was recognised in, commonest first —
-        what to fold into :data:`~.instrumentation.CATEGORIES` next. Empty string
+        what to fold into :data:`~composer_schema.instrumentation.CATEGORIES` next. Empty string
         when the run met none."""
         return _counted(self.unrecognised_scoring, limit=_SCORING_REPORTED)
 

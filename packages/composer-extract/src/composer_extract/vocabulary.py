@@ -63,7 +63,7 @@ _WORK_PREDICATES = (
 #: dedup editions.
 #:
 #: ``written_for`` is not something the model is asked for: it is derived from
-#: whatever scoring text lands on ``orchestration`` (see :mod:`.instrumentation`),
+#: whatever scoring text lands on ``orchestration`` (see :mod:`composer_schema.instrumentation`),
 #: because a synonym table gets "Klavier zu vier Händen" right and a local model
 #: does not.
 _SCORE_PREDICATES = (
@@ -71,7 +71,7 @@ _SCORE_PREDICATES = (
     # What is *in* the ensemble, as against what the work is *for*. A symphony is
     # written for orchestra and includes a flute; keeping the two apart is what
     # stops "works for flute" from returning the entire orchestral repertoire.
-    # Derived, like ``written_for``: see :mod:`.shorthand`.
+    # Derived, like ``written_for``: see :mod:`composer_schema.shorthand`.
     "includes_instrument",
     "in_key",
     "catalogue_number",

@@ -9,7 +9,7 @@ dots them and separates with ``-``.
 from __future__ import annotations
 
 import pytest
-from composer_extract.shorthand import parse_shorthand
+from composer_schema.shorthand import parse_shorthand
 
 # --- the catalogue entries, by work and dialect --------------------------------
 
@@ -279,3 +279,25 @@ def test_what_is_not_shorthand_is_refused(raw: str) -> None:
     """A false positive would file a work under an ensemble it was never written
     for, so the gate is strict and the caller falls back to reading prose."""
     assert parse_shorthand(raw) is None
+
+
+def test_an_unreadable_desk_section_does_not_shift_the_next_into_its_family() -> None:
+    # Cor anglais and bass clarinet written as desks of their own make the woodwind
+    # section unreadable; read as the woodwind, "4.3.3.1" would be four flutes.
+    parsed = parse_shorthand("3.2.Eh.2.Bkl.2 - 4.3.3.1 - Pk - Str")
+
+    assert parsed is not None
+    assert "flute" not in parsed.instruments
+    assert "horn" not in parsed.instruments
+    assert parsed.unparsed == ("3.2.Eh.2.Bkl.2", "4.3.3.1")
+    assert parsed.counts == {"timpani": 1}
+
+
+def test_german_abbreviations_are_read() -> None:
+    parsed = parse_shorthand("2(Picc),2(Eh),2(BKlar),2(Kfag) – 4,2,3,1 – Pk,Schlg – Hfe – Str")
+
+    assert parsed is not None
+    assert parsed.unparsed == ()
+    assert parsed.counts["english horn"] == 1
+    assert parsed.counts["contrabassoon"] == 1
+    assert {"timpani", "percussion", "harp"} <= set(parsed.instruments)
