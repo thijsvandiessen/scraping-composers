@@ -45,6 +45,9 @@ def test_a_named_scoring_folds_onto_its_category(raw: str, expected: tuple[str, 
         ("Klavier zu vier Händen", ("piano four hands", "piano")),
         ("Piano 4 hands", ("piano four hands", "piano")),
         ("two pianos", ("two pianos", "piano")),
+        # Henle's category for its two-piano editions.
+        ("2 Pianos, 4-hands", ("two pianos", "piano")),
+        ("Mandolin and Piano", ("mandolin", "piano")),
     ],
 )
 def test_a_combination_also_yields_its_parts(raw: str, expected: tuple[str, ...]) -> None:
@@ -59,6 +62,11 @@ def test_a_combination_also_yields_its_parts(raw: str, expected: tuple[str, ...]
         ("string quartet", ("violin", "viola", "cello")),
         ("Streichquartett", ("violin", "viola", "cello")),
         ("piano trio", ("piano", "violin", "cello")),
+        # A catalogue names its shelves in the plural ("String Quartets"); the
+        # category is the same one.
+        ("String Quartets", ("violin", "viola", "cello")),
+        ("Piano Quintets", ("piano", "violin", "viola", "cello")),
+        ("String Sextets", ("violin", "viola", "cello")),
     ],
 )
 def test_an_ensemble_names_only_itself_and_lists_its_members_apart(
