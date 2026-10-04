@@ -8,11 +8,13 @@ rather than the run.
 
 from __future__ import annotations
 
+import gzip
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from composer_http.pages import PageCache, open_page_cache
+from composer_http.pages import PageCache, open_page_cache, request_fingerprint
 
 URL = "https://example.org/concert/1/"
 
@@ -79,3 +81,82 @@ def test_open_page_cache_honours_the_setting(tmp_path: Path, monkeypatch: pytest
     cache = open_page_cache()
     assert cache is not None
     assert cache.path == tmp_path / "pages.db"
+
+
+# ---- freshness: the cadence and the request ---- #
+
+
+def _age(path: Path, url: str, days: int) -> None:
+    """Backdate *url*'s row by *days*."""
+    stamp = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+    with sqlite3.connect(path) as connection:
+        connection.execute("UPDATE page_cache SET fetched_at = ? WHERE url = ?", (stamp, url))
+
+
+def test_a_page_younger_than_the_max_age_is_served(tmp_path: Path) -> None:
+    cache = PageCache(tmp_path / "pages.db")
+    cache.put(URL, "page")
+    _age(tmp_path / "pages.db", URL, days=300)
+    assert cache.get(URL, max_age=timedelta(days=365)) == "page"
+
+
+def test_a_page_older_than_the_max_age_is_a_miss(tmp_path: Path) -> None:
+    """The run that becomes due by the source's cadence must refetch."""
+    cache = PageCache(tmp_path / "pages.db")
+    cache.put(URL, "page")
+    _age(tmp_path / "pages.db", URL, days=400)
+    assert cache.get(URL, max_age=timedelta(days=365)) is None
+    assert (cache.hits, cache.misses, cache.stale) == (0, 1, 1)
+    assert "1 expired or changed" in cache.summary()
+
+
+def test_without_a_max_age_a_page_never_expires(tmp_path: Path) -> None:
+    """A STATIC source — an archive, scraped once — keeps its mirror forever."""
+    cache = PageCache(tmp_path / "pages.db")
+    cache.put(URL, "page")
+    _age(tmp_path / "pages.db", URL, days=10_000)
+    assert cache.get(URL) == "page"
+
+
+def test_a_page_stored_by_a_different_request_is_a_miss(tmp_path: Path) -> None:
+    """Changing the query in code must not keep serving the old query's answer."""
+    cache = PageCache(tmp_path / "pages.db")
+    old = request_fingerprint("POST", URL, '{"query": "{ a }"}')
+    new = request_fingerprint("POST", URL, '{"query": "{ a b }"}')
+    cache.put(URL, "answer to the old query", fingerprint=old)
+    assert cache.get(URL, fingerprint=old) == "answer to the old query"
+    assert cache.get(URL, fingerprint=new) is None
+    assert cache.stale == 1
+
+
+def test_a_page_stored_without_a_fingerprint_does_not_answer_one(tmp_path: Path) -> None:
+    """A row from before fingerprints cannot say which query produced it."""
+    cache = PageCache(tmp_path / "pages.db")
+    cache.put(URL, "page")
+    assert cache.get(URL, fingerprint=request_fingerprint("POST", URL, "{}")) is None
+
+
+def test_the_fingerprint_follows_every_part_of_the_request() -> None:
+    base = request_fingerprint("POST", URL, "body")
+    assert base == request_fingerprint("post", URL, "body")
+    assert base == request_fingerprint("POST", URL, b"body")
+    assert base != request_fingerprint("GET", URL, "body")
+    assert base != request_fingerprint("POST", URL + "?x", "body")
+    assert base != request_fingerprint("POST", URL, "body ")
+
+
+def test_a_mirror_from_before_fingerprints_is_upgraded_in_place(tmp_path: Path) -> None:
+    """The archive mirrors are hours of fetching; a schema change must keep them."""
+    path = tmp_path / "pages.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE page_cache (url TEXT PRIMARY KEY, body BLOB NOT NULL, fetched_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO page_cache VALUES (?, ?, ?)",
+            (URL, gzip.compress(b"old page"), datetime.now(UTC).isoformat()),
+        )
+    cache = PageCache(path)
+    assert cache.get(URL) == "old page"
+    cache.put("https://example.org/concert/2/", "new", fingerprint="f")
+    assert cache.get("https://example.org/concert/2/", fingerprint="f") == "new"

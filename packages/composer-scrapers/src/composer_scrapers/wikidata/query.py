@@ -18,20 +18,30 @@ Each page is followed by a second, cheap VALUES query for per-item popularity
 metrics (sitelink/statement/identifier counts and the P86 backlink count). All
 queries go via POST (responses bypass the WDQS edge cache, and large VALUES
 blocks would exceed URL length limits as GET parameters).
+
+The id list is the enumerator and always runs live. Each batch's detail,
+multi-valued and metrics answers are mirrored under a digest of the query
+text, so a batch is only re-asked once the cadence has passed — or once the
+query itself is edited, which changes the digest. A detail answer missing any
+bound item is never mirrored (see :func:`_fetch_page`).
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from typing import Any
 
 import httpx
-from composer_http import call_with_retries
+from composer_http import SourceSession, call_with_retries, request_fingerprint
 
 from .parse import METRICS, _literal
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
 PAGE_SIZE = 500
 REQUEST_DELAY_S = 1.0
+#: A 500-item detail query is slow to build server-side.
+TIMEOUT_S = 90.0
 # 5 attempts back off 2+4+8+16s — long enough to ride out a laptop
 # sleep/wake network blip, not just a WDQS hiccup
 RETRIES = 5
@@ -115,22 +125,49 @@ GROUP BY ?item ?sitelinks ?statements ?identifiers
 """
 
 
-def _run_query(client: httpx.Client, query: str, desc: str) -> list[dict[str, Any]]:
+def _bindings(text: str) -> list[dict[str, Any]]:
+    """The result rows of a SPARQL JSON answer; ``ValueError``/``KeyError`` if it is not one."""
+    bindings: list[dict[str, Any]] = json.loads(text)["results"]["bindings"]
+    return bindings
+
+
+def _run_query(
+    session: SourceSession,
+    query: str,
+    desc: str,
+    *,
+    mirror: bool = False,
+    complete: Callable[[list[dict[str, Any]]], bool] | None = None,
+) -> list[dict[str, Any]]:
     """Execute a SPARQL query with retries. Queries go via POST: responses to
     POST bypass the WDQS edge cache (which can serve a body truncated
     mid-stream as a cached 200 for 300s, defeating retries), and large VALUES
-    blocks would exceed URL length limits as GET parameters."""
+    blocks would exceed URL length limits as GET parameters.
 
-    def do() -> list[dict[str, Any]]:
-        resp = client.post(SPARQL_URL, data={"query": query, "format": "json"})
-        resp.raise_for_status()
-        bindings: list[dict[str, Any]] = resp.json()["results"]["bindings"]
-        return bindings
+    With ``mirror``, the answer is stored under a digest of the query, and only
+    when ``complete`` (if given) accepts its rows."""
 
-    # WDQS rate-limits with 429 + Retry-After; the helper honors it
-    return call_with_retries(
-        do, label=desc, retries=RETRIES, retry_on=(httpx.HTTPError, ValueError, KeyError)
-    )
+    def produce() -> str:
+        def do() -> str:
+            text = session.post_text(
+                SPARQL_URL, label=desc, data={"query": query, "format": "json"}, retries=1
+            )
+            _bindings(text)  # a truncated body fails here, inside the retry loop
+            return text
+
+        # WDQS rate-limits with 429 + Retry-After; the helper honors it
+        return call_with_retries(
+            do, label=desc, retries=RETRIES, retry_on=(httpx.HTTPError, ValueError, KeyError)
+        )
+
+    if not mirror:
+        return _bindings(produce())
+
+    def valid(text: str) -> bool:
+        return complete is None or complete(_bindings(text))
+
+    key = "sparql://wikidata/" + request_fingerprint("POST", SPARQL_URL, query)
+    return _bindings(session.mirrored(key, produce, valid=valid))
 
 
 def _qid(row: dict[str, Any]) -> str:
@@ -144,16 +181,16 @@ def _values(qids: list[str]) -> str:
     return " ".join(f"wd:{qid}" for qid in qids)
 
 
-def _fetch_qids(client: httpx.Client) -> list[str]:
+def _fetch_qids(session: SourceSession) -> list[str]:
     """Every composer QID, numerically ordered."""
-    qids = {_qid(row) for row in _run_query(client, ID_QUERY, "composer id list")}
+    qids = {_qid(row) for row in _run_query(session, ID_QUERY, "composer id list")}
     # numeric, not lexicographic: QIDs carry no leading zeros, so (length,
     # string) is numeric order. It keeps the low -- and therefore best known --
     # QIDs in the first batches, which is what a max_pages smoke run sees.
     return sorted(qids, key=lambda qid: (len(qid), qid))
 
 
-def _fetch_page(client: httpx.Client, qids: list[str]) -> list[dict[str, Any]]:
+def _fetch_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
     """Fetch the detail rows for one batch of composers: the single-valued
     fields, then the multi-valued ones (see MULTI_QUERY for why they are a
     separate query). The two row lists concatenate -- ``_fold_rows`` groups by
@@ -165,7 +202,11 @@ def _fetch_page(client: httpx.Client, qids: list[str]) -> list[dict[str, Any]]:
     in transit rather than an item having no properties. Raising here is what
     stops a silent hole from quietly halving the dataset (issue #181)."""
     page = QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
-    rows = _run_query(client, page, f"page of {len(qids)} items")
+
+    def covered(rows: list[dict[str, Any]]) -> bool:
+        return not set(qids) - {_qid(row) for row in rows}
+
+    rows = _run_query(session, page, f"page of {len(qids)} items", mirror=True, complete=covered)
     missing = set(qids) - {_qid(row) for row in rows}
     if missing:
         raise RuntimeError(
@@ -175,13 +216,13 @@ def _fetch_page(client: httpx.Client, qids: list[str]) -> list[dict[str, Any]]:
     # no coverage check here: an item with none of these properties, and so no
     # row at all, is ordinary
     multi = MULTI_QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
-    return rows + _run_query(client, multi, f"multi for {len(qids)} items")
+    return rows + _run_query(session, multi, f"multi for {len(qids)} items", mirror=True)
 
 
-def _fetch_metrics(client: httpx.Client, qids: list[str]) -> dict[str, dict[str, str]]:
+def _fetch_metrics(session: SourceSession, qids: list[str]) -> dict[str, dict[str, str]]:
     """Popularity metrics keyed by QID for the given items."""
     query = METRICS_QUERY.format(values=_values(qids))
     metrics: dict[str, dict[str, str]] = {}
-    for row in _run_query(client, query, f"metrics for {len(qids)} items"):
+    for row in _run_query(session, query, f"metrics for {len(qids)} items", mirror=True):
         metrics[_qid(row)] = {var: value for var, _ in METRICS if (value := _literal(row, var)) is not None}
     return metrics

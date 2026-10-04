@@ -16,8 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
-from composer_http import get_json
+from composer_http import SourceSession
 
 BASE_URL = "https://imslp.org"
 
@@ -37,6 +36,10 @@ def worklist_url(start: int, kind: int) -> str:
     return f"{API_URL}?account=worklist/disclaimer=accepted/sort=id/type={kind}/start={start}/retformat=json"
 
 
-def worklist_page(client: httpx.Client, start: int, kind: int = PEOPLE) -> dict[str, Any]:
-    """One page of rows, still keyed by stringified index, with ``metadata``."""
-    return get_json(client, worklist_url(start, kind), label=f"type={kind} start={start}")
+def worklist_page(session: SourceSession, start: int, kind: int = PEOPLE) -> dict[str, Any]:
+    """One page of rows, still keyed by stringified index, with ``metadata``.
+
+    Not mirrored: the worklist is the enumerator, so a re-run must see it as it
+    is now rather than as it was.
+    """
+    return session.get_json(worklist_url(start, kind), label=f"type={kind} start={start}")

@@ -4,17 +4,17 @@ A two-level crawl: 26 alphabet index pages discover the composers, and each
 composer's own page is fetched for its works. The site serves cp1251 and
 declares it in the ``Content-Type`` header, so httpx decodes ``resp.text``
 correctly — do not decode the bytes by hand.
+
+The index pages are enumerators and stay live; composer pages are mirrored.
 """
 
 from __future__ import annotations
 
 import logging
 import string
-import time
 from collections.abc import Iterator
 
-import httpx
-from composer_http import call_with_retries, user_agent
+from composer_http import SourceSession
 
 from .composers import IndexEntry, iter_index_entries
 
@@ -25,25 +25,12 @@ RETRIES = 3
 log = logging.getLogger(__name__)
 
 
-def _make_client() -> httpx.Client:
-    return httpx.Client(headers={"User-Agent": user_agent()}, timeout=30)
-
-
-def _get_text(client: httpx.Client, url: str, label: str) -> str:
-    def do() -> str:
-        resp = client.get(url)
-        resp.raise_for_status()
-        return resp.text
-
-    return call_with_retries(do, label=label, retries=RETRIES)
-
-
-def fetch_index(client: httpx.Client, letter: str) -> str:
+def fetch_index(session: SourceSession, letter: str) -> str:
     """Fetch one letter of the composer index."""
-    return _get_text(client, f"{BASE_URL}/en/composers/{letter}", f"index {letter}")
+    return session.get_text(f"{BASE_URL}/en/composers/{letter}", label=f"index {letter}", retries=RETRIES)
 
 
-def iter_composers(max_pages: int | None = None) -> Iterator[tuple[IndexEntry, str]]:
+def iter_composers(session: SourceSession, max_pages: int | None = None) -> Iterator[tuple[IndexEntry, str]]:
     """Yield (index entry, composer page HTML) for every listed composer.
 
     Walks the index A-Z, fetching each letter only when it is reached, and
@@ -56,23 +43,20 @@ def iter_composers(max_pages: int | None = None) -> Iterator[tuple[IndexEntry, s
     """
     seen: set[str] = set()
     count = 0
-    with _make_client() as client:
-        for letter in string.ascii_uppercase:
-            page = fetch_index(client, letter)
-            entries = iter_index_entries(page, BASE_URL, letter)
-            log.info("classicalmusiconline index %s: %d composers", letter, len(entries))
-            time.sleep(REQUEST_DELAY_S)
-            for entry in entries:
-                if entry.external_id in seen:
-                    continue
-                seen.add(entry.external_id)
-                try:
-                    detail = _get_text(client, entry.url, f"composer {entry.external_id}")
-                except httpx.HTTPError as exc:
-                    log.warning("skipping composer %s: %s", entry.url, exc)
-                    continue
-                yield entry, detail
-                count += 1
-                if max_pages is not None and count >= max_pages:
-                    return
-                time.sleep(REQUEST_DELAY_S)
+    for letter in string.ascii_uppercase:
+        page = fetch_index(session, letter)
+        entries = iter_index_entries(page, BASE_URL, letter)
+        log.info("classicalmusiconline index %s: %d composers", letter, len(entries))
+        for entry in entries:
+            if entry.external_id in seen:
+                continue
+            seen.add(entry.external_id)
+            detail = session.try_get_text(
+                entry.url, label=f"composer {entry.external_id}", mirror=True, retries=RETRIES
+            )
+            if detail is None:
+                continue
+            yield entry, detail
+            count += 1
+            if max_pages is not None and count >= max_pages:
+                return

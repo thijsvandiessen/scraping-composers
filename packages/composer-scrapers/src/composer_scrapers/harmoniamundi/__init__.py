@@ -37,13 +37,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from urllib.parse import quote
 
-import httpx
-from composer_http import PageCache, open_page_cache
+from composer_http import SourceSession
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceClaim, WorkMentionDocument
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
 from .albums import Album, Credit, parse_album
 from .contents import ComposerBlock, WorkEntry, fold
-from .fetch import fetch_page, fetch_sitemap_index, fetch_urlset, make_client
+from .fetch import FOLLOW_REDIRECTS, REQUEST_DELAY_S, fetch_page, fetch_sitemap_index, fetch_urlset
 from .people import Person, Roster, parse_profile
 from .urls import SITE_URL, album_urls, child_sitemaps, page_ref, profile_urls, slug
 
@@ -71,24 +70,23 @@ class _Sweep:
 
 @dataclass
 class _Reader:
-    """The client, mirror and accumulators one sweep threads through its pages."""
+    """The session and accumulators one sweep threads through its pages."""
 
-    client: httpx.Client
-    cache: PageCache | None
+    session: SourceSession
     roster: Roster
     sweep: _Sweep
 
     def page_lists(self) -> tuple[list[str], list[str]]:
         """The album URLs and profile URLs the sitemaps list, in file order."""
-        index = fetch_sitemap_index(self.client)
+        index = fetch_sitemap_index(self.session)
         album_maps, people_maps = child_sitemaps(index)
-        albums = [url for m in album_maps for url in album_urls(fetch_urlset(self.client, m))]
-        profiles = [url for m in people_maps for url in profile_urls(fetch_urlset(self.client, m))]
+        albums = [url for m in album_maps for url in album_urls(fetch_urlset(self.session, m))]
+        profiles = [url for m in people_maps for url in profile_urls(fetch_urlset(self.session, m))]
         return albums, profiles
 
     def album(self, url: str, ingested_at: datetime) -> Iterator[WorkMentionDocument]:
         """One album page, as the works on it."""
-        page = fetch_page(self.client, url, self.cache)
+        page = fetch_page(self.session, url)
         album = parse_album(page, url) if page else None
         if album is None:
             self.sweep.unreadable += 1
@@ -110,7 +108,7 @@ class _Reader:
         ref = page_ref(url)
         if ref is None:
             return
-        page = fetch_page(self.client, url, self.cache)
+        page = fetch_page(self.session, url)
         profile = parse_profile(page, ref[0], slug(url)) if page else None
         if profile is None:
             return
@@ -118,14 +116,18 @@ class _Reader:
         self.roster.enrich(profile)
 
 
-class HarmoniaMundiAdapter(SourceAdapter):
+class HarmoniaMundiAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     """Every release harmonia mundi lists, and everyone credited on one."""
 
     name = "harmoniamundi"
     base_url = SITE_URL
-    cadence = RefreshCadence.MONTHLY
+    cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
+    follow_redirects = FOLLOW_REDIRECTS
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """The catalogue, as work mentions first and the people on them after.
 
         ``max_pages`` caps the number of *album* pages read, for smoke runs. The
@@ -138,26 +140,24 @@ class HarmoniaMundiAdapter(SourceAdapter):
         appear under, which is not known until the albums have been read.
         """
         ingested_at = datetime.now(UTC)
-        cache = open_page_cache()
         sweep = _Sweep()
         roster = Roster()
-        with make_client() as client:
-            reader = _Reader(client, cache, roster, sweep)
-            albums, profiles = reader.page_lists()
-            if max_pages is not None:
-                albums = albums[:max_pages]
-            log.info("harmoniamundi: %d album pages, %d profile pages", len(albums), len(profiles))
-            for url in albums:
-                yield from reader.album(url, ingested_at)
-            for url in profiles:
-                reader.profile(url)
+        reader = _Reader(session, roster, sweep)
+        albums, profiles = reader.page_lists()
+        if max_pages is not None:
+            albums = albums[:max_pages]
+        log.info("harmoniamundi: %d album pages, %d profile pages", len(albums), len(profiles))
+        for url in albums:
+            yield from reader.album(url, ingested_at)
+        for url in profiles:
+            reader.profile(url)
         roster.life_dates(sweep.life_dates)
         folded = roster.reconcile()
         for person in roster:
             yield _person_document(person, ingested_at)
         log.info(
             "harmoniamundi: %d albums (%d unreadable), %d work mentions (%d albums with no tracklist), "
-            "%d profiles, %d people (%d bare names folded in); page mirror: %s",
+            "%d profiles, %d people (%d bare names folded in)",
             sweep.albums,
             sweep.unreadable,
             sweep.mentions,
@@ -165,7 +165,6 @@ class HarmoniaMundiAdapter(SourceAdapter):
             sweep.profiles,
             len(roster),
             folded,
-            cache.summary() if cache is not None else "off",
         )
 
 

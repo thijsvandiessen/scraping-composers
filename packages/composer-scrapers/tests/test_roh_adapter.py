@@ -114,24 +114,14 @@ def stub_http(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     def index(_client: object, letter: str) -> str:
         return INDEX_A if letter == "A" else "<table class='results'></table>"
 
-    def page(_client: object, url: str, _cache: object = None) -> str | None:
+    def page(_session: object, url: str) -> str | None:
         asked.append(url)
         ref = page_ref(url)
         return PAGES.get(ref) if ref else None
 
     monkeypatch.setattr("composer_scrapers.roh.fetch_index", index)
     monkeypatch.setattr("composer_scrapers.roh.fetch_page", page)
-    monkeypatch.setattr("composer_scrapers.roh.make_client", lambda: _NullClient())
-    monkeypatch.setattr("composer_scrapers.roh.open_page_cache", lambda: None)
     return asked
-
-
-class _NullClient:
-    def __enter__(self) -> _NullClient:
-        return self
-
-    def __exit__(self, *_: Any) -> None:
-        return None
 
 
 def _run(max_pages: int | None = None) -> list[Any]:

@@ -30,7 +30,7 @@ class SnapshotOut(BaseModel):
 class ScraperOut(BaseModel):
     name: str
     base_url: str | None
-    cadence: str  # monthly | yearly | static
+    cadence: str  # yearly | static (weekly | monthly unused by the adapters)
     due: bool  # raw data stale enough to be worth re-fetching now
     last_snapshot: SnapshotOut | None
 

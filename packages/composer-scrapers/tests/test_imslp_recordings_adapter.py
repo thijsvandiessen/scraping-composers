@@ -43,7 +43,7 @@ PAGES: dict[int, tuple[str, str]] = {
 def _walk(pages: dict[int, tuple[str, str]] | None = None) -> Any:
     chosen = PAGES if pages is None else pages
 
-    def fake(max_pages: int | None = None) -> Iterator[tuple[int, str, str, str]]:
+    def fake(_session: object, max_pages: int | None = None) -> Iterator[tuple[int, str, str, str]]:
         for index, (pageid, (title, document)) in enumerate(chosen.items()):
             if max_pages is not None and index >= max_pages:
                 return
@@ -183,7 +183,7 @@ def test_an_artist_loads_under_a_stable_id(documents: list[Any]) -> None:
 def test_max_pages_reaches_the_walk(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[int | None] = []
 
-    def fake(max_pages: int | None = None) -> Iterator[tuple[int, str, str, str]]:
+    def fake(_session: object, max_pages: int | None = None) -> Iterator[tuple[int, str, str, str]]:
         seen.append(max_pages)
         return iter(())
 

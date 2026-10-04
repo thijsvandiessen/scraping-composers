@@ -22,8 +22,9 @@ in favour of the API over ``GET /wiki/<Title>``:
 What the API cannot do is batch. This is MediaWiki 1.18 — ``action=parse`` takes
 one page per call, and the IMSLP extensions register no API action of their own
 — so the sweep is 26,933 calls however it is written, and the way to pay for it
-once is :class:`~composer_http.PageCache`. A run interrupted after two hours
-resumes where it stopped rather than starting over.
+once per cadence is the session's page mirror. A run interrupted after two hours
+resumes where it stopped rather than starting over. The category listing is the
+enumerator and always runs live.
 
 One more 1.18-ism: continuation comes back under ``query-continue``, not the
 ``continue`` of every modern MediaWiki.
@@ -33,13 +34,11 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from collections.abc import Iterator
 from typing import Any
 from urllib.parse import quote
 
-import httpx
-from composer_http import PageCache, get_json, get_text, new_client, open_page_cache
+from composer_http import SourceSession
 
 log = logging.getLogger(__name__)
 
@@ -92,13 +91,13 @@ def page_url(title: str) -> str:
     return f"{BASE_URL}/wiki/{path}"
 
 
-def iter_category_members(client: httpx.Client) -> Iterator[tuple[int, str]]:
+def iter_category_members(session: SourceSession) -> Iterator[tuple[int, str]]:
     """Every ``(pageid, title)`` in the category, following its continuation."""
     cmcontinue: str | None = None
     seen = 0
     while True:
-        body = get_json(
-            client, members_url(cmcontinue), label=f"category members from {seen}", retries=RETRIES
+        body = session.get_json(
+            members_url(cmcontinue), label=f"category members from {seen}", retries=RETRIES
         )
         members = _members(body)
         for member in members:
@@ -113,7 +112,9 @@ def iter_category_members(client: httpx.Client) -> Iterator[tuple[int, str]]:
             return
 
 
-def iter_recording_pages(max_pages: int | None = None) -> Iterator[tuple[int, str, str, str]]:
+def iter_recording_pages(
+    session: SourceSession, max_pages: int | None = None
+) -> Iterator[tuple[int, str, str, str]]:
     """Walk the category, yielding ``(pageid, title, url, parser html)`` per page.
 
     ``max_pages`` caps the number of ``parse`` calls, which is what a smoke run
@@ -124,72 +125,61 @@ def iter_recording_pages(max_pages: int | None = None) -> Iterator[tuple[int, st
     must not die on one bad page, and IMSLP has been seen to answer a detail
     request with a bot-check interstitial (see :mod:`..imslp_works.fetch`).
     """
-    cache = open_page_cache()
-    with new_client() as client:
-        fetched = 0
-        skipped = 0
-        for pageid, listed_title in iter_category_members(client):
-            if max_pages is not None and fetched >= max_pages:
-                log.info("imslp_recordings: stopping after max_pages=%d parsed pages", max_pages)
-                break
-            parsed = _parse_page(client, cache, pageid, listed_title)
-            if parsed is None:
-                skipped += 1
-                continue
-            title, document = parsed
-            fetched += 1
-            yield pageid, title, page_url(title), document
-    log.info(
-        "imslp_recordings: %d pages parsed, %d skipped; page mirror: %s",
-        fetched,
-        skipped,
-        cache.summary() if cache is not None else "off",
+    fetched = 0
+    skipped = 0
+    for pageid, listed_title in iter_category_members(session):
+        if max_pages is not None and fetched >= max_pages:
+            log.info("imslp_recordings: stopping after max_pages=%d parsed pages", max_pages)
+            break
+        parsed = _parse_page(session, pageid, listed_title)
+        if parsed is None:
+            skipped += 1
+            continue
+        title, document = parsed
+        fetched += 1
+        yield pageid, title, page_url(title), document
+    log.info("imslp_recordings: %d pages parsed, %d skipped", fetched, skipped)
+
+
+def _parse_page(session: SourceSession, pageid: int, listed_title: str) -> tuple[str, str] | None:
+    """``(title, parser html)`` for one page, from the mirror or the API.
+
+    Only a usable answer is mirrored. MediaWiki 1.18 answers an unknown page
+    with a 200 and an error object, so caching whatever decoded as JSON would
+    mean never retrying a page that failed once.
+    """
+    raw = session.try_get_text(
+        parse_url(pageid),
+        label=f"page {pageid} ({listed_title})",
+        retries=RETRIES,
+        mirror=True,
+        valid=lambda body: _read(body, listed_title, quiet=True) is not None,
     )
+    return _read(raw, listed_title) if raw is not None else None
 
 
-def _parse_page(
-    client: httpx.Client, cache: PageCache | None, pageid: int, listed_title: str
-) -> tuple[str, str] | None:
-    """``(title, parser html)`` for one page, from the mirror or the API."""
-    url = parse_url(pageid)
-    mirrored = cache.get(url) if cache is not None else None
-    if mirrored is not None:
-        return _read(mirrored, listed_title)
-    time.sleep(REQUEST_DELAY_S)
-    try:
-        raw = get_text(client, url, label=f"page {pageid} ({listed_title})", retries=RETRIES)
-    except httpx.HTTPError as exc:
-        log.warning("imslp_recordings: skipping %r after error (%s)", listed_title, exc)
-        return None
-    parsed = _read(raw, listed_title)
-    # Only a usable answer is mirrored. MediaWiki 1.18 answers an unknown page
-    # with a 200 and an error object, so caching whatever decoded as JSON would
-    # mean never retrying a page that failed once.
-    if parsed is not None and cache is not None:
-        cache.put(url, raw)
-    return parsed
-
-
-def _read(raw: str, listed_title: str) -> tuple[str, str] | None:
+def _read(raw: str, listed_title: str, *, quiet: bool = False) -> tuple[str, str] | None:
     """``(title, parser html)`` out of one API response body, or None.
 
     The title is the API's own, which is what the page is *now* — a listing
-    entry can name a page that has since been renamed.
+    entry can name a page that has since been renamed. ``quiet`` skips the
+    warnings, for the check deciding whether a body is worth mirroring.
     """
+    warn = log.debug if quiet else log.warning
     try:
         body = json.loads(raw)
     except ValueError as exc:
-        log.warning("imslp_recordings: unreadable API response for %r (%s)", listed_title, exc)
+        warn("imslp_recordings: unreadable API response for %r (%s)", listed_title, exc)
         return None
     parse = body.get("parse") if isinstance(body, dict) else None
     if not isinstance(parse, dict):
         error = body.get("error") if isinstance(body, dict) else None
-        log.warning("imslp_recordings: no parse output for %r (%s)", listed_title, error)
+        warn("imslp_recordings: no parse output for %r (%s)", listed_title, error)
         return None
     text = parse.get("text")
     document = text.get("*") if isinstance(text, dict) else None
     if not isinstance(document, str):
-        log.warning("imslp_recordings: empty parser output for %r", listed_title)
+        warn("imslp_recordings: empty parser output for %r", listed_title)
         return None
     title = parse.get("title")
     return (title if isinstance(title, str) else listed_title), document

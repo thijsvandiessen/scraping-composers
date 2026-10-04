@@ -10,10 +10,13 @@ a 200 carrying ``{"error": ...}`` rather than a 404.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
+from composer_http import PageCache, SourceSession
+from composer_http.testing import mock_session
 from composer_scrapers.imslp_recordings.fetch import (
     BASE_URL,
     iter_category_members,
@@ -26,12 +29,11 @@ from composer_scrapers.imslp_recordings.fetch import (
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Politeness delays are real seconds; drop them for the suite."""
-    monkeypatch.setattr("composer_scrapers.imslp_recordings.fetch.time.sleep", lambda _: None)
     monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
 
-def _client(handler: Any) -> httpx.Client:
-    return httpx.Client(transport=httpx.MockTransport(handler))
+def _client(handler: Any) -> SourceSession:
+    return mock_session(handler)
 
 
 def _members(members: list[tuple[int, str]], cmcontinue: str | None = None) -> dict[str, Any]:
@@ -118,45 +120,43 @@ class TestCategoryMembers:
 
 
 class TestRecordingPages:
-    def test_yields_the_parser_output_and_the_title_the_api_reports(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_yields_the_parser_output_and_the_title_the_api_reports(self) -> None:
         """The API names the page back, so the listing's title is not trusted."""
         pages = {1: _parsed("First, Renamed (A, B)", _page(11))}
-        _use(monkeypatch, _handler(pages))
-        (page,) = list(iter_recording_pages(max_pages=1))
+        session = mock_session(_handler(pages))
+        (page,) = list(iter_recording_pages(session, max_pages=1))
         assert page[0] == 1
         assert page[1] == "First, Renamed (A, B)"
         assert page[2] == f"{BASE_URL}/wiki/First,_Renamed_(A,_B)"
         assert "JGCommRec" in page[3]
 
-    def test_max_pages_caps_the_parse_calls(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_max_pages_caps_the_parse_calls(self) -> None:
         pages = {n: _parsed(f"Page {n}", _page(n)) for n in (1, 2, 3)}
-        _use(monkeypatch, _handler(pages))
-        assert len(list(iter_recording_pages(max_pages=2))) == 2
+        session = mock_session(_handler(pages))
+        assert len(list(iter_recording_pages(session, max_pages=2))) == 2
 
-    def test_reads_every_page_when_uncapped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_reads_every_page_when_uncapped(self) -> None:
         pages = {n: _parsed(f"Page {n}", _page(n)) for n in (1, 2, 3)}
-        _use(monkeypatch, _handler(pages))
-        assert [page[0] for page in iter_recording_pages()] == [1, 2, 3]
+        session = mock_session(_handler(pages))
+        assert [page[0] for page in iter_recording_pages(session)] == [1, 2, 3]
 
-    def test_a_page_that_fails_does_not_end_the_sweep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_page_that_fails_does_not_end_the_sweep(self) -> None:
         """26,933 pages is hours of fetching; one bad page must not cost it."""
         pages = {1: _parsed("Page 1", _page(11)), 3: _parsed("Page 3", _page(33))}
-        _use(monkeypatch, _handler(pages))
-        assert [page[0] for page in iter_recording_pages()] == [1, 3]
+        session = mock_session(_handler(pages))
+        assert [page[0] for page in iter_recording_pages(session)] == [1, 3]
 
-    def test_an_api_error_body_is_skipped_like_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_an_api_error_body_is_skipped_like_a_failure(self) -> None:
         """1.18 answers an unknown page id with a 200 and an error object."""
         pages: dict[int, dict[str, Any]] = {
             1: {"error": {"code": "nosuchpageid", "info": "There is no page with ID 1"}},
             2: _parsed("Page 2", _page(22)),
             3: _parsed("Page 3", _page(33)),
         }
-        _use(monkeypatch, _handler(pages))
-        assert [page[0] for page in iter_recording_pages()] == [2, 3]
+        session = mock_session(_handler(pages))
+        assert [page[0] for page in iter_recording_pages(session)] == [2, 3]
 
-    def test_an_unreadable_body_is_skipped_like_a_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_an_unreadable_body_is_skipped_like_a_failure(self) -> None:
         def handle(request: httpx.Request) -> httpx.Response:
             params = request.url.params
             if params.get("action") == "query":
@@ -165,12 +165,12 @@ class TestRecordingPages:
                 return httpx.Response(200, text="<html>not json at all</html>")
             return httpx.Response(200, json=_parsed("A page", _page(1)))
 
-        _use(monkeypatch, handle)
-        assert [page[0] for page in iter_recording_pages()] == [1, 3]
+        session = mock_session(handle)
+        assert [page[0] for page in iter_recording_pages(session)] == [1, 3]
 
 
 class TestPageMirror:
-    def test_a_mirrored_page_is_not_fetched_twice(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_mirrored_page_is_not_fetched_twice(self, tmp_path: Path) -> None:
         calls: list[int] = []
 
         def handle(request: httpx.Request) -> httpx.Response:
@@ -180,14 +180,12 @@ class TestPageMirror:
             calls.append(int(params["pageid"]))
             return httpx.Response(200, json=_parsed("Only (A, B)", _page(11)))
 
-        _use(monkeypatch, handle)
-        cache = _FakeCache()
-        monkeypatch.setattr("composer_scrapers.imslp_recordings.fetch.open_page_cache", lambda: cache)
-        assert len(list(iter_recording_pages())) == 1
-        assert len(list(iter_recording_pages())) == 1
+        session = mock_session(handle, cache=PageCache(tmp_path / "pages.db"))
+        assert len(list(iter_recording_pages(session))) == 1
+        assert len(list(iter_recording_pages(session))) == 1
         assert calls == [1]
 
-    def test_a_page_that_failed_is_not_mirrored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_a_page_that_failed_is_not_mirrored(self, tmp_path: Path) -> None:
         """Storing an error would mean never retrying the page that produced it."""
 
         def handle(request: httpx.Request) -> httpx.Response:
@@ -196,33 +194,7 @@ class TestPageMirror:
                 return httpx.Response(200, json=_members([(1, "Only (A, B)")]))
             return httpx.Response(200, json={"error": {"code": "nosuchpageid"}})
 
-        _use(monkeypatch, handle)
-        cache = _FakeCache()
-        monkeypatch.setattr("composer_scrapers.imslp_recordings.fetch.open_page_cache", lambda: cache)
-        assert list(iter_recording_pages()) == []
-        assert cache.stored == {}
-
-
-class _FakeCache:
-    """Enough of PageCache to see what a sweep would have mirrored."""
-
-    def __init__(self) -> None:
-        self.stored: dict[str, str] = {}
-
-    def get(self, url: str) -> str | None:
-        return self.stored.get(url)
-
-    def put(self, url: str, body: str) -> None:
-        self.stored[url] = body
-
-    def summary(self) -> str:
-        return f"{len(self.stored)} stored"
-
-
-def _use(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
-    """Point the source's client at *handler*, and its mirror at nothing."""
-    monkeypatch.setattr(
-        "composer_scrapers.imslp_recordings.fetch.new_client",
-        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
-    )
-    monkeypatch.setattr("composer_scrapers.imslp_recordings.fetch.open_page_cache", lambda: None)
+        cache = PageCache(tmp_path / "pages.db")
+        assert list(iter_recording_pages(mock_session(handle, cache=cache))) == []
+        assert cache.get(parse_url(1)) is None
+        assert (cache.hits, cache.misses) == (0, 2)  # the sweep's lookup, and this one
