@@ -30,11 +30,11 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from composer_http import open_page_cache
+from composer_http import SourceSession
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceClaim, WorkMentionDocument
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
 from .artists import Person, Roster
-from .fetch import fetch_artists, fetch_families, fetch_sitemap, make_client
+from .fetch import REQUEST_DELAY_S, TIMEOUT_S, fetch_artists, fetch_families, fetch_sitemap
 from .products import Recording, WorkMention, recordings
 from .urls import SITE_URL, artist_slugs, families
 
@@ -43,14 +43,18 @@ log = logging.getLogger(__name__)
 __all__ = ["SITE_URL", "DeccaAdapter"]
 
 
-class DeccaAdapter(SourceAdapter):
+class DeccaAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     """Every recording Decca Classics lists, and everyone credited on one."""
 
     name = "decca"
     base_url = SITE_URL
-    cadence = RefreshCadence.MONTHLY
+    cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
+    timeout_s = TIMEOUT_S
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """The catalogue, as work mentions first and the people on them after.
 
         ``max_pages`` caps the number of *product families* read, for smoke
@@ -63,35 +67,32 @@ class DeccaAdapter(SourceAdapter):
         appear under, which is not known until the recordings have been read.
         """
         ingested_at = datetime.now(UTC)
-        cache = open_page_cache()
         roster = Roster()
-        with make_client() as client:
-            sitemap = fetch_sitemap(client)
-            catalogue = families(sitemap)
-            slugs = artist_slugs(sitemap)
-            ids = list(catalogue)[:max_pages] if max_pages is not None else list(catalogue)
-            log.info("decca: %d product families, %d roster pages", len(ids), len(slugs))
-            mentions = 0
-            for family in fetch_families(client, ids, cache):
-                family_id = family.get("idRaw")
-                if not isinstance(family_id, int):
-                    continue
-                for recording in recordings(family, catalogue.get(family_id, str(family_id))):
-                    _collect(roster, recording)
-                    for mention in recording.mentions:
-                        mentions += 1
-                        yield _mention_document(recording, mention, ingested_at)
-            for node in fetch_artists(client, slugs, cache):
-                roster.enrich(node)
+        sitemap = fetch_sitemap(session)
+        catalogue = families(sitemap)
+        slugs = artist_slugs(sitemap)
+        ids = list(catalogue)[:max_pages] if max_pages is not None else list(catalogue)
+        log.info("decca: %d product families, %d roster pages", len(ids), len(slugs))
+        mentions = 0
+        for family in fetch_families(session, ids):
+            family_id = family.get("idRaw")
+            if not isinstance(family_id, int):
+                continue
+            for recording in recordings(family, catalogue.get(family_id, str(family_id))):
+                _collect(roster, recording)
+                for mention in recording.mentions:
+                    mentions += 1
+                    yield _mention_document(recording, mention, ingested_at)
+        for node in fetch_artists(session, slugs):
+            roster.enrich(node)
         folded = roster.reconcile()
         for person in roster:
             yield _person_document(person, ingested_at)
         log.info(
-            "decca: %d work mentions, %d artists (%d heading-only names folded in); page mirror: %s",
+            "decca: %d work mentions, %d artists (%d heading-only names folded in)",
             mentions,
             len(roster),
             folded,
-            cache.summary() if cache is not None else "off",
         )
 
 

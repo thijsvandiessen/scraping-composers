@@ -20,7 +20,7 @@ PageTuple = tuple[WorkLink, str, str]
 
 
 def _stub_pages(monkeypatch: pytest.MonkeyPatch, pages: list[PageTuple]) -> None:
-    def fake(max_pages: int | None = None) -> Iterator[PageTuple]:
+    def fake(session: object, max_pages: int | None = None) -> Iterator[PageTuple]:
         yield from pages if max_pages is None else pages[:max_pages]
 
     monkeypatch.setattr("composer_scrapers.boosey.iter_work_pages", fake)

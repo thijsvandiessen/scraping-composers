@@ -20,9 +20,11 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
+from composer_http import SourceSession
+
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, WorkMentionDocument
 from .artists import _Artist, _artist_record, _collect
-from .fetch import BASE_URL, iter_concerts
+from .fetch import BASE_URL, REQUEST_DELAY_S, iter_concerts
 from .performances import _performances
 
 log = logging.getLogger(__name__)
@@ -30,19 +32,24 @@ log = logging.getLogger(__name__)
 __all__ = ["BASE_URL", "BerlinPhilAdapter"]
 
 
-class BerlinPhilAdapter(SourceAdapter):
+class BerlinPhilAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "berlinphil"
     base_url = BASE_URL
-    cadence = RefreshCadence.MONTHLY
+    # an archive of concerts already given: scraped once
+    cadence = RefreshCadence.STATIC
+    request_delay_s = REQUEST_DELAY_S
+    headers = {"Accept-Language": "en"}
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield every work-performance in the archive (one work mention each),
         then one ``person``/``ensemble`` record per distinct artist seen along the
         way. ``max_pages`` caps the number of concerts fetched, for test runs."""
         ingested_at = datetime.now(UTC)
         registry: dict[str, _Artist] = {}
         works = 0
-        for concert in iter_concerts(max_pages=max_pages):
+        for concert in iter_concerts(session, max_pages=max_pages):
             _collect(concert, registry)
             for mention in _performances(concert):
                 works += 1

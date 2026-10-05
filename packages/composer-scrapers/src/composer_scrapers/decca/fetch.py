@@ -19,23 +19,25 @@ Two details of the query are load-bearing:
     The catalogue is indexed in German (see :mod:`.urls`) but titles are
     localised, and the rest of this project reads English.
 
-Requests are batched with GraphQL aliases, mirrored per family through
-:class:`~composer_http.PageCache`, and rate-limited between uncached calls. A
-full sweep is ~715 requests over roughly an hour, so a run that dies partway
-must not have to start over: the mirror is keyed per family, not per batch, so
-a resumed run only asks for what it is missing.
+Requests are batched with GraphQL aliases, mirrored per family through the
+session's page mirror, and rate-limited between uncached calls. A full sweep is
+~715 requests over roughly an hour, so a run that dies partway must not have to
+start over: the mirror is keyed per family, not per batch, so a resumed run only
+asks for what it is missing. Each entry is fingerprinted with the query that
+produced it — the selection and its field set — so editing
+:data:`_FAMILY_FIELDS` or :data:`_ARTIST_FIELDS` refetches everything rather
+than serving answers that lack the new fields.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import time
 from collections.abc import Iterator, Sequence
 from typing import Any
 
 import httpx
-from composer_http import PageCache, call_with_retries, get_text, new_client
+from composer_http import SourceSession, call_with_retries, request_fingerprint
 
 from .urls import SITEMAP_URL, locations
 
@@ -87,39 +89,31 @@ _ARTIST_FIELDS = """
 TIMEOUT_S = 120.0
 
 
-def make_client() -> httpx.Client:
-    """A client for both hosts: the sitemap on the site, everything else on the API."""
-    return new_client(timeout=TIMEOUT_S)
-
-
-def fetch_sitemap(client: httpx.Client) -> str:
+def fetch_sitemap(session: SourceSession) -> str:
     """The sitemap urlset listing the catalogue.
 
     ``/robots.txt`` points at a sitemap *index* holding exactly one child, so
     this follows the indirection. An index that grows a second child is
     concatenated rather than silently truncated to the first.
     """
-    index = get_text(client, SITEMAP_URL, label="sitemap index")
+    index = session.get_text(SITEMAP_URL, label="sitemap index")
     children = [url for url in locations(index) if url != SITEMAP_URL]
     if not children:
         return index
     log.info("decca: sitemap index lists %d urlset(s)", len(children))
-    return "".join(get_text(client, url, label=f"sitemap {n}") for n, url in enumerate(children))
+    return "".join(session.get_text(url, label=f"sitemap {n}") for n, url in enumerate(children))
 
 
-def _post(client: httpx.Client, query: str, *, label: str) -> dict[str, Any]:
+def _post(session: SourceSession, query: str, *, label: str) -> dict[str, Any]:
     """One GraphQL POST, retried, with the API's errors surfaced as failures.
 
-    ``composer_http`` only wraps GET, but ``call_with_retries`` is generic over
-    the callable, so the backoff and Retry-After handling come for free. A
-    GraphQL error arrives as HTTP 200 with an ``errors`` key; raising on it is
-    what lets the caller's batch-halving see it.
+    A GraphQL error arrives as HTTP 200 with an ``errors`` key; raising on it
+    inside the retry loop is what lets the caller's batch-halving see it.
     """
 
     def do_request() -> dict[str, Any]:
-        response = client.post(GRAPHQL_URL, json={"query": query})
-        response.raise_for_status()
-        payload: dict[str, Any] = response.json()
+        text = session.post_text(GRAPHQL_URL, label=label, json={"query": query}, retries=1)
+        payload: dict[str, Any] = json.loads(text)
         errors = payload.get("errors")
         if errors:
             raise httpx.HTTPError(f"{label}: {json.dumps(errors)[:300]}")
@@ -143,7 +137,7 @@ def _nodes(payload: dict[str, Any]) -> dict[str, Any]:
     return {alias: node for alias, node in root.items() if node}
 
 
-def _fetch_batch(client: httpx.Client, selections: dict[str, str], *, label: str) -> dict[str, Any]:
+def _fetch_batch(session: SourceSession, selections: dict[str, str], *, label: str) -> dict[str, Any]:
     """One aliased batch, as ``{alias: node}``.
 
     Failure halves the batch and retries each half, so one unservable family
@@ -153,7 +147,7 @@ def _fetch_batch(client: httpx.Client, selections: dict[str, str], *, label: str
     if not selections:
         return {}
     try:
-        return _nodes(_post(client, _query(list(selections.values())), label=label))
+        return _nodes(_post(session, _query(list(selections.values())), label=label))
     except httpx.HTTPError as exc:
         if len(selections) == 1:
             log.warning("decca: skipping %s: %s", label, exc)
@@ -163,96 +157,94 @@ def _fetch_batch(client: httpx.Client, selections: dict[str, str], *, label: str
         log.info("decca: %s failed over %d items, halving: %s", label, len(aliases), exc)
         merged: dict[str, Any] = {}
         for half in (aliases[:middle], aliases[middle:]):
-            merged.update(_fetch_batch(client, {a: selections[a] for a in half}, label=label))
+            merged.update(_fetch_batch(session, {a: selections[a] for a in half}, label=label))
         return merged
 
 
-def fetch_families(
-    client: httpx.Client, ids: Sequence[int], cache: PageCache | None = None
-) -> Iterator[dict[str, Any]]:
+def _family_selection(family_id: int) -> str:
+    return f"productFamily(id: {family_id}) {{ {_FAMILY_FIELDS} }}"
+
+
+def _artist_selection(slug: str) -> str:
+    # The slug rides in the argument JSON-encoded rather than interpolated raw.
+    return f"artist(urlAlias: {json.dumps(slug)}) {{ {_ARTIST_FIELDS} }}"
+
+
+def fetch_families(session: SourceSession, ids: Sequence[int]) -> Iterator[dict[str, Any]]:
     """Every product family in *ids*, mirrored, in the order given.
 
     Yields as each batch lands rather than accumulating: the caller writes
     documents per family, so a sweep cut short still leaves a usable snapshot.
     """
-    pending: list[int] = []
-    for family_id in ids:
-        mirrored = _mirrored(cache, _family_key(family_id))
-        if mirrored is not None:
-            yield mirrored
-            continue
-        pending.append(family_id)
-        if len(pending) >= BATCH_SIZE:
-            yield from _fetch_family_batch(client, pending, cache)
-            pending = []
-    yield from _fetch_family_batch(client, pending, cache)
+    yield from _fetch_mirrored(
+        session, [(_family_key(i), f"f{i}", _family_selection(i)) for i in ids], label="families"
+    )
 
 
-def _fetch_family_batch(
-    client: httpx.Client, ids: list[int], cache: PageCache | None
-) -> Iterator[dict[str, Any]]:
-    if not ids:
-        return
-    selections = {f"f{i}": f"f{i}: productFamily(id: {i}) {{ {_FAMILY_FIELDS} }}" for i in ids}
-    nodes = _fetch_batch(client, selections, label=f"families {ids[0]}..{ids[-1]}")
-    time.sleep(REQUEST_DELAY_S)
-    for family_id in ids:
-        node = nodes.get(f"f{family_id}")
-        if node is None:
-            continue
-        _mirror(cache, _family_key(family_id), node)
-        yield node
-
-
-def fetch_artists(
-    client: httpx.Client, slugs: Sequence[str], cache: PageCache | None = None
-) -> Iterator[dict[str, Any]]:
+def fetch_artists(session: SourceSession, slugs: Sequence[str]) -> Iterator[dict[str, Any]]:
     """Every roster artist in *slugs*, mirrored, in the order given."""
-    pending: list[str] = []
-    for slug in slugs:
-        mirrored = _mirrored(cache, _artist_key(slug))
+    yield from _fetch_mirrored(
+        session, [(_artist_key(s), None, _artist_selection(s)) for s in slugs], label="artists"
+    )
+
+
+#: One record to read: its mirror key, its alias in a batch (``None`` to alias
+#: it by its position, as ``a<n>``), and its selection.
+_Item = tuple[str, str | None, str]
+
+
+def _fetch_mirrored(
+    session: SourceSession, items: Sequence[_Item], *, label: str
+) -> Iterator[dict[str, Any]]:
+    """*items*, answered from the mirror or in batches of :data:`BATCH_SIZE`.
+
+    Mirrored items are yielded as they are reached; the rest are yielded as
+    their batch lands, so order follows *items* except that a batch comes after
+    any mirrored items read while it was filling.
+    """
+    pending: list[_Item] = []
+    for item in items:
+        mirrored = _mirrored(session, item[0], item[2])
         if mirrored is not None:
             yield mirrored
             continue
-        pending.append(slug)
+        pending.append(item)
         if len(pending) >= BATCH_SIZE:
-            yield from _fetch_artist_batch(client, pending, cache)
+            yield from _fetch_pending(session, pending, label=label)
             pending = []
-    yield from _fetch_artist_batch(client, pending, cache)
+    yield from _fetch_pending(session, pending, label=label)
 
 
-def _fetch_artist_batch(
-    client: httpx.Client, slugs: list[str], cache: PageCache | None
-) -> Iterator[dict[str, Any]]:
-    """A batch keyed by position, not slug: a slug is not a GraphQL alias.
+def _fetch_pending(session: SourceSession, pending: list[_Item], *, label: str) -> Iterator[dict[str, Any]]:
+    """One aliased batch, mirroring each answer under its own key.
 
-    Aliases must match ``[_A-Za-z][_0-9A-Za-z]*`` and roster slugs hold hyphens
-    and leading digits, so the alias is the index and the slug rides in the
-    argument, JSON-encoded rather than interpolated raw.
+    A slug is not a GraphQL alias — aliases must match ``[_A-Za-z][_0-9A-Za-z]*``
+    and roster slugs hold hyphens and leading digits — so artists are aliased by
+    position and their slug rides in the argument.
     """
-    if not slugs:
+    if not pending:
         return
+    aliases = [alias or f"a{n}" for n, (_, alias, _) in enumerate(pending)]
     selections = {
-        f"a{n}": f"a{n}: artist(urlAlias: {json.dumps(slug)}) {{ {_ARTIST_FIELDS} }}"
-        for n, slug in enumerate(slugs)
+        alias: f"{alias}: {selection}" for alias, (_, _, selection) in zip(aliases, pending, strict=True)
     }
-    nodes = _fetch_batch(client, selections, label=f"artists {slugs[0]}..{slugs[-1]}")
-    time.sleep(REQUEST_DELAY_S)
-    for n, slug in enumerate(slugs):
-        node = nodes.get(f"a{n}")
+    first, last = pending[0][0].rsplit("/", 1)[-1], pending[-1][0].rsplit("/", 1)[-1]
+    nodes = _fetch_batch(session, selections, label=f"{label} {first}..{last}")
+    for alias, (key, _, selection) in zip(aliases, pending, strict=True):
+        node = nodes.get(alias)
         if node is None:
             continue
-        _mirror(cache, _artist_key(slug), node)
+        session.store(key, json.dumps(node), fingerprint=_fingerprint(selection))
         yield node
 
 
 def _family_key(family_id: int) -> str:
     """The mirror key for a family.
 
-    A synthetic URL, because :class:`~composer_http.PageCache` is keyed by one
-    and these are POSTs. Keyed per family rather than per batch so that
-    re-running after a partial sweep, or with a different :data:`BATCH_SIZE`,
-    still hits everything already fetched.
+    A synthetic URL, because the mirror is keyed by one and these are POSTs.
+    Keyed per family rather than per batch so that re-running after a partial
+    sweep, or with a different :data:`BATCH_SIZE`, still hits everything already
+    fetched.
     """
     return f"graphql://decca/family/{family_id}"
 
@@ -261,10 +253,14 @@ def _artist_key(slug: str) -> str:
     return f"graphql://decca/artist/{slug}"
 
 
-def _mirrored(cache: PageCache | None, key: str) -> dict[str, Any] | None:
-    if cache is None:
-        return None
-    stored = cache.get(key)
+def _fingerprint(selection: str) -> str:
+    """The request that answers for one record: its selection inside the query
+    wrapper, so a change to the fields *or* to ``channel``/``language`` counts."""
+    return request_fingerprint("POST", GRAPHQL_URL, _query([selection]))
+
+
+def _mirrored(session: SourceSession, key: str, selection: str) -> dict[str, Any] | None:
+    stored = session.lookup(key, fingerprint=_fingerprint(selection))
     if stored is None:
         return None
     try:
@@ -272,8 +268,3 @@ def _mirrored(cache: PageCache | None, key: str) -> dict[str, Any] | None:
     except ValueError:
         return None  # A truncated mirror entry is a miss, not a crash.
     return node
-
-
-def _mirror(cache: PageCache | None, key: str, node: dict[str, Any]) -> None:
-    if cache is not None:
-        cache.put(key, json.dumps(node))

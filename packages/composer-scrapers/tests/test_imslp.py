@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 import pytest
+from composer_http.testing import mock_session
 from composer_scrapers.imslp import ImslpAdapter
 from composer_scrapers.imslp.fetch import worklist_page
 
@@ -29,7 +30,7 @@ def testworklist_page_returns_parsed_json() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=_page("Bach, Johann Sebastian", "Beethoven, Ludwig van"))
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         result = worklist_page(client, start=0)
 
     assert result["0"]["id"] == "Category:Bach, Johann Sebastian"
@@ -44,7 +45,7 @@ def testworklist_page_includes_start_in_url() -> None:
         seen_urls.append(str(request.url))
         return httpx.Response(200, json=_page())
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         worklist_page(client, start=2000)
 
     assert "start=2000" in seen_urls[0]
@@ -60,7 +61,7 @@ def testworklist_page_retries_on_http_error(monkeypatch: pytest.MonkeyPatch) -> 
             return httpx.Response(500, text="Server Error")
         return httpx.Response(200, json=_page("Bach, Johann Sebastian"))
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         result = worklist_page(client, start=0)
 
     assert len(attempts) == 3
@@ -73,7 +74,7 @@ def testworklist_page_raises_after_all_retries_exhausted(monkeypatch: pytest.Mon
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="always fails")
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         with pytest.raises(httpx.HTTPStatusError):
             worklist_page(client, start=0)
 
@@ -84,7 +85,6 @@ def testworklist_page_raises_after_all_retries_exhausted(monkeypatch: pytest.Mon
 
 
 def test_fetch_records_yields_source_records(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.imslp.time.sleep", lambda _: None)
     page = _page("Bach, Johann Sebastian", "Beethoven, Ludwig van", more=False)
 
     monkeypatch.setattr("composer_scrapers.imslp.worklist_page", lambda client, start: dict(page))
@@ -98,7 +98,6 @@ def test_fetch_records_yields_source_records(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_fetch_records_sets_url_from_permlink(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.imslp.time.sleep", lambda _: None)
     page = _page("Bach, Johann Sebastian", more=False)
 
     monkeypatch.setattr("composer_scrapers.imslp.worklist_page", lambda client, start: dict(page))
@@ -108,7 +107,6 @@ def test_fetch_records_sets_url_from_permlink(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_fetch_records_stops_when_no_more_results(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.imslp.time.sleep", lambda _: None)
     calls: list[int] = []
 
     def fake_fetch(client: Any, start: int) -> dict[str, Any]:
@@ -122,7 +120,6 @@ def test_fetch_records_stops_when_no_more_results(monkeypatch: pytest.MonkeyPatc
 
 
 def test_fetch_records_pages_until_exhausted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.imslp.time.sleep", lambda _: None)
     calls: list[int] = []
 
     def fake_fetch(client: Any, start: int) -> dict[str, Any]:
@@ -137,7 +134,6 @@ def test_fetch_records_pages_until_exhausted(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_fetch_records_stops_at_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.imslp.time.sleep", lambda _: None)
     calls: list[int] = []
 
     def fake_fetch(client: Any, start: int) -> dict[str, Any]:
@@ -151,7 +147,6 @@ def test_fetch_records_stops_at_max_pages(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_fetch_records_skips_rows_with_empty_name(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.imslp.time.sleep", lambda _: None)
     page: dict[str, Any] = {
         "0": {"id": "Category:Valid Name", "permlink": "https://imslp.org/valid"},
         "1": {"id": "Category:", "permlink": None},  # empty after prefix removal

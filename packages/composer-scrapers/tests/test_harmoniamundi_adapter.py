@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import httpx
 import pytest
 from composer_scrapers import REGISTRY, EntityDocument, WorkMentionDocument
 from composer_scrapers.harmoniamundi import HarmoniaMundiAdapter
@@ -104,14 +103,13 @@ def fetched(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Stub the site, and record the order its pages were read in."""
     seen: list[str] = []
 
-    def fetch_page(_client: Any, url: str, _cache: Any = None) -> str | None:
+    def fetch_page(_session: Any, url: str) -> str | None:
         seen.append(url)
         return SITE.get(url)
 
     monkeypatch.setattr("composer_scrapers.harmoniamundi.fetch_sitemap_index", lambda _c: SITEMAP_INDEX)
     monkeypatch.setattr("composer_scrapers.harmoniamundi.fetch_urlset", lambda _c, url: SITEMAPS[url])
     monkeypatch.setattr("composer_scrapers.harmoniamundi.fetch_page", fetch_page)
-    monkeypatch.setattr("composer_scrapers.harmoniamundi.make_client", httpx.Client)
     return seen
 
 

@@ -12,30 +12,39 @@ from typing import Any
 
 import httpx
 import pytest
-from composer_http import PageCache
+from composer_http import PageCache, SourceSession
+from composer_http.testing import mock_session
+from composer_scrapers.decca import DeccaAdapter
 from composer_scrapers.decca import fetch as decca_fetch
 from composer_scrapers.decca.fetch import (
     GRAPHQL_URL,
     fetch_artists,
     fetch_families,
     fetch_sitemap,
-    make_client,
 )
 from composer_scrapers.decca.urls import SITEMAP_URL
 
 
 @pytest.fixture(autouse=True)
 def no_delay(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(decca_fetch.time, "sleep", lambda _: None)
+    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
 
-def _client(handler: Any, seen: list[httpx.Request] | None = None) -> httpx.Client:
+def _client(
+    handler: Any, seen: list[httpx.Request] | None = None, cache: PageCache | None = None
+) -> SourceSession:
     def transport(request: httpx.Request) -> httpx.Response:
         if seen is not None:
             seen.append(request)
         return handler(request)
 
-    return httpx.Client(transport=httpx.MockTransport(transport))
+    return mock_session(transport, cache=cache)
+
+
+def _mirror_family(cache: PageCache, family_id: int, node: str) -> None:
+    """Store *node* as the current query would have, fingerprint and all."""
+    fingerprint = decca_fetch._fingerprint(decca_fetch._family_selection(family_id))  # pyright: ignore[reportPrivateUsage]
+    cache.put(f"graphql://decca/family/{family_id}", node, fingerprint=fingerprint)
 
 
 def _query(request: httpx.Request) -> str:
@@ -137,10 +146,10 @@ def test_a_graphql_error_is_a_failure_even_though_it_arrives_as_http_200() -> No
 
 def test_a_mirrored_family_is_served_without_a_request(tmp_path: Any) -> None:
     cache = PageCache(tmp_path / "pages.db")
-    cache.put("graphql://decca/family/7", json.dumps({"idRaw": 7, "headline": "mirrored"}))
+    _mirror_family(cache, 7, json.dumps({"idRaw": 7, "headline": "mirrored"}))
     seen: list[httpx.Request] = []
-    with _client(_answer(f7={"idRaw": 7, "headline": "fetched"}), seen) as client:
-        found = list(fetch_families(client, [7], cache))
+    with _client(_answer(f7={"idRaw": 7, "headline": "fetched"}), seen, cache=cache) as client:
+        found = list(fetch_families(client, [7]))
     assert found[0]["headline"] == "mirrored"
     assert seen == []
 
@@ -148,10 +157,10 @@ def test_a_mirrored_family_is_served_without_a_request(tmp_path: Any) -> None:
 def test_only_the_families_missing_from_the_mirror_are_requested(tmp_path: Any) -> None:
     """What makes a sweep resumable: an interrupted run re-asks for the rest."""
     cache = PageCache(tmp_path / "pages.db")
-    cache.put("graphql://decca/family/1", json.dumps({"idRaw": 1}))
+    _mirror_family(cache, 1, json.dumps({"idRaw": 1}))
     seen: list[httpx.Request] = []
-    with _client(_answer(f2={"idRaw": 2}, f3={"idRaw": 3}), seen) as client:
-        assert [f["idRaw"] for f in fetch_families(client, [1, 2, 3], cache)] == [1, 2, 3]
+    with _client(_answer(f2={"idRaw": 2}, f3={"idRaw": 3}), seen, cache=cache) as client:
+        assert [f["idRaw"] for f in fetch_families(client, [1, 2, 3])] == [1, 2, 3]
     query = _query(seen[0])
     assert "f1:" not in query
     assert "f2:" in query and "f3:" in query
@@ -159,22 +168,42 @@ def test_only_the_families_missing_from_the_mirror_are_requested(tmp_path: Any) 
 
 def test_what_is_fetched_is_mirrored(tmp_path: Any) -> None:
     cache = PageCache(tmp_path / "pages.db")
-    with _client(_answer(f7={"idRaw": 7, "headline": "fetched"})) as client:
-        list(fetch_families(client, [7], cache))
+    with _client(_answer(f7={"idRaw": 7, "headline": "fetched"}), cache=cache) as client:
+        list(fetch_families(client, [7]))
     assert json.loads(cache.get("graphql://decca/family/7") or "{}")["headline"] == "fetched"
 
 
 def test_a_truncated_mirror_entry_is_a_miss_not_a_crash(tmp_path: Any) -> None:
     cache = PageCache(tmp_path / "pages.db")
-    cache.put("graphql://decca/family/7", '{"idRaw": 7, "headl')
-    with _client(_answer(f7={"idRaw": 7, "headline": "fetched"})) as client:
-        assert [f["headline"] for f in fetch_families(client, [7], cache)] == ["fetched"]
+    _mirror_family(cache, 7, '{"idRaw": 7, "headl')
+    with _client(_answer(f7={"idRaw": 7, "headline": "fetched"}), cache=cache) as client:
+        assert [f["headline"] for f in fetch_families(client, [7])] == ["fetched"]
+
+
+def test_a_family_mirrored_by_a_different_query_is_refetched(tmp_path: Any) -> None:
+    """Editing the field set must not keep serving answers that lack the new
+    fields: the entry is fingerprinted with the query that produced it."""
+    cache = PageCache(tmp_path / "pages.db")
+    cache.put(
+        "graphql://decca/family/7", json.dumps({"idRaw": 7, "headline": "old"}), fingerprint="an older query"
+    )
+    seen: list[httpx.Request] = []
+    with _client(_answer(f7={"idRaw": 7, "headline": "fetched"}), seen, cache=cache) as client:
+        assert [f["headline"] for f in fetch_families(client, [7])] == ["fetched"]
+    assert len(seen) == 1
+
+
+def test_a_mirror_written_before_fingerprints_is_refetched(tmp_path: Any) -> None:
+    cache = PageCache(tmp_path / "pages.db")
+    cache.put("graphql://decca/family/7", json.dumps({"idRaw": 7, "headline": "old"}))
+    with _client(_answer(f7={"idRaw": 7, "headline": "fetched"}), cache=cache) as client:
+        assert [f["headline"] for f in fetch_families(client, [7])] == ["fetched"]
 
 
 def test_artists_are_mirrored_under_their_slug(tmp_path: Any) -> None:
     cache = PageCache(tmp_path / "pages.db")
-    with _client(_answer(a0={"idRaw": 1, "screenname": "Alfred Brendel"})) as client:
-        list(fetch_artists(client, ["alfredbrendel"], cache))
+    with _client(_answer(a0={"idRaw": 1, "screenname": "Alfred Brendel"}), cache=cache) as client:
+        list(fetch_artists(client, ["alfredbrendel"]))
     assert cache.get("graphql://decca/artist/alfredbrendel") is not None
 
 
@@ -203,8 +232,8 @@ def test_an_index_listing_nothing_is_returned_as_is() -> None:
 
 
 def test_the_client_identifies_itself() -> None:
-    with make_client() as client:
-        assert "composer-ingest" in client.headers["user-agent"]
+    with DeccaAdapter().open_session() as session:
+        assert "composer-ingest" in session.client.headers["user-agent"]
 
 
 def test_requests_go_to_the_api_host() -> None:
@@ -217,5 +246,5 @@ def test_requests_go_to_the_api_host() -> None:
 def test_the_client_allows_a_box_set_time_to_answer() -> None:
     """A batch of box sets outruns the shared 30s default, and a timeout costs
     three retries and two halvings before the family is dropped."""
-    with make_client() as client:
-        assert client.timeout.read == decca_fetch.TIMEOUT_S
+    with DeccaAdapter().open_session() as session:
+        assert session.client.timeout.read == decca_fetch.TIMEOUT_S

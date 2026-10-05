@@ -2,6 +2,11 @@
 
 Dataset version 3 holds 13,954 programs from the 1842-43 season through
 2016-17. The whole source is one download; there is no pagination.
+
+The one source here that is not HTTP: kagglehub fetches and caches the dataset
+itself, so the adapter is a plain :class:`~composer_schema.SourceAdapter` rather
+than an :class:`~composer_scrapers.HttpSourceAdapter`. It keeps the same layout —
+this module is its fetch — and, the dataset being a closed archive, ``STATIC``.
 """
 
 from __future__ import annotations

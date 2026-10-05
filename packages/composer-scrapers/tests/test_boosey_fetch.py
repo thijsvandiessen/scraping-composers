@@ -10,30 +10,18 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-import pytest
+from composer_http import SourceSession
+from composer_http.testing import mock_session
 from composer_scrapers.boosey.fetch import (
     BASE_URL,
-    _make_client,
     composer_index,
     composer_work_links,
     iter_work_pages,
 )
 
 
-def _patch_client(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
-    class _MockedClient(httpx.Client):
-        def __init__(self, **kw: Any) -> None:
-            kw["transport"] = httpx.MockTransport(handler)
-            super().__init__(**kw)
-
-    monkeypatch.setattr("composer_scrapers.boosey.fetch.httpx.Client", _MockedClient)
-
-
-@pytest.fixture(autouse=True)
-def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Politeness delays are real seconds; drop them for the suite."""
-    monkeypatch.setattr("composer_scrapers.boosey.fetch.time.sleep", lambda _: None)
-    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
+def _session(handler: Any) -> SourceSession:
+    return mock_session(handler, follow_redirects=True)
 
 
 # A two-page composer index over two composers who share one work.
@@ -66,20 +54,18 @@ def _handler(request: httpx.Request) -> httpx.Response:
 # ---------------------------------------------------------------------------
 
 
-def test_composer_index_follows_rel_next(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_client(monkeypatch, _handler)
-    with _make_client() as client:
+def test_composer_index_follows_rel_next() -> None:
+    with _session(_handler) as client:
         assert composer_index(client) == ["/composer/A", "/composer/B"]
 
 
-def test_composer_work_links_span_paginated_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_client(monkeypatch, _handler)
-    with _make_client() as client:
+def test_composer_work_links_span_paginated_pages() -> None:
+    with _session(_handler) as client:
         links = composer_work_links(client, "/composer/A")
     assert [link.work_id for link in links] == ["1", "2"]
 
 
-def test_listing_stops_when_next_points_at_itself(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_listing_stops_when_next_points_at_itself() -> None:
     """A self-referential "next" link would otherwise loop until MAX_LIST_PAGES."""
     requests: list[str] = []
 
@@ -87,8 +73,7 @@ def test_listing_stops_when_next_points_at_itself(monkeypatch: pytest.MonkeyPatc
         requests.append(str(request.url))
         return httpx.Response(200, text='<a href="/composer/A">A</a><a rel="next" href="/composers">x</a>')
 
-    _patch_client(monkeypatch, handler)
-    with _make_client() as client:
+    with _session(handler) as client:
         assert composer_index(client) == ["/composer/A"]
     assert len(requests) == 1
 
@@ -98,15 +83,14 @@ def test_listing_stops_when_next_points_at_itself(monkeypatch: pytest.MonkeyPatc
 # ---------------------------------------------------------------------------
 
 
-def test_iter_work_pages_walks_composers_then_works(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_client(monkeypatch, _handler)
-    pages = list(iter_work_pages())
+def test_iter_work_pages_walks_composers_then_works() -> None:
+    pages = list(iter_work_pages(_session(_handler)))
     assert [link.work_id for link, _, _ in pages] == ["1", "2", "3"]
     assert pages[0][1] == BASE_URL + "/cr/music/a-one/1"
     assert "<h1>Work 1</h1>" in pages[0][2]
 
 
-def test_iter_work_pages_fetches_a_shared_work_once(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_iter_work_pages_fetches_a_shared_work_once() -> None:
     """Work 2 is listed under both composers; it must not be fetched twice."""
     fetched: list[str] = []
 
@@ -115,12 +99,10 @@ def test_iter_work_pages_fetches_a_shared_work_once(monkeypatch: pytest.MonkeyPa
             fetched.append(request.url.path)
         return _handler(request)
 
-    _patch_client(monkeypatch, handler)
-    list(iter_work_pages())
+    list(iter_work_pages(_session(handler)))
     assert len(fetched) == len(set(fetched)) == 3
 
 
-def test_iter_work_pages_honours_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_client(monkeypatch, _handler)
-    pages = list(iter_work_pages(max_pages=2))
+def test_iter_work_pages_honours_max_pages() -> None:
+    pages = list(iter_work_pages(_session(_handler), max_pages=2))
     assert [link.work_id for link, _, _ in pages] == ["1", "2"]

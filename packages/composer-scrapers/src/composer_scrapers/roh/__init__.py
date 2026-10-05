@@ -45,7 +45,7 @@ registry in :mod:`.people`.
 for a 180-second crawl delay; this adapter uses five, a departure agreed with
 the repository owner and documented in :mod:`.fetch`. Even so a full run is
 ~18,000 pages and more than a day. Every page goes through
-:class:`~composer_http.PageCache`, so a run that dies at hour twenty resumes
+the session's page mirror, so a run that dies at hour twenty resumes
 where it stopped, and re-parsing the cast tables — the least regular markup on
 the site — costs nothing.
 """
@@ -57,13 +57,12 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-import httpx
-from composer_http import PageCache, open_page_cache
+from composer_http import SourceSession
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, WorkMentionDocument
 from .credits import Credit
 from .dates import iso_date, place
-from .fetch import fetch_index, fetch_page, make_client
+from .fetch import FOLLOW_REDIRECTS, REQUEST_DELAY_S, TIMEOUT_S, fetch_index, fetch_page
 from .index import IndexEntry, entries
 from .listings import PerformanceRef
 from .people import Person, Registry
@@ -85,14 +84,20 @@ __all__ = ["BASE_URL", "RohAdapter"]
 _PROGRESS_EVERY = 100
 
 
-class RohAdapter(SourceAdapter):
+class RohAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     """Every work the Royal Opera House has staged, and every night it ran."""
 
     name = "roh"
     base_url = BASE_URL
-    cadence = RefreshCadence.MONTHLY
+    # an archive of performances already given: scraped once
+    cadence = RefreshCadence.STATIC
+    request_delay_s = REQUEST_DELAY_S
+    timeout_s = TIMEOUT_S
+    follow_redirects = FOLLOW_REDIRECTS
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield a mention per work, then one per performance, then the people.
 
         ``max_pages`` caps the number of *record* pages read — work, production
@@ -106,15 +111,13 @@ class RohAdapter(SourceAdapter):
         composer set, and loses only the performance detail.
         """
         ingested_at = datetime.now(UTC)
-        cache = open_page_cache()
         registry = Registry()
 
-        with make_client() as client:
-            sweep = _Sweep(client, cache, max_pages)
-            listing = _enumerate(client)
-            yield from _read_works(sweep, listing, registry, ingested_at)
-            _read_productions(sweep, registry)
-            yield from _read_performances(sweep, registry, ingested_at)
+        sweep = _Sweep(session, max_pages)
+        listing = _enumerate(session)
+        yield from _read_works(sweep, listing, registry, ingested_at)
+        _read_productions(sweep, registry)
+        yield from _read_performances(sweep, registry, ingested_at)
 
         log.info("roh: %s", sweep.summary(registry))
         if sweep.unknown:
@@ -150,8 +153,7 @@ class _Sweep:
     walk next door.
     """
 
-    client: httpx.Client
-    cache: PageCache | None
+    session: SourceSession
     max_pages: int | None
     pages: int = 0
     works: dict[int, WorkPage] = field(default_factory=dict)
@@ -172,7 +174,7 @@ class _Sweep:
     def fetch(self, url: str) -> str | None:
         """One record page, against the budget. None if it could not be read."""
         self.pages += 1
-        page = fetch_page(self.client, url, self.cache)
+        page = fetch_page(self.session, url)
         if page is None:
             self.unreadable += 1
         if self.pages % _PROGRESS_EVERY == 0:
@@ -186,22 +188,21 @@ class _Sweep:
         return page
 
     def summary(self, registry: Registry) -> str:
-        mirror = f"; page mirror: {self.cache.summary()}" if self.cache is not None else ""
         return (
             f"{self.pages} pages, {len(self.works)} works ({self.stubs} cross-reference stubs), "
             f"{self.mentions} work mentions, {len(registry)} people, "
-            f"{self.unreadable} unreadable{mirror}"
+            f"{self.unreadable} unreadable"
         )
 
 
-def _enumerate(client: httpx.Client) -> list[IndexEntry]:
+def _enumerate(session: SourceSession) -> list[IndexEntry]:
     """Every work in the database, from the 27 letter pages of the index.
 
-    Not budgeted and not mirrored — see :meth:`RohAdapter.fetch` and
+    Not budgeted and not mirrored — see :meth:`RohAdapter.scrape` and
     :mod:`.fetch`. A letter that cannot be read raises rather than shortening
     the sweep silently.
     """
-    listing = [entry for letter in LETTERS for entry in entries(fetch_index(client, letter))]
+    listing = [entry for letter in LETTERS for entry in entries(fetch_index(session, letter))]
     log.info("roh: %d works in the index", len(listing))
     return listing
 

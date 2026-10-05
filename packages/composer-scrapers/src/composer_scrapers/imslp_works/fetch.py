@@ -32,7 +32,7 @@ enriches nothing still reports the entire catalogue.
 Detail pages are read through ``api.php`` rather than ``/wiki/<Title>``, which
 is worth doing for two reasons beyond the 6.2KB-against-13.8KB payload:
 :mod:`composer_scrapers.imslp_recordings` requests those same pages at the same
-URL, so the two sources share one :class:`~composer_http.PageCache` mirror and
+URL, so the two sources share one page mirror (both are ``YEARLY``) and
 the second sweep to run gets its overlap free; and the worklist hands over
 ``pageid``, so a title never has to survive a round trip through a URL.
 """
@@ -41,13 +41,11 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
-from composer_http import PageCache, get_text, new_client, open_page_cache
+from composer_http import SourceSession
 
 from ..imslp.fetch import PAGE_SIZE, WORKS, worklist_page
 
@@ -119,12 +117,12 @@ def _text(value: Any) -> str | None:
     return stripped or None
 
 
-def iter_worklist(client: httpx.Client) -> Iterator[WorkRow]:
+def iter_worklist(session: SourceSession) -> Iterator[WorkRow]:
     """Every work IMSLP lists, paging the bulk endpoint until it is exhausted."""
     start = 0
     seen = 0
     while True:
-        data = worklist_page(client, start, WORKS)
+        data = worklist_page(session, start, WORKS)
         meta = data.pop("metadata", {})
         for key in sorted(data, key=int):
             row = _row(data[key])
@@ -135,10 +133,11 @@ def iter_worklist(client: httpx.Client) -> Iterator[WorkRow]:
             log.info("imslp_works: %d works in the catalogue", seen)
             return
         start += PAGE_SIZE
-        time.sleep(REQUEST_DELAY_S)
 
 
-def iter_works(max_details: int | None = None) -> Iterator[tuple[WorkRow, str | None]]:
+def iter_works(
+    session: SourceSession, max_details: int | None = None
+) -> Iterator[tuple[WorkRow, str | None]]:
     """The catalogue, as ``(row, parser html or None)`` per work.
 
     ``max_details`` caps how many work pages are *fetched*; every work is
@@ -146,59 +145,50 @@ def iter_works(max_details: int | None = None) -> Iterator[tuple[WorkRow, str | 
     counted as attempts rather than successes, so a run of failing pages cannot
     silently outgrow its request budget.
     """
-    cache = open_page_cache()
     enriched = 0
     attempted = 0
-    with new_client() as client:
-        for row in iter_worklist(client):
-            document: str | None = None
-            if max_details is None or attempted < max_details:
-                attempted += 1
-                document = _detail(client, cache, row)
-                enriched += document is not None
-            yield row, document
-    log.info(
-        "imslp_works: %d/%d detail pages read; page mirror: %s",
-        enriched,
-        attempted,
-        cache.summary() if cache is not None else "off",
+    for row in iter_worklist(session):
+        document: str | None = None
+        if max_details is None or attempted < max_details:
+            attempted += 1
+            document = _detail(session, row)
+            enriched += document is not None
+        yield row, document
+    log.info("imslp_works: %d/%d detail pages read", enriched, attempted)
+
+
+def _detail(session: SourceSession, row: WorkRow) -> str | None:
+    """The parser output for one work page, from the mirror or the API.
+
+    One work must not abort a sweep measured in hours — IMSLP has answered a
+    detail request with a bot-check interstitial before now — so a failure is
+    skipped. Only a usable answer is mirrored: MediaWiki 1.18 reports an unknown
+    page as a 200 carrying an error object, and caching that would mean never
+    retrying a page that failed once.
+    """
+    raw = session.try_get_text(
+        parse_url(row.page_id),
+        label=f"work {row.page_id} ({row.title})",
+        retries=RETRIES,
+        mirror=True,
+        valid=lambda body: _document(body, row.title, quiet=True) is not None,
     )
+    return _document(raw, row.title) if raw is not None else None
 
 
-def _detail(client: httpx.Client, cache: PageCache | None, row: WorkRow) -> str | None:
-    """The parser output for one work page, from the mirror or the API."""
-    url = parse_url(row.page_id)
-    mirrored = cache.get(url) if cache is not None else None
-    if mirrored is not None:
-        return _document(mirrored, row.title)
-    time.sleep(REQUEST_DELAY_S)
-    try:
-        raw = get_text(client, url, label=f"work {row.page_id} ({row.title})", retries=RETRIES)
-    except httpx.HTTPError as exc:
-        # One work must not abort a sweep measured in hours — IMSLP has answered
-        # a detail request with a bot-check interstitial before now.
-        log.warning("imslp_works: skipping %r after error (%s)", row.title, exc)
-        return None
-    document = _document(raw, row.title)
-    # Only a usable answer is mirrored: MediaWiki 1.18 reports an unknown page
-    # as a 200 carrying an error object, and caching that would mean never
-    # retrying a page that failed once.
-    if document is not None and cache is not None:
-        cache.put(url, raw)
-    return document
-
-
-def _document(raw: str, title: str) -> str | None:
-    """The parser output inside one API response body, or None."""
+def _document(raw: str, title: str, *, quiet: bool = False) -> str | None:
+    """The parser output inside one API response body, or None. ``quiet`` skips
+    the warnings, for the check deciding whether a body is worth mirroring."""
+    warn = log.debug if quiet else log.warning
     try:
         body = json.loads(raw)
     except ValueError as exc:
-        log.warning("imslp_works: unreadable API response for %r (%s)", title, exc)
+        warn("imslp_works: unreadable API response for %r (%s)", title, exc)
         return None
     parse = body.get("parse") if isinstance(body, dict) else None
     if not isinstance(parse, dict):
         error = body.get("error") if isinstance(body, dict) else None
-        log.warning("imslp_works: no parse output for %r (%s)", title, error)
+        warn("imslp_works: no parse output for %r (%s)", title, error)
         return None
     text = parse.get("text")
     document = text.get("*") if isinstance(text, dict) else None
