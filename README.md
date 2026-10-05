@@ -547,7 +547,7 @@ uv run composer-ingest fetch imslp    # network → ./raw-data/imslp/<run_id>/re
 uv run composer-ingest process imslp  # disk → DB; latest run by default, --run-id to pick one
 ```
 
-The bucket (`scraper/bucket.py`; NDJSON per run under `BUCKET_PATH`, default
+The bucket (`composer_bronze/bucket.py`; NDJSON per run under `BUCKET_PATH`, default
 `./raw-data`) is the only way data enters the database: after an ETL change you
 can re-process a snapshot without hitting the source again, and `LocalBucket`
 can be swapped for an S3 implementation without touching callers.
@@ -571,7 +571,7 @@ resolution happen downstream when data is promoted into gold.
   timestamps, status, and seen/new counts.
 - **`entity_records`** — raw records per source, unique on
   `(source, external_id)`. Stores the original payload as JSON plus
-  `first_seen`/`last_seen` timestamps and run ids. Re-ingesting is idempotent.
+  `first_seen_at`/`last_seen_at` timestamps and run ids. Re-ingesting is idempotent.
 - **`entities`** — canonical, deduplicated nodes. `kind` says what a node is:
   `person`, `profession`, `period`, `genre`, `place`, `work`, `ensemble`,
   `publisher`, `instrumentation` (an open set — `kind` is a plain string column,

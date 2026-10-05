@@ -9,7 +9,8 @@ The endpoint (`/imslpscripts/API.ISCR.php`) takes its parameters as a single
 slash-separated string, returns rows keyed by stringified indices alongside a
 `metadata` entry holding the pagination flag, and embeds names in MediaWiki
 category titles (`Category:Beethoven, Ludwig van`). `composer_scrapers/imslp/`
-handles all of this, plus retries and a polite request delay.
+handles all of this; retries and the polite request delay come from the
+`composer_http.SourceSession` it fetches through.
 
 It serves two lists and IMSLP documents no others: `type=1` is the people, read
 by `imslp`, and `type=2` is the ~267,000 works, read by `imslp_works`. Both
