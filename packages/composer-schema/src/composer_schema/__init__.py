@@ -109,7 +109,11 @@ def deserialize_document(d: dict[str, Any]) -> EntityDocument | WorkMentionDocum
 
 # ---------------------------------------------------------------------------
 # Refresh cadence — how often a source's data is worth re-scraping. Drives the
-# admin interface's "what's due" view so scrapes can be triggered by staleness.
+# admin interface's "what's due" view so scrapes can be triggered by staleness,
+# and how long an HTTP source's page mirror serves a page before refetching it
+# (see composer_scrapers.base). The adapters use two: STATIC for archives of
+# things already given — scraped once, re-run on demand for what was added —
+# and YEARLY for everything else.
 # ---------------------------------------------------------------------------
 
 
@@ -166,7 +170,7 @@ class SourceAdapter(ABC):
 
     name: ClassVar[str]
     base_url: ClassVar[str]
-    cadence: ClassVar[RefreshCadence] = RefreshCadence.MONTHLY
+    cadence: ClassVar[RefreshCadence] = RefreshCadence.YEARLY
 
     @abstractmethod
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]: ...

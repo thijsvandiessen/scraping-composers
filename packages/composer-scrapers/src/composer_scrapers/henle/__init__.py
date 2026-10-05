@@ -34,11 +34,11 @@ from collections import Counter
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from composer_http import open_page_cache
+from composer_http import SourceSession
 from composer_schema.instrumentation import category_for, members_of, parse_instrumentation
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceClaim, WorkMentionDocument
-from .fetch import BASE_URL, fetch_sitemap, iter_products, make_client, product_urls
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
+from .fetch import BASE_URL, FOLLOW_REDIRECTS, REQUEST_DELAY_S, fetch_sitemap, iter_products, product_urls
 from .products import Contributor, ParsedProduct, parse_product
 
 log = logging.getLogger(__name__)
@@ -137,38 +137,38 @@ def _raw(product: ParsedProduct, url: str) -> dict[str, object]:
     }
 
 
-class HenleAdapter(SourceAdapter):
+class HenleAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "henle"
     base_url = BASE_URL
     # A publisher's back catalogue changes slowly: new editions appear, existing
     # ones rarely move.
     cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
+    follow_redirects = FOLLOW_REDIRECTS
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Walk the catalogue, yielding a work mention and a work entity per work.
 
         ``max_pages`` caps the number of product pages requested.
         """
         ingested_at = datetime.now(UTC)
-        cache = open_page_cache()
         tally: Counter[str] = Counter()
-        with make_client() as client:
-            products = product_urls(fetch_sitemap(client))
-            tally["listed"] = len(products)
-            for product_id, url, page in iter_products(client, products, cache, max_pages):
-                product = parse_product(product_id, page)
-                if product is None:
-                    tally["unreadable"] += 1
-                    continue
-                if not product.is_music:
-                    tally["not sheet music"] += 1
-                    continue
-                tally["editions"] += 1
-                if product.scoring and not written_for(product.scoring):
-                    tally["scorings unrecognised"] += 1
-                yield from self._documents(product, url, ingested_at, tally)
-        if cache is not None:
-            log.info("henle: page cache %s", cache.summary())
+        products = product_urls(fetch_sitemap(session))
+        tally["listed"] = len(products)
+        for product_id, url, page in iter_products(session, products, max_pages):
+            product = parse_product(product_id, page)
+            if product is None:
+                tally["unreadable"] += 1
+                continue
+            if not product.is_music:
+                tally["not sheet music"] += 1
+                continue
+            tally["editions"] += 1
+            if product.scoring and not written_for(product.scoring):
+                tally["scorings unrecognised"] += 1
+            yield from self._documents(product, url, ingested_at, tally)
         log.info("henle: %s", ", ".join(f"{count} {what}" for what, count in tally.items()))
 
     def _documents(

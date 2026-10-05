@@ -111,12 +111,12 @@ ROSTER: dict[str, dict[str, Any]] = {
 
 @pytest.fixture(autouse=True)
 def fake_site(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fetch_families(_client: Any, ids: Sequence[int], _cache: Any = None) -> Iterator[dict[str, Any]]:
+    def fetch_families(_session: Any, ids: Sequence[int]) -> Iterator[dict[str, Any]]:
         for family_id in ids:
             if family_id in CATALOGUE:
                 yield CATALOGUE[family_id]
 
-    def fetch_artists(_client: Any, slugs: Sequence[str], _cache: Any = None) -> Iterator[dict[str, Any]]:
+    def fetch_artists(_session: Any, slugs: Sequence[str]) -> Iterator[dict[str, Any]]:
         for slug in slugs:
             if slug in ROSTER:
                 yield ROSTER[slug]
@@ -124,15 +124,6 @@ def fake_site(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("composer_scrapers.decca.fetch_sitemap", lambda _client: _SITEMAP)
     monkeypatch.setattr("composer_scrapers.decca.fetch_families", fetch_families)
     monkeypatch.setattr("composer_scrapers.decca.fetch_artists", fetch_artists)
-    monkeypatch.setattr("composer_scrapers.decca.make_client", lambda: _NullClient())
-
-
-class _NullClient:
-    def __enter__(self) -> _NullClient:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        return None
 
 
 def _documents() -> list[EntityDocument | WorkMentionDocument]:

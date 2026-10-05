@@ -36,9 +36,11 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceClaim, WorkMentionDocument
+from composer_http import SourceSession
+
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
 from .artists import Person, Roster
-from .fetch import BASE_URL, iter_recording_pages
+from .fetch import BASE_URL, REQUEST_DELAY_S, iter_recording_pages
 from .recordings import Album, WorkPage, commercial_recordings, work_page
 
 log = logging.getLogger(__name__)
@@ -46,14 +48,17 @@ log = logging.getLogger(__name__)
 __all__ = ["BASE_URL", "ImslpRecordingsAdapter"]
 
 
-class ImslpRecordingsAdapter(SourceAdapter):
+class ImslpRecordingsAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     """Every commercial recording IMSLP lists, and everyone credited on one."""
 
     name = "imslp_recordings"
     base_url = BASE_URL
     cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """The category, as work mentions first and the people on them after.
 
         ``max_pages`` caps the number of work pages read, for smoke runs. A
@@ -68,7 +73,7 @@ class ImslpRecordingsAdapter(SourceAdapter):
         roster = Roster()
         mentions = 0
         pages = 0
-        for pageid, page_title, url, document in iter_recording_pages(max_pages=max_pages):
+        for pageid, page_title, url, document in iter_recording_pages(session, max_pages=max_pages):
             albums = commercial_recordings(document)
             if not albums:
                 continue

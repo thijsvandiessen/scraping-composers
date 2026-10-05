@@ -2,34 +2,16 @@
 
 Both index pages are single documents with no pagination, so what matters
 here is simply that the right two URLs are requested, in order, with a
-politeness delay between them. Retries are ``composer_http.get_text``'s job
-and are tested in that package.
+politeness delay between them. Retries and the delay itself are the
+session's job and are tested in ``composer_http``.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
 import httpx
-import pytest
-from composer_scrapers.classicfm.fetch import ARTISTS_URL, COMPOSERS_URL, _make_client, fetch_index_pages
-
-
-def _patch_client(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
-    class _MockedClient(httpx.Client):
-        def __init__(self, **kw: Any) -> None:
-            kw["transport"] = httpx.MockTransport(handler)
-            super().__init__(**kw)
-
-    monkeypatch.setattr("composer_scrapers.classicfm.fetch.httpx.Client", _MockedClient)
-
-
-@pytest.fixture(autouse=True)
-def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Politeness delays are real seconds; drop them for the suite."""
-    monkeypatch.setattr("composer_scrapers.classicfm.fetch.time.sleep", lambda _: None)
-    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
-
+from composer_http.testing import mock_session
+from composer_scrapers.classicfm import ClassicFmAdapter
+from composer_scrapers.classicfm.fetch import ARTISTS_URL, COMPOSERS_URL, fetch_index_pages
 
 PAGES: dict[str, str] = {
     "/composers/": "<html>composers index</html>",
@@ -43,37 +25,28 @@ def _handler(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404, text="not found")
 
 
-def test_fetch_index_pages_returns_both_pages(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_client(monkeypatch, _handler)
-    composers_html, artists_html = fetch_index_pages()
+def test_fetch_index_pages_returns_both_pages() -> None:
+    composers_html, artists_html = fetch_index_pages(mock_session(_handler))
     assert composers_html == "<html>composers index</html>"
     assert artists_html == "<html>artists index</html>"
 
 
-def test_fetch_index_pages_requests_composers_then_artists(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_index_pages_requests_composers_then_artists() -> None:
     requested: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requested.append(request.url.path)
         return _handler(request)
 
-    _patch_client(monkeypatch, handler)
-    fetch_index_pages()
+    fetch_index_pages(mock_session(handler))
     assert requested == ["/composers/", "/artists/"]
 
 
-def test_fetch_index_pages_sleeps_between_requests(monkeypatch: pytest.MonkeyPatch) -> None:
-    sleeps: list[float] = []
-    monkeypatch.setattr("composer_scrapers.classicfm.fetch.time.sleep", sleeps.append)
-
-    _patch_client(monkeypatch, _handler)
-    fetch_index_pages()
-    assert sleeps == [0.5]
-
-
-def test_make_client_sends_a_user_agent(monkeypatch: pytest.MonkeyPatch) -> None:
-    with _make_client() as client:
-        assert client.headers["User-Agent"]
+def test_adapter_session_is_polite_and_identified() -> None:
+    with ClassicFmAdapter().open_session() as session:
+        assert session.delay_s == 0.5
+        assert session.client.headers["User-Agent"]
+        assert session.client.follow_redirects
 
 
 def test_urls_target_classicfm() -> None:

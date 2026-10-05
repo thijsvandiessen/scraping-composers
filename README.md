@@ -388,9 +388,13 @@ uv run uvicorn composer_admin:admin_app --port 8001
 # open http://localhost:8001/docs and click "Try it out"
 ```
 
-Each scraper carries a **refresh cadence** (`monthly`, `yearly`, or `static`)
-declared on its `SourceAdapter`. The API surfaces which scrapers are _due_ so
-you can refresh by staleness rather than by data type:
+Each scraper carries a **refresh cadence** declared on its `SourceAdapter`:
+`static` for the archives (wienerphil, roh, concertgebouw_archive, berlinphil,
+nyphil — scraped once, re-run on demand to pick up what was added) and `yearly`
+for everything else. The cadence also sets how long the scraper's page mirror
+serves a page before refetching it (see [Adding a source](#adding-a-source)).
+The API surfaces which scrapers are _due_ so you can refresh by staleness rather
+than by data type:
 
 The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
 `process`:
@@ -621,47 +625,84 @@ and ids stay stable, so the pass is re-runnable as the heuristics grow
 
 ## Adding a source
 
-Create a package `packages/composer-scrapers/src/composer_scrapers/<name>/` and subclass
-`SourceAdapter` (the contracts live in `composer_schema` and are re-exported from
-`composer_scrapers`):
+Every source has the same shape. Create a package
+`packages/composer-scrapers/src/composer_scrapers/<name>/` with:
+
+- `fetch.py` — URLs and the requests themselves, as functions of a
+  `composer_http.SourceSession`. No client construction, no `time.sleep`, no
+  cache handling: the session owns all three.
+- one parse module per view — pure functions from a fetched body to records.
+- `__init__.py` — a subclass of `HttpSourceAdapter` declaring identity, cadence
+  and manners, with `scrape(session, max_pages)` gluing the two together.
 
 ```python
-from datetime import UTC, datetime
 from collections.abc import Iterator
-from composer_scrapers import (
-    EntityDocument,
-    SourceAdapter,
-    SourceClaim,
-    WorkMentionDocument,
-)
+from datetime import UTC, datetime
+
+from composer_http import SourceSession
+from composer_scrapers import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
+
+from .fetch import fetch_index, fetch_person
 
 
-class MyAdapter(SourceAdapter):
+class MyAdapter(HttpSourceAdapter[EntityDocument]):
     name = "mysource"
     base_url = "https://example.com"
+    cadence = RefreshCadence.YEARLY  # STATIC for an archive of things already given
+    request_delay_s = 0.5  # between network requests; mirror hits are free
+    follow_redirects = True  # also: timeout_s, headers
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(self, session: SourceSession, max_pages: int | None = None) -> Iterator[EntityDocument]:
         ingested_at = datetime.now(UTC)
-        for row in _fetch_data(max_pages):
+        for row in fetch_index(session)[:max_pages]:  # live: how a re-run sees growth
+            page = fetch_person(session, row.url)  # mirrored, tolerant of a 404
+            ...
             yield EntityDocument(
-                id=row["id"],
-                url=row.get("url"),
+                id=row.id,
+                url=row.url,
                 source_name=self.name,
                 ingested_at=ingested_at,
-                name=row["name"],
-                claims=(SourceClaim("has_profession", "profession", row["role"]),),
+                name=row.name,
+                claims=(SourceClaim("has_profession", "profession", "composer"),),
             )
 ```
+
+with `fetch.py` along the lines of:
+
+```python
+def fetch_index(session: SourceSession) -> str:
+    return session.get_text(INDEX_URL, label="index")  # never mirrored
+
+
+def fetch_person(session: SourceSession, url: str) -> str | None:
+    return session.try_get_text(url, label=url, mirror=True)
+```
+
+**The page mirror.** `mirror=True` keeps a fetched page in `PAGE_CACHE_PATH`
+(SQLite, gzipped), so a sweep of thousands of detail pages is paid once and an
+interrupted run resumes. Two things decide whether a mirrored page is served:
+
+- **its age, against the adapter's cadence** — a `yearly` source refetches once a
+  year has passed, which is exactly when it becomes due; a `static` source keeps
+  its mirror forever;
+- **the request that produced it** — a POSTed query (GraphQL, SPARQL) is mirrored
+  through `session.mirrored(...)`/`session.store(...)` with a
+  `request_fingerprint` of the query, so editing the query in code is a miss.
+
+Mirror detail pages; never mirror what *enumerates* the source (an index, a
+listing, a sitemap) or a re-run would never see new records. Pass `valid=` to
+keep error pages served with a 200 out of the mirror. `PAGE_CACHE_ENABLED=false`
+bypasses it for a run; deleting the file is the hard reset.
 
 Every document inherits the `ScrapedDocument` base: `id` (source-local identifier),
 `url`, `source_name`, and `ingested_at` (UTC timestamp set at fetch time). Use
 `EntityDocument` for named entities (people, places, …) and `WorkMentionDocument`
-for concert-programme entries (a `(composer, title)` pair). Attach typed assertions
-to an entity as `SourceClaim`s in `EntityDocument.claims`.
+for concert-programme entries (a `(composer, title)` pair) — a source yielding both
+subclasses `HttpSourceAdapter[EntityDocument | WorkMentionDocument]`. Attach typed
+assertions to an entity as `SourceClaim`s in `EntityDocument.claims`.
 
-Keep HTTP/API access in `fetch.py` and parsing in one module per view; put the
-public `fetch()` orchestration in `__init__.py`. Then add an instance to `REGISTRY`
-in `composer_scrapers/__init__.py`.
+Then add an instance to `REGISTRY` in `composer_scrapers/__init__.py`. Test
+against `composer_http.testing.mock_session(handler)` rather than the network.
 
 ## Development
 
@@ -675,7 +716,8 @@ Libraries under `packages/` (each depends only on the tiers below it):
 - `composer-models` — the ORM schema shared by the silver and gold DBs, engine helpers, and the
   dedup keys / seeded entity UUIDs that define entity identity
 - `composer-http` — the polite User-Agent (contact identity) and retrying HTTP helpers, shared by
-  `composer-scrapers` and `composer-crawler`
+  `composer-scrapers` and `composer-crawler`, plus the `SourceSession` and page mirror the
+  scrapers fetch through
 - `composer-bronze` — the raw NDJSON bucket and fetch orchestration
 - `composer-scrapers` — the per-source adapters and `REGISTRY`
 - `composer-crawler` — the generic config-driven crawl4ai crawler, into the same bucket

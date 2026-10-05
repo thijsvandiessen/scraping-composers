@@ -17,8 +17,9 @@ Two passes, in one sweep:
 The result listing is a dozen requests for all ten thousand concerts, but it
 labels no performer except the conductor, so every concert's own page is fetched
 too: one request each, which is the whole cost of this source. That cost is paid
-once — the pages go into a :class:`~composer_http.PageCache`, and an archive of
-concerts already given does not change (see :mod:`composer_http.pages`).
+once — the pages go into the session's page mirror, and an archive of
+concerts already given does not change, so the source is ``STATIC``: scraped
+once, re-run on demand to pick up what has been added.
 """
 
 from __future__ import annotations
@@ -27,13 +28,12 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-import httpx
-from composer_http import PageCache, open_page_cache
+from composer_http import SourceSession
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceRecord, WorkMentionDocument
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceRecord, WorkMentionDocument
 from .details import detail
 from .dropdowns import COMPOSERS, PERFORMERS, WORKS, composer_record, performer_record, vocabularies
-from .fetch import BASE_URL, _make_client, fetch_detail, fetch_fragments, fetch_landing, total_item_count
+from .fetch import BASE_URL, REQUEST_DELAY_S, fetch_detail, fetch_fragments, fetch_landing, total_item_count
 from .performances import Concert, concerts, mentions, merge
 
 log = logging.getLogger(__name__)
@@ -45,12 +45,16 @@ __all__ = ["BASE_URL", "WienerPhilAdapter"]
 _PROGRESS_EVERY = 100
 
 
-class WienerPhilAdapter(SourceAdapter):
+class WienerPhilAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "wienerphil"
     base_url = BASE_URL
-    cadence = RefreshCadence.MONTHLY
+    # an archive of concerts already given: scraped once
+    cadence = RefreshCadence.STATIC
+    request_delay_s = REQUEST_DELAY_S
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield every work performed in the archive, then everyone named in it.
 
         ``max_pages`` caps the number of concert *detail* pages read — the
@@ -60,38 +64,36 @@ class WienerPhilAdapter(SourceAdapter):
         composer and performer.
         """
         ingested_at = datetime.now(UTC)
-        cache = open_page_cache()
         conducted: set[str] = set()
         disciplines: dict[str, set[str]] = {}
         found = works = plain = 0
 
-        with _make_client() as client:
-            landing = fetch_landing(client)
-            vocabulary = vocabularies(landing)
-            titles = frozenset(vocabulary.get(WORKS, ()))
-            expected = total_item_count(landing)
-            log.info("wienerphil: %d concerts to read", expected if max_pages is None else max_pages)
+        landing = fetch_landing(session)
+        vocabulary = vocabularies(landing)
+        titles = frozenset(vocabulary.get(WORKS, ()))
+        expected = total_item_count(landing)
+        log.info("wienerphil: %d concerts to read", expected if max_pages is None else max_pages)
 
-            for concert, detailed in self._concerts(client, landing, titles, cache, max_pages):
-                found += 1
-                plain += not detailed
-                conducted.update(concert.conductors)
-                for name, discipline in concert.soloists:
-                    if discipline:
-                        disciplines.setdefault(name, set()).add(discipline)
-                for mention in mentions(concert):
-                    works += 1
-                    yield WorkMentionDocument(
-                        id=mention.external_id,
-                        url=concert.url,
-                        source_name=self.name,
-                        ingested_at=ingested_at,
-                        title=mention.title,
-                        composer=mention.composer,
-                        raw=mention.raw,
-                    )
-                if found % _PROGRESS_EVERY == 0:
-                    log.info("wienerphil: %d concerts read%s", found, _cached(cache))
+        for concert, detailed in self._concerts(session, landing, titles, max_pages):
+            found += 1
+            plain += not detailed
+            conducted.update(concert.conductors)
+            for name, discipline in concert.soloists:
+                if discipline:
+                    disciplines.setdefault(name, set()).add(discipline)
+            for mention in mentions(concert):
+                works += 1
+                yield WorkMentionDocument(
+                    id=mention.external_id,
+                    url=concert.url,
+                    source_name=self.name,
+                    ingested_at=ingested_at,
+                    title=mention.title,
+                    composer=mention.composer,
+                    raw=mention.raw,
+                )
+            if found % _PROGRESS_EVERY == 0:
+                log.info("wienerphil: %d concerts read%s", found, _cached(session))
 
         if max_pages is None and found != expected:
             # the cheapest tripwire for a change in page size or block markup
@@ -101,7 +103,7 @@ class WienerPhilAdapter(SourceAdapter):
             found,
             plain,
             works,
-            _cached(cache),
+            _cached(session),
         )
 
         people = 0
@@ -121,10 +123,9 @@ class WienerPhilAdapter(SourceAdapter):
 
     @staticmethod
     def _concerts(
-        client: httpx.Client,
+        session: SourceSession,
         landing: str,
         titles: frozenset[str],
-        cache: PageCache | None,
         max_pages: int | None,
     ) -> Iterator[tuple[Concert, bool]]:
         """Every concert of the archive, each with its own detail page folded in.
@@ -140,12 +141,12 @@ class WienerPhilAdapter(SourceAdapter):
         listing pages whose concerts it would never read.
         """
         read = 0
-        for fragment in fetch_fragments(client, landing):
+        for fragment in fetch_fragments(session, landing):
             for concert in concerts(fragment, titles):
                 if max_pages is not None and read >= max_pages:
                     return
                 read += 1
-                page = fetch_detail(client, concert.url, cache)
+                page = fetch_detail(session, concert.url)
                 found = detail(page) if page is not None else None
                 if found is None:
                     log.debug("concert %s: no detail page read", concert.concert_id)
@@ -172,6 +173,6 @@ class WienerPhilAdapter(SourceAdapter):
                 yield performer_record(name, conducted, disciplines)
 
 
-def _cached(cache: PageCache | None) -> str:
-    """The mirror's tally, as a clause to hang off a progress line."""
-    return f" ({cache.summary()})" if cache is not None else ""
+def _cached(session: SourceSession) -> str:
+    """The session's tally, as a clause to hang off a progress line."""
+    return f" ({session.summary()})"

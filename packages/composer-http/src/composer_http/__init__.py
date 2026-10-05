@@ -14,7 +14,8 @@ retrying and rate limiting); the adapters use all of it.
 
 :mod:`composer_http.pages` adds a third thing that only the adapters need: a
 mirror of pages already fetched, for the sources that spend one request per
-record.
+record. :mod:`composer_http.session` puts all three together as
+:class:`SourceSession`, the one way an adapter talks to the network.
 """
 
 from __future__ import annotations
@@ -26,12 +27,15 @@ from typing import Any, TypeVar
 
 import httpx
 
-from .pages import PageCache, open_page_cache
+from .pages import PageCache, open_page_cache, request_fingerprint
+from .session import SourceSession, Validator
 
 __all__ = [
     "DEFAULT_RETRIES",
     "DEFAULT_TIMEOUT_S",
     "PageCache",
+    "SourceSession",
+    "Validator",
     "browser_user_agent",
     "call_with_retries",
     "contact_email",
@@ -39,6 +43,7 @@ __all__ = [
     "get_text",
     "new_client",
     "open_page_cache",
+    "request_fingerprint",
     "user_agent",
 ]
 

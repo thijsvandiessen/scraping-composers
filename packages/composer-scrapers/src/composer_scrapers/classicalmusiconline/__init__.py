@@ -20,9 +20,11 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
+from composer_http import SourceSession
+
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, WorkMentionDocument
 from .composers import index_record
-from .fetch import BASE_URL, iter_composers
+from .fetch import BASE_URL, REQUEST_DELAY_S, iter_composers
 from .works import iter_work_mentions
 
 log = logging.getLogger(__name__)
@@ -30,12 +32,15 @@ log = logging.getLogger(__name__)
 __all__ = ["BASE_URL", "ClassicalMusicOnlineAdapter"]
 
 
-class ClassicalMusicOnlineAdapter(SourceAdapter):
+class ClassicalMusicOnlineAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "classicalmusiconline"
     base_url = BASE_URL
     cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield each composer's person record followed by its work mentions.
 
         ``max_pages`` caps the number of composer pages fetched, for test runs.
@@ -43,7 +48,7 @@ class ClassicalMusicOnlineAdapter(SourceAdapter):
         ingested_at = datetime.now(UTC)
         composers = 0
         works = 0
-        for entry, page in iter_composers(max_pages=max_pages):
+        for entry, page in iter_composers(session, max_pages=max_pages):
             record = index_record(entry)
             composers += 1
             yield EntityDocument(

@@ -31,7 +31,7 @@ ARTISTS_HTML = """
 def _stub_pages(monkeypatch: pytest.MonkeyPatch, composers_html: str = "", artists_html: str = "") -> None:
     monkeypatch.setattr(
         "composer_scrapers.classicfm.fetch_index_pages",
-        lambda: (composers_html, artists_html),
+        lambda session: (composers_html, artists_html),
     )
 
 

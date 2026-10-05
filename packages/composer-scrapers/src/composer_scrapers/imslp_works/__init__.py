@@ -42,8 +42,10 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceClaim, WorkMentionDocument
-from .fetch import BASE_URL, WorkRow, iter_works
+from composer_http import SourceSession
+
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
+from .fetch import BASE_URL, REQUEST_DELAY_S, WorkRow, iter_works
 from .works import ParsedWork, parse_work, strip_composer_suffix
 
 log = logging.getLogger(__name__)
@@ -90,14 +92,17 @@ def _raw(row: WorkRow, work: ParsedWork | None) -> dict[str, object]:
     }
 
 
-class ImslpWorksAdapter(SourceAdapter):
+class ImslpWorksAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "imslp_works"
     base_url = BASE_URL
     # A wiki catalogue changes slowly, and a full detail sweep is tens of hours
     # — not worth re-running often.
     cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Every work IMSLP lists, as a work mention and a work entity each.
 
         ``max_pages`` caps the number of work detail pages fetched, not the
@@ -107,7 +112,7 @@ class ImslpWorksAdapter(SourceAdapter):
         works = 0
         enriched = 0
         skipped = 0
-        for row, document in iter_works(max_details=max_pages):
+        for row, document in iter_works(session, max_details=max_pages):
             work = parse_work(document, row.title) if document is not None else None
             if document is not None and work is None:
                 skipped += 1

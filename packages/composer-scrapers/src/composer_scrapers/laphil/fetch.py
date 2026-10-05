@@ -9,8 +9,8 @@ events they appeared in. So the sitemap is a seed, not an inventory, and the
 whole ``/events/`` + ``/people/`` subgraph is reached by walking those links.
 
 That is thousands of requests, and each page is ~400KB of mostly navigation
-chrome, so every fetch goes through :class:`~composer_http.PageCache`: the sweep
-is paid once, a run interrupted halfway resumes where it stopped, and — the
+chrome, so every page goes through the session's page mirror: the sweep
+is paid once a year (the cadence), a run interrupted halfway resumes where it stopped, and — the
 reason it matters beyond this scraper — the *raw HTML* stays on disk. Only the
 composer credits are read today; a later pass over concerts, programmed works,
 performers or venues re-parses the same mirrored pages without touching the
@@ -21,10 +21,8 @@ around it.
 from __future__ import annotations
 
 import logging
-import time
 
-import httpx
-from composer_http import PageCache, get_text, new_client
+from composer_http import SourceSession
 
 from .urls import BASE_URL
 
@@ -37,25 +35,19 @@ SITEMAP_URL = f"{BASE_URL}/sitemap.xml"
 REQUEST_DELAY_S = 0.5
 
 
-def make_client() -> httpx.Client:
-    """A client that follows redirects.
-
-    Not optional here: a *past* event answers ``/events/<slug>`` with a 302 to
-    its per-performance permalink, ``/events/instances/<id>/<date>/<slug>``,
-    which serves the same page including the programme. Without this the entire
-    archive — everything but the current season — reads as an error.
-    """
-    client = new_client()
-    client.follow_redirects = True
-    return client
+#: Not optional here: a *past* event answers ``/events/<slug>`` with a 302 to
+#: its per-performance permalink, ``/events/instances/<id>/<date>/<slug>``,
+#: which serves the same page including the programme. Without following it
+#: the entire archive — everything but the current season — reads as an error.
+FOLLOW_REDIRECTS = True
 
 
-def fetch_sitemap(client: httpx.Client) -> str:
-    """The sitemap urlset, which seeds the walk."""
-    return get_text(client, SITEMAP_URL, label="sitemap")
+def fetch_sitemap(session: SourceSession) -> str:
+    """The sitemap urlset, which seeds the walk. Not mirrored: it is the seed."""
+    return session.get_text(SITEMAP_URL, label="sitemap")
 
 
-def fetch_page(client: httpx.Client, url: str, cache: PageCache | None = None) -> str | None:
+def fetch_page(session: SourceSession, url: str) -> str | None:
     """One event or person page, from the mirror when it holds it.
 
     Returns ``None`` rather than raising when the page cannot be fetched: the
@@ -63,16 +55,4 @@ def fetch_page(client: httpx.Client, url: str, cache: PageCache | None = None) -
     404ing or the connection dropping (the previous LLM crawl of this site died
     exactly that way, mid-run, after 35k records).
     """
-    if cache is not None:
-        mirrored = cache.get(url)
-        if mirrored is not None:
-            return mirrored
-    try:
-        page = get_text(client, url, label=url)
-    except httpx.HTTPError as exc:
-        log.warning("skipping %s: %s", url, exc)
-        return None
-    if cache is not None:
-        cache.put(url, page)
-    time.sleep(REQUEST_DELAY_S)
-    return page
+    return session.try_get_text(url, label=url, mirror=True)

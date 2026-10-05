@@ -39,11 +39,19 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-from composer_http import open_page_cache
+from composer_http import SourceSession
 from composer_schema.shorthand import parse_shorthand
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceClaim, WorkMentionDocument
-from .fetch import BASE_URL, fetch_sitemap, iter_products, make_client, product_ids, product_url
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
+from .fetch import (
+    BASE_URL,
+    FOLLOW_REDIRECTS,
+    REQUEST_DELAY_S,
+    fetch_sitemap,
+    iter_products,
+    product_ids,
+    product_url,
+)
 from .instrumentation import (
     Detail,
     ensemble_members,
@@ -195,37 +203,39 @@ def skipped_digital_twins(ids: list[str]) -> set[str]:
     return {pid for pid in ids if (twin := twin_print_id(pid)) is not None and twin in catalogue}
 
 
-class BaerenreiterAdapter(SourceAdapter):
+class BaerenreiterAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "baerenreiter"
     base_url = BASE_URL
     # A publisher's back catalogue changes slowly: new editions appear, existing
     # ones rarely move.
     cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
+    follow_redirects = FOLLOW_REDIRECTS
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Walk the catalogue, yielding a work mention and a work entity per edition.
 
         ``max_pages`` caps the number of product records requested.
         """
         ingested_at = datetime.now(UTC)
-        cache = open_page_cache()
         tally: Counter[str] = Counter()
-        with make_client() as client:
-            ids = product_ids(fetch_sitemap(client))
-            skipped = skipped_digital_twins(ids)
-            digital_of = {twin_print_id(pid): pid for pid in skipped}
-            tally["listed"], tally["digital twins skipped"] = len(ids), len(skipped)
-            wanted = [pid for pid in ids if pid not in skipped]
-            for product_id, payload in iter_products(client, wanted, cache, max_pages):
-                product = parse_product(payload)
-                if product is None:
-                    tally["unreadable"] += 1
-                    continue
-                if not product.is_music:
-                    tally["not sheet music"] += 1
-                    continue
-                tally["editions"] += 1
-                yield from self._documents(product, payload, digital_of.get(product_id), ingested_at, tally)
+        ids = product_ids(fetch_sitemap(session))
+        skipped = skipped_digital_twins(ids)
+        digital_of = {twin_print_id(pid): pid for pid in skipped}
+        tally["listed"], tally["digital twins skipped"] = len(ids), len(skipped)
+        wanted = [pid for pid in ids if pid not in skipped]
+        for product_id, payload in iter_products(session, wanted, max_pages):
+            product = parse_product(payload)
+            if product is None:
+                tally["unreadable"] += 1
+                continue
+            if not product.is_music:
+                tally["not sheet music"] += 1
+                continue
+            tally["editions"] += 1
+            yield from self._documents(product, payload, digital_of.get(product_id), ingested_at, tally)
         log.info("baerenreiter: %s", ", ".join(f"{count} {what}" for what, count in tally.items()))
 
     def _documents(
