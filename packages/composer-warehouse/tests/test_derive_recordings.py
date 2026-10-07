@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 
 def _recording_raw(catalogue: str | None = "486 1234") -> dict[str, object]:
-    """The normalized recording payload composer_extract writes."""
+    """The normalized recording payload composer_extract wrote (scrapers write the same shape)."""
     return {
         "_source": "llm",
         "_kind": "recording",

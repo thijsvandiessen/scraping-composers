@@ -286,7 +286,7 @@ def test_load_page_lists_snapshots_with_load_button(
     assert SNAPSHOT_PAYLOAD["id"] in page
     assert page.count("Load into DB") == 2  # completed and failed documents snapshots are both loadable
     assert "boom" in page  # failed snapshot's error shown
-    assert "snap-pages" in page and "extract first" in page  # raw pages are gated, not loadable
+    assert "snap-pages" in page and "not loadable" in page  # raw pages are gated, not loadable
 
 
 def test_process_snapshot_redirects_with_message(

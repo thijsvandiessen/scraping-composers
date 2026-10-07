@@ -6,7 +6,7 @@ string orchestra", "Violine und Klavier" — and that text is kept verbatim as a
 piano" over free prose is a ``LIKE`` across a dozen spellings in two languages.
 
 So the stated text is also folded onto a canonical *scoring category* here, and
-:mod:`composer_extract.scoring` emits one ``written_for`` claim per category, pointing at an
+an adapter emits one ``written_for`` claim per category, pointing at an
 ``instrumentation`` entity. The category — not the individual instrument — is the
 unit, because that is what the catalogues themselves are organised by: Bärenreiter
 offers "works for string orchestra" as a facet, and a string orchestra is not a
@@ -18,10 +18,9 @@ instruments — a violin sonata really is *for* the piano, so it still answers "
 for piano". :data:`MEMBERS` holds the ones that name an ensemble, whose instruments
 the work merely *includes*; :mod:`.shorthand` draws the same line for an orchestra.
 
-Nothing here guesses, on the same principle as :mod:`composer_extract.values`: a phrase the tables
-do not recognise yields no category at all rather than an invented one. The
-``orchestration`` literal still carries it, and the run log counts it (see
-:meth:`~.resilience.ExtractStats.unrecognised_summary`) so the tables can grow.
+Nothing here guesses: a phrase the tables do not recognise yields no category at
+all rather than an invented one. The ``orchestration`` literal still carries it,
+and the adapters' fetch logs count it so the tables can grow.
 
 """
 

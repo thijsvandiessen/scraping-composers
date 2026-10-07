@@ -121,7 +121,7 @@ def test_derive_concerts_groups_and_resolves(session: Session) -> None:
 
 
 def _llm_raw(title_key: str) -> dict[str, object]:
-    """The normalized, source-independent payload composer_extract writes."""
+    """The normalized, source-independent payload the since-removed composer_extract wrote."""
     return {
         "_source": "llm",
         "concert_key": "https://lso.co.uk/beethoven",

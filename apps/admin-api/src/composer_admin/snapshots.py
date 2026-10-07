@@ -1,10 +1,6 @@
 """Bucket, snapshot and source-identity plumbing shared across the admin API.
 
-A crawl run reuses the scraper's snapshot machinery wholesale — same bucket,
-same manifest states, same running-run guard — so :mod:`.routes`,
-:mod:`.crawl_routes` and :mod:`.pipeline` all need these. They lived in
-``routes`` and were reached from the other two under their private names; they
-are public here instead.
+Everything that fetches, lists or loads a bucket snapshot needs these.
 """
 
 import logging
@@ -13,7 +9,6 @@ from datetime import datetime
 
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH, LocalBucket, Snapshot
 from composer_bronze.scraper import iter_all_from_bucket, iter_from_bucket
-from composer_crawler import all_crawl_configs
 from composer_models import IngestRun
 from composer_scrapers import REGISTRY
 from composer_warehouse.ingestion import execute_run
@@ -27,15 +22,12 @@ log = logging.getLogger(__name__)
 
 
 def source_base_url(source: str) -> str:
-    """Base URL for a bucket source: a registered scraper, or a crawl config's
-    first seed. Mirrors the CLI's ``source_base_url`` so crawl-config sources
-    (whose LLM ``extract`` docs live under their name) can open an IngestRun,
-    and so ``rebuild-silver`` can label the sources it replays from the bucket."""
+    """Base URL for a bucket source: a registered scraper's, else empty. Mirrors
+    the CLI's ``source_base_url``; a bucket source with no adapter (a retired one
+    still on disk) can still open an IngestRun and be labelled by
+    ``rebuild-silver``."""
     adapter = REGISTRY.get(source)
-    if adapter is not None:
-        return adapter.base_url
-    config = all_crawl_configs().get(source)
-    return config.seeds[0] if config and config.seeds else ""
+    return adapter.base_url if adapter is not None else ""
 
 
 def bucket() -> LocalBucket:
@@ -78,7 +70,7 @@ def snapshot_or_404(store: LocalBucket, source: str, snapshot_id: str) -> Snapsh
 
     ``list_snapshots`` raises when the bucket's segment guard refuses *source*
     (traversal, control characters). That is a malformed identifier, so it answers
-    422 like ``put_crawl`` does rather than the 500 an unhandled ValueError gives.
+    422 rather than the 500 an unhandled ValueError gives.
     """
     try:
         snapshots = store.list_snapshots(source)
@@ -96,8 +88,7 @@ def snapshot_or_404(store: LocalBucket, source: str, snapshot_id: str) -> Snapsh
 def process_in_background(source_name: str, snapshot_id: str, run_id: int) -> None:
     """Load a bucket snapshot into the DB for an already-created run.
 
-    ``source_name`` may be a scraper or a crawl config — the bucket records are
-    the same ``entity``/``work_mention`` documents either way.
+    The bucket records are ``entity``/``work_mention`` documents.
     """
     with session_scope() as session:
         run = session.get(IngestRun, run_id)
