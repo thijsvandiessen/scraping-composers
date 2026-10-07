@@ -18,7 +18,7 @@ something else: ``3(pic)``, ``4(2pic)``, ``3(III=picc)``, ``4(III,IV=picc)`` and
 ``Dcl(=Ebcl)`` all occur.
 
 What comes out is instruments, not a scoring category: a symphony is a work *for
-orchestra* that *includes* a flute, which is why :mod:`composer_extract.scoring` writes these as
+orchestra* that *includes* a flute, which is why the adapters write these as
 ``includes_instrument`` and only the ensemble itself as ``written_for``.
 
 Detection is deliberately strict, because a false positive files a work under an

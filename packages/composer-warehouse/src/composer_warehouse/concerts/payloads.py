@@ -146,8 +146,8 @@ def _wienerphil_fields(raw: dict[str, Any]) -> ConcertFields | None:
 
 
 def _llm_fields(raw: dict[str, Any]) -> ConcertFields | None:
-    """Concert fields from an LLM-extracted mention (composer_extract writes a
-    normalized, source-independent payload marked ``_source: "llm"``)."""
+    """Concert fields from an LLM-extracted mention (the since-removed
+    composer_extract wrote a normalized payload marked ``_source: "llm"``)."""
     key = raw.get("concert_key")
     if not key:
         return None

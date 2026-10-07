@@ -9,7 +9,7 @@ for the reason boosey's is — entity dedup keys on the label alone.
 What this source adds over boosey is instrumentation *in detail*: a part-by-part
 list with counts and doublings ("Flute (2) (Piccolo flute), Horn (4), …"), read
 by :mod:`.instrumentation`. It lands three ways, the convention of
-:mod:`composer_extract.scoring`:
+:mod:`composer_schema.instrumentation`:
 
 - ``written_for`` edges: what the work is *for*, from the "Scoring" field;
 - ``includes_instrument`` edges: every instrument in the detail list;

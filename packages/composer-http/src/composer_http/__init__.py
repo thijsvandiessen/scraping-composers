@@ -1,20 +1,14 @@
 """Polite HTTP plumbing shared by every network-facing package.
 
-Two things belong here because both the per-source adapters
-(:mod:`composer_scrapers`) and the generic crawler (:mod:`composer_crawler`)
-need them, and neither package depends on the other:
+Two things every per-source adapter (:mod:`composer_scrapers`) needs:
 
 * the **contact identity** advertised to the sites we fetch — a User-Agent
   naming a reachable human, which is the whole of politeness as far as those
   sites can see;
 * **retrying a request**, since every API here rate-limits or flakes eventually.
 
-The crawler only uses the identity half (crawl4ai does its own fetching,
-retrying and rate limiting); the adapters use all of it.
-
-:mod:`composer_http.pages` adds a third thing that only the adapters need: a
-mirror of pages already fetched, for the sources that spend one request per
-record. :mod:`composer_http.session` puts all three together as
+:mod:`composer_http.pages` adds a third: a mirror of pages already fetched, for
+the sources that spend one request per record. :mod:`composer_http.session` puts all three together as
 :class:`SourceSession`, the one way an adapter talks to the network.
 """
 

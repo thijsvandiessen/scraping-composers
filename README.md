@@ -11,10 +11,6 @@ ingest run produced it.
 ```sh
 uv sync
 
-# the generic crawler (composer-ingest crawl) renders pages with crawl4ai in a
-# headless browser; install its Chromium once after syncing
-uv run crawl4ai-setup
-
 # scrapers identify themselves (User-Agent) to the sites they crawl; a
 # reachable contact email is required before fetching
 export SCRAPER_CONTACT_EMAIL="you@example.com"
@@ -35,34 +31,10 @@ uv run composer-ingest fetch imslp --max-pages 1
 uv run composer-ingest fetch classicalmusiconline --max-pages 5
 uv run composer-ingest process classicalmusiconline
 
-# extract concerts + performers from crawled pages with a local Ollama model:
-# crawl a site, run the model over each page's markdown (stored at crawl time),
-# then process the extracted docs like any other snapshot. Needs Ollama running
-# (e.g. `ollama pull qwen2.5`); set OLLAMA_MODEL/OLLAMA_BASE_URL to override.
-# The same crawl → extract steps are buttons on the dashboard's Crawls page.
-uv run composer-ingest crawl lso
-uv run composer-ingest extract lso                       # → work-mention + person docs; prints run_id
-uv run composer-ingest process lso --run-id <run_id>     # load the extract snapshot
-uv run composer-ingest derive-concerts                   # group the mentions into concerts
-
-# re-extracting a crawl only pays for pages whose text actually changed: model
-# answers are cached (see "Not analysing the same page twice" below)
-uv run composer-ingest extract lso --no-cache            # force every page back through the model
-
-# extract-all: LLM-extract every loadable crawl snapshot of every crawl-config
-# source in one call — every past crawl run, not just the latest — instead of
-# looping `extract <config> --crawl-run-id <id>` by hand. Best-effort: one run
-# failing doesn't stop the rest of the batch, and it prints which (source, run)
-# pairs failed. Accepts the same --provider/--model/--no-cache/--no-ledger flags
-# as `extract`, applied to every run.
-uv run composer-ingest extract-all
-
-# crawl and extract are slow and unattended, so they narrate themselves on stderr:
-# discovery, a periodic page count, and what each run dropped. DEBUG adds a line
-# per crawled page, per markdown chunk and per model call (with its latency and
-# token counts). Global flags come before the subcommand.
-uv run composer-ingest -v crawl lso              # DEBUG, crawl4ai and ollama included
-uv run composer-ingest --log-level warning run lso
+# fetches are slow and unattended, so they narrate themselves on stderr. Global
+# flags come before the subcommand.
+uv run composer-ingest -v fetch imslp            # DEBUG, third-party libraries included
+uv run composer-ingest --log-level warning fetch imslp
 # LOG_LEVEL in .env sets the default for the CLI and the admin API alike
 
 # inspect the dataset and the collection log
@@ -200,48 +172,6 @@ are dropped.
 The defaults produce roughly a thousand elements, which Kumu opens comfortably;
 `--limit 0` exports every performer and is a good deal more than it enjoys.
 
-### Not analysing the same page twice
-
-A crawl writes a whole new snapshot every run, but most of a site is the same text
-as last time. Re-extracting it used to re-ask the model about every page — hours of
-GPU time to recompute answers it had already given. Model answers are therefore
-cached in `extract-cache.db` (`EXTRACT_CACHE_PATH`), so an `extract` only pays for
-pages whose text actually changed.
-
-The key is a SHA-256 of the **whole request**, not of the page: the model, the
-system prompt, the user prompt (which folds in the page markdown *and* its
-title/description metadata), the JSON schema demanded of the answer, and the
-generation options. Anything that could change the answer changes the key — so
-editing the prompts in `composer_extract/prompt.py`, or pointing `OLLAMA_MODEL` at
-a different model, re-asks every page by itself. There is no version constant to
-remember to bump, which is the failure mode that makes a prompt improvement look
-like it did nothing.
-
-Only answers that validate are stored, so the truncated JSON that
-`composer_extract/resilience.py` exists to survive is never cached; empty answers
-*are* cached, since "this page has no concert on it" is the common case and would
-otherwise be recomputed forever. The cache is an optimization and never a reason to
-fail — an unreachable or damaged database degrades to "not cached" and is logged.
-
-```sh
-uv run composer-ingest extract lso            # prints e.g. "412 cached, 38 asked (92% of calls saved)"
-uv run composer-ingest extract lso --no-cache # bypass it for one run
-rm extract-cache.db                           # the hard reset
-sqlite3 extract-cache.db "select model, schema_name, count(*) from extraction_cache group by 1, 2"
-```
-
-Crawling cannot skip the fetch itself: the markdown only exists once crawl4ai has
-rendered the page in its headless browser, and crawl4ai's request headers are
-browser-global, so there is no seam for a per-URL `If-None-Match`. (ETags are
-captured in each record's `headers` where a site sends them, but coverage across
-the configured sources is too sparse to build on.) What the crawl does instead is
-stamp every page with `content_sha256` and compare it against the previous
-snapshot, so the closing tally reports how much of a re-crawl was worth doing:
-
-```
-crawl 'lso' finished in 812s: 450 pages, 0 skipped, 2 without markdown, 412 unchanged
-```
-
 ### Rebuilding silver
 
 Interpretation (entity resolution, work matching) is applied when a record is
@@ -256,10 +186,10 @@ uv run composer-ingest rebuild-silver   # bucket → composers.db (atomic swap)
 What gets replayed is **every source the bucket has data for, and every one of
 its loadable document snapshots** — the same union `process` loads, not just
 the newest run. The source list comes from the bucket rather than the scraper
-registry, so the crawl-config sources count too: they have no adapter, but the
-`extract` step writes their LLM-derived documents in the same format a scraper
-writes, and they are the only source of recordings. A source that has been
-crawled but not yet extracted has no document snapshot and is skipped.
+registry, so a source whose adapter has since been removed is still replayed.
+That includes any LLM-extracted snapshots the retired crawl → extract pipeline
+wrote: delete their directories from the bucket to keep them out. Raw
+crawled-page snapshots are never loaded.
 
 Human review decisions survive the rebuild: accepted/rejected person pairs
 carry over directly (entity ids are deterministic), and manual work matches
@@ -407,13 +337,12 @@ The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
 - `POST /admin/v1/snapshots/{source}/{snapshot_id}/abandon` — give up on a snapshot stuck on `running`
 - `GET  /admin/v1/runs` / `GET /admin/v1/runs/{run_id}` — load history and status
 
-A fetch or crawl that is killed outright never finalizes its manifest, so it
+A fetch that is killed outright never finalizes its manifest, so it
 stays `running` for good: the dashboard keeps showing it as live and no new run
 for that source can start. **Abandon** is the way out — it marks the snapshot
 failed and corrects its record count to what is on disk, deleting nothing (a
-crawl streams its pages to the bucket as it goes, so an interrupted one keeps
-everything it had fetched). The Crawls page grows an **Abandon** button on any
-row whose last snapshot is `running`.
+fetch streams its records to the bucket as it goes, so an interrupted one keeps
+everything it had fetched).
 
 Fetch status lives in the snapshot's manifest on disk; loads are recorded in
 `ingest_runs` (the same log the CLI `runs` command shows). `ADMIN_API_KEY` is
@@ -716,12 +645,10 @@ Libraries under `packages/` (each depends only on the tiers below it):
 - `composer-models` — the ORM schema shared by the silver and gold DBs, engine helpers, and the
   dedup keys / seeded entity UUIDs that define entity identity
 - `composer-http` — the polite User-Agent (contact identity) and retrying HTTP helpers, shared by
-  `composer-scrapers` and `composer-crawler`, plus the `SourceSession` and page mirror the
+  `composer-scrapers`, plus the `SourceSession` and page mirror the
   scrapers fetch through
 - `composer-bronze` — the raw NDJSON bucket and fetch orchestration
 - `composer-scrapers` — the per-source adapters and `REGISTRY`
-- `composer-crawler` — the generic config-driven crawl4ai crawler, into the same bucket
-- `composer-extract` — local-LLM (Ollama) extraction of concerts/recordings from crawled pages
 - `composer-warehouse` — the silver staging DB: ingestion and person/work matching
 - `composer-gold` — promotion of the staging DB into a curated copy
 
@@ -740,8 +667,6 @@ uv run --directory packages/composer-models pytest
 uv run --directory packages/composer-http pytest
 uv run --directory packages/composer-bronze pytest
 uv run --directory packages/composer-scrapers pytest
-uv run --directory packages/composer-crawler pytest
-uv run --directory packages/composer-extract pytest
 uv run --directory packages/composer-warehouse pytest
 uv run --directory packages/composer-gold pytest
 uv run --directory apps/consumer-api pytest
@@ -1049,7 +974,7 @@ Basso continuo (Violoncello, Organ)
 ```
 
 Names resolve through the same `composer_schema.instrumentation` table the
-`claims` extractor uses, so "Violoncello" here and "Cello" elsewhere are one
+other publisher adapters use, so "Violoncello" here and "Cello" elsewhere are one
 entity; ~96% of entries resolve, and what does not is kept verbatim under
 `raw["instrumentation"]["unmatched"]` rather than guessed. Counts stay in `raw`,
 as the shorthand's do. About a sixth of the catalogue states *only* the
@@ -1115,14 +1040,10 @@ forces: "Violin Concertos" is read as violin and orchestra, while "Chamber music
 with winds" names no scoring and is counted in the fetch log's `scorings
 unrecognised`.
 
-## Publisher catalogues via the crawler
+## Publisher catalogues: scoring and editions
 
-`boosey`, `baerenreiter` and `henle` are hand-written adapters for one publisher each.
-Every other publisher's catalogue is reachable with the generic crawler and the `claims` extract kind,
-with no code at all — which is what `claims` is for: it records whatever a page
-states, so a site nobody wrote a parser for still contributes.
-
-A sheet-music page states two things at once, and both land on the work:
+`boosey`, `baerenreiter` and `henle` are hand-written adapters for one publisher
+each. A sheet-music page states two things at once, and both land on the work:
 
 - facts about the piece — `written_for`, `includes_instrument`, `in_key`,
   `catalogue_number`, `composed_in`, `duration_minutes`;
@@ -1160,16 +1081,8 @@ Beethoven: Violin Sonata no. 5  --orchestration--> "Violine und Klavier"   (lite
 ```
 
 Nothing is guessed. A phrase no category is recognised in keeps its literal and is
-*counted*, and the extract run's log names the commonest misses:
-
-```
-claims: 412 pages, 480 chunks, 0 retried, 0 failed, 3106 claims
-  (new predicates: plate_number(88); unrecognised scoring: 12 solo voices(31), …)
-```
-
-Those two lists are the review queue: fold a recurring predicate into
-`vocabulary.py`'s `ALIASES` and a recurring scoring phrase into
-`instrumentation.py`'s `CATEGORIES`, and the next run curates it.
+*counted* in the fetch log; fold a recurring scoring phrase into
+`instrumentation.py`'s `CATEGORIES` and the next run curates it.
 
 ### Orchestral shorthand
 
@@ -1220,34 +1133,3 @@ ensemble it was never written for: a shorthand must name strings **and** carry a
 least one four-count section. Prose never does — it always names an instrument
 after a count — so `flute, 2 oboes, …, strings` stays on the prose path and is
 recognised as nothing rather than as a work for flute.
-
-### Crawl recipes
-
-A recipe goes in via the dashboard's **New crawl** form (or `PUT
-/admin/v1/crawls/<name>`) rather than `CRAWL_REGISTRY` — a code-registered config
-wins over the stored one and is read-only in the dashboard, so tuning an allow
-pattern would mean a commit each time.
-
-Henle and Bärenreiter have no recipe: a crawl of either stored next to nothing
-(Bärenreiter's pages render client-side; Henle's facts sit in shop markup the
-`claims` prompt did not read), so each has an adapter of its own (see above).
-
-Two things to check before a wide run:
-
-- **Facet URLs are often not crawlable.** Search and filter paths are usually
-  absent from `sitemap.xml` and frequently `Disallow`ed in `robots.txt`;
-  `respect_robots` defaults to on, so those pages will simply be skipped. Read
-  the site's `robots.txt` first, and fall back to sitemap-driven detail pages if
-  the facets are excluded — the detail pages state the scoring themselves, so the
-  facet listings are a convenience, not a requirement.
-- **These are commercial catalogues.** Keep the request delay polite and check
-  the site's terms of use before running anything at scale.
-
-### Enabling this on an existing crawl costs one re-extract
-
-The `claims` system prompt is part of both the answer-cache key and the
-extraction ledger's fingerprint (see [Not analysing the same page
-twice](#not-analysing-the-same-page-twice)), so widening it invalidates every
-cached `claims` answer: the next `extract` run on a crawl with `claims` enabled
-sends every page back through the model once. `concerts` and `recordings` are
-unaffected — their prompts did not change, so their caches stay warm.

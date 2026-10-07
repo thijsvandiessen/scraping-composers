@@ -43,9 +43,9 @@ LOADABLE_STATUSES = ("completed", "unknown")
 EXPLICITLY_LOADABLE_STATUSES = LOADABLE_STATUSES + ("failed",)
 
 # Record ``_type`` values that make a snapshot loadable into the warehouse.
-# A crawl source's dir mixes these "documents" snapshots (written by scrape or
-# the LLM ``extract`` step) with raw "pages" snapshots (``_type: "crawl"``);
-# only the former can be ingested — see ``Snapshot.kind``.
+# A bucket may still hold raw "pages" snapshots (``_type: "crawl"``) written by
+# the since-removed crawler; only "documents" snapshots can be ingested — see
+# ``Snapshot.kind``.
 DOCUMENT_RECORD_TYPES = frozenset({"entity", "work_mention"})
 
 
@@ -118,7 +118,7 @@ class Snapshot:
 
     manifest: SnapshotManifest
     size_bytes: int
-    kind: str  # "documents" (loadable) | "pages" (raw crawl, extract first)
+    kind: str  # "documents" (loadable) | "pages" (retired crawler output, never loadable)
 
 
 class Bucket(Protocol):
@@ -156,7 +156,7 @@ class LocalBucket:
             for record in records:
                 fh.write(json.dumps(record, ensure_ascii=False))
                 fh.write("\n")
-                # *records* is usually a generator driving a live fetch/crawl; flush
+                # *records* is usually a generator driving a live fetch; flush
                 # per record so a run killed outright doesn't lose a buffered one.
                 fh.flush()
 
@@ -190,8 +190,8 @@ class LocalBucket:
     def list_sources(self) -> list[str]:
         """Every source with data in the bucket (each a top-level dir), sorted.
 
-        Enumerating the bucket itself — rather than a registry — surfaces crawl-config
-        sources and even sources whose config was later deleted.
+        Enumerating the bucket itself — rather than a registry — surfaces sources
+        whose adapter was later removed.
         """
         if not self.root.is_dir():
             return []
@@ -247,32 +247,6 @@ class LocalBucket:
         return snapshots
 
 
-def latest_loadable_run_id(bucket: Bucket, source: str) -> str | None:
-    """The most recent snapshot of *source* worth reading, or None if there is none.
-
-    Skips fetches still running or crashed, so callers defaulting to "the latest
-    snapshot" never pick up a half-written one.
-    """
-    loadable = [
-        snapshot.manifest.run_id
-        for snapshot in bucket.list_snapshots(source)
-        if snapshot.manifest.status in LOADABLE_STATUSES
-    ]
-    return loadable[-1] if loadable else None
-
-
-def latest_document_run_id(bucket: Bucket, source: str) -> str | None:
-    """The most recent loadable *documents* snapshot of *source*, or None. Like
-    :func:`latest_loadable_run_id` but skips raw-page crawl snapshots, so a crawl
-    re-run after an extract never shadows the extracted documents."""
-    documents = [
-        snapshot.manifest.run_id
-        for snapshot in bucket.list_snapshots(source)
-        if snapshot.manifest.status in LOADABLE_STATUSES and snapshot.kind == "documents"
-    ]
-    return documents[-1] if documents else None
-
-
 def _explicitly_loadable_run_ids(bucket: Bucket, source: str, kind: str) -> list[str]:
     """Every *kind* snapshot of *source* in :data:`EXPLICITLY_LOADABLE_STATUSES`, oldest to newest.
 
@@ -291,9 +265,3 @@ def _explicitly_loadable_run_ids(bucket: Bucket, source: str, kind: str) -> list
 def all_document_run_ids(bucket: Bucket, source: str) -> list[str]:
     """Every loadable *documents* snapshot of *source* — see :func:`_explicitly_loadable_run_ids`."""
     return _explicitly_loadable_run_ids(bucket, source, "documents")
-
-
-def all_page_run_ids(bucket: Bucket, source: str) -> list[str]:
-    """The extract step's input side of :func:`all_document_run_ids`: every loadable
-    raw-*pages* crawl snapshot of *source*."""
-    return _explicitly_loadable_run_ids(bucket, source, "pages")
