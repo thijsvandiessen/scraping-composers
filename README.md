@@ -1,10 +1,40 @@
 # composer-ingest
 
-Ingests classical composer data from IMSLP, Wikidata, Open Opus, Concertgebouw,
-NY Phil, Berlin Phil, and classical-music-online.net into a database, with full
-provenance: every record
-knows which source it came from, when it was first and last seen, and which
-ingest run produced it.
+Ingests classical composer, work, concert and recording data from 19 sources (see
+[Sources](#sources)) plus any site the generic crawler is pointed at, into a
+database, with full provenance: every record knows which source it came from, when
+it was first and last seen, and which ingest run produced it.
+
+## Sources
+
+Each source is an adapter in `packages/composer-scrapers/src/composer_scrapers/`,
+registered in `REGISTRY` under the name `composer-ingest fetch` takes.
+
+| Source | What it reads | Notes |
+| --- | --- | --- |
+| `imslp` | IMSLP people API | [imslp](docs/sources/imslp.md) |
+| `imslp_works` | IMSLP work catalogue — all of it | [imslp](docs/sources/imslp.md) |
+| `imslp_recordings` | IMSLP's commercial recordings of the catalogue | [imslp](docs/sources/imslp.md) |
+| `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | |
+| `openopus` | Open Opus work catalogue | |
+| `classicalmusiconline` | classical-music-online.net composer catalogue and works | |
+| `classicfm` | composer and artist name lists from classicfm.com | |
+| `concertgebouw_archive` | Concertgebouworkest concert archive | |
+| `rco` | Royal Concertgebouw Orchestra live calendar | |
+| `nyphil` | New York Philharmonic performance history (Kaggle dataset) | |
+| `berlinphil` | Berliner Philharmoniker Digital Concert Hall archive | |
+| `wienerphil` | Vienna Philharmonic concert archive | |
+| `laphil` | Los Angeles Philharmonic concert programmes | |
+| `roh` | Royal Opera House Collections performance database | [roh](docs/sources/roh.md) |
+| `decca` | Decca Classics recorded catalogue | |
+| `harmoniamundi` | harmonia mundi label catalogue | [harmoniamundi](docs/sources/harmoniamundi.md) |
+| `boosey` | Boosey & Hawkes work catalogue | [boosey](docs/sources/boosey.md) |
+| `baerenreiter` | Bärenreiter editions and instrumentation | [baerenreiter](docs/sources/baerenreiter.md) |
+| `henle` | G. Henle Urtext editions and difficulty | [henle](docs/sources/henle.md) |
+
+Sites without an adapter go through the generic crawler (`composer-ingest crawl`)
+and LLM extraction; how its `claims` kind turns publisher catalogues, scoring and
+orchestral shorthand into claims is in [docs/extract-claims.md](docs/extract-claims.md).
 
 ## Usage
 
@@ -517,7 +547,7 @@ uv run composer-ingest fetch imslp    # network → ./raw-data/imslp/<run_id>/re
 uv run composer-ingest process imslp  # disk → DB; latest run by default, --run-id to pick one
 ```
 
-The bucket (`scraper/bucket.py`; NDJSON per run under `BUCKET_PATH`, default
+The bucket (`composer_bronze/bucket.py`; NDJSON per run under `BUCKET_PATH`, default
 `./raw-data`) is the only way data enters the database: after an ETL change you
 can re-process a snapshot without hitting the source again, and `LocalBucket`
 can be swapped for an S3 implementation without touching callers.
@@ -535,15 +565,13 @@ provenance layer. This is the silver staging schema: it records what sources
 say, verbatim, plus the matching passes over it; curation and conflict
 resolution happen downstream when data is promoted into gold.
 
-- **`sources`** — where data comes from (`imslp`, `imslp_works`,
-  `imslp_recordings`, `wikidata`, `openopus`, `concertgebouw`, `nyphil`,
-  `berlinphil`, `wienerphil`, `laphil`, `decca`, `harmoniamundi`, `roh`,
-  `classicalmusiconline`, `boosey`, `baerenreiter`, `henle`, ...).
+- **`sources`** — where data comes from: one row per [source](#sources) or crawl
+  config.
 - **`ingest_runs`** — the collection log: one row per ingest, with source,
   timestamps, status, and seen/new counts.
 - **`entity_records`** — raw records per source, unique on
   `(source, external_id)`. Stores the original payload as JSON plus
-  `first_seen`/`last_seen` timestamps and run ids. Re-ingesting is idempotent.
+  `first_seen_at`/`last_seen_at` timestamps and run ids. Re-ingesting is idempotent.
 - **`entities`** — canonical, deduplicated nodes. `kind` says what a node is:
   `person`, `profession`, `period`, `genre`, `place`, `work`, `ensemble`,
   `publisher`, `instrumentation` (an open set — `kind` is a plain string column,
@@ -721,7 +749,8 @@ Libraries under `packages/` (each depends only on the tiers below it):
 - `composer-bronze` — the raw NDJSON bucket and fetch orchestration
 - `composer-scrapers` — the per-source adapters and `REGISTRY`
 - `composer-crawler` — the generic config-driven crawl4ai crawler, into the same bucket
-- `composer-extract` — local-LLM (Ollama) extraction of concerts/recordings from crawled pages
+- `composer-extract` — LLM extraction (local Ollama or hosted Gemini) of concerts, recordings and
+  claims from crawled pages
 - `composer-warehouse` — the silver staging DB: ingestion and person/work matching
 - `composer-gold` — promotion of the staging DB into a curated copy
 
@@ -735,6 +764,7 @@ Apps under `apps/`:
 ```sh
 # tests run per member (each owns its pytest config; the Django settings stay
 # scoped to the dashboard) — mock sources, in-memory SQLite, no network:
+uv run --directory packages/composer-config pytest
 uv run --directory packages/composer-schema pytest
 uv run --directory packages/composer-models pytest
 uv run --directory packages/composer-http pytest
@@ -764,490 +794,3 @@ on the merge commit. Commit messages and PR titles must follow
 [Conventional Commits](https://www.conventionalcommits.org/) (`feat: ...`,
 `fix: ...`); `.github/workflows/conventional-commits.yml` enforces this on
 every pull request.
-
-## IMSLP API quirks
-
-The endpoint (`/imslpscripts/API.ISCR.php`) takes its parameters as a single
-slash-separated string, returns rows keyed by stringified indices alongside a
-`metadata` entry holding the pagination flag, and embeds names in MediaWiki
-category titles (`Category:Beethoven, Ludwig van`). `sources/imslp/`
-handles all of this, plus retries and a polite request delay.
-
-It serves two lists and IMSLP documents no others: `type=1` is the people, read
-by `imslp`, and `type=2` is the ~267,000 works, read by `imslp_works`. Both
-arrive in the shape above, so `imslp/fetch.py::worklist_page` is shared between
-the two sources rather than written twice.
-
-## IMSLP works: the whole catalogue, enriched in a second pass
-
-`imslp_works` used to be the one source here that discovered *who* to scrape
-from somewhere other than the source: it read gold's composer list, guessed
-each composer's IMSLP category URL, and crawled the work lists under it. That
-capped it at whoever gold already knew — 7,256 works.
-
-The `type=2` worklist replaces all of that. Every work IMSLP lists arrives in
-~267 requests carrying its composer, title, IMSLP catalogue number and page id,
-so there is no category to resolve, no pagination to follow, and no scoping.
-
-The **detail pages are now a second pass** over that spine, and the split is the
-thing to understand before changing this source:
-
-- The bulk row alone produces both documents and the `composed_by` /
-  `catalogue_number` claims. A work is reported whether or not anyone read its
-  page.
-- The page adds `has_scoring`, `has_key`, `has_genre` and `composed_in`. At one
-  request per work, sweeping all 267k is tens of hours, so `--max-pages` bounds
-  it — and bounds *only* it. `raw["enriched"]` records whether the page was
-  actually read, which is what distinguishes a work with no stated scoring from
-  one nobody has looked at yet.
-
-Detail pages come from `action=parse&prop=text`, not `/wiki/<Title>`: the
-infobox is field-for-field identical in both (verified over six random works),
-the parser output is 6.2KB against 13.8KB, and `imslp_recordings` requests the
-same pages at the same URL — so the two share one `PageCache` mirror and
-whichever sweep runs second gets the overlap free. The one thing parser output
-lacks is a `<title>` tag, which is why `parse_work` takes the title as an
-argument rather than reading it off the page.
-
-`imslp_recordings` uses the *other* IMSLP API, the wiki's own `api.php`, and
-that one has quirks of its own. It runs MediaWiki 1.18, so continuation comes
-back under `query-continue` rather than the modern `continue`, an unknown page
-id answers 200 with an `{"error": ...}` body rather than 404, and `action=parse`
-takes one page per call — there is no batching to be had, and the IMSLP
-extensions register no API action of their own.
-
-## IMSLP commercial recordings
-
-`imslp_recordings` reads `Category:Pages with commercial recordings` — 26,933
-work pages naming the albums each work appears on, the tracks of it on each, and
-everyone credited. It is the cheapest source of *credits* here, which is what
-gold's person selection actually counts: a `recording_participants` row that
-resolved to an entity is evidence someone played, where appearing in a source's
-artist index is not.
-
-Two things about it are worth knowing before changing it:
-
-- **The data is not in the HTML you can see.** The "Commercial 💿" tab renders
-  client-side from a `JGCommRec` JS global — but that global sits inside the
-  *parser output*, so `action=parse&prop=text` serves it at 6.2KB against 13.8KB
-  for the rendered page. It is not in the wikitext; `prop=revisions` gets you
-  nothing.
-- **Pages are addressed by id.** `list=categorymembers` returns a `pageid`
-  beside every title and `action=parse` takes one, which is how the titles in
-  this category (`'E spingole frangese!`, `1.X.1905 (Janáček, Leoš)`) stay out
-  of a URL. The response names the page back, so the work title and its
-  `(Surname, Given)` composer suffix come from the API rather than the listing.
-
-A full sweep is ~27k calls at one per second — hours, so it goes through
-`composer_http.PageCache` and an interrupted run resumes where it stopped.
-
-## harmonia mundi: sitemaps, because the REST API is off limits
-
-`harmoniamundi` replaced a crawl4ai + LLM config over the same site. The crawl
-produced 985 recording mentions of which every one had a null release date and
-a null catalogue number — both printed on every album page — plus invented roles
-(a baritone as `soprano`), `record_key`s pointing at artist pages so no work
-ever folded into a release, and album pages read as *concerts*, one dated 1907.
-
-The site is WordPress with a hand-filled template, so every one of those fields
-is in a named class: `div.feature.ref` is the catalogue number,
-`time.release_date` the release month, `div.feature.cd_number` the *format*
-(`"1 CD"`, `"Digital"` — not a disc count), and `div.album_humans` lists each
-person with the role they were credited under and a link to their page when they
-have one. A person becomes a composer here only because the label filed them
-under Composers.
-
-Being WordPress, it also answers `/wp-json/wp/v2/albums` with the whole post
-list — a far cheaper enumerator than the sitemaps, and **`Disallow`ed**: the
-`User-agent: *` group is `Allow: /` with four exceptions and `/wp-json` is one
-of them. So enumeration goes through `sitemap_index.xml`, which is allowed and
-just as complete (1752 album, 104 artist and 129 composer pages, matching the
-site's own totals), and every field is read from the rendered page. Note also
-`Content-Signal: ai-train=no, use=reference` — a catalogue index is reference
-use, and this trains nothing.
-
-One field is genuinely free text: the "Contents" tracklist, a rich-text box
-whose conventions have drifted across thirty years of releases. It is read from
-the two signals that hold across the catalogue — life dates in brackets open a
-composer, a leading bullet marks a track — and `<strong>` is deliberately
-ignored, because some albums bold every track and others bold the work. The
-verbatim text rides along in every mention's `raw`, so a better parse can be
-derived later without re-fetching 2000 pages.
-
-## Royal Opera House: the composer is three levels above the performance
-
-`roh` reads the Covent Garden performance database — every opera, ballet and
-concert given at the Royal Opera House since the 1730s. It is the deepest
-performance archive here and the only one reaching back to the eighteenth
-century.
-
-**The site's own search is the wrong way in.**
-`SearchResults.aspx?searchtype=performance&genre=Opera` paginates 5,690 opera
-performances twenty to a page (9,757 more for ballet), and neither the listing
-nor the performance page behind it names a composer. Carmen, 14 January 1947,
-records the company, the venue, the conductor, thirty-three cast members, the
-translator and the programme it was catalogued from; it does not record Bizet.
-Some 15,700 requests would yield no composers at all.
-
-The composer is on the **work** page, in a labelled row, three levels up:
-
-```
-work.aspx?work=551          Composer: Giuseppe Verdi      <- the only level with one
-  production.aspx?...=3775  Director: Elijah Moshinsky
-    performance.aspx?...    Conductor, cast, venue, date
-```
-
-So enumeration goes through `performanceindex.aspx` instead — 27 letter pages,
-no pagination, every work in the database with its genre — and the sweep
-descends from there. That is **27 requests where the search needs 773** (285
-pages of opera results plus 488 of ballet), and it
-reaches every composer the archive holds. The index has 995 rows; 47 are
-cross-references, leaving **948 works — 577 ballets, 287 operas, 62 concert
-works** and a scatter of plays, poems and musicals. 926 of them name a composer,
-340 distinct.
-
-**A ballet's title is not a work by its composer.** "Adagio Hammerklavier" is
-Hans van Manen's; Beethoven wrote the *Piano Sonata No. 29 in B-flat, Op. 106*
-that the page names on the next row. So where a work page distinguishes a
-`Music title:` it — not the staged title — is what pairs with the composer;
-that is **661 of the 948**, so it is the common case, not an edge one. The index compounds the trap by printing one bracketed name after every
-title: the composer for an opera, the *choreographer* for a ballet, with nothing
-to say which. It is recorded and never read as a composer.
-
-Two more things the markup hides:
-
-- **The hierarchy is not strict.** Some performances hang off a work with no
-  production between them — Aida's two 1988 concert excerpts — under a separate
-  "Performances not linked to a production" table. A walk that only descends
-  through productions drops them and looks complete doing it.
-- **A production page never says which work it stages.** There is no link
-  upward and no work id in the markup, so a production is only ever read as a
-  child of the work that listed it.
-
-Some index rows are cross-reference stubs rather than works ("The Barber of
-Seville: see 'Il barbiere di Siviglia'"). Their wording varies too much to
-filter on — "see", "See also", ": see", "- See" — so they are recognised by what
-their page carries: nothing at all.
-
-A person becomes a composer here only because a work page filed them under
-`Composer`. Cast members get no profession at all — the cast column holds the
-*part*, not the discipline ("Don José", "Tavern Dancer", "Harpsichord
-continuo"), and a 1947 Carmen credits opera singers and ballet dancers in the
-same table.
-
-**Which rows name a person is an allowlist per level**, read off the pages
-rather than guessed, because the inverse rule ("anything unrecognised is a
-credit") files `Opera in four acts` as a human being the first time a new label
-appears. The staging tier proves the point twice over: a hundred sampled
-productions produced a dozen labels used exactly once (`Cloth designer`,
-`Incidental dances`, `Artistic Collaborator`), and two co-production partners
-are filed under labels that are the partner's *own name* — `Theater an der
-Wien, Vienna` as the `<th>`. Nothing is lost to an unrecognised label, since
-every non-credit row is kept as a field regardless; the adapter just logs what
-it did not recognise, which is how the lists grow. `Additional music: Ian Page
-(recitatives)` is the find that justifies reading the staging tier at all: a
-production can commission a composer the work page never names.
-
-`robots.txt` disallows only `/search/autocomplete*`, which this source does not
-touch, and asks `User-agent: *` for `Crawl-delay: 180` — three minutes, which
-over ~18,000 pages is three weeks for one sweep. The adapter uses **five
-seconds**, a deliberate departure recorded in `roh/fetch.py`; it is still ten
-times slower than the other HTML sources here. (~18,000 = 995 works, ~1,140
-productions and ~15,700 nights, measured over a 300-work sample and agreeing
-with the site's own search totals of 5,690 opera and 9,757 ballet performances
-— about 25 hours.) Every page goes through
-`composer_http.PageCache`, which is what makes a run of that length survivable:
-the tiers are drained in order, so every composer is known at ~1,000 pages of
-the ~18,000, and a run that dies at hour twenty resumes where it stopped.
-
-## Boosey & Hawkes work metadata
-
-`boosey` is the first source carrying *work* metadata — scoring, duration, year
-of composition — rather than concert programmes or people. It walks the
-publisher's catalogue in three hops (composer index → each composer's work list
-→ each work's detail page) and emits **two documents per work**, sharing the
-work's Boosey id:
-
-- a `WorkMentionDocument`, which the work matcher resolves to a canonical `works`
-  row, with everything the page stated kept in `raw`;
-- an `EntityDocument` of kind `work`, whose claims (`has_scoring`,
-  `has_duration`, `composed_in`, `composed_by`, `published_by`) make that
-  metadata queryable next to every other claim.
-
-Both are needed because the two land in different tables — `Entity(kind="work")`
-is not the same row as a `Work`, and nothing links them.
-
-```bash
-uv run composer-ingest fetch boosey --max-pages 5
-uv run composer-ingest process boosey
-uv run composer-ingest claims "Kerori" --kind work --source boosey
-```
-
-Two things to know before running it wide:
-
-- **Work entity labels are composer-qualified** ("Kerori (Walter Steffens)").
-  Entity dedup keys on the normalised label alone, so a bare title would merge
-  two composers' identically-named works into one entity and pool their claims.
-- **Parsing is label-driven, not markup-driven.** `boosey/works.py` flattens a
-  page to text lines and reads "Scoring", "Duration", "Year Composed" … off by
-  label, so it survives a redesign and skips labels it does not recognise. Add
-  aliases to `_LABELS` rather than writing new regexes. Discovery
-  (`boosey/catalogue.py`) keys only on the stable `/cr/music/<slug>/<id>` URL
-  shape; the id is the trailing integer, and the slug is decorative.
-
-## Bärenreiter catalogue: instrumentation in detail
-
-`baerenreiter` reads every edition Bärenreiter sells or hires: about 17,000
-products, of which ~13,000 are reached (see below for what is left out). It is
-shaped like `boosey` — a work mention plus a composer-qualified work entity per
-edition — and adds what boosey's pages do not state: the instrumentation **part
-by part**, with counts and doublings.
-
-The site is a client-rendered single-page app, so its HTML is an empty shell for
-every product (the reason an earlier generic crawl of it stored 34,719 empty
-pages). The data comes from the JSON API the page itself calls, which needs no
-authentication:
-
-| | |
-| --- | --- |
-| `/api/sitemap/products_en.xml` | every product id — the inventory |
-| `/api/bv/product/{id}?lang=en` | one product, every field its page shows |
-
-The shop's search API is not an inventory: it answers HTTP 500 past the 10,000th
-hit and omits products hidden from search, so the sweep is one request per
-sitemap id, mirrored through the page cache (≈3 hours the first time, free after).
-
-```bash
-uv run composer-ingest fetch baerenreiter --max-pages 50
-uv run composer-ingest process baerenreiter
-```
-
-The API's field names are the publisher's German internals: `art` (*Artikel*, a
-shop product) plus an abbreviation — `artAuCompos` composer, `artTiMain` title,
-and the `artBstz…` (*Besetzung*, scoring) family. `baerenreiter/products.py` is
-the one place that maps them to the labels the page shows:
-
-| API field | Page label | Lands as |
-| --- | --- | --- |
-| `artBstzMainDispl` | Scoring | `written_for` edges, `has_scoring` literal |
-| `artBstzDispl` | Instrumentation in detail | `includes_instrument` edges, `raw["instrumentation"]["parts"]` |
-| `artBstzOrchNum` | Instrumentation | shorthand; read when there is no detail list |
-| `artAuCompos` / `artAuText` / `artAuArr` | Composer / Librettist / Arranger | `composed_by` / `text_by` / `arranged_by` |
-| `orderId`, `artPrTyDispl`, `artISMN` | Edition number, Product format, ISMN | `catalogue_number`, `edition_type`, `ismn` |
-| `artTiDatOr`, `artLength` | Date of composition, Duration | `composed_in`, `has_duration` (minutes) |
-| `state` | Availability | `raw["availability"]` |
-
-The detail list is read entry by entry (`baerenreiter/instrumentation.py`); a
-parenthetical is a count, a choir's voicing, or the instruments a player doubles
-on (or that realise a continuo), told apart by what it contains:
-
-```
-Flute (2) (Piccolo flute)  ->  {"instrument": "flute", "count": 2, "also": ["piccolo"]}
-Mixed choir (SATB) (2)     ->  {"instrument": "mixed choir", "count": 2, "voicing": "SATB"}
-Basso continuo (Violoncello, Organ)
-                           ->  {"instrument": "basso continuo", "also": ["cello", "organ"]}
-```
-
-Names resolve through the same `composer_schema.instrumentation` table the
-`claims` extractor uses, so "Violoncello" here and "Cello" elsewhere are one
-entity; ~96% of entries resolve, and what does not is kept verbatim under
-`raw["instrumentation"]["unmatched"]` rather than guessed. Counts stay in `raw`,
-as the shorthand's do. About a sixth of the catalogue states *only* the
-shorthand, which is read the same way as a publisher shorthand (including
-Bärenreiter's German abbreviations and a sized string section, `str (4.4.3.2.1)`).
-
-Left out on purpose:
-
-- **Digital twins.** `BA05163D` is `BA05163` as a PDF — same edition, same
-  contents — so it is not fetched when the print product is listed; its id is
-  recorded on the print edition as `digital_edition_id`. Digital-only editions
-  are kept.
-- **Books, magazines and media** (`NON_MUSIC_TYPES`): their contents are chapters.
-
-An anthology's items are works of their own: each item with a composer becomes a
-work mention (`<product>#<n>`), and the anthology itself is only an entity.
-
-## Henle catalogue: difficulty per work
-
-`henle` reads every edition G. Henle sells: the 2,241 products in henle.de's
-English sitemap. It is shaped like `baerenreiter` (a work mention plus a
-composer-qualified work entity) and adds what no other source here states: Henle's
-**level of difficulty**. Henle grades every piano, violin, flute, cello and
-clarinet work from 1 (easy) to 9 (difficult), and grades it *per work*, so a
-volume of nine Mozart sonatas says which one is the hardest.
-
-The shop is Shopware, rendered on the server; its `/api/` is disallowed in
-`robots.txt`, so the product page itself is the record. One request per product,
-mirrored through the page cache (≈40 minutes the first time, free after; ~55KB
-per page gzipped).
-
-```bash
-uv run composer-ingest fetch henle --max-pages 20
-uv run composer-ingest process henle
-uv run composer-ingest claims "Impromptu c minor op. 90,1 D 899" --kind work --source henle
-```
-
-`henle/products.py` reads the page by its class names:
-
-| Page | Markup | Lands as |
-| --- | --- | --- |
-| Composer | `h2.product-detail-subtitle` | `composed_by` (an anthology's "Piano Music (Collection)" is not a person; its rows name their own composers) |
-| Scoring ("Piano solo", "String Quartets") | `.product-detail-properties-container` | `written_for` / `includes_instrument` edges, `has_scoring` literal |
-| Edition type ("Urtext Edition, paperbound") | `.product-detail-properties-container` | `edition_type` |
-| Contributors ("… (Editor)", "… (Fingering Piano)") | `.product-persons-contributors-row` | `edited_by`, `fingering_by`; other roles stay in `raw` |
-| HN number, ISMN, pages | `itemprop="sku"`, `itemprop="ISMN"`, `.product-detail-weight` | `catalogue_number`, `ismn`, `page_count` |
-| Contents: title, grade 1–9, band, ABRSM grade | `.mws-henle-work` rows | one work each, `difficulty_level`; band and ABRSM in `raw` |
-
-What a product becomes depends on its contents table:
-
-- **Several rows** (a volume): each row is a work (`HN-1#3`) with its own grade
-  and a `part_of` edge to the volume, which is only an entity (`HN-1`) carrying the
-  edition facts. A bold row is a set ("4 Impromptus op. 90 D 899") whose pieces
-  follow as rows of their own; nothing in the markup says where the set ends, so
-  rows are not nested, and `raw["heading"]` marks the set.
-- **One row or none**: the edition is the work (`HN-659`), one mention and one
-  entity carrying every claim.
-
-Parts, study score and complete-edition volume are separate products (HN 741,
-HN 9741, …) and arrive as separate mentions of the same composer-qualified title;
-the matcher and entity dedup fold them. Henle's scoring names shelves as well as
-forces: "Violin Concertos" is read as violin and orchestra, while "Chamber music
-with winds" names no scoring and is counted in the fetch log's `scorings
-unrecognised`.
-
-## Publisher catalogues via the crawler
-
-`boosey`, `baerenreiter` and `henle` are hand-written adapters for one publisher each.
-Every other publisher's catalogue is reachable with the generic crawler and the `claims` extract kind,
-with no code at all — which is what `claims` is for: it records whatever a page
-states, so a site nobody wrote a parser for still contributes.
-
-A sheet-music page states two things at once, and both land on the work:
-
-- facts about the piece — `written_for`, `includes_instrument`, `in_key`,
-  `catalogue_number`, `composed_in`, `duration_minutes`;
-- facts about the printed edition of it — `published_by`, `edited_by`,
-  `fingering_by`, `edition_type`, `ismn`, `page_count`, `difficulty_level`.
-
-Edition facts are claims on the *work*, not on an "edition" entity of their own,
-so two editions of one piece merge. That is a deliberate trade: edition dedup is
-a problem in its own right and nothing downstream needs it solved yet.
-
-### Scoring is stored twice
-
-"Which works are for piano" is the question a publisher's catalogue is built to
-answer — Bärenreiter's own navigation offers *works for string orchestra* as a
-facet — and free text cannot answer it: the same scoring is written `for piano
-solo`, `Klavier zu vier Händen`, `Piano, 4 hands`. So the stated scoring is kept
-twice over:
-
-- verbatim, as an `orchestration` literal — what the page actually said;
-- folded onto canonical *scoring categories*, as one `written_for` claim each,
-  pointing at an `instrumentation` entity.
-
-The category, not the instrument, is the unit: `piano`, `string orchestra` and
-`violin and piano` are each one entity, because that is how the catalogues
-themselves are organised and because a string orchestra is not a list of
-instruments. A category that names instruments rather than an ensemble also emits
-them (`instrumentation.py`'s `CONTAINS`), so a violin sonata still answers "works
-for piano":
-
-```
-Beethoven: Violin Sonata no. 5  --orchestration--> "Violine und Klavier"   (literal)
-                                --written_for----> violin and piano        (instrumentation)
-                                --written_for----> violin                  (instrumentation)
-                                --written_for----> piano                   (instrumentation)
-```
-
-Nothing is guessed. A phrase no category is recognised in keeps its literal and is
-*counted*, and the extract run's log names the commonest misses:
-
-```
-claims: 412 pages, 480 chunks, 0 retried, 0 failed, 3106 claims
-  (new predicates: plate_number(88); unrecognised scoring: 12 solo voices(31), …)
-```
-
-Those two lists are the review queue: fold a recurring predicate into
-`vocabulary.py`'s `ALIASES` and a recurring scoring phrase into
-`instrumentation.py`'s `CATEGORIES`, and the next run curates it.
-
-### Orchestral shorthand
-
-An orchestral catalogue does not print prose. It prints a positional notation, in
-two dialects that say the same thing (`shorthand.py`):
-
-| | Beethoven's Fifth |
-| --- | --- |
-| Chester/Novello | `3223 / 2230 / timp.perc / str[8]` |
-| Boosey & Hawkes | `3.2.2.3 - 2.2.3.0 - timp - strings[6]` |
-| Bärenreiter | `2,2,2,2 – 2,2,3,0 – Pk,Schlg – Str` (German abbreviations) |
-
-The first two sections are *positional*: four counts standing for the four standing
-woodwind desks (flute, oboe, clarinet, bassoon) and the four brass ones (horn,
-trumpet, trombone, tuba), in score order. A parenthetical says how many of a desk's
-players double on something else — `3(pic)`, `4(2pic)`, `3(III=picc)`,
-`4(III,IV=picc)` and `Dcl(=Ebcl)` all occur — and `[N]` counts the string parts.
-
-A symphony is not "a work for flute" the way a sonata is a work for piano, so the
-two are different predicates:
-
-```
-Beethoven: Symphony No. 5  --orchestration-------> "3.2.2.3 - 2.2.3.0 - timp - strings[6]"
-                           --written_for---------> orchestra
-                           --includes_instrument-> flute, oboe, clarinet, bassoon,
-                                                   horn, trumpet, trombone,
-                                                   timpani, strings
-```
-
-Both point at the same `instrumentation` entities, so `piano` is one node whether a
-sonata is for it or a symphony contains it, and "everything involving a piano" is
-the union of the two predicates. The same split applies to a named ensemble:
-`string quartet` is what the work is `written_for`, and violin/viola/cello are what
-it `includes_instrument` (`instrumentation.py`'s `MEMBERS`).
-
-Player counts and the string-part number are structure rather than facts to
-compare, so they travel in the record's `raw` payload under `"scoring"` instead of
-becoming a claim each:
-
-```json
-{"instruments": ["flute", "oboe", "…"],
- "counts": {"flute": 3, "oboe": 2, "clarinet": 2, "bassoon": 3, "…": 1},
- "string_parts": 6}
-```
-
-Detection is deliberately strict, because a false positive files a work under an
-ensemble it was never written for: a shorthand must name strings **and** carry at
-least one four-count section. Prose never does — it always names an instrument
-after a count — so `flute, 2 oboes, …, strings` stays on the prose path and is
-recognised as nothing rather than as a work for flute.
-
-### Crawl recipes
-
-A recipe goes in via the dashboard's **New crawl** form (or `PUT
-/admin/v1/crawls/<name>`) rather than `CRAWL_REGISTRY` — a code-registered config
-wins over the stored one and is read-only in the dashboard, so tuning an allow
-pattern would mean a commit each time.
-
-Henle and Bärenreiter have no recipe: a crawl of either stored next to nothing
-(Bärenreiter's pages render client-side; Henle's facts sit in shop markup the
-`claims` prompt did not read), so each has an adapter of its own (see above).
-
-Two things to check before a wide run:
-
-- **Facet URLs are often not crawlable.** Search and filter paths are usually
-  absent from `sitemap.xml` and frequently `Disallow`ed in `robots.txt`;
-  `respect_robots` defaults to on, so those pages will simply be skipped. Read
-  the site's `robots.txt` first, and fall back to sitemap-driven detail pages if
-  the facets are excluded — the detail pages state the scoring themselves, so the
-  facet listings are a convenience, not a requirement.
-- **These are commercial catalogues.** Keep the request delay polite and check
-  the site's terms of use before running anything at scale.
-
-### Enabling this on an existing crawl costs one re-extract
-
-The `claims` system prompt is part of both the answer-cache key and the
-extraction ledger's fingerprint (see [Not analysing the same page
-twice](#not-analysing-the-same-page-twice)), so widening it invalidates every
-cached `claims` answer: the next `extract` run on a crawl with `claims` enabled
-sends every page back through the model once. `concerts` and `recordings` are
-unaffected — their prompts did not change, so their caches stay warm.
