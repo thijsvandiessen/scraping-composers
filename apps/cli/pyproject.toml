@@ -9,6 +9,8 @@ dependencies = [
     "composer-models",
     "composer-warehouse",
     "composer-gold",
+    "composer-graph",
+    "neo4j>=6.4.1",
     "python-dotenv>=1.2.4",
     "composer-config",
 ]

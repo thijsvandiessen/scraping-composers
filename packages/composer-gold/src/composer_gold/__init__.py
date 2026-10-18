@@ -36,6 +36,7 @@ from .promote import (
     promote,
     read_gold_manifest,
 )
+from .queries import entity_sources, literal_claims, object_claims
 
 # Rule 3 threshold: keep entities referenced by at least this many distinct kept
 # persons. Defaults to 1, i.e. keep anything referenced at all.
@@ -55,9 +56,12 @@ __all__ = [
     "PromoteStats",
     "Rule1Config",
     "build_blueprint",
+    "entity_sources",
     "export_kumu",
     "gold_engine",
     "gold_target",
+    "literal_claims",
+    "object_claims",
     "promote",
     "read_gold_manifest",
 ]

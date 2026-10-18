@@ -10,6 +10,12 @@
 #   docker compose up -d postgres-gold
 #   export GOLD_DATABASE_URL=postgresql+psycopg://composers:composers@localhost:5434/composers_gold
 #   uv run composer-ingest promote
+#
+# And Neo4j, for exploring gold as a graph (Browser at http://localhost:7475,
+# user neo4j / password composers):
+#
+#   docker compose up -d neo4j
+#   uv run composer-ingest export-neo4j
 services:
   postgres:
     # Debian rather than alpine: glibc collation, which is what a hosted
@@ -53,6 +59,30 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  neo4j:
+    # Loaded from gold by `composer-ingest export-neo4j`, which replaces the
+    # whole graph each time — nothing here is a source of truth.
+    image: neo4j:2026.09-community
+    environment:
+      NEO4J_AUTH: neo4j/composers
+      # Graph Data Science, for similarity and community detection over the
+      # performer/composer network (gds.nodeSimilarity, gds.louvain, ...).
+      NEO4J_PLUGINS: '["graph-data-science"]'
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_memory_pagecache_size: 2G
+    ports:
+      # 7475/7688 on the host, not the defaults: Neo4j Desktop (or another
+      # project's container) usually already owns 7474/7687.
+      - "7475:7474"
+      - "7688:7687"
+    volumes:
+      - neo4jdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
 volumes:
   pgdata:
   pggold:
+  neo4jdata:

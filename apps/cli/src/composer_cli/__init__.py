@@ -12,10 +12,11 @@ from composer_gold import (
     DEFAULT_PERFORMER_LIMIT,
     DEFAULT_RULE1_CONFIG_PATH,
 )
+from composer_graph import DEFAULT_BATCH_SIZE
 from composer_scrapers import REGISTRY
 from composer_warehouse.persons import AUTO_THRESHOLD, MODEL_PATH
 
-from .export_cmds import cmd_export_kumu
+from .export_cmds import cmd_export_kumu, cmd_export_neo4j
 from .ingest_cmds import (
     cmd_derive_concerts,
     cmd_derive_recordings,
@@ -191,6 +192,27 @@ def _add_export_parsers(sub: _SubParsers) -> None:
         help="include the biographical claim edges (profession, birthplace, citizenship, genre, ...)",
     )
     p_kumu.set_defaults(func=cmd_export_kumu)
+
+    p_neo4j = sub.add_parser(
+        "export-neo4j",
+        help="replace a Neo4j database with the whole gold graph (entities, works, concerts, "
+        "recordings and the links between them)",
+    )
+    _add_gold_url_arg(p_neo4j)
+    p_neo4j.add_argument(
+        "--neo4j-url", default=settings.neo4j_url, help="bolt URL of the server (default: $NEO4J_URL)"
+    )
+    p_neo4j.add_argument("--neo4j-user", default=settings.neo4j_user, help="(default: $NEO4J_USER)")
+    p_neo4j.add_argument(
+        "--neo4j-password", default=settings.neo4j_password, help="(default: $NEO4J_PASSWORD)"
+    )
+    p_neo4j.add_argument(
+        "--database", default=None, help="the Neo4j database to replace (default: the server's default)"
+    )
+    p_neo4j.add_argument(
+        "--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="rows per write transaction"
+    )
+    p_neo4j.set_defaults(func=cmd_export_neo4j)
 
 
 def _add_person_parsers(sub: _SubParsers) -> None:

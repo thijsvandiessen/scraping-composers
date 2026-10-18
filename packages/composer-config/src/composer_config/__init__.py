@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     # just as silver_schema is by every rebuild.
     gold_schema: str = "gold"
     gold_min_referrers: int = 1
+    # The Neo4j server export-neo4j loads gold into (see docker-compose's neo4j).
+    neo4j_url: str = "bolt://localhost:7688"
+    neo4j_user: str = "neo4j"
+    neo4j_password: str = "composers"
     bucket_path: str = "./raw-data"
     scraper_contact_email: str | None = None
 
