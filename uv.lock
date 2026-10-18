@@ -10,6 +10,7 @@ members = [
     "composer-config",
     "composer-consumer-api",
     "composer-dashboard",
+    "composer-e2e",
     "composer-gold",
     "composer-http",
     "composer-models",
@@ -362,6 +363,25 @@ requires-dist = [
     { name = "django-unfold", specifier = ">=0.108.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
+]
+
+[[package]]
+name = "composer-e2e"
+version = "0.1.0"
+source = { editable = "tests/e2e" }
+dependencies = [
+    { name = "composer-cli" },
+    { name = "composer-consumer-api" },
+    { name = "composer-schema" },
+    { name = "composer-scrapers" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "composer-cli", editable = "apps/cli" },
+    { name = "composer-consumer-api", editable = "apps/consumer-api" },
+    { name = "composer-schema", editable = "packages/composer-schema" },
+    { name = "composer-scrapers", editable = "packages/composer-scrapers" },
 ]
 
 [[package]]

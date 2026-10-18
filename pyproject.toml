@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["packages/*", "apps/*"]
+members = ["packages/*", "apps/*", "tests/e2e"]
 # apps/frontend is a Node (Astro) app, not a Python project; keep it out of the
 # member glob or uv fails on the missing pyproject.toml.
 exclude = ["apps/frontend"]
@@ -31,7 +31,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["packages", "apps"]
+testpaths = ["packages", "apps", "tests/e2e"]
 # The dashboard's own pytest settings (pythonpath, Django settings module) only
 # apply when pytest's rootdir is apps/dashboard, as in per-member CI runs;
 # mirror them here so a workspace-root `uv run pytest` can import its tests too.
@@ -40,7 +40,7 @@ DJANGO_SETTINGS_MODULE = "config.settings"
 
 [tool.ruff]
 line-length = 110
-src = ["packages", "apps"]
+src = ["packages", "apps", "tests"]
 
 [tool.ruff.lint]
 # C90/PLR091 cap function complexity at ruff's default thresholds (spelled out below
@@ -60,7 +60,7 @@ max-statements = 50
 
 [tool.pyright]
 typeCheckingMode = "strict"
-include = ["packages", "apps"]
+include = ["packages", "apps", "tests/e2e"]
 # Each member ships a `src` (or Django project root) plus a `tests/` dir; list them as
 # extra import roots so files map to clean module names across the workspace.
 extraPaths = [
@@ -88,6 +88,8 @@ extraPaths = [
     "apps/cli/tests",
     "apps/dashboard",
     "apps/dashboard/tests",
+    "tests/e2e/src",
+    "tests/e2e/tests",
 ]
 # Trivial per-member conftests share the module name "conftest"; nothing to type-check there.
 exclude = ["**/conftest.py", "**/.venv", "**/__pycache__", "**/migrations/versions/**"]
