@@ -226,6 +226,8 @@ def composer_works(
             )
         ).all()
         for work_id, src_name, src_base, c_url, c_date, c_venue, r_url, r_date in proof_rows:
+            if work_id is None:  # excluded by the IN filter; narrows the nullable column for the type checker
+                continue
             bucket = proofs_by_work.setdefault(work_id, [])
             if len(bucket) >= WORK_PROOF_CAP:
                 continue

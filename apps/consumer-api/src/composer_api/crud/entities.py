@@ -21,7 +21,8 @@ from .common import INCOMING_CLAIMS_CAP, outgoing_claims
 
 
 def get_stats(db: Session) -> StatsOut:
-    def count(query: Select[tuple[int]]) -> int:
+    # SQLAlchemy 2.1 types a select by its columns (Select[*Ts]), not a row tuple
+    def count(query: Select[int]) -> int:
         return db.scalar(query) or 0
 
     entities_by_kind = dict(
