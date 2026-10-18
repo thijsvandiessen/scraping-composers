@@ -30,19 +30,18 @@ from pathlib import Path
 from typing import Any
 
 from composer_models import (
-    Claim,
     ConcertParticipant,
     ConcertWork,
     Entity,
-    EntityRecord,
     RawWorkMention,
     RecordingParticipant,
     RecordingWork,
-    Source,
     Work,
 )
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+
+from .queries import entity_sources, literal_claims, object_claims
 
 log = logging.getLogger(__name__)
 
@@ -192,68 +191,6 @@ def _performance_edges(session: Session) -> dict[tuple[uuid.UUID, uuid.UUID], in
     return dict(edges)
 
 
-def _object_claims(session: Session) -> dict[tuple[uuid.UUID, str, uuid.UUID], list[str]]:
-    """(subject, predicate, object) → the source names asserting it."""
-    rows = session.execute(
-        select(Claim.subject_id, Claim.predicate, Claim.object_id, Source.name)
-        .join(Source, Source.id == Claim.source_id)
-        .where(Claim.object_id.is_not(None))
-        .order_by(Claim.subject_id, Claim.predicate, Source.name)
-    ).tuples()
-    claims: dict[tuple[uuid.UUID, str, uuid.UUID], list[str]] = defaultdict(list)
-    for subject_id, predicate, object_id, source_name in rows:
-        assert object_id is not None
-        sources = claims[(subject_id, predicate, object_id)]
-        if source_name not in sources:
-            sources.append(source_name)
-    return dict(claims)
-
-
-def _literal_claims(session: Session) -> dict[uuid.UUID, dict[str, list[str]]]:
-    """subject → predicate → the distinct values sources gave it.
-
-    Sources disagree (two birth dates for the same person is routine), so the
-    values are kept in "most sources first" order and the caller picks.
-    """
-    wanted = set(_LITERAL_FIELDS) | set(_LITERAL_LISTS)
-    rows = session.execute(
-        select(Claim.subject_id, Claim.predicate, Claim.value, func.count())
-        .where(Claim.object_id.is_(None), Claim.value.is_not(None), Claim.predicate.in_(wanted))
-        .group_by(Claim.subject_id, Claim.predicate, Claim.value)
-    ).tuples()
-    tallies: dict[uuid.UUID, dict[str, Counter[str]]] = defaultdict(lambda: defaultdict(Counter))
-    for subject_id, predicate, value, count in rows:
-        assert value is not None
-        tallies[subject_id][predicate][value] += count
-    return {
-        subject_id: {
-            # Ties broken on the value itself so the export is reproducible.
-            predicate: [value for value, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
-            for predicate, counts in by_predicate.items()
-        }
-        for subject_id, by_predicate in tallies.items()
-    }
-
-
-def _entity_sources(session: Session) -> dict[uuid.UUID, tuple[list[str], str | None]]:
-    """entity → (source names that reported it, a URL one of them gave)."""
-    rows = session.execute(
-        select(EntityRecord.entity_id, Source.name, EntityRecord.url)
-        .join(Source, Source.id == EntityRecord.source_id)
-        .where(EntityRecord.entity_id.is_not(None))
-        .order_by(EntityRecord.entity_id, Source.name)
-    ).tuples()
-    names: dict[uuid.UUID, list[str]] = defaultdict(list)
-    urls: dict[uuid.UUID, str] = {}
-    for entity_id, source_name, url in rows:
-        assert entity_id is not None
-        if source_name not in names[entity_id]:
-            names[entity_id].append(source_name)
-        if url and entity_id not in urls:
-            urls[entity_id] = url
-    return {entity_id: (source_names, urls.get(entity_id)) for entity_id, source_names in names.items()}
-
-
 # --- selection -------------------------------------------------------------
 
 
@@ -333,7 +270,7 @@ def _fields(
     often the entity was credited."""
     fields: dict[str, Any] = {}
     for predicate, label in _LITERAL_FIELDS.items():
-        # Sources disagree; _literal_claims already ranked them, so take the
+        # Sources disagree; literal_claims already ranked them, so take the
         # value the most sources back.
         if values := literals.get(predicate):
             value = values[0]
@@ -433,7 +370,7 @@ def build_blueprint(session: Session, config: KumuConfig | None = None) -> Bluep
     peripheral: set[uuid.UUID] = set()
     if cfg.claims:
         for (subject_id, predicate, object_id), sources in sorted(
-            _object_claims(session).items(), key=lambda kv: (str(kv[0][0]), kv[0][1], str(kv[0][2]))
+            object_claims(session).items(), key=lambda kv: (str(kv[0][0]), kv[0][1], str(kv[0][2]))
         ):
             if subject_id not in core:
                 continue
@@ -449,8 +386,8 @@ def build_blueprint(session: Session, config: KumuConfig | None = None) -> Bluep
             claim_edges += 1
 
     connected = {conn["from"] for conn in connections} | {conn["to"] for conn in connections}
-    literals = _literal_claims(session)
-    provenance = _entity_sources(session)
+    literals = literal_claims(session, set(_LITERAL_FIELDS) | set(_LITERAL_LISTS))
+    provenance = entity_sources(session)
     rows = session.scalars(
         select(Entity).where(Entity.id.in_(core | peripheral)).order_by(Entity.kind, Entity.label)
     ).all()
