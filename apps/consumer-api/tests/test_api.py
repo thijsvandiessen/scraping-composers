@@ -790,9 +790,23 @@ def composer_works_client(promote_gold: PromoteGold) -> Iterator[TestClient]:
         name="imslp_works",
         base_url="https://imslp.org",
     )
+    # a catalogue that records the work's own page in the payload
+    catalogue = FakeSource(
+        records=(
+            perf_mention(
+                "cat:1",
+                "Don Juan",
+                "Richard Strauss",
+                {"title": "Don Juan", "url": "https://catalogue.example/work/1"},
+            ),
+        ),
+        name="catalogue",
+        base_url="https://catalogue.example",
+    )
     with factory() as s:
         ingest_source(s, berlinphil)
         ingest_source(s, imslp)
+        ingest_source(s, catalogue)
         derive_concerts(s)
         gold_factory = promote_gold(s)
     yield TestClient(create_app("test-gold-composer-works", lambda: gold_factory))
@@ -802,7 +816,7 @@ def test_composer_works_includes_concert_and_catalogue_proof(composer_works_clie
     composer_id = _person_id(composer_works_client, "Richard Strauss")
     data = composer_works_client.get(f"/v1/composers/{composer_id}/works").json()
     assert data["composer_id"] == composer_id
-    assert data["total"] == 2
+    assert data["total"] == 3
 
     by_title = {w["canonical_title"]: w for w in data["items"]}
 
@@ -820,6 +834,12 @@ def test_composer_works_includes_concert_and_catalogue_proof(composer_works_clie
     assert proof["source"] == "imslp_works"
     assert proof["source_url"] == "https://imslp.org"
     assert proof["date"] is None
+
+    # a catalogue-only proof links to the work's own page, not the homepage
+    don_juan = by_title["Don Juan"]
+    assert don_juan["proof"][0]["source_url"] == "https://catalogue.example/work/1"
+    work = composer_works_client.get(f"/v1/works/{don_juan['id']}").json()
+    assert work["proof"][0]["source_url"] == "https://catalogue.example/work/1"
 
 
 def test_composer_works_404_and_invalid_sort(composer_works_client: TestClient) -> None:

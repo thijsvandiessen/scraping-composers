@@ -12,7 +12,7 @@ Two kinds of edge make it in:
   composer. Weighted by how many performances of that composer's music the
   pairing accounts for, so Kumu can size or filter by it.
 - **claims** — the object-valued rows of ``claims`` (``has_profession``,
-  ``born_in``, ``citizen_of``, ``has_genre``, ``studied_with``, ...), collapsed
+  ``born_in``, ``citizen_of``, ``has_genre``, ``student_of``, ...), collapsed
   across the sources that assert them.
 
 Literal claims (``born_on``, ``program_count``, ...) are not edges; they become

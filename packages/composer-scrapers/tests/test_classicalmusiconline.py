@@ -190,6 +190,13 @@ def test_work_mention_without_production_link_gets_a_stable_id() -> None:
     assert first.raw["production_id"] is None
     assert first.external_id == second.external_id
     assert first.external_id != "1060"
+    assert first.raw["url"] is None
+
+
+def test_work_mention_without_production_link_points_at_the_composer_page() -> None:
+    composer_url = BASE_URL + "/en/composer/Arensky/249"
+    mention = iter_work_mentions(COMPOSER_PAGE, "Arensky, Anton", "249", BASE_URL, composer_url)[2]
+    assert mention.raw["url"] == composer_url
 
 
 def test_work_mentions_ignore_pages_without_a_works_table() -> None:

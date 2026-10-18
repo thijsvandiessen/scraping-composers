@@ -117,6 +117,25 @@ def test_claim_objects_are_deduplicated_entities(session: Session) -> None:
     }
 
 
+def test_a_claim_pinned_to_a_qid_lands_on_that_items_entity(session: Session) -> None:
+    """Brahms's student_of claim names Marxsen by QID, so it must point at the
+    entity Marxsen's own wikidata record created -- not mint a QID-less twin
+    that only the dedupe pass could (maybe) fold back."""
+    teacher = SourceClaim("student_of", "person", "Eduard Marxsen", object_wikidata_id="Q61658")
+    source = FakeSource(
+        records=(
+            person("Johannes Brahms", teacher, url="https://www.wikidata.org/wiki/Q7294"),
+            person("Eduard Marxsen", url="https://www.wikidata.org/wiki/Q61658"),
+        ),
+    )
+    ingest_source(session, source)
+
+    assert session.scalar(select(func.count()).select_from(Entity).where(Entity.kind == "person")) == 2
+    marxsen = session.scalars(select(Entity).where(Entity.label == "Eduard Marxsen")).one()
+    claim = session.scalars(select(Claim).where(Claim.predicate == "student_of")).one()
+    assert claim.object_id == marxsen.id
+
+
 def test_mentioned_in_uses_record_url_when_present(session: Session) -> None:
     source = FakeSource(
         records=(
