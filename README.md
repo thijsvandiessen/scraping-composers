@@ -215,7 +215,9 @@ People, ensembles, places, genres, movements, professions and periods become
 labelled nodes, with their literal claims (`born_on`, `sitelink_count`, …) as
 properties. Works, concerts and recordings are nodes too, linked by `COMPOSED_BY`,
 `PERFORMED_IN {role}` and `PROGRAMMED`. Object claims become relationships
-(`BORN_IN`, `HAS_GENRE`, …) that carry the sources asserting them. Nothing is
+(`BORN_IN`, `HAS_GENRE`, …) that carry the sources asserting them. That includes
+the Wikidata person ↔ person relations: `STUDENT_OF`, `TEACHER_OF`,
+`INFLUENCED_BY`, and the family links. Nothing is
 pre-aggregated: how strongly two entities are connected is a count over paths.
 [`packages/composer-graph/queries.cypher`](packages/composer-graph/queries.cypher)
 has starter queries for that: performer → composer, composers programmed

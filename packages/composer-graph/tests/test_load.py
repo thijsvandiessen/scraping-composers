@@ -16,7 +16,7 @@ from graph_fixture import gold_session
 from neo4j import Driver, GraphDatabase
 from sqlalchemy.orm import Session
 
-NEO4J_URL = os.environ.get("COMPOSER_TEST_NEO4J_URL")
+NEO4J_URL = os.environ.get("COMPOSER_TEST_NEO4J_URL") or None
 
 pytestmark = pytest.mark.skipif(NEO4J_URL is None, reason="COMPOSER_TEST_NEO4J_URL not set")
 

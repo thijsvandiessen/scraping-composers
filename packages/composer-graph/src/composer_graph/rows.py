@@ -64,6 +64,15 @@ CLAIM_TYPES: dict[str, str] = {
     "in_movement": "IN_MOVEMENT",
     "has_profession": "HAS_PROFESSION",
     "associated_period": "ASSOCIATED_PERIOD",
+    # Person ↔ person, from Wikidata. Read as subject → object: (a)-[:STUDENT_OF]->(b)
+    # means a studied with b; (a)-[:CHILD_OF]->(b) means b is a's parent.
+    "student_of": "STUDENT_OF",
+    "teacher_of": "TEACHER_OF",
+    "influenced_by": "INFLUENCED_BY",
+    "child_of": "CHILD_OF",
+    "parent_of": "PARENT_OF",
+    "spouse_of": "SPOUSE_OF",
+    "sibling_of": "SIBLING_OF",
 }
 
 # Literal claims carried onto entity nodes. Single-valued ones take the value

@@ -66,6 +66,7 @@ def _seed_silver(session: Session) -> None:
                 SourceClaim("performs_as", value="piano"),
                 SourceClaim("program_count", value="12"),
                 SourceClaim("statement_count", value="40"),
+                SourceClaim("student_of", "person", "Mengelberg, Willem"),
                 external_id="a:beinum",
             ),
             person("Mengelberg, Willem", external_id="a:mengelberg"),

@@ -7,6 +7,8 @@
 //   (:Concert|Recording)-[:PROGRAMMED {times}]->(:Work)-[:COMPOSED_BY]->(:Person)
 //   (:Person)-[:BORN_IN|DIED_IN|CITIZEN_OF]->(:Place)
 //   (:Person)-[:HAS_GENRE|IN_MOVEMENT|HAS_PROFESSION|ASSOCIATED_PERIOD]->(...)
+//   (:Person)-[:STUDENT_OF|TEACHER_OF|INFLUENCED_BY]->(:Person)
+//   (:Person)-[:CHILD_OF|PARENT_OF|SPOUSE_OF|SIBLING_OF]->(:Person)
 //
 // so a connection's strength is whatever you count along the paths. Raw counts
 // mostly measure popularity (everyone is "strongly connected" to Beethoven), so
@@ -62,6 +64,31 @@ MATCH (a:Person|Ensemble)-[:PERFORMED_IN]->(e)<-[:PERFORMED_IN]-(b:Person|Ensemb
 WHERE elementId(a) < elementId(b)
 RETURN a.label AS a, b.label AS b, count(DISTINCT e) AS events
 ORDER BY events DESC LIMIT 25;
+
+
+// --- teachers, influence, family (Wikidata) ------------------------------
+
+// Lineages: the teaching network around one person, three steps out. Wikidata
+// records a pairing from either side (A student_of B, or B teacher_of A), so
+// the pattern is undirected; the arrows in Browser show which way each runs.
+MATCH path = (:Person {label: 'Johannes Brahms'})-[:STUDENT_OF|TEACHER_OF*1..3]-(:Person)
+RETURN path LIMIT 50;
+
+// The most influential teachers, by students recorded either way round.
+MATCH (t:Person)
+OPTIONAL MATCH (t)<-[:STUDENT_OF]-(a:Person)
+OPTIONAL MATCH (t)-[:TEACHER_OF]->(b:Person)
+WITH t, collect(DISTINCT a) + collect(DISTINCT b) AS students
+UNWIND students AS student
+WITH t, count(DISTINCT student) AS students WHERE students > 0
+RETURN t.label AS teacher, students ORDER BY students DESC LIMIT 25;
+
+// Do teacher and student turn up on the same programmes? A recorded
+// relationship backed by performance data.
+MATCH (s:Person)-[:STUDENT_OF]->(t:Person)
+MATCH (s)<-[:COMPOSED_BY]-(:Work)<-[:PROGRAMMED]-(e:Concert)-[:PROGRAMMED]->(:Work)-[:COMPOSED_BY]->(t)
+RETURN s.label AS student, t.label AS teacher, count(DISTINCT e) AS concerts
+ORDER BY concerts DESC LIMIT 25;
 
 
 // --- shared biography -----------------------------------------------------

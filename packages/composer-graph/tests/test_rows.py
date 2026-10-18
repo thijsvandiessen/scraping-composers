@@ -102,5 +102,6 @@ def test_object_claims_become_typed_relationships(session: Session, tmp_path: Pa
 
     assert ("Beinum, Eduard van", "BORN_IN", "Arnhem") in edges
     assert ("Beinum, Eduard van", "HAS_PROFESSION", "conductor") in edges
+    assert ("Beinum, Eduard van", "STUDENT_OF", "Mengelberg, Willem") in edges
     born_in = next(row for group, row in rels if group.type == "BORN_IN")
     assert born_in["props"]["sources"] == ["archive"]
