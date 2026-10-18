@@ -17,8 +17,9 @@ still fail CI.
 
 ## Tests (per workspace member)
 
-Each `packages/*` and `apps/*` member is tested independently (its own
-`pyproject.toml`, isolated from the others):
+Each `packages/*` and `apps/*` member, plus `tests/e2e` (the end-to-end
+suite), is tested independently (its own `pyproject.toml`, isolated from the
+others):
 
 ```
 uv run --directory <member> pytest --rootdir . --cov=<import_name> --cov-report=term-missing
@@ -31,7 +32,7 @@ fail CI, but a failing test will. Run the full matrix before opening a PR:
 for m in packages/composer-schema packages/composer-models packages/composer-http packages/composer-bronze \
          packages/composer-scrapers packages/composer-crawler packages/composer-extract \
          packages/composer-warehouse packages/composer-gold packages/composer-config \
-         apps/consumer-api apps/admin-api apps/cli apps/dashboard; do
+         apps/consumer-api apps/admin-api apps/cli apps/dashboard tests/e2e; do
   uv run --directory "$m" pytest --rootdir . -q
 done
 ```
