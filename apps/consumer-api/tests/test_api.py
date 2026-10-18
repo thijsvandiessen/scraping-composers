@@ -51,6 +51,13 @@ class _FakeSource(SourceAdapter):
         yield from self._records
 
 
+def _person_id(client: TestClient, label: str) -> str:
+    """A person's id by exact label — via /v1/entities, since being listed
+    under /v1/composers takes works the fixture may not give them."""
+    items = client.get("/v1/entities", params={"q": label, "kind": "person"}).json()["items"]
+    return next(i["id"] for i in items if i["label"] == label)
+
+
 def _seeded_factory() -> sessionmaker[Session]:
     # StaticPool shares one in-memory connection across all sessions so the
     # seeded data is visible to every request the TestClient makes.
@@ -250,42 +257,69 @@ def test_person_with_both_roles_appears_in_both_lists(client: TestClient) -> Non
 # --- /v1/composers ---
 
 
-def test_list_composers_returns_all_persons(client: TestClient) -> None:
-    r = client.get("/v1/composers")
+@pytest.fixture
+def composers_client() -> Iterator[TestClient]:
+    """Silver client where composer status hinges on work counts, not professions."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    factory = init_db(engine)
+    people = _FakeSource(
+        [
+            _person("Bach, Johann", SourceClaim("has_profession", "profession", "composer")),
+            # tagged composer, but only two works: a conductor's stray pieces
+            _person("Maestro, Some", SourceClaim("has_profession", "profession", "composer")),
+            _person("Doe, Jane", SourceClaim("has_profession", "profession", "soloist")),
+        ]
+    )
+    works = [
+        ("Bach, Johann", ("Mass in B minor", "Goldberg Variations", "St Matthew Passion")),
+        # no profession claim at all, yet three works
+        ("Hensel, Fanny", ("Das Jahr", "Piano Trio in D minor", "Easter Sonata")),
+        ("Maestro, Some", ("Fanfare for Orchestra", "Lullaby for Strings")),
+    ]
+    programmes = FakeSource(
+        records=tuple(
+            mention(title, composer, f"m:{composer}:{title}")
+            for composer, titles in works
+            for title in titles
+        ),
+        name="programmes",
+        base_url="https://programmes.example",
+    )
+    with factory() as s:
+        ingest_source(s, people)
+        ingest_source(s, programmes)
+    yield TestClient(create_app("test-silver-composers", lambda: factory))
+
+
+def test_list_composers_takes_three_works_not_the_profession(composers_client: TestClient) -> None:
+    r = composers_client.get("/v1/composers")
     assert r.status_code == 200
     data = r.json()
+    assert {item["label"] for item in data["items"]} == {"Bach, Johann", "Hensel, Fanny"}
     assert data["total"] == 2
-    labels = {item["label"] for item in data["items"]}
-    assert "Bach, Johann" in labels
-    assert "Beethoven, Ludwig van" in labels
-    assert "Doe, Jane" not in labels
-    assert "Smith, John" not in labels
 
 
-def test_list_composers_profession_entities_excluded(client: TestClient) -> None:
-    r = client.get("/v1/composers")
-    assert r.status_code == 200
-    labels = {item["label"] for item in r.json()["items"]}
-    # kind=profession entities (e.g. "composer", "soloist") must not appear
-    assert "composer" not in labels
-    assert "soloist" not in labels
-
-
-def test_list_composers_search_filter(client: TestClient) -> None:
-    r = client.get("/v1/composers?q=Bach")
-    assert r.status_code == 200
-    data = r.json()
+def test_list_composers_search_filter(composers_client: TestClient) -> None:
+    data = composers_client.get("/v1/composers?q=Bach").json()
     assert data["total"] == 1
     assert data["items"][0]["label"] == "Bach, Johann"
 
 
-def test_list_composers_pagination(client: TestClient) -> None:
-    r = client.get("/v1/composers?page=1&limit=1")
-    assert r.status_code == 200
-    data = r.json()
+def test_list_composers_pagination(composers_client: TestClient) -> None:
+    data = composers_client.get("/v1/composers?page=1&limit=1").json()
     assert data["total"] == 2
     assert data["limit"] == 1
     assert len(data["items"]) == 1
+
+
+def test_list_composers_filter_by_source(composers_client: TestClient) -> None:
+    # Hensel exists only as a programme mention's composer; Bach also has a record in "fake"
+    assert composers_client.get("/v1/composers?source=fake").json()["total"] == 1
+    assert composers_client.get("/v1/composers?source=nobody").json()["total"] == 0
 
 
 def test_list_composers_invalid_page_returns_422(client: TestClient) -> None:
@@ -298,9 +332,7 @@ def test_list_composers_invalid_limit_returns_422(client: TestClient) -> None:
 
 
 def test_get_composer_returns_detail_with_claims(client: TestClient) -> None:
-    listing = client.get("/v1/composers").json()
-    bach = next(i for i in listing["items"] if i["label"] == "Bach, Johann")
-    r = client.get(f"/v1/composers/{bach['id']}")
+    r = client.get(f"/v1/composers/{_person_id(client, 'Bach, Johann')}")
     assert r.status_code == 200
     data = r.json()
     assert data["label"] == "Bach, Johann"
@@ -311,9 +343,7 @@ def test_get_composer_returns_detail_with_claims(client: TestClient) -> None:
 
 def test_claim_source_url_is_record_page(client: TestClient) -> None:
     """Claims point at the exact source page they came from, not the source homepage."""
-    listing = client.get("/v1/composers").json()
-    beethoven = next(i for i in listing["items"] if i["label"] == "Beethoven, Ludwig van")
-    data = client.get(f"/v1/composers/{beethoven['id']}").json()
+    data = client.get(f"/v1/composers/{_person_id(client, 'Beethoven, Ludwig van')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
     assert profession["source"] == "fake"
     assert profession["source_url"] == "https://fake.example/wiki/Q255"
@@ -322,9 +352,7 @@ def test_claim_source_url_is_record_page(client: TestClient) -> None:
 
 def test_claim_source_url_falls_back_to_base_url(client: TestClient) -> None:
     """Records without a page URL fall back to the source homepage."""
-    listing = client.get("/v1/composers").json()
-    bach = next(i for i in listing["items"] if i["label"] == "Bach, Johann")
-    data = client.get(f"/v1/composers/{bach['id']}").json()
+    data = client.get(f"/v1/composers/{_person_id(client, 'Bach, Johann')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
     assert profession["source_url"] == "https://fake.example"
 
@@ -771,9 +799,9 @@ def composer_works_client(promote_gold: PromoteGold) -> Iterator[TestClient]:
 
 
 def test_composer_works_includes_concert_and_catalogue_proof(composer_works_client: TestClient) -> None:
-    composer = composer_works_client.get("/v1/composers?q=Strauss").json()["items"][0]
-    data = composer_works_client.get(f"/v1/composers/{composer['id']}/works").json()
-    assert data["composer_id"] == composer["id"]
+    composer_id = _person_id(composer_works_client, "Richard Strauss")
+    data = composer_works_client.get(f"/v1/composers/{composer_id}/works").json()
+    assert data["composer_id"] == composer_id
     assert data["total"] == 2
 
     by_title = {w["canonical_title"]: w for w in data["items"]}
@@ -797,8 +825,8 @@ def test_composer_works_includes_concert_and_catalogue_proof(composer_works_clie
 def test_composer_works_404_and_invalid_sort(composer_works_client: TestClient) -> None:
     r = composer_works_client.get("/v1/composers/00000000-0000-0000-0000-000000000000/works")
     assert r.status_code == 404
-    composer = composer_works_client.get("/v1/composers?q=Strauss").json()["items"][0]
-    assert composer_works_client.get(f"/v1/composers/{composer['id']}/works?sort=nope").status_code == 422
+    composer_id = _person_id(composer_works_client, "Richard Strauss")
+    assert composer_works_client.get(f"/v1/composers/{composer_id}/works?sort=nope").status_code == 422
 
 
 def _recording_raw(catalogue: str, works_title: str) -> dict[str, object]:
@@ -886,11 +914,11 @@ def test_people_reject_an_unknown_sort(client: TestClient) -> None:
 
 def test_people_filter_by_source(client: TestClient) -> None:
     # the person records all come from "fake"; "programmes" only reported works
-    assert client.get("/v1/composers?source=fake").json()["total"] == 2
-    assert client.get("/v1/composers?source=programmes").json()["total"] == 0
-    assert client.get("/v1/composers?source=nobody").json()["total"] == 0
+    assert client.get("/v1/soloists?source=fake").json()["total"] == 2
+    assert client.get("/v1/soloists?source=programmes").json()["total"] == 0
+    assert client.get("/v1/soloists?source=nobody").json()["total"] == 0
     # and the filter composes with the search term
-    assert client.get("/v1/composers?source=fake&q=Bach").json()["total"] == 1
+    assert client.get("/v1/soloists?source=fake&q=Doe").json()["total"] == 1
 
 
 def test_recording_detail_has_artists_and_works(recordings_client: TestClient) -> None:
@@ -963,16 +991,13 @@ def test_person_concerts_on_silver(tmp_path: Path) -> None:
 def test_gold_hides_people_without_performance_evidence(gold_client: TestClient) -> None:
     # the four fake-source people have no mentions and no archive records;
     # only the mentions' composer survives promotion
-    data = gold_client.get("/v1/composers").json()
-    assert data["total"] == 1
-    assert data["items"][0]["label"] == "Beethoven, Ludwig van"
+    data = gold_client.get("/v1/entities", params={"kind": "person"}).json()
+    assert [item["label"] for item in data["items"]] == ["Beethoven, Ludwig van"]
 
 
 def test_gold_claim_source_url_survives_promotion(gold_client: TestClient) -> None:
     """Promotion copies entity records, so gold claims still link the exact source page."""
-    listing = gold_client.get("/v1/composers").json()
-    beethoven = next(i for i in listing["items"] if i["label"] == "Beethoven, Ludwig van")
-    data = gold_client.get(f"/v1/composers/{beethoven['id']}").json()
+    data = gold_client.get(f"/v1/composers/{_person_id(gold_client, 'Beethoven, Ludwig van')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
     assert profession["source_url"] == "https://fake.example/wiki/Q255"
     assert profession["source_external_id"] == "Q255"

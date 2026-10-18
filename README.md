@@ -298,7 +298,9 @@ uv run uvicorn composer_api:silver_app --port 8003   # staging
 ```
 
 - `GET /v1/composers` / `/v1/soloists` / `/v1/conductors` (+ `/{id}`) — searchable, paginated people;
-  `?sort=concerts` orders by concert count (each item carries `concert_count`)
+  `?sort=concerts` orders by concert count (each item carries `concert_count`). Soloists and
+  conductors are picked by profession claim; composers by having at least three works (the
+  `composer` profession claim is too loose — wikidata gives it to pop stars and conductors)
 - `GET /v1/people/{id}/concerts` — the concerts a person took part in, with dates, venues, and works
 - `GET /v1/concerts?q=&source=` / `GET /v1/concerts/{id}` — browse concerts (search by venue or
   participant); the detail carries all musicians (role, discipline, entity link) and the programme

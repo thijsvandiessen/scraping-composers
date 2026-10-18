@@ -82,7 +82,7 @@ def test_fetch_writes_one_completed_snapshot_per_source(pipeline: Pipeline) -> N
         lines = (run_dir / "records.ndjson").read_text().splitlines()
         assert manifest["record_count"] == len(lines)
         counts[source] = manifest["record_count"]
-    assert counts == {"wikidata": 3, "berlinphil": 10, "decca": 6}
+    assert counts == {"wikidata": 3, "berlinphil": 10, "decca": 7}
 
 
 # --- silver ---------------------------------------------------------------------
@@ -121,14 +121,14 @@ def test_silver_derives_concerts_and_recordings(pipeline: Pipeline) -> None:
         assert all(p.entity_id is not None for c in concerts for p in c.participants)
 
         recordings = session.scalars(select(Recording).order_by(Recording.external_key)).all()
-        assert [(r.external_key, len(r.works)) for r in recordings] == [("p1", 1), ("p2", 2)]
+        assert [(r.external_key, len(r.works)) for r in recordings] == [("p1", 2), ("p2", 2)]
 
 
 def test_work_mentions_resolve_to_one_work_per_piece(pipeline: Pipeline) -> None:
-    # Eight mentions across a concert archive and a label, three distinct pieces.
+    # Nine mentions across a concert archive and a label, four distinct pieces.
     with Session(pipeline.silver()) as session:
         titles = sorted(session.scalars(select(Work.canonical_title)))
-    assert len(titles) == 3
+    assert len(titles) == 4
     assert any("Op. 61" in t for t in titles) and any("Op. 67" in t for t in titles)
 
 
@@ -151,7 +151,7 @@ def test_gold_collapse_carries_the_duplicate_claims(pipeline: Pipeline) -> None:
 
 def test_gold_copies_concerts_recordings_and_works(pipeline: Pipeline) -> None:
     gold = pipeline.gold()
-    assert (_count(gold, Concert), _count(gold, Recording), _count(gold, Work)) == (3, 2, 3)
+    assert (_count(gold, Concert), _count(gold, Recording), _count(gold, Work)) == (3, 2, 4)
     manifest = json.loads((pipeline.root / "gold.db.manifest.json").read_text())
     assert manifest["status"] == "completed"
 
@@ -159,9 +159,11 @@ def test_gold_copies_concerts_recordings_and_works(pipeline: Pipeline) -> None:
 # --- gold API -------------------------------------------------------------------
 
 
-def test_api_lists_the_curated_composers(api: TestClient) -> None:
+def test_api_lists_composers_with_three_works(api: TestClient) -> None:
+    # Mahler is in gold (he conducts) and wikidata tags him a composer, but
+    # with one mentioned work he isn't listed as one.
     body = api.get("/v1/composers", params={"limit": 100}).json()
-    assert {item["label"] for item in body["items"]} == {"Gustav Mahler", "Ludwig van Beethoven"}
+    assert {item["label"] for item in body["items"]} == {"Ludwig van Beethoven"}
 
 
 def test_api_composer_detail_cites_every_source(api: TestClient) -> None:
