@@ -1,10 +1,10 @@
 """Give this app's own loggers a handler, which uvicorn does not.
 
 Uvicorn's default logging config attaches handlers to the ``uvicorn*`` loggers
-only and leaves the root logger bare. Records from ``composer_crawler`` /
-``composer_extract`` therefore propagate to a root logger with nothing on it and
-fall through to :data:`logging.lastResort`, which drops anything below WARNING —
-so every progress line a background crawl or extract emits is discarded, and the
+only and leaves the root logger bare. Records from the ``composer_*`` packages
+therefore propagate to a root logger with nothing on it and fall through to
+:data:`logging.lastResort`, which drops anything below WARNING — so every
+progress line a background fetch or build emits is discarded, and the
 long-running stages triggered from the dashboard look silent even when they are
 working. Installing one handler here is what makes them visible.
 

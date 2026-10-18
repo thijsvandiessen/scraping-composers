@@ -101,8 +101,8 @@ def _contributor_claims(contributor: Contributor) -> Iterator[SourceClaim]:
 
 
 def _edition_claims(product: ParsedProduct) -> list[SourceClaim]:
-    """What is true of this printed edition: a claim on the work, by the
-    convention of :mod:`composer_extract.facts`, so two editions merge."""
+    """What is true of this printed edition: a claim on the work rather than on
+    an edition entity of its own, so two editions merge."""
     claims = [_edge("published_by", "publisher", PUBLISHER)]
     claims += [claim for person in product.contributors for claim in _contributor_claims(person)]
     literals: list[tuple[str, object]] = [

@@ -507,22 +507,16 @@ def test_rebuild_silver_replays_bucket_sources_with_no_adapter(
 ) -> None:
     """#182: the replay is driven by the bucket, not by ``REGISTRY``.
 
-    A crawl config's extracted documents live in the bucket under its own name
-    and have no adapter to look up; they used to be skipped entirely.
+    A source whose adapter is gone still has documents in the bucket under its
+    own name; they used to be skipped entirely.
     """
     from composer_bronze.scraper import write_documents
-    from composer_crawler import CrawlConfig
     from composer_models import Source
     from composer_models.db import get_engine
     from sqlalchemy import select
 
     silver_path = tmp_path / "silver.db"
     monkeypatch.setattr(settings, "database_url", f"sqlite:///{silver_path}")
-    monkeypatch.setattr(
-        admin_snapshots,
-        "all_crawl_configs",
-        lambda: {"alpha": CrawlConfig(name="alpha", seeds=("https://alpha.example",))},
-    )
     assert client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
     write_documents(LocalBucket(bucket_path), "alpha", iter([_person("Rattle, Simon")]))
 
@@ -532,7 +526,7 @@ def test_rebuild_silver_replays_bucket_sources_with_no_adapter(
     factory = init_db(get_engine(f"sqlite:///{silver_path}"))
     with factory() as session:
         alpha = session.scalars(select(Source).where(Source.name == "alpha")).one()
-    assert alpha.base_url == "https://alpha.example"
+    assert alpha.base_url == ""
 
 
 def test_rebuild_silver_conflicts_while_running(

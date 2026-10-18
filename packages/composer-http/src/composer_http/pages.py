@@ -28,9 +28,8 @@ Bodies are gzipped, which matters at this scale: the Vienna archive's pages are
 ~36KB each and compress to ~10KB, so the whole mirror is ~100MB rather than
 ~380MB.
 
-Modelled on :mod:`composer_extract.cache`, including its failure policy: a cache
-is an optimization and never a reason to fail, so every SQLite error degrades to
-"not cached" and is logged.
+A cache is an optimization and never a reason to fail, so every SQLite error
+degrades to "not cached" and is logged.
 """
 
 from __future__ import annotations
