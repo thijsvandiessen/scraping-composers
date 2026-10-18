@@ -124,33 +124,6 @@ class AdminAPI(_BaseAPI):
     def put_rule1_config(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._json_dict("PUT", "/admin/v1/rule1-config", json=payload)
 
-    def list_crawls(self) -> list[dict[str, Any]]:
-        return self._json_list("GET", "/admin/v1/crawls")
-
-    def get_crawl(self, name: str) -> dict[str, Any]:
-        return self._json_dict("GET", f"/admin/v1/crawls/{name}")
-
-    def put_crawl(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._json_dict("PUT", f"/admin/v1/crawls/{name}", json=payload)
-
-    def delete_crawl(self, name: str) -> None:
-        # 204, so there is no body to type — _request is called directly.
-        self._request("DELETE", f"/admin/v1/crawls/{name}")
-
-    def start_crawl(self, name: str) -> dict[str, Any]:
-        return self._json_dict("POST", f"/admin/v1/crawls/{name}/fetch")
-
-    def start_extract(self, name: str) -> dict[str, Any]:
-        return self._json_dict("POST", f"/admin/v1/crawls/{name}/extract")
-
-    def load_crawl(self, name: str) -> dict[str, Any]:
-        """Load the crawl's latest extracted snapshot into the database."""
-        return self._json_dict("POST", f"/admin/v1/crawls/{name}/process")
-
-    def run_crawl_pipeline(self, name: str) -> dict[str, Any]:
-        """Crawl, extract and load the crawl in one unattended chain."""
-        return self._json_dict("POST", f"/admin/v1/crawls/{name}/run")
-
 
 @dataclass
 class DataAPI(_BaseAPI):

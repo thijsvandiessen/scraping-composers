@@ -104,8 +104,8 @@ def fetch_scraper(
 def list_snapshots() -> list[SnapshotOut]:
     """Every snapshot in the bucket, newest first.
 
-    Enumerates the bucket's own sources (not just ``REGISTRY``), so crawl-config
-    sources and their LLM-extracted ``documents`` snapshots show up too.
+    Enumerates the bucket's own sources (not just ``REGISTRY``), so a source
+    with data on disk but no adapter any more still shows up.
     """
     store = bucket()
     snapshots = [snapshot_out(s) for name in store.list_sources() for s in store.list_snapshots(name)]
@@ -116,14 +116,14 @@ def list_snapshots() -> list[SnapshotOut]:
 def abandon_snapshot(source: str, snapshot_id: str) -> SnapshotOut:
     """Mark a stuck ``running`` snapshot failed, unblocking the source.
 
-    A fetch or crawl killed outright (the process gone, honcho stopped) never
+    A fetch killed outright (the process gone, honcho stopped) never
     gets to finalize its manifest, so it stays ``running`` forever: the
     dashboard shows it as live and ``has_running_fetch`` refuses to start
     anything new for that source. This is the way out — nothing is deleted, the
     pages already written stay readable, and ``record_count`` is corrected to
     what is actually on disk.
 
-    Whether the run is really dead is the caller's judgement: a crawl that *is*
+    Whether the run is really dead is the caller's judgement: a fetch that *is*
     still going will carry on writing to a snapshot now marked failed.
     """
     store = bucket()
@@ -153,8 +153,7 @@ def abandon_snapshot(source: str, snapshot_id: str) -> SnapshotOut:
 def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: BackgroundTasks) -> RunStarted:
     """Load a snapshot's documents from the bucket into the database (background).
 
-    Works for scraper and crawl-config sources alike; the latter's loadable
-    snapshots are the ``documents`` the LLM ``extract`` step wrote.
+    Raw ``pages`` snapshots the retired crawler left in the bucket are refused.
     """
     snapshot = snapshot_or_404(bucket(), source, snapshot_id)
     if snapshot.manifest.status not in EXPLICITLY_LOADABLE_STATUSES:
@@ -165,7 +164,7 @@ def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: B
     if snapshot.kind != "documents":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"snapshot {source}/{snapshot_id} holds crawled pages, not documents; run extract first",
+            f"snapshot {source}/{snapshot_id} holds crawled pages, not documents",
         )
     if has_running(db, source):
         raise running_conflict(source)

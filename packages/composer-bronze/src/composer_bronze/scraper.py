@@ -37,8 +37,7 @@ def write_documents(
     """Serialize *docs* into a bucket snapshot with a manifest, returning the run_id.
 
     Shared by :meth:`Scraper.fetch_to_bucket` and callers that already hold built
-    documents (e.g. the LLM ``extract`` step, which writes documents derived from
-    crawled pages). The manifest is ``running`` while the stream writes, then
+    documents. The manifest is ``running`` while the stream writes, then
     finalized to ``completed`` with the count, or ``failed`` (re-raising).
     """
     if run_id is None:

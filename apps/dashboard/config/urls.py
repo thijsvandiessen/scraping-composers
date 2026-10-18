@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.urls import path
 from django.views.generic import RedirectView
-from scrapers import crawl_views, views
+from scrapers import views
 
 urlpatterns = [
     # Registered before admin.site.urls so these win the /admin/... match;
@@ -9,43 +9,6 @@ urlpatterns = [
     path("admin/scrapers/", admin.site.admin_view(views.index), name="scrapers_index"),
     path("admin/scrapers/fetch-due", admin.site.admin_view(views.fetch_due), name="fetch_due"),
     path("admin/scrapers/<str:name>/fetch", admin.site.admin_view(views.start_fetch), name="start_fetch"),
-    path("admin/crawls/", admin.site.admin_view(crawl_views.crawls_index), name="crawls_index"),
-    path("admin/crawls/new/", admin.site.admin_view(crawl_views.crawl_form), name="crawl_new"),
-    path(
-        "admin/crawls/<str:name>/edit/",
-        admin.site.admin_view(crawl_views.crawl_form),
-        name="crawl_edit",
-    ),
-    path(
-        "admin/crawls/<str:name>/delete",
-        admin.site.admin_view(crawl_views.delete_crawl),
-        name="crawl_delete",
-    ),
-    path(
-        "admin/crawls/<str:name>/run",
-        admin.site.admin_view(crawl_views.run_crawl_pipeline),
-        name="run_crawl_pipeline",
-    ),
-    path(
-        "admin/crawls/<str:name>/crawl",
-        admin.site.admin_view(crawl_views.start_crawl),
-        name="start_crawl",
-    ),
-    path(
-        "admin/crawls/<str:name>/extract",
-        admin.site.admin_view(crawl_views.start_extract),
-        name="start_extract",
-    ),
-    path(
-        "admin/crawls/<str:name>/load",
-        admin.site.admin_view(crawl_views.start_load),
-        name="load_crawl",
-    ),
-    path(
-        "admin/crawls/<str:name>/<str:snapshot_id>/abandon",
-        admin.site.admin_view(crawl_views.abandon_crawl),
-        name="abandon_crawl",
-    ),
     path("admin/load/", admin.site.admin_view(views.load_index), name="load_index"),
     path("admin/promote/", admin.site.admin_view(views.promote_page), name="promote"),
     path("admin/promote/start", admin.site.admin_view(views.start_promote), name="start_promote"),

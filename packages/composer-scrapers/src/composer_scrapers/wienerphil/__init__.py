@@ -41,7 +41,7 @@ log = logging.getLogger(__name__)
 __all__ = ["BASE_URL", "WienerPhilAdapter"]
 
 #: How often a sweep of ten thousand detail pages says where it is. Hours of
-#: silence is not a progress report; this mirrors composer_crawler.progress.
+#: silence is not a progress report.
 _PROGRESS_EVERY = 100
 
 
