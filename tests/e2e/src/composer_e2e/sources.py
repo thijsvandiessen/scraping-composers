@@ -9,7 +9,8 @@ and ingest folds a ``wikidata.org/wiki/Q…`` URL into the entity's dedup key
 
 The dataset is small and every name in it is there to exercise one rule:
 
-- Beethoven composed two mentioned works (composer rule) and arrives twice —
+- Beethoven composed three mentioned works (composer rule, and the API's
+  three-work bar for listing a composer) and arrives twice —
   once from wikidata with a QID, once bare from the programmes — so the
   dedupe pass has a real pair to link and promote has a duplicate to collapse.
 - Mahler conducts two concerts; Mutter solos on two concerts and two recordings;
@@ -198,7 +199,14 @@ class SyntheticBerlinPhil(SourceAdapter):
 
 #: (product id, title, [(composer, work title), ...])
 _RELEASES: list[tuple[str, str, list[tuple[str, str]]]] = [
-    ("p1", "Beethoven: Violin Concerto", [("Ludwig van Beethoven", "Violin Concerto in D major, Op. 61")]),
+    (
+        "p1",
+        "Beethoven: Violin Concerto",
+        [
+            ("Ludwig van Beethoven", "Violin Concerto in D major, Op. 61"),
+            ("Ludwig van Beethoven", "Coriolan Overture, Op. 62"),
+        ],
+    ),
     (
         "p2",
         "Beethoven & Mahler",
