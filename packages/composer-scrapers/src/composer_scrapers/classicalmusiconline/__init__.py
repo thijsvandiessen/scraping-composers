@@ -61,7 +61,7 @@ class ClassicalMusicOnlineAdapter(HttpSourceAdapter[EntityDocument | WorkMention
                 raw=record.raw,
                 claims=record.claims,
             )
-            for mention in iter_work_mentions(page, entry.name, entry.external_id, BASE_URL):
+            for mention in iter_work_mentions(page, entry.name, entry.external_id, BASE_URL, entry.url):
                 works += 1
                 yield WorkMentionDocument(
                     id=mention.external_id,

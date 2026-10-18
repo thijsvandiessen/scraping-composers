@@ -26,7 +26,7 @@ from ..schemas import (
     WorkProofOut,
     WorkSummary,
 )
-from .common import WORK_PROOF_CAP
+from .common import WORK_PROOF_CAP, mention_url
 
 
 def source_filter(source: str) -> ColumnElement[bool]:
@@ -212,6 +212,7 @@ def composer_works(
                 Concert.venue,
                 Recording.url,
                 Recording.release_date,
+                RawWorkMention.raw,
             )
             .join(Source, Source.id == RawWorkMention.source_id)
             .outerjoin(ConcertWork, ConcertWork.mention_id == RawWorkMention.id)
@@ -225,7 +226,7 @@ def composer_works(
                 RawWorkMention.id,
             )
         ).all()
-        for work_id, src_name, src_base, c_url, c_date, c_venue, r_url, r_date in proof_rows:
+        for work_id, src_name, src_base, c_url, c_date, c_venue, r_url, r_date, raw in proof_rows:
             if work_id is None:  # excluded by the IN filter; narrows the nullable column for the type checker
                 continue
             bucket = proofs_by_work.setdefault(work_id, [])
@@ -238,7 +239,9 @@ def composer_works(
             elif r_url or r_date:
                 proof = WorkProofOut(source=src_name, source_url=r_url or src_base, date=r_date, venue=None)
             else:
-                proof = WorkProofOut(source=src_name, source_url=src_base, date=None, venue=None)
+                proof = WorkProofOut(
+                    source=src_name, source_url=mention_url(raw) or src_base, date=None, venue=None
+                )
             seen = seen_by_work.setdefault(work_id, set())
             key = (proof.source, proof.source_url)
             if key in seen:
@@ -303,6 +306,7 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
             Concert.venue,
             Recording.url,
             Recording.release_date,
+            RawWorkMention.raw,
         )
         # Explicit left side: without it the leading Source columns make Source
         # the inferred FROM and the join below is ambiguous.
@@ -319,7 +323,7 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
             RawWorkMention.id,
         )
     ).all()
-    for src_name, src_base, c_url, c_date, c_venue, r_url, r_date in proof_rows:
+    for src_name, src_base, c_url, c_date, c_venue, r_url, r_date, raw in proof_rows:
         if len(proofs) >= WORK_PROOF_CAP:
             break
         if c_url or c_date or c_venue:
@@ -327,7 +331,9 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
         elif r_url or r_date:
             proof = WorkProofOut(source=src_name, source_url=r_url or src_base, date=r_date, venue=None)
         else:
-            proof = WorkProofOut(source=src_name, source_url=src_base, date=None, venue=None)
+            proof = WorkProofOut(
+                source=src_name, source_url=mention_url(raw) or src_base, date=None, venue=None
+            )
         key = (proof.source, proof.source_url)
         if key in seen:
             continue
