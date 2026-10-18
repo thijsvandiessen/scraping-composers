@@ -37,12 +37,19 @@ class SourceClaim:
     The object is either another entity (set ``object_kind`` +
     ``object_label``, e.g. ("profession", "composer") for has_profession) or
     a literal (set ``value``, e.g. "1756-01-27" for born_on).
+
+    ``object_wikidata_id`` pins an entity object to the Wikidata item it names,
+    the way a record's own wikidata URL pins its subject. Without it the object
+    is resolved by label alone, and a teacher named in a Wikidata claim would
+    land beside -- not on -- the composer entity Wikidata's own record for that
+    teacher created.
     """
 
     predicate: str
     object_kind: str | None = None
     object_label: str | None = None
     value: str | None = None
+    object_wikidata_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

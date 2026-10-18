@@ -11,11 +11,12 @@ from composer_http import PageCache
 from composer_http.testing import mock_session
 from composer_schema import SourceClaim
 from composer_scrapers.wikidata import WikidataAdapter
-from composer_scrapers.wikidata.parse import _format_time, _records_from_rows
+from composer_scrapers.wikidata.parse import RELATIONS, _format_time, _records_from_rows
 from composer_scrapers.wikidata.query import (
     LABEL_LANGUAGES,
     MULTI_QUERY,
     QUERY,
+    RELATIONS_QUERY,
     _fetch_metrics,
     _fetch_page,
     _fetch_qids,
@@ -214,11 +215,12 @@ def test_fetch_page_concatenates_both_queries_label_bearing_rows_first() -> None
     responses = {
         "?itemLabel": [row("Q7294", "Johannes Brahms", birth="1833-05-07T00:00:00Z")],
         "UNION": [row("Q7294", genreLabel="symphony"), row("Q7294", alias="Brahms")],
+        "?relation": [relation("Q7294", "P1066", "Q61658", "Eduard Marxsen")],
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
         query = urllib.parse.parse_qs(request.read().decode())["query"][0]
-        key = "?itemLabel" if "?itemLabel" in query else "UNION"
+        key = next(key for key in responses if key in query)
         return httpx.Response(200, json={"results": {"bindings": responses[key]}})
 
     with mock_session(handler) as client:
@@ -230,6 +232,7 @@ def test_fetch_page_concatenates_both_queries_label_bearing_rows_first() -> None
         SourceClaim("born_on", value="1833-05-07"),
         SourceClaim("has_genre", "genre", "symphony"),
         SourceClaim("also_known_as", value="Brahms"),
+        SourceClaim("student_of", "person", "Eduard Marxsen", object_wikidata_id="Q61658"),
     )
 
 
@@ -315,6 +318,61 @@ def test_metrics_become_literal_claims_and_land_in_raw() -> None:
     assert SourceClaim("identifier_count", value="370") in record.claims
     assert SourceClaim("work_count", value="342") in record.claims
     assert record.raw["sitelinks"] == "273"
+
+
+def relation(qid: str, prop: str, other: str, label: str) -> dict[str, Any]:
+    """A RELATIONS_QUERY row: ``qid`` relates to ``other`` via ``prop``."""
+    return row(qid) | {
+        "relation": {"type": "uri", "value": f"http://www.wikidata.org/prop/direct/{prop}"},
+        "other": {"type": "uri", "value": f"http://www.wikidata.org/entity/{other}"},
+        "otherLabel": {"type": "literal", "value": label},
+    }
+
+
+def test_relations_become_person_claims_pinned_to_the_other_qid() -> None:
+    (record,) = _records_from_rows(
+        [
+            row("Q7294", "Johannes Brahms"),
+            relation("Q7294", "P1066", "Q61658", "Eduard Marxsen"),
+            relation("Q7294", "P737", "Q255", "Ludwig van Beethoven"),
+            relation("Q7294", "P22", "Q1683937", "Johann Jakob Brahms"),
+        ]
+    )
+
+    assert record.claims == (
+        SourceClaim("has_profession", "profession", "composer"),
+        SourceClaim("child_of", "person", "Johann Jakob Brahms", object_wikidata_id="Q1683937"),
+        SourceClaim("influenced_by", "person", "Ludwig van Beethoven", object_wikidata_id="Q255"),
+        SourceClaim("student_of", "person", "Eduard Marxsen", object_wikidata_id="Q61658"),
+    )
+    assert record.raw["relations"][0] == {
+        "predicate": "child_of",
+        "item": "Q1683937",
+        "label": "Johann Jakob Brahms",
+    }
+
+
+def test_relations_to_unnamed_items_or_unasked_properties_are_skipped() -> None:
+    (record,) = _records_from_rows(
+        [
+            row("Q7294", "Johannes Brahms"),
+            relation("Q7294", "P1066", "Q99999999", "Q99999999"),  # label service echoed the QID
+            relation("Q7294", "P1038", "Q61658", "Eduard Marxsen"),  # not a RELATIONS property
+        ]
+    )
+    assert record.claims == (SourceClaim("has_profession", "profession", "composer"),)
+    assert "relations" not in record.raw
+
+
+def test_relations_query_asks_every_relation_and_only_of_humans() -> None:
+    rendered = RELATIONS_QUERY.format(
+        values="wd:Q7294", relations=" ".join(f"wdt:{p}" for p, _ in RELATIONS), languages="en,mul"
+    )
+    for prop, _ in RELATIONS:
+        assert f"wdt:{prop}" in rendered
+    # P737 also names movements and works; only people become person entities
+    assert "?other wdt:P31 wd:Q5" in rendered
+    assert "OPTIONAL" not in rendered
 
 
 def test_records_without_metrics_get_no_metric_claims() -> None:

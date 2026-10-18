@@ -14,8 +14,10 @@ issue #181. Driving the batches from a client-side id list drops the cursor
 entirely and makes coverage checkable: every id bound in a VALUES block must
 come back, and ``_fetch_page`` fails the run if one does not.
 
-Each page is followed by a second, cheap VALUES query for per-item popularity
-metrics (sitelink/statement/identifier counts and the P86 backlink count). All
+Each page's detail is three queries -- single-valued fields, multi-valued
+fields, person-to-person relations -- followed by a cheap VALUES query for
+per-item popularity metrics (sitelink/statement/identifier counts and the P86
+backlink count). All
 queries go via POST (responses bypass the WDQS edge cache, and large VALUES
 blocks would exceed URL length limits as GET parameters).
 
@@ -35,7 +37,7 @@ from typing import Any
 import httpx
 from composer_http import SourceSession, call_with_retries, request_fingerprint
 
-from .parse import METRICS, _literal
+from .parse import METRICS, RELATIONS, _literal
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
 PAGE_SIZE = 500
@@ -103,6 +105,26 @@ WHERE {{
   UNION {{ ?item wdt:P136 ?genre . }}
   UNION {{ ?item wdt:P135 ?movement . }}
   UNION {{ ?item skos:altLabel ?alias . }}
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
+}}
+"""
+
+# Person-to-person relations (teachers, students, influences, family), one row
+# per edge. The property is bound by VALUES rather than one UNION branch each,
+# so ``RELATIONS`` in ``parse`` is the single list of what is asked for. The
+# other end must itself be a human: P737 "influenced by" also points at
+# movements and works, and those are not person entities. ?other is returned
+# as well as its label so the claim can carry the QID -- see
+# ``SourceClaim.object_wikidata_id``. Unlike the user-facing lineage queries
+# this has no genre filter: P136 is sparse, and the composer population is
+# already the filter.
+RELATIONS_QUERY = """\
+SELECT ?item ?relation ?other ?otherLabel
+WHERE {{
+  VALUES ?item {{ {values} }}
+  VALUES ?relation {{ {relations} }}
+  ?item ?relation ?other .
+  ?other wdt:P31 wd:Q5 .
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
 }}
 """
@@ -193,9 +215,10 @@ def _fetch_qids(session: SourceSession) -> list[str]:
 def _fetch_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
     """Fetch the detail rows for one batch of composers: the single-valued
     fields, then the multi-valued ones (see MULTI_QUERY for why they are a
-    separate query). The two row lists concatenate -- ``_fold_rows`` groups by
-    QID and reads whichever variables a row binds -- and QUERY's rows must come
-    first, since the label is taken from the first row seen for an item.
+    separate query), then the relations. The row lists concatenate --
+    ``_fold_rows`` groups by QID and reads whichever variables a row binds --
+    and QUERY's rows must come first, since the label is taken from the first
+    row seen for an item.
 
     In QUERY every pattern besides the VALUES block is OPTIONAL, so each bound
     item must produce at least one row; a short answer means rows went missing
@@ -216,7 +239,16 @@ def _fetch_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]
     # no coverage check here: an item with none of these properties, and so no
     # row at all, is ordinary
     multi = MULTI_QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
-    return rows + _run_query(session, multi, f"multi for {len(qids)} items", mirror=True)
+    relations = RELATIONS_QUERY.format(
+        values=_values(qids),
+        relations=" ".join(f"wdt:{prop}" for prop, _ in RELATIONS),
+        languages=LABEL_LANGUAGES,
+    )
+    return (
+        rows
+        + _run_query(session, multi, f"multi for {len(qids)} items", mirror=True)
+        + _run_query(session, relations, f"relations for {len(qids)} items", mirror=True)
+    )
 
 
 def _fetch_metrics(session: SourceSession, qids: list[str]) -> dict[str, dict[str, str]]:

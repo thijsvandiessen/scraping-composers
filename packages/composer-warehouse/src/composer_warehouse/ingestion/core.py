@@ -99,7 +99,13 @@ def _add_record_claims(
 
     for claim in record.claims:
         object_id = (
-            get_or_create_entity(state.session, state.entities_by_key, claim.object_kind, claim.object_label)
+            get_or_create_entity(
+                state.session,
+                state.entities_by_key,
+                claim.object_kind,
+                claim.object_label,
+                claim.object_wikidata_id,
+            )
             if claim.object_kind is not None and claim.object_label is not None
             else None
         )
