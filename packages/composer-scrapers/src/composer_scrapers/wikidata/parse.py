@@ -41,6 +41,23 @@ FIELDS: tuple[tuple[str, str, str | None], ...] = (
     ("musicbrainz", "musicbrainz_id", None),
 )
 
+# RELATIONS_QUERY property -> claim predicate; the object is always a person,
+# pinned by QID. Each is stored as the subject's own item asserts it: B's P802
+# naming A is not copied onto A as student_of, since A's record does not say
+# it. Father and mother both read as child_of -- which parent is not a
+# relationship between the two people.
+RELATIONS: tuple[tuple[str, str], ...] = (
+    ("P1066", "student_of"),
+    ("P802", "teacher_of"),
+    ("P737", "influenced_by"),
+    ("P22", "child_of"),
+    ("P25", "child_of"),
+    ("P40", "parent_of"),
+    ("P26", "spouse_of"),
+    ("P3373", "sibling_of"),
+)
+_RELATION_PREDICATES: dict[str, str] = dict(RELATIONS)
+
 # METRICS_QUERY result variable -> claim predicate (all literal-valued).
 METRICS: tuple[tuple[str, str], ...] = (
     ("sitelinks", "sitelink_count"),
@@ -95,13 +112,29 @@ def _literal(row: dict[str, Any], var: str) -> str | None:
     return value
 
 
+def _relation(row: dict[str, Any]) -> tuple[str, str, str] | None:
+    """A RELATIONS_QUERY row as (predicate, other QID, other label), or None
+    for any other row -- or one whose other end the label service cannot name."""
+    relation, other, label = (_literal(row, var) for var in ("relation", "other", "otherLabel"))
+    if relation is None or other is None or label is None or _BARE_QID.match(label):
+        return None
+    predicate = _RELATION_PREDICATES.get(relation.rsplit("/", 1)[-1])
+    if predicate is None:
+        return None
+    return predicate, other.rsplit("/", 1)[-1], label
+
+
 def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """Group result rows by QID, collecting each field's values into a set."""
     items: dict[str, dict[str, Any]] = {}
     for row in rows:
         uri = row["item"]["value"]
         qid = uri.rsplit("/", 1)[-1]
-        item = items.setdefault(qid, {"label": _literal(row, "itemLabel") or "", "values": {}})
+        item = items.setdefault(
+            qid, {"label": _literal(row, "itemLabel") or "", "values": {}, "relations": set()}
+        )
+        if (relation := _relation(row)) is not None:
+            item["relations"].add(relation)
         for var, _, kind in FIELDS:
             value = _literal(row, var)
             if value is None:
@@ -123,6 +156,8 @@ def _item_claims(item: dict[str, Any], item_metrics: dict[str, str]) -> tuple[So
                 claims.append(SourceClaim(predicate, value=value))
             else:
                 claims.append(SourceClaim(predicate, kind, value))
+    for predicate, other, label in sorted(item["relations"]):
+        claims.append(SourceClaim(predicate, "person", label, object_wikidata_id=other))
     for var, predicate in METRICS:
         if var in item_metrics:
             claims.append(SourceClaim(predicate, value=item_metrics[var]))
@@ -144,6 +179,11 @@ def _records_from_rows(
         item_metrics = (metrics or {}).get(qid, {})
         raw = {"item": f"http://www.wikidata.org/entity/{qid}", "label": name}
         raw.update({var: sorted(values) for var, values in item["values"].items()})
+        if item["relations"]:
+            raw["relations"] = [
+                {"predicate": predicate, "item": other, "label": label}
+                for predicate, other, label in sorted(item["relations"])
+            ]
         raw.update(item_metrics)
         records.append(
             SourceRecord(
