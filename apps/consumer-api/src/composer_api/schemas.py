@@ -317,6 +317,9 @@ class ConnectionOut(BaseModel):
     kind: str
     # performed | performed_by | appeared_with, or the claim predicate itself
     relation: str
+    # every relation linking the two, strongest first: a person born and died
+    # in a place is one neighbour, not two; ``relation`` is the first of these
+    relations: list[str]
     direction: str  # out = this entity is the claim's subject, in = its object
     weight: int  # performances, shared events, or sources asserting the claim
     score: float  # the value the ranking used; equals weight when rank=weight

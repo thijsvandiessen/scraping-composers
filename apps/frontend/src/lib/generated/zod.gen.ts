@@ -143,6 +143,7 @@ export const zConnectionOut = z.object({
     kind: z.string(),
     label: z.string(),
     relation: z.string(),
+    relations: z.array(z.string()),
     roles: z.array(z.string()),
     score: z.number(),
     via: z.array(z.string()),
@@ -550,7 +551,7 @@ export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetPath = z.obj
 
 export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetQuery = z.object({
     limit: z.int().gte(1).lte(100).optional().default(24),
-    per_relation: z.int().gte(1).lte(50).optional().default(6),
+    per_relation: z.int().gte(1).lte(50).nullish(),
     min_weight: z.int().gte(1).optional().default(1),
     rank: z.string().regex(/^(affinity|weight)$/).optional().default('affinity'),
     relation: z.string().nullish()

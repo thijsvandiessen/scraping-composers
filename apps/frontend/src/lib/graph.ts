@@ -27,6 +27,8 @@ export const RELATION_ORDER = ["performed", "performed_by", "appeared_with"] as 
 
 export interface GraphNode {
   connection: Connection;
+  /** Position in the API's ranking, 0 = strongest. Nodes are stored in sector order. */
+  rank: number;
   x: number;
   y: number;
   radius: number;
@@ -152,6 +154,7 @@ export function layout(connections: Connection[]): Graph {
       const rightHalf = x >= centre.x;
       nodes.push({
         connection,
+        rank,
         x,
         y,
         radius,
@@ -178,6 +181,11 @@ export function relationLabel(relation: string): string {
   if (known) return known;
   const words = relation.replaceAll("_", " ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** Every relation behind one neighbour, as a phrase: "Born in · Died in". */
+export function relationsLabel(connection: Connection): string {
+  return connection.relations.map(relationLabel).join(" · ");
 }
 
 /**

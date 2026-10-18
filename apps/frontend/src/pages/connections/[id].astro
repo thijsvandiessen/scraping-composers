@@ -1,7 +1,7 @@
 ---
 import Base from "../../layouts/Base.astro";
 import { GRAPH_LIMIT, getConnections, type ConnectionRank } from "../../lib/api";
-import { layout, relationLabel, weightLabel } from "../../lib/graph";
+import { layout, relationLabel, relationsLabel, weightLabel } from "../../lib/graph";
 import type { Connections } from "../../lib/schemas";
 
 const { id } = Astro.params;
@@ -31,6 +31,8 @@ if (!connections && !error) {
 }
 
 const graph = connections ? layout(connections.items) : null;
+// The drawing groups nodes by sector; the list reads best-first.
+const ranked = graph ? [...graph.nodes].sort((a, b) => a.rank - b.rank) : [];
 const truncated = connections ? connections.total > connections.items.length : false;
 
 function viewUrl(overrides: { rank?: ConnectionRank; min?: number; limit?: number }): string {
@@ -144,7 +146,7 @@ const title = connections ? `${connections.label} — Connections` : "Connection
                 {graph.nodes.map((node) => (
                   <a href={neighbourUrl(node.connection.entity_id)}>
                     <title>
-                      {`${node.connection.label} — ${relationLabel(node.connection.relation)}, ${weightLabel(node.connection.relation, node.connection.weight)}`}
+                      {`${node.connection.label} — ${relationsLabel(node.connection)}, ${weightLabel(node.connection.relation, node.connection.weight)}`}
                     </title>
                     <circle cx={node.x} cy={node.y} r={node.radius} data-group={node.group} />
                     <text x={node.x + node.labelOffset} y={node.y + 4} text-anchor={node.anchor}>
@@ -174,13 +176,13 @@ const title = connections ? `${connections.label} — Connections` : "Connection
 
           <h2>The evidence</h2>
           <ul class="connection-list">
-            {graph.nodes.map((node) => (
+            {ranked.map((node) => (
               <li>
                 <a class="connection-name" href={neighbourUrl(node.connection.entity_id)}>
                   {node.connection.label}
                 </a>
                 <span class="connection-relation" data-group={node.group}>
-                  {relationLabel(node.connection.relation)}
+                  {relationsLabel(node.connection)}
                 </span>
                 <span class="connection-weight">
                   {weightLabel(node.connection.relation, node.connection.weight)}

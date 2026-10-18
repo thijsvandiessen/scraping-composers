@@ -7,7 +7,7 @@ the facts gold holds, not scores derived from them — how strongly two people
 are connected is left to the queries (see ``queries.cypher``).
 """
 
-from .load import DEFAULT_BATCH_SIZE, GraphStats, load_graph
+from .load import DEFAULT_BATCH_SIZE, GraphStats, claim_pattern, load_graph
 from .rows import CLAIM_TYPES, ENTITY_LABELS, NODE_LABELS
 
 __all__ = [
@@ -16,5 +16,6 @@ __all__ = [
     "ENTITY_LABELS",
     "NODE_LABELS",
     "GraphStats",
+    "claim_pattern",
     "load_graph",
 ]

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Query
+from neo4j import Driver
 from sqlalchemy.orm import Session
 
 
@@ -14,6 +15,16 @@ def get_db() -> Generator[Session, None, None]:
 
 
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+def get_graph() -> Driver | None:
+    """The Neo4j driver the connections read from; ``create_app`` overrides
+    this. ``None`` is an app with no graph (silver), which the route turns into
+    a 503 only after the entity itself has been found."""
+    return None
+
+
+GraphDriver = Annotated[Driver | None, Depends(get_graph)]
 
 
 @dataclass(frozen=True)
@@ -57,7 +68,9 @@ class GraphBudget:
     """
 
     limit: Annotated[int, Query(ge=1, le=100)] = 24
-    per_relation: Annotated[int, Query(ge=1, le=50)] = 6
+    # Unset, each relation is guaranteed six and the rest of ``limit`` is
+    # shared out by rank; set, it is a hard cap per relation.
+    per_relation: Annotated[int | None, Query(ge=1, le=50)] = None
     min_weight: Annotated[int, Query(ge=1)] = 1
     rank: Annotated[str, Query(pattern="^(affinity|weight)$")] = "affinity"
     relation: str | None = None

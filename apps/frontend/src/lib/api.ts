@@ -19,7 +19,6 @@ export type ConnectionRank = "affinity" | "weight";
 /** Graph defaults. Kept here rather than in the page so the API and the
  * drawing agree on how many nodes a picture is allowed to carry. */
 export const GRAPH_LIMIT = 24;
-export const GRAPH_PER_RELATION = 6;
 export type WorkSort = "label" | "mentions";
 
 export class ApiError extends Error {
@@ -121,7 +120,9 @@ export async function getConnections(
 ): Promise<Connections | null> {
   const params = new URLSearchParams();
   params.set("limit", String(opts.limit ?? GRAPH_LIMIT));
-  params.set("per_relation", String(opts.perRelation ?? GRAPH_PER_RELATION));
+  // Left unset, the API reserves each relation a share and fills the rest of
+  // `limit` by rank, so a larger graph actually gets larger.
+  if (opts.perRelation) params.set("per_relation", String(opts.perRelation));
   if (opts.minWeight && opts.minWeight > 1) params.set("min_weight", String(opts.minWeight));
   if (opts.rank) params.set("rank", opts.rank);
   try {

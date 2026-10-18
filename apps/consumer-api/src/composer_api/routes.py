@@ -21,7 +21,7 @@ from .crud import (
     person_concerts,
     person_recordings,
 )
-from .deps import DbSession, FilterQuery, GraphQuery, PageQuery
+from .deps import DbSession, FilterQuery, GraphDriver, GraphQuery, PageQuery
 from .schemas import (
     ComposerDetail,
     ComposerPage,
@@ -66,7 +66,9 @@ def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
 
 
 @v1.get("/entities/{entity_id}/connections", response_model=ConnectionsOut)
-def entity_connections_route(entity_id: uuid.UUID, db: DbSession, budget: GraphQuery) -> ConnectionsOut:
+def entity_connections_route(
+    entity_id: uuid.UUID, db: DbSession, graph: GraphDriver, budget: GraphQuery
+) -> ConnectionsOut:
     """The strongest neighbours of one entity, budgeted so a graph can draw them.
 
     The whole neighbourhood is unusable — a busy conductor reaches thousands of
@@ -74,9 +76,10 @@ def entity_connections_route(entity_id: uuid.UUID, db: DbSession, budget: GraphQ
     telling. ``rank=affinity`` discounts each neighbour by how much it is
     performed or referenced overall, ``per_relation`` keeps the performance
     edges from crowding out the biographical ones, and ``min_weight`` drops the
-    one-off co-occurrences that are mostly matcher noise.
+    one-off co-occurrences that are mostly matcher noise. Served from the Neo4j
+    projection of gold; 503 when that isn't loaded or reachable.
     """
-    return entity_connections(db, entity_id, budget)
+    return entity_connections(db, graph, entity_id, budget)
 
 
 @v1.get("/works", response_model=WorkPage)

@@ -1,10 +1,11 @@
 """One entity's neighbours in the gold graph, budgeted so a page can draw them.
 
-The edges are the ones :mod:`composer_gold.kumu` exports full-graph, asked one
-entity at a time instead: a performer is joined to the composers it programmed
-through its concerts' (or recordings') works, and object-valued claims
-(``born_in``, ``student_of``, ``has_genre``, ...) hang the biographical context
-off both ends.
+Read from the Neo4j projection of gold (``composer-ingest export-neo4j``,
+see :mod:`composer_graph`): a performer reaches the composers it programmed
+through its concerts' (or recordings') works, performers billed together reach
+each other, and the claims (``born_in``, ``student_of``, ``has_genre``, ...)
+hang the biographical context off both ends. Gold itself still answers whether
+the entity exists, so an unknown id is a 404 whether or not the graph is up.
 
 Every knob here exists because the raw neighbourhood is unusable. A busy
 conductor touches hundreds of composers and thousands of colleagues, and the
@@ -17,41 +18,45 @@ to something a reader (and a layout) can take in:
 ``per_relation``
     A separate budget per relation, so the performance edges — always the
     numerous ones — cannot crowd the handful of biographical edges out of the
-    graph entirely.
+    graph entirely. Left unset it is a reservation rather than a cap: each
+    relation is guaranteed its share, and whatever ``limit`` has left over goes
+    to the next-best edges of any relation.
 ``limit``
     The overall cap, sized for a drawing rather than for completeness.
 ``rank``
     ``weight`` ranks by raw co-occurrence and surfaces the famous. ``affinity``
-    (the default) divides by the square root of how much the neighbour is
-    performed or referenced overall, which demotes the hubs everyone connects
-    to and lets a pairing that is *distinctive* — Karajan and Strauss rather
-    than Karajan and Beethoven — come out on top. It is a ranking heuristic,
-    deliberately a plain one; ``weight`` is always there to check it against.
+    (the default) divides by the square root of the neighbour's reach *in the
+    same relation family* — how often a composer is performed at all, how many
+    performances a performer gives, how many events a stage partner appears at
+    — which demotes the hubs everyone connects to and lets a pairing that is
+    *distinctive* come out on top. ``weight`` is always there to check it
+    against. The reach is stored on each node by the loader, one property per
+    family; comparing an edge with a reach from another family is the mistake
+    this module was rewritten to stop making.
+
+Claim edges are ranked differently, because their weight (how many sources
+assert the claim) is almost always one or two. A place, genre or movement is
+discounted by how many entities it is linked to — Vienna says less about a
+person than a small town does. A person or ensemble is the other way round:
+on Vienna's page the people born there are ranked by how widely they are
+performed, so Beethoven and Brahms come before a name nobody has heard. A
+neighbour linked by several claims (born *and* died there) is one node, with
+all its relations listed.
 """
 
-import math
 import uuid
-from collections import Counter, defaultdict
+from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from typing import Any, LiteralString, cast
 
-from composer_models import (
-    Claim,
-    Concert,
-    ConcertParticipant,
-    ConcertWork,
-    Entity,
-    RawWorkMention,
-    Recording,
-    RecordingParticipant,
-    RecordingWork,
-    Source,
-    Work,
-)
-from sqlalchemy import and_, func, or_, select
+from composer_graph import CLAIM_TYPES, ENTITY_LABELS, claim_pattern
+from composer_models import Entity
+from neo4j import Driver
 from sqlalchemy.orm import Session
 
 from ..deps import GraphBudget
-from ..errors import NotFoundError
+from ..errors import GraphUnavailableError, NotFoundError
 from ..schemas import ConnectionOut, ConnectionsOut
 
 # Relations, in the order the graph should read them.
@@ -59,319 +64,256 @@ PERFORMED = "performed"  # this entity performed that composer's music
 PERFORMED_BY = "performed_by"  # that performer played this composer's music
 APPEARED_WITH = "appeared_with"  # shared a concert or a recording session
 
-PERFORMANCE_RELATIONS = frozenset({PERFORMED, PERFORMED_BY, APPEARED_WITH})
-
-# Claim predicates that would connect nearly everyone to a handful of nodes.
-# "has_profession" makes the profession entity ("composer") the biggest hub in
-# the dataset while saying nothing about any particular pair.
-HUB_PREDICATES = frozenset({"has_profession"})
+# The per-relation allowance when the caller sets none: a reservation, see
+# ``_budgeted``. Six of each keeps the default 24-node drawing varied.
+RESERVED_PER_RELATION = 6
 
 # Proof snippets carried per edge. Three is enough to show the reader what the
 # edge is made of without turning the payload into a concert listing.
 VIA_CAP = 3
 
-# The participant/work pair of each event kind, and the foreign keys that tie a
-# participant row to the work rows of the same event. Passed as explicit column
-# arguments (rather than reached for off the class) so the two event families
-# can share one query body.
-_EVENT_JOINS = (
-    (ConcertParticipant, ConcertWork, ConcertParticipant.concert_id, ConcertWork.concert_id),
-    (RecordingParticipant, RecordingWork, RecordingParticipant.recording_id, RecordingWork.recording_id),
-)
+_KINDS = {label: kind for kind, label in ENTITY_LABELS.items()}
+_PREDICATES = {rel_type: predicate for predicate, rel_type in CLAIM_TYPES.items()}
+
+# Shared tail of the performance queries: score each neighbour, rank, and
+# return the best ``$keep`` alongside how many cleared ``min_weight``. The
+# reach property is the neighbour's total in this family; below 1 it is
+# clamped so a neighbour the loader didn't annotate ranks by its raw weight.
+_RANKED: LiteralString = """
+WITH n, weight, roles, toFloat(coalesce(n[$reach], 1)) AS reach
+WHERE weight >= $min_weight
+WITH n, weight, roles,
+     CASE $rank WHEN 'weight' THEN toFloat(weight)
+                ELSE weight / sqrt(CASE WHEN reach < 1 THEN 1.0 ELSE reach END) END AS score
+ORDER BY score DESC, weight DESC, n.id
+WITH collect({node: elementId(n), id: n.id, label: n.label, kind: labels(n)[0],
+              weight: weight, score: score, roles: roles}) AS edges
+RETURN size(edges) AS total, edges[0..$keep] AS edges
+"""
+
+# Performances are counted per event and work (PROGRAMMED.times), not per
+# credit: a soloist who also conducted the night is one performance, two roles.
+# The roles come with the proof, for the kept edges only — collecting them for
+# every one of Beethoven's thousands of performers doubles the query.
+_PERFORMANCE_QUERIES: dict[str, tuple[LiteralString, str]] = {
+    PERFORMED: (
+        "MATCH (f:$FOCUS {id: $id})-[:PERFORMED_IN]->(e) WITH DISTINCT f, e "
+        "MATCH (e)-[pr:PROGRAMMED]->(:Work)-[:COMPOSED_BY]->(n) WHERE n <> f "
+        "WITH n, sum(pr.times) AS weight, [] AS roles",
+        "times_performed",
+    ),
+    PERFORMED_BY: (
+        "MATCH (f:$FOCUS {id: $id})<-[:COMPOSED_BY]-(:Work)<-[pr:PROGRAMMED]-(e)<-[:PERFORMED_IN]-(n) "
+        "WHERE n <> f WITH DISTINCT n, pr "
+        "WITH n, sum(pr.times) AS weight, [] AS roles",
+        "performances",
+    ),
+    APPEARED_WITH: (
+        "MATCH (f:$FOCUS {id: $id})-[:PERFORMED_IN]->(e)<-[pi:PERFORMED_IN]-(n) "
+        "WHERE n <> f "
+        "WITH n, count(DISTINCT e) AS weight, collect(DISTINCT pi.role) AS roles",
+        "appearances",
+    ),
+}
+
+_CLAIMS: LiteralString = """
+MATCH (f:$FOCUS {id: $id})-[r:$CLAIMS]-(n)
+WHERE n <> f
+WITH n, r, CASE WHEN startNode(r) = f THEN 'out' ELSE 'in' END AS direction,
+     coalesce(r.sources, []) AS sources
+ORDER BY size(sources) DESC, type(r)
+WITH n, collect({type: type(r), direction: direction}) AS claims,
+     sum(size(sources)) AS weight, reduce(acc = [], s IN collect(sources) | acc + s) AS sources
+WHERE weight >= $min_weight
+WITH n, claims, weight, sources,
+     CASE WHEN n:Person OR n:Ensemble
+          THEN log(2 + coalesce(n.times_performed, 0) + coalesce(n.appearances, 0))
+          ELSE 1 / sqrt(toFloat(CASE WHEN coalesce(n.claim_degree, 1) < 1 THEN 1 ELSE n.claim_degree END))
+     END AS factor
+WITH n, claims, weight, sources, factor,
+     CASE $rank WHEN 'weight' THEN toFloat(weight) ELSE weight * factor END AS score
+ORDER BY score DESC, weight DESC, factor DESC, n.id
+RETURN elementId(n) AS node, n.id AS id, n.label AS label, labels(n)[0] AS kind,
+       claims, weight, score, sources
+"""
+
+# The proof behind each kept performance edge, in one pass over its paths:
+# the performer's roles, and the distinct works with the year they were played
+# (or released), for Python to put newest first and cut to three.
+_PROOF: dict[str, LiteralString] = {
+    PERFORMED: "MATCH (f)-[pi:PERFORMED_IN]->(e)-[:PROGRAMMED]->(w:Work)-[:COMPOSED_BY]->(n)",
+    PERFORMED_BY: "MATCH (n)-[pi:PERFORMED_IN]->(e)-[:PROGRAMMED]->(w:Work)-[:COMPOSED_BY]->(f)",
+}
+_PROOF_TAIL: LiteralString = """
+  RETURN collect(DISTINCT pi.role) AS roles,
+         collect(DISTINCT [w.title, left(coalesce(e.date, e.release_date), 4)]) AS works
+}
+RETURN node, roles, works
+"""
 
 
 @dataclass
 class _Edge:
-    """One neighbour, before ranking and before its proof is attached."""
+    """One neighbour, as the graph returned it, before the budgets."""
 
-    entity_id: uuid.UUID
+    node: str  # Neo4j element id, to ask for the edge's proof without a label
+    entity_id: str
+    label: str
+    kind: str
     relation: str
-    weight: int = 0
+    weight: int
+    score: float
     direction: str = "out"
-    roles: set[str] = field(default_factory=set)
-    via: list[str] = field(default_factory=list)
-    score: float = 0.0
+    relations: list[str] = field(default_factory=list[str])
+    roles: list[str] = field(default_factory=list[str])
+    via: list[str] = field(default_factory=list[str])
 
 
-def _performed_edges(db: Session, entity_id: uuid.UUID) -> list[_Edge]:
-    """Composers whose music this entity performed, weighted by performances."""
-    weights: Counter[uuid.UUID] = Counter()
-    roles: defaultdict[uuid.UUID, set[str]] = defaultdict(set)
-    for participant, event_work, participant_fk, event_work_fk in _EVENT_JOINS:
-        rows = db.execute(
-            select(Work.composer_entity_id, participant.role, func.count())
-            .select_from(participant)
-            .join(event_work, event_work_fk == participant_fk)
-            .join(RawWorkMention, RawWorkMention.id == event_work.mention_id)
-            .join(Work, Work.id == RawWorkMention.work_id)
-            # Gold keeps every work but prunes entities, so a work can point at
-            # a composer that did not survive promotion; the join drops those.
-            .join(Entity, Entity.id == Work.composer_entity_id)
-            .where(participant.entity_id == entity_id, Work.composer_entity_id != entity_id)
-            .group_by(Work.composer_entity_id, participant.role)
-        ).tuples()
-        for composer_id, role, count in rows:
-            assert composer_id is not None  # guarded by the join on Entity
-            weights[composer_id] += count
-            roles[composer_id].add(role)
-    return [
-        _Edge(entity_id=cid, relation=PERFORMED, weight=weight, roles=roles[cid])
-        for cid, weight in weights.items()
-    ]
+def _cypher(template: LiteralString, focus: str) -> LiteralString:
+    """Labels and relationship types can't be parameters, so they are formatted
+    in — the focus label from ``ENTITY_LABELS``, the types from ``CLAIM_TYPES``,
+    never request data. A label is what lets the lookup use the id constraint;
+    without one Neo4j scans every node."""
+    return cast(LiteralString, template.replace("$FOCUS", focus).replace("$CLAIMS", claim_pattern()))
 
 
-def _performed_by_edges(db: Session, entity_id: uuid.UUID) -> list[_Edge]:
-    """Performers and ensembles that played this composer's music."""
-    weights: Counter[uuid.UUID] = Counter()
-    roles: defaultdict[uuid.UUID, set[str]] = defaultdict(set)
-    for participant, event_work, participant_fk, event_work_fk in _EVENT_JOINS:
-        rows = db.execute(
-            select(participant.entity_id, participant.role, func.count())
-            .select_from(Work)
-            .join(RawWorkMention, RawWorkMention.work_id == Work.id)
-            .join(event_work, event_work.mention_id == RawWorkMention.id)
-            .join(participant, participant_fk == event_work_fk)
-            .where(
-                Work.composer_entity_id == entity_id,
-                participant.entity_id.is_not(None),
-                participant.entity_id != entity_id,
+def _kind(node_label: str) -> str:
+    """The gold entity kind a node label stands for (``Person`` -> ``person``)."""
+    return _KINDS.get(node_label) or node_label.lower()
+
+
+def _run(graph: Driver, query: LiteralString, **params: Any) -> list[dict[str, Any]]:
+    records, _, _ = graph.execute_query(query, params)
+    return [record.data() for record in records]
+
+
+def _performance_edges(
+    graph: Driver, focus: str, params: dict[str, Any], relations: Iterable[str]
+) -> tuple[int, list[_Edge]]:
+    total = 0
+    edges: list[_Edge] = []
+    for relation in relations:
+        head, reach = _PERFORMANCE_QUERIES[relation]
+        [row] = _run(graph, _cypher(head + _RANKED, focus), reach=reach, **params)
+        total += row["total"]
+        edges += [
+            _Edge(
+                node=e["node"],
+                entity_id=e["id"],
+                label=e["label"],
+                kind=_kind(e["kind"]),
+                relation=relation,
+                weight=e["weight"],
+                score=e["score"],
+                direction="in" if relation == PERFORMED_BY else "out",
+                relations=[relation],
+                roles=sorted(set(e["roles"])),
             )
-            .group_by(participant.entity_id, participant.role)
-        ).tuples()
-        for performer_id, role, count in rows:
-            assert performer_id is not None  # guarded by the WHERE above
-            weights[performer_id] += count
-            roles[performer_id].add(role)
-    return [
-        _Edge(entity_id=pid, relation=PERFORMED_BY, weight=weight, direction="in", roles=roles[pid])
-        for pid, weight in weights.items()
-    ]
+            for e in row["edges"]
+        ]
+    return total, edges
 
 
-def _appeared_with_edges(db: Session, entity_id: uuid.UUID) -> list[_Edge]:
-    """Everyone billed alongside this entity, weighted by shared events.
-
-    Two passes rather than a self-join: the events this entity appears at, then
-    everyone else appearing at those. Both hit ``ix_*_participants_entity`` and
-    the event-id index, and it keeps the query free of an alias.
-    """
-    weights: Counter[uuid.UUID] = Counter()
-    roles: defaultdict[uuid.UUID, set[str]] = defaultdict(set)
-    for participant, _event_work, participant_fk, _event_work_fk in _EVENT_JOINS:
-        events = select(participant_fk).where(participant.entity_id == entity_id).scalar_subquery()
-        rows = db.execute(
-            select(participant.entity_id, participant.role, func.count(func.distinct(participant_fk)))
-            .where(
-                participant_fk.in_(events),
-                participant.entity_id.is_not(None),
-                participant.entity_id != entity_id,
+def _claim_edges(graph: Driver, focus: str, params: dict[str, Any], only: str | None) -> list[_Edge]:
+    """One edge per neighbour, its claims collapsed; the strongest names it."""
+    edges: list[_Edge] = []
+    for row in _run(graph, _cypher(_CLAIMS, focus), **params):
+        relations = list(dict.fromkeys(_PREDICATES[c["type"]] for c in row["claims"]))
+        if only is not None and only not in relations:
+            continue
+        primary = only or relations[0]
+        direction = next(c["direction"] for c in row["claims"] if _PREDICATES[c["type"]] == primary)
+        edges.append(
+            _Edge(
+                node=row["node"],
+                entity_id=row["id"],
+                label=row["label"],
+                kind=_kind(row["kind"]),
+                relation=primary,
+                weight=row["weight"],
+                score=row["score"],
+                direction=direction,
+                relations=relations,
+                via=list(dict.fromkeys(row["sources"]))[:VIA_CAP],
             )
-            .group_by(participant.entity_id, participant.role)
-        ).tuples()
-        for other_id, role, count in rows:
-            assert other_id is not None  # guarded by the WHERE above
-            weights[other_id] += count
-            roles[other_id].add(role)
-    return [
-        _Edge(entity_id=oid, relation=APPEARED_WITH, weight=weight, roles=roles[oid])
-        for oid, weight in weights.items()
-    ]
+        )
+    return edges
 
 
-def _claim_edges(db: Session, entity_id: uuid.UUID) -> list[_Edge]:
-    """Object-valued claims either way, weighted by how many sources assert them.
-
-    A claim asserted by three sources outranks one asserted by a single
-    scraper, which is the only corroboration signal the claims table carries.
-    """
-    edges: dict[tuple[uuid.UUID, str, str], _Edge] = {}
-    directions = (
-        ("out", Claim.subject_id == entity_id, Claim.object_id),
-        ("in", Claim.object_id == entity_id, Claim.subject_id),
-    )
-    for direction, subject_filter, other_column in directions:
-        rows = db.execute(
-            select(other_column, Claim.predicate, Source.name)
-            .join(Source, Source.id == Claim.source_id)
-            .where(subject_filter, Claim.object_id.is_not(None), other_column != entity_id)
-            .distinct()
-        ).tuples()
-        for other_id, predicate, source_name in rows:
-            if other_id is None or predicate in HUB_PREDICATES:
-                continue
-            key = (other_id, predicate, direction)
-            edge = edges.get(key)
-            if edge is None:
-                edge = _Edge(entity_id=other_id, relation=predicate, direction=direction)
-                edges[key] = edge
-            edge.weight += 1
-            if len(edge.via) < VIA_CAP and source_name not in edge.via:
-                edge.via.append(source_name)
-    return list(edges.values())
-
-
-def _performance_prominence(db: Session, composer_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
-    """How often each composer is performed at all — the hub discount's denominator."""
-    totals: Counter[uuid.UUID] = Counter()
-    if not composer_ids:
-        return totals
-    for _participant, event_work, _participant_fk, _event_work_fk in _EVENT_JOINS:
-        rows = db.execute(
-            select(Work.composer_entity_id, func.count())
-            .select_from(event_work)
-            .join(RawWorkMention, RawWorkMention.id == event_work.mention_id)
-            .join(Work, Work.id == RawWorkMention.work_id)
-            .where(Work.composer_entity_id.in_(composer_ids))
-            .group_by(Work.composer_entity_id)
-        ).tuples()
-        for composer_id, count in rows:
-            assert composer_id is not None  # guarded by the IN above
-            totals[composer_id] += count
-    return totals
-
-
-def _appearance_prominence(db: Session, performer_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
-    """How many events each performer appears at at all."""
-    totals: Counter[uuid.UUID] = Counter()
-    if not performer_ids:
-        return totals
-    for participant, _event_work, participant_fk, _event_work_fk in _EVENT_JOINS:
-        rows = db.execute(
-            select(participant.entity_id, func.count(func.distinct(participant_fk)))
-            .where(participant.entity_id.in_(performer_ids))
-            .group_by(participant.entity_id)
-        ).tuples()
-        for performer_id, count in rows:
-            assert performer_id is not None  # guarded by the IN above
-            totals[performer_id] += count
-    return totals
-
-
-def _claim_prominence(db: Session, entity_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
-    """How many distinct entities each claim neighbour is attached to.
-
-    Vienna is a weak signal precisely because half the dataset was born there.
-    """
-    if not entity_ids:
-        return {}
-    rows = db.execute(
-        select(Claim.object_id, func.count(func.distinct(Claim.subject_id)))
-        .where(Claim.object_id.in_(entity_ids))
-        .group_by(Claim.object_id)
-    ).tuples()
-    return {object_id: count for object_id, count in rows if object_id is not None}
-
-
-def _prominence(db: Session, edges: list[_Edge]) -> dict[uuid.UUID, int]:
-    """The denominator for every edge, looked up per relation family."""
-    performed = [e.entity_id for e in edges if e.relation == PERFORMED]
-    performers = [e.entity_id for e in edges if e.relation in (PERFORMED_BY, APPEARED_WITH)]
-    claims = [e.entity_id for e in edges if e.relation not in PERFORMANCE_RELATIONS]
-    return {
-        **_performance_prominence(db, performed),
-        **_appearance_prominence(db, performers),
-        **_claim_prominence(db, claims),
-    }
-
-
-def _score(edge: _Edge, prominence: dict[uuid.UUID, int], rank: str) -> float:
-    """Rank key: raw weight, or weight discounted by the neighbour's reach.
-
-    The square root is the usual soft discount — it pulls the hubs down without
-    handing the top of the list to every one-off pairing, which dividing by the
-    raw total would.
-    """
-    if rank == "weight":
-        return float(edge.weight)
-    return edge.weight / math.sqrt(max(prominence.get(edge.entity_id, 1), 1))
-
-
-def _budgeted(edges: list[_Edge], per_relation: int, limit: int) -> list[_Edge]:
+def _budgeted(edges: list[_Edge], per_relation: int | None, limit: int) -> list[_Edge]:
     """Top ``per_relation`` of each relation, then the best ``limit`` overall.
 
     ``edges`` arrives sorted best-first, so one pass gives each relation its own
     budget: a conductor's thousand performance edges cannot squeeze out the two
     claims that say where he was born, because they are spending different
-    allowances.
+    allowances. With ``per_relation`` unset, a second pass hands whatever
+    ``limit`` has left to the next-best edges, so a page asking for 48 nodes
+    gets 48 even when only two relations are present.
     """
+    allowance = per_relation or RESERVED_PER_RELATION
     taken: Counter[str] = Counter()
-    kept: list[_Edge] = []
-    for edge in edges:
-        if taken[edge.relation] >= per_relation:
-            continue
-        taken[edge.relation] += 1
-        kept.append(edge)
+    kept: set[int] = set()
+    for index, edge in enumerate(edges):
         if len(kept) >= limit:
             break
-    return kept
+        if taken[edge.relation] < allowance:
+            taken[edge.relation] += 1
+            kept.add(index)
+    if per_relation is None:
+        for index in range(len(edges)):
+            if len(kept) >= limit:
+                break
+            kept.add(index)
+    return [edge for index, edge in enumerate(edges) if index in kept]
 
 
-def _attach_performance_via(db: Session, entity_id: uuid.UUID, edges: list[_Edge]) -> None:
-    """Hang a few real performances off each performance edge, as its proof.
+def _newest(works: list[list[str | None]]) -> list[str]:
+    """Up to ``VIA_CAP`` "Title (year)" snippets, newest first, undated last."""
+    named = sorted(((title, year) for title, year in works if title is not None), key=lambda w: w[0])
+    # Stable, so equal years keep the title order; an undated "" sorts last.
+    named.sort(key=lambda w: w[1] or "", reverse=True)
+    snippets = [f"{title} ({year})" if year else title for title, year in named]
+    return list(dict.fromkeys(snippets))[:VIA_CAP]
 
-    Only the edges that survived the budget are asked about, so this is one
-    extra query per event kind over at most ``limit`` neighbours.
-    """
-    performed = {e.entity_id: e for e in edges if e.relation == PERFORMED}
-    performed_by = {e.entity_id: e for e in edges if e.relation == PERFORMED_BY}
-    if not performed and not performed_by:
-        return
-    ids = list(performed.keys() | performed_by.keys())
-    # The two event kinds date themselves differently (a concert happened on a
-    # date, a recording was released on one), so the date column travels with
-    # the join rather than being reached for off the mapped class.
-    joins = (
-        (
-            ConcertParticipant,
-            ConcertWork,
-            Concert,
-            ConcertParticipant.concert_id,
-            ConcertWork.concert_id,
-            Concert.date,
-        ),
-        (
-            RecordingParticipant,
-            RecordingWork,
-            Recording,
-            RecordingParticipant.recording_id,
-            RecordingWork.recording_id,
-            Recording.release_date,
-        ),
-    )
-    for participant, event_work, event, participant_fk, event_work_fk, date_column in joins:
-        # One query serves both directions: the rows are (performer, composer,
-        # title, date) tuples, and which side is the neighbour depends only on
-        # which end the focused entity sits at.
-        rows = db.execute(
-            select(participant.entity_id, Work.composer_entity_id, RawWorkMention.raw_title, date_column)
-            .select_from(participant)
-            .join(event, event.id == participant_fk)
-            .join(event_work, event_work_fk == participant_fk)
-            .join(RawWorkMention, RawWorkMention.id == event_work.mention_id)
-            .join(Work, Work.id == RawWorkMention.work_id)
-            .where(
-                or_(
-                    and_(participant.entity_id == entity_id, Work.composer_entity_id.in_(ids)),
-                    and_(Work.composer_entity_id == entity_id, participant.entity_id.in_(ids)),
-                )
-            )
-            .order_by(date_column.desc().nulls_last())
-        ).tuples()
-        for performer_id, composer_id, title, date in rows:
-            # Both sides are nullable columns; the WHERE above only guarantees
-            # that one end is the focused entity.
-            if performer_id is None or composer_id is None:
-                continue
-            edge = performed.get(composer_id) if performer_id == entity_id else performed_by.get(performer_id)
-            if edge is None or len(edge.via) >= VIA_CAP:
-                continue
-            snippet = f"{title} ({date[:4]})" if date else title
-            if snippet not in edge.via:
-                edge.via.append(snippet)
+
+def _attach_proof(graph: Driver, focus: str, entity_id: str, edges: list[_Edge]) -> None:
+    """Hang the roles and a few real performances off each kept performance edge."""
+    for relation, pattern in _PROOF.items():
+        by_node = {e.node: e for e in edges if e.relation == relation}
+        if not by_node:
+            continue
+        query = (
+            "MATCH (f:$FOCUS {id: $id}) UNWIND $nodes AS node MATCH (n) WHERE elementId(n) = node "
+            "CALL (f, n) { " + pattern + _PROOF_TAIL
+        )
+        for row in _run(graph, _cypher(query, focus), id=entity_id, nodes=list(by_node)):
+            edge = by_node[row["node"]]
+            edge.roles = sorted(row["roles"])
+            edge.via = _newest(row["works"])
+
+
+def _neighbours(graph: Driver, focus: str, entity_id: str, budget: GraphBudget) -> tuple[int, list[_Edge]]:
+    """Every edge that cleared ``min_weight``, counted, and the best of them ranked."""
+    keep = min(budget.per_relation or budget.limit, budget.limit)
+    params: dict[str, Any] = {
+        "id": entity_id,
+        "min_weight": budget.min_weight,
+        "rank": budget.rank,
+        "keep": keep,
+    }
+    families = [r for r in _PERFORMANCE_QUERIES if budget.relation in (None, r)]
+    total, edges = _performance_edges(graph, focus, params, families)
+    if budget.relation is None or budget.relation not in _PERFORMANCE_QUERIES:
+        claims = _claim_edges(graph, focus, params, budget.relation)
+        total += len(claims)
+        edges += claims
+    # Ties broken on the id so a page reloads to the same picture.
+    edges.sort(key=lambda e: (-e.score, -e.weight, e.entity_id))
+    return total, edges
 
 
 def entity_connections(
-    db: Session, entity_id: uuid.UUID, budget: GraphBudget | None = None
+    db: Session, graph: Driver | None, entity_id: uuid.UUID, budget: GraphBudget | None = None
 ) -> ConnectionsOut:
     """The strongest neighbours of one entity, ready to draw.
 
@@ -383,36 +325,15 @@ def entity_connections(
     entity = db.get(Entity, entity_id)
     if entity is None:
         raise NotFoundError("entity not found")
+    if graph is None:
+        raise GraphUnavailableError("this API has no graph database")
 
-    edges = [
-        *_performed_edges(db, entity_id),
-        *_performed_by_edges(db, entity_id),
-        *_appeared_with_edges(db, entity_id),
-        *_claim_edges(db, entity_id),
-    ]
-    edges = [e for e in edges if e.weight >= budget.min_weight]
-    if budget.relation is not None:
-        edges = [e for e in edges if e.relation == budget.relation]
-    total = len(edges)
-
-    prominence = _prominence(db, edges)
-    for edge in edges:
-        edge.score = _score(edge, prominence, budget.rank)
-    # Ties broken on the id so a page reloads to the same picture.
-    edges.sort(key=lambda e: (-e.score, -e.weight, str(e.entity_id)))
-    kept = _budgeted(edges, budget.per_relation, budget.limit)
-    _attach_performance_via(db, entity_id, kept)
-
-    # One lookup for the labels and kinds of everything that survived, rather
-    # than an ORM load per edge.
-    named = {
-        row_id: (label, kind)
-        for row_id, label, kind in db.execute(
-            select(Entity.id, Entity.label, Entity.kind).where(Entity.id.in_([e.entity_id for e in kept]))
-        )
-        .tuples()
-        .all()
-    }
+    total, kept = 0, list[_Edge]()
+    # A work entity, say, is no node in the graph and so has no neighbours.
+    if (focus := ENTITY_LABELS.get(entity.kind)) is not None:
+        total, edges = _neighbours(graph, focus, str(entity_id), budget)
+        kept = _budgeted(edges, budget.per_relation, budget.limit)
+        _attach_proof(graph, focus, str(entity_id), kept)
 
     return ConnectionsOut(
         entity_id=entity.id,
@@ -420,14 +341,15 @@ def entity_connections(
         kind=entity.kind,
         items=[
             ConnectionOut(
-                entity_id=edge.entity_id,
-                label=named[edge.entity_id][0],
-                kind=named[edge.entity_id][1],
+                entity_id=uuid.UUID(edge.entity_id),
+                label=edge.label,
+                kind=edge.kind,
                 relation=edge.relation,
+                relations=edge.relations,
                 direction=edge.direction,
                 weight=edge.weight,
                 score=round(edge.score, 4),
-                roles=sorted(edge.roles),
+                roles=edge.roles,
                 via=edge.via,
             )
             for edge in kept

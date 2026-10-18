@@ -762,6 +762,13 @@
             "title": "Relation",
             "type": "string"
           },
+          "relations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Relations",
+            "type": "array"
+          },
           "roles": {
             "items": {
               "type": "string"
@@ -790,6 +797,7 @@
           "label",
           "kind",
           "relation",
+          "relations",
           "direction",
           "weight",
           "score",
@@ -2082,6 +2090,7 @@
   "paths": {
     "/v1/composers": {
       "get": {
+        "description": "People credited with at least three works, whatever their profession claims say.",
         "operationId": "list_composers_v1_composers_get",
         "parameters": [
           {
@@ -2691,7 +2700,7 @@
     },
     "/v1/entities/{entity_id}/connections": {
       "get": {
-        "description": "The strongest neighbours of one entity, budgeted so a graph can draw them.\n\nThe whole neighbourhood is unusable \u2014 a busy conductor reaches thousands of\npeople, and the heaviest edges (everyone performs Beethoven) are the least\ntelling. ``rank=affinity`` discounts each neighbour by how much it is\nperformed or referenced overall, ``per_relation`` keeps the performance\nedges from crowding out the biographical ones, and ``min_weight`` drops the\none-off co-occurrences that are mostly matcher noise.",
+        "description": "The strongest neighbours of one entity, budgeted so a graph can draw them.\n\nThe whole neighbourhood is unusable \u2014 a busy conductor reaches thousands of\npeople, and the heaviest edges (everyone performs Beethoven) are the least\ntelling. ``rank=affinity`` discounts each neighbour by how much it is\nperformed or referenced overall, ``per_relation`` keeps the performance\nedges from crowding out the biographical ones, and ``min_weight`` drops the\none-off co-occurrences that are mostly matcher noise. Served from the Neo4j\nprojection of gold; 503 when that isn't loaded or reachable.",
         "operationId": "entity_connections_route_v1_entities__entity_id__connections_get",
         "parameters": [
           {
@@ -2721,11 +2730,17 @@
             "name": "per_relation",
             "required": false,
             "schema": {
-              "default": 6,
-              "maximum": 50,
-              "minimum": 1,
-              "title": "Per Relation",
-              "type": "integer"
+              "anyOf": [
+                {
+                  "maximum": 50,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Per Relation"
             }
           },
           {

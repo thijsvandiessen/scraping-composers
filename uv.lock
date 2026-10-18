@@ -335,8 +335,10 @@ source = { editable = "apps/consumer-api" }
 dependencies = [
     { name = "composer-config" },
     { name = "composer-gold" },
+    { name = "composer-graph" },
     { name = "composer-models" },
     { name = "fastapi" },
+    { name = "neo4j" },
     { name = "python-dotenv" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -345,8 +347,10 @@ dependencies = [
 requires-dist = [
     { name = "composer-config", editable = "packages/composer-config" },
     { name = "composer-gold", editable = "packages/composer-gold" },
+    { name = "composer-graph", editable = "packages/composer-graph" },
     { name = "composer-models", editable = "packages/composer-models" },
     { name = "fastapi", specifier = ">=0.143.0" },
+    { name = "neo4j", specifier = ">=6.4.1" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
 ]
