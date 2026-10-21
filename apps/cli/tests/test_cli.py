@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import logging
 import sys
@@ -12,14 +13,17 @@ import pytest
 from composer_cli import _log_level, main
 from composer_cli.export_cmds import cmd_export_kumu
 from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
-from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_eval, cmd_person_review
+from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_eval, cmd_person_review, cmd_person_train
 from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
 from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work
 from composer_models.db import get_engine, init_db
 from composer_schema import SourceClaim
 from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.persons import AUTO_THRESHOLD
+from composer_warehouse.persons import AUTO_THRESHOLD, training
+from composer_warehouse.persons.evaluation import read_dataset
+from composer_warehouse.persons.fellegi_sunter import LinkageModel
+from composer_warehouse.persons.training import sample_non_match_levels
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -340,6 +344,67 @@ def test_cmd_dedupe_persons_reset_lets_the_pass_re_decide(
     out = capsys.readouterr().out
     assert "reset 2 machine match(es)" in out
     assert "auto-linked 1" in out
+
+
+def _ingest_labellable_people(db_url: str) -> None:
+    """People the automatic labeller can judge: J.S. Bach's dates are backed by
+    two sources (a match), and J.C. Bach was born a generation later (not)."""
+    dates = (SourceClaim("born_on", value="1685"), SourceClaim("died_on", value="1750"))
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    person("Bach, J.S.", *dates),
+                    person("Bach, Johann Sebastian", *dates),
+                    person("Bach, Johann Christian", SourceClaim("born_on", value="1735")),
+                    *(person(f"Smith, Filler{i}") for i in range(10)),
+                ),
+                name="first",
+            ),
+        )
+        ingest_source(session, FakeSource(records=(person("Bach, J.S.", *dates),), name="second"))
+
+
+@pytest.fixture
+def small_u_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The shipped three-million-pair sample is sized for the real corpus.
+    monkeypatch.setattr(
+        training, "sample_non_match_levels", functools.partial(sample_non_match_levels, pairs=5_000)
+    )
+
+
+@pytest.mark.usefixtures("small_u_sample")
+def test_cmd_person_train_writes_the_model_and_the_dataset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_labellable_people(db_url)
+    model_path, dataset_path = tmp_path / "model.json", tmp_path / "pairs.jsonl.gz"
+
+    args = _ns(database_url=db_url, model_out=str(model_path), dataset_out=str(dataset_path))
+    assert cmd_person_train(args) == 0
+
+    model = LinkageModel.load(model_path)
+    assert 0.0 < model.prior <= 0.5
+    rows = read_dataset(dataset_path)
+    assert {row.provenance for row in rows} == {"dates_corroborated", "year_conflict"}
+    out = capsys.readouterr().out
+    assert f"wrote {model_path} (prior {model.prior:.5f})" in out
+    assert f"wrote {dataset_path} ({len(rows)} labelled pairs)" in out
+    assert "given:" in out
+
+
+@pytest.mark.usefixtures("small_u_sample")
+def test_cmd_person_train_writes_no_dataset_unless_asked(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_labellable_people(db_url)
+
+    assert (
+        cmd_person_train(_ns(database_url=db_url, model_out=str(tmp_path / "m.json"), dataset_out=None)) == 0
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["m.json", "test.db"]
 
 
 def test_cmd_person_eval_reports_the_model_against_the_baseline(
