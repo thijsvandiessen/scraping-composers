@@ -36,6 +36,14 @@ for m in packages/composer-schema packages/composer-models packages/composer-htt
 done
 ```
 
+## Docs follow the tests
+
+Domain docs live with the code: each member has a `README.md` whose **Tests**
+section lists its test files and what they cover. The root `README.md` stays a
+short overview that links to them. When a PR adds, removes or renames a test
+file, or changes what one covers, update that member's Tests section in the
+same PR. The same goes for behaviour a README describes.
+
 ## Postgres-backed tests
 
 Five members (`composer-models`, `composer-warehouse`, `composer-gold`,
