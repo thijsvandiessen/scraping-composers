@@ -77,7 +77,7 @@ Lead with a single line: either "Nothing needs attention" or how many items
 do. Then one section per bucket that has entries, most urgent first: stuck
 bumps, audit advisories, red or conflicted PRs, issues that are done or
 obsolete (ready to close), partly done issues, stale PRs, still-needed issues,
-fine PRs. Every
-entry links the PR or advisory and ends with the concrete next step
-("re-run after #NNN lands", "needs a human: major bump of X").
+fine PRs. Every entry links the PR, issue or advisory and ends with the
+concrete next step ("re-run after #NNN lands", "needs a human: major bump of
+X", "close: done in #NNN").
 Skip empty sections.
