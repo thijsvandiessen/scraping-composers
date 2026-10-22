@@ -48,6 +48,8 @@ OPERA_WORK = panel("""<H1 class=large>Aida</H1>
 <TABLE class="result work">
 <tr><th>Composer:</th><td>Giuseppe Verdi </td></tr>
 <tr><th>Music title:</th><td>Aida (1871)</td></tr>
+<tr><th>World premiere:</th><td>24 December 1871, Opera House, Cairo</td></tr>
+<tr><th>ROH premiere:</th><td>22 June 1876, Royal Italian Opera, Covent Garden</td></tr>
 </TABLE>
 <table class="results performance">
 <tr><th colspan="3">Performances not linked to a production</th></tr>
@@ -192,6 +194,19 @@ def test_a_works_premieres_are_split_into_a_date_and_a_place() -> None:
         "date": "1973-10-04",
         "place": "Dutch National Ballet, Amsterdam",
     }
+
+
+def test_an_operas_world_premiere_is_the_works_premiere() -> None:
+    aida = next(m for m in _mentions(_run()) if m.id == "work/551")
+    # the ROH premiere is this house's staging, not the work's
+    assert aida.raw["premiere"] == {"date": "1871-12-24", "place": "Opera House, Cairo"}
+
+
+def test_a_ballets_world_premiere_is_not_the_musics() -> None:
+    """The ballet's 1973 premiere is not when Beethoven's sonata was first played."""
+    ballet = next(m for m in _mentions(_run()) if m.id == "work/301")
+    assert "World premiere" in ballet.raw["premieres"]
+    assert "premiere" not in ballet.raw
 
 
 def test_a_work_records_the_productions_it_was_staged_in() -> None:

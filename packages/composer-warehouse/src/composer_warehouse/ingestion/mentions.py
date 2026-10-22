@@ -1,8 +1,11 @@
 import json
 import uuid
+from typing import Any
 
 from composer_models import RawWorkMention, Work, WorkTitle
 from composer_schema import WorkMentionDocument
+from composer_schema.premiere import premiere_of, supersedes
+from sqlalchemy import update
 
 from ..works import Candidate, MatchResult, WorkFeatures, extract_features, resolve
 from .entities import get_or_create_entity
@@ -70,6 +73,28 @@ def add_work_title_alias(state: IngestState, work_id: uuid.UUID, title: str, fea
         state.existing_work_titles.add(key)
 
 
+def apply_premiere(state: IngestState, work_id: uuid.UUID, raw: dict[str, Any]) -> None:
+    """Carry a mention's world premiere (``raw["premiere"]``) onto its work.
+
+    The first source to report a work is seldom the one that knows its
+    premiere, so a work without a date takes the first one offered; a work
+    that has one only gives it up for an earlier (or more precise) date -- see
+    :func:`composer_schema.premiere.supersedes`. The winning source's place and
+    id go with the date, so the three always describe the same claim."""
+    premiere = premiere_of(raw)
+    if premiere is None:
+        return
+    date, place = premiere
+    if not supersedes(date, state.work_premieres.get(work_id)):
+        return
+    state.session.execute(
+        update(Work)
+        .where(Work.id == work_id)
+        .values(premiere_date=date, premiere_place=place, premiere_source_id=state.source.id)
+    )
+    state.work_premieres[work_id] = date
+
+
 def ingest_mention(state: IngestState, mention: WorkMentionDocument) -> tuple[int, str]:
     """Resolve one work mention to a canonical work (match/review/create), store
     the mention with the decision, and save its title as an alias. Returns the
@@ -103,5 +128,6 @@ def ingest_mention(state: IngestState, mention: WorkMentionDocument) -> tuple[in
 
     if matched_work_id is not None:
         add_work_title_alias(state, matched_work_id, mention.title, features)
+        apply_premiere(state, matched_work_id, mention.raw)
 
     return mention_row.id, content_hash(mention.title, mention.composer, raw_json)

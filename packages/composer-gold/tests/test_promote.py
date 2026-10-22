@@ -1111,3 +1111,30 @@ def test_kept_composer_keeps_the_link_on_their_works(session: Session, tmp_path:
         works = list(gold.scalars(select(Work)))
         assert works
         assert all(w.composer_entity_id == bach.id for w in works)
+
+
+def test_a_works_premiere_survives_promotion(session: Session, tmp_path: Path) -> None:
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                perf_mention(
+                    "w1",
+                    "Goldberg Variations, BWV 988",
+                    "Bach, Johann Sebastian",
+                    {"premiere": {"date": "1741", "place": "Dresden"}},
+                ),
+            ),
+            name="wikidata_works",
+        ),
+    )
+    silver_source = session.scalars(select(Work.premiere_source_id)).one()
+    gold_path = tmp_path / "gold.db"
+
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        work = gold.scalars(select(Work)).one()
+        assert (work.premiere_date, work.premiere_place) == ("1741", "Dresden")
+        assert silver_source is not None
+        assert work.premiere_source_id == silver_source

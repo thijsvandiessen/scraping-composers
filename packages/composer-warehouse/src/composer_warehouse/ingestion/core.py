@@ -11,7 +11,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from .entities import flush_entity_timestamps, get_or_create_entity
-from .mentions import add_work_title_alias, ingest_mention, resolve_mention
+from .mentions import add_work_title_alias, apply_premiere, ingest_mention, resolve_mention
 from .state import IngestState, content_hash, load_state
 
 log = logging.getLogger(__name__)
@@ -66,6 +66,7 @@ def _ingest_work_mention(state: IngestState, item: WorkMentionDocument, now: dat
             )
             if matched_work_id is not None:
                 add_work_title_alias(state, matched_work_id, item.title, features)
+                apply_premiere(state, matched_work_id, item.raw)
         state.session.execute(
             update(RawWorkMention).where(RawWorkMention.id == existing_mid).values(**values)
         )

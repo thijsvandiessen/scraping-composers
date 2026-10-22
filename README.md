@@ -75,6 +75,12 @@ uv run composer-ingest runs
 uv run composer-ingest claims "Beethoven, Ludwig van" --kind person
 uv run composer-ingest claims "Beethoven, Ludwig van" --predicate born_on
 
+# world premieres (date + place of first performance) for every work Wikidata
+# records one for (P1191/P4647), as work mentions; processing fills
+# Work.premiere_date/premiere_place, earliest date across sources winning
+uv run composer-ingest fetch wikidata_works --max-pages 1   # 500 works, smoke run
+uv run composer-ingest process wikidata_works
+
 # inspect resolved works (by composer or title) and the titles they were seen under
 uv run composer-ingest works "Beethoven"
 
@@ -532,7 +538,7 @@ say, verbatim, plus the matching passes over it; curation and conflict
 resolution happen downstream when data is promoted into gold.
 
 - **`sources`** — where data comes from (`imslp`, `imslp_works`,
-  `imslp_recordings`, `wikidata`, `openopus`, `concertgebouw`, `nyphil`,
+  `imslp_recordings`, `wikidata`, `wikidata_works`, `openopus`, `concertgebouw`, `nyphil`,
   `berlinphil`, `wienerphil`, `laphil`, `decca`, `harmoniamundi`, `roh`,
   `classicalmusiconline`, `boosey`, `baerenreiter`, `henle`, ...).
 - **`ingest_runs`** — the collection log: one row per ingest, with source,
@@ -590,6 +596,13 @@ same work across spellings), works go through a resolution pipeline
   features). High scores auto-match, middling scores are flagged for `review`,
   low scores create a new work. Work ids are assigned at creation, not derived
   from the title.
+  `premiere_date` / `premiere_place` hold the work's **world premiere**, from
+  any mention whose payload states one under `raw["premiere"]`
+  (`composer_schema.premiere`) — today `wikidata_works` (P1191 date and P4647
+  location of first performance) and the ROH's operas. The earliest date wins
+  (a later "premiere" is nearly always a house premiere), a full date refines a
+  bare year of the same premiere, and `premiere_source_id` names the source
+  that won. House and production premieres never land here.
 - **`work_titles`** — every title a work was seen under (its aliases).
 
 Composers stay `person` entities (deduplicated as above); works reference them

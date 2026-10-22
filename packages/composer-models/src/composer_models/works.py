@@ -34,7 +34,11 @@ class Work(Base):
     catalogue_number: Mapped[str | None] = mapped_column(String(50))
     musical_key: Mapped[str | None] = mapped_column(String(50))
     number: Mapped[int | None] = mapped_column(Integer)
+    # The world premiere, from whichever source states the earliest date (see
+    # composer_schema.premiere); the source that won is kept alongside it.
     premiere_date: Mapped[str | None] = mapped_column(String(50))
+    premiere_place: Mapped[str | None] = mapped_column(Text)
+    premiere_source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     first_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
