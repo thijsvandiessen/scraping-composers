@@ -372,36 +372,6 @@ a.source-chip:hover {
   margin-top: 0.5rem;
 }
 
-.graph-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1.25rem;
-  margin: 1rem 0 0.75rem;
-  font-size: 0.9rem;
-}
-
-.control-group {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-}
-
-.control-label {
-  color: var(--muted);
-}
-
-.control {
-  padding: 0.1rem 0.45rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  text-decoration: none;
-}
-
-.control.on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-}
-
 .rank-note {
   color: var(--muted);
   font-size: 0.88rem;
@@ -464,8 +434,14 @@ a.source-chip:hover {
   font-weight: 600;
 }
 
-.connection-name:hover {
+a.connection-name:hover {
   text-decoration: underline;
+}
+
+/* A neighbour with no page of its own — a place, an ensemble — keeps its
+   weight in the list but not the accent colour that promises a link. */
+span.connection-name {
+  color: var(--fg);
 }
 
 .connection-relation {
