@@ -1,6 +1,6 @@
 ---
 name: housekeeping
-description: Weekly repo check-up — open pull requests and dependency updates. Reports what needs attention; changes nothing. Use when asked for housekeeping, a repo check-up, or the state of open PRs and dependency bumps.
+description: Weekly repo check-up — open pull requests, dependency updates and open issues. Reports what needs attention; changes nothing. Use when asked for housekeeping, a repo check-up, or the state of open PRs, dependency bumps or open issues.
 ---
 
 # Housekeeping
@@ -46,11 +46,38 @@ npm, weekly); there is no Renovate.
   week (Dependabot gave up or someone closed it), so a skipped update isn't
   lost.
 
-## 3. Report
+## 3. Open issues
+
+List every open issue (not PRs). For each, read its body and comments, then
+check the code on `main` and the history for what it asks:
+
+- merged PRs and commits that mention `#<number>` or its subject
+  (`git log --oneline --grep`, `mcp__github__search_pull_requests`);
+- the code it names: does the function, file, flag or behaviour it describes
+  still exist, and does it still behave the way the issue says?
+
+Sort each issue into one bucket, always with the evidence (PR, commit, or
+`file:line`):
+
+- **Done** — everything it asks for is on `main`. Name what did it; the
+  maintainer can close it.
+- **Partly done** — some of it landed. List what's done and what's left, as
+  a short checklist.
+- **Obsolete** — the code or premise it's about is gone or was replaced
+  (e.g. by a later design), so it no longer applies as written.
+- **Still needed** — nothing relevant has landed. One line on what the first
+  step would be; note when an open PR is already working on it.
+
+If the evidence is ambiguous, say so and put it under **Still needed**
+rather than calling it done.
+
+## 4. Report
 
 Lead with a single line: either "Nothing needs attention" or how many items
 do. Then one section per bucket that has entries, most urgent first: stuck
-bumps, audit advisories, red or conflicted PRs, stale PRs, fine PRs. Every
+bumps, audit advisories, red or conflicted PRs, issues that are done or
+obsolete (ready to close), partly done issues, stale PRs, still-needed issues,
+fine PRs. Every
 entry links the PR or advisory and ends with the concrete next step
 ("re-run after #NNN lands", "needs a human: major bump of X").
 Skip empty sections.
