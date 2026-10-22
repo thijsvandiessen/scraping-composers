@@ -8,6 +8,26 @@ This page is the overview. Each package and app has a README of its own with its
 domain details and what its tests cover; the [layout](#layout) below links to
 them.
 
+## Why this exists
+
+The project started from one question: what connects these composers in ways
+that aren't obvious? Teacher and pupil, a shared publisher, a premiere by the
+same orchestra, a work that kept being programmed decades later. Links like
+these are spread over many sources and rarely sit side by side. The idea was to
+put them on a timeline, where they would become visible.
+
+The catch is that a timeline showing every kind of connection at once isn't
+clear. Too many options, and the connections you were looking for get lost.
+So the work now is on the ontology: a small, deliberate set of entity kinds and
+claim predicates (`student_of`, `composed_by`, `performed`, `born_in`, …), each
+with one clear meaning. Then a timeline can be built for a specific question,
+like who taught whom or where a work was played, and show only the connections
+that answer it.
+
+The rest of the pipeline is groundwork for that. Collecting from many sources
+with full provenance means each connection on a timeline can show who asserted
+it, and two sources that disagree stay visible as two claims.
+
 ## How it fits together
 
 Data lives in three tiers:
