@@ -124,6 +124,12 @@ uv run --directory packages/composer-scrapers pytest --rootdir . --cov=composer_
 
 No network: every request goes to a `mock_session` handler or a fixture page.
 
+Every claim an adapter builds during a test is checked against the claim
+vocabulary in [`composer_schema.ontology`](../composer-schema/README.md) (an
+autouse fixture in `conftest.py`). A new predicate fails the suite until it is
+added there with its meaning. Only test-covered paths are checked, and the check
+does not run in production, so replaying old bronze never trips it.
+
 Most sources are tested in three layers, one file each:
 
 - **parse** (`test_<source>.py`) — the pure functions from a fetched body to

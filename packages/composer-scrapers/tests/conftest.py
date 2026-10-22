@@ -19,3 +19,24 @@ def no_page_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     from composer_config import settings
 
     monkeypatch.setattr(settings, "page_cache_enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def claims_fit_the_ontology(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail any test whose adapter emits a claim the vocabulary does not list.
+
+    Every adapter test parses real fixtures, so wrapping ``SourceClaim``'s
+    constructor here checks each predicate the adapters actually produce,
+    without the check running (and possibly rejecting old bronze) in
+    production.
+    """
+    from composer_schema import SourceClaim
+    from composer_schema.ontology import check_claim
+
+    init = SourceClaim.__init__
+
+    def checked_init(self: SourceClaim, *args: object, **kwargs: object) -> None:
+        init(self, *args, **kwargs)  # pyright: ignore[reportArgumentType]
+        check_claim(self)
+
+    monkeypatch.setattr(SourceClaim, "__init__", checked_init)
