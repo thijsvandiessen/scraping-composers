@@ -22,7 +22,8 @@ So the work now is on the ontology: a small, deliberate set of entity kinds and
 claim predicates (`student_of`, `composed_by`, `performed`, `born_in`, …), each
 with one clear meaning. Then a timeline can be built for a specific question,
 like who taught whom or where a work was played, and show only the connections
-that answer it.
+that answer it. The vocabulary, grouped into those themes, lives in
+[`composer_schema.ontology`](packages/composer-schema/README.md).
 
 The rest of the pipeline is groundwork for that. Collecting from many sources
 with full provenance means each connection on a timeline can show who asserted

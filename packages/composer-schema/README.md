@@ -8,6 +8,15 @@ or the scraper stack.
 - `__init__.py` — `ScrapedDocument`, `EntityDocument`, `WorkMentionDocument`,
   `SourceClaim`, `SourceAdapter` and `RefreshCadence` (when a source is due
   again), plus document serialization for the bucket.
+- `ontology.py` — the claim vocabulary. Every predicate a claim may carry is
+  listed once, with the kind of object it points at (an entity kind or a
+  literal), one line on what it asserts, and a theme (`life`, `relation`,
+  `authorship`, `work`, `edition`, `person`, `performance`, `bookkeeping`). A
+  theme is what a timeline or graph view is built from, so a view of "who
+  taught whom" reads `relation` and nothing else. It records today's usage
+  without renaming anything; where sources disagree (`has_genre` is an entity
+  from Wikidata, a literal from IMSLP) the entry allows both and says so. The
+  scraper suite fails on any predicate not listed here.
 - `kinds.py` — the label-based ensemble guard. Every source that credits
   concert or recording participants files each credited *name* as a person,
   whether it names a violinist or an orchestra. A label carrying an ensemble
@@ -34,6 +43,7 @@ uv run --directory packages/composer-schema pytest --rootdir . --cov=composer_sc
 | File | Covers |
 | --- | --- |
 | `test_schema.py` | Refresh-cadence staleness (static never due, never-run always due, naive timestamps as UTC), the document factories and `FakeSource`, and serialization round-trips. |
+| `test_ontology.py` | The claim vocabulary: every predicate has a meaning and an object kind, names are unique, themes cover the vocabulary exactly once, `relation` is person-to-person, and `check_claim` rejects unknown predicates and wrong object kinds. |
 | `test_kinds.py` | The ensemble guard (#174): ensemble labels recognised, musicians left alone, and only `person` second-guessed. |
 | `test_instrumentation.py` | Scoring categories: combinations yield their parts, ensembles list their members apart, unrecognised scoring yields nothing, and the category tables are consistent. |
 | `test_shorthand.py` | Real catalogue entries in both dialects: desks, doublings, percussion, string parts, score order, German abbreviations, and refusing what is not shorthand. |
