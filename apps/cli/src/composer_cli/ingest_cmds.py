@@ -13,8 +13,6 @@ from composer_warehouse.ingestion import ingest_documents
 from composer_warehouse.rebuild import rebuild_silver
 from composer_warehouse.recordings import derive_recordings
 
-from .crawl_cmds import crawl_choices
-
 log = logging.getLogger(__name__)
 
 
@@ -83,17 +81,13 @@ def cmd_promote(args: argparse.Namespace) -> int:
 
 
 def source_base_url(source: str) -> str:
-    """Base URL for a bucket source: a registered scraper's, or a crawl config's
-    first seed (the ``extract`` step wrote its LLM-derived docs under that name).
+    """Base URL for a bucket source: a registered scraper's, else empty.
 
-    Empty for a source with neither — the bucket keeps data for sources whose
-    adapter or config was later removed, and ``rebuild-silver`` replays those too.
+    Empty for a source with no adapter — the bucket keeps data for sources whose
+    adapter was later removed, and ``rebuild-silver`` replays those too.
     """
     adapter = REGISTRY.get(source)
-    if adapter is not None:
-        return adapter.base_url
-    config = crawl_choices().get(source)
-    return config.seeds[0] if config and config.seeds else ""
+    return adapter.base_url if adapter is not None else ""
 
 
 def _source_identity(source: str) -> tuple[str, str]:

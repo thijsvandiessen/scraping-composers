@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import logging
 import sys
@@ -12,14 +13,17 @@ import pytest
 from composer_cli import _log_level, main
 from composer_cli.export_cmds import cmd_export_kumu
 from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
-from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_eval, cmd_person_review
+from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_eval, cmd_person_review, cmd_person_train
 from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
 from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work
 from composer_models.db import get_engine, init_db
 from composer_schema import SourceClaim
 from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.persons import AUTO_THRESHOLD
+from composer_warehouse.persons import AUTO_THRESHOLD, training
+from composer_warehouse.persons.evaluation import read_dataset
+from composer_warehouse.persons.fellegi_sunter import LinkageModel
+from composer_warehouse.persons.training import sample_non_match_levels
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -342,6 +346,67 @@ def test_cmd_dedupe_persons_reset_lets_the_pass_re_decide(
     assert "auto-linked 1" in out
 
 
+def _ingest_labellable_people(db_url: str) -> None:
+    """People the automatic labeller can judge: J.S. Bach's dates are backed by
+    two sources (a match), and J.C. Bach was born a generation later (not)."""
+    dates = (SourceClaim("born_on", value="1685"), SourceClaim("died_on", value="1750"))
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    person("Bach, J.S.", *dates),
+                    person("Bach, Johann Sebastian", *dates),
+                    person("Bach, Johann Christian", SourceClaim("born_on", value="1735")),
+                    *(person(f"Smith, Filler{i}") for i in range(10)),
+                ),
+                name="first",
+            ),
+        )
+        ingest_source(session, FakeSource(records=(person("Bach, J.S.", *dates),), name="second"))
+
+
+@pytest.fixture
+def small_u_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The shipped three-million-pair sample is sized for the real corpus.
+    monkeypatch.setattr(
+        training, "sample_non_match_levels", functools.partial(sample_non_match_levels, pairs=5_000)
+    )
+
+
+@pytest.mark.usefixtures("small_u_sample")
+def test_cmd_person_train_writes_the_model_and_the_dataset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_labellable_people(db_url)
+    model_path, dataset_path = tmp_path / "model.json", tmp_path / "pairs.jsonl.gz"
+
+    args = _ns(database_url=db_url, model_out=str(model_path), dataset_out=str(dataset_path))
+    assert cmd_person_train(args) == 0
+
+    model = LinkageModel.load(model_path)
+    assert 0.0 < model.prior <= 0.5
+    rows = read_dataset(dataset_path)
+    assert {row.provenance for row in rows} == {"dates_corroborated", "year_conflict"}
+    out = capsys.readouterr().out
+    assert f"wrote {model_path} (prior {model.prior:.5f})" in out
+    assert f"wrote {dataset_path} ({len(rows)} labelled pairs)" in out
+    assert "given:" in out
+
+
+@pytest.mark.usefixtures("small_u_sample")
+def test_cmd_person_train_writes_no_dataset_unless_asked(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_labellable_people(db_url)
+
+    assert (
+        cmd_person_train(_ns(database_url=db_url, model_out=str(tmp_path / "m.json"), dataset_out=None)) == 0
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["m.json", "test.db"]
+
+
 def test_cmd_person_eval_reports_the_model_against_the_baseline(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -570,154 +635,6 @@ def test_cmd_process_returns_1_without_fetched_runs(tmp_path: Path, monkeypatch:
 
 
 # ---------------------------------------------------------------------------
-# cmd_extract_all
-# ---------------------------------------------------------------------------
-
-
-def _crawl_snapshot(bucket_path: Path, source: str, run_id: str, status: str) -> None:
-    """Write a raw-pages crawl snapshot with the given manifest status."""
-    from composer_bronze.bucket import LocalBucket, SnapshotManifest
-
-    bucket = LocalBucket(bucket_path)
-    bucket.write_records(source, run_id, [{"_type": "crawl", "url": f"https://{source}/{run_id}"}])
-    manifest = SnapshotManifest.start(source, run_id)
-    manifest = manifest.completed(record_count=1) if status == "completed" else manifest.failed("boom")
-    if status == "running":
-        manifest = SnapshotManifest.start(source, run_id)
-    bucket.write_manifest(manifest)
-
-
-def test_cmd_extract_all_covers_every_source_and_loadable_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from composer_cli import extract_cmds
-    from composer_crawler import CrawlConfig
-
-    bucket_path = tmp_path / "bucket"
-    _crawl_snapshot(bucket_path, "alpha", "2026-01-01T00:00:00-1", "completed")
-    _crawl_snapshot(bucket_path, "alpha", "2026-01-02T00:00:00-2", "failed")  # still included
-    _crawl_snapshot(bucket_path, "alpha", "2026-01-03T00:00:00-3", "running")  # excluded
-    _crawl_snapshot(bucket_path, "beta", "2026-01-01T00:00:00-1", "completed")
-    _crawl_snapshot(bucket_path, "gamma", "2026-01-01T00:00:00-1", "completed")
-
-    monkeypatch.setattr(
-        extract_cmds,
-        "crawl_choices",
-        lambda: {
-            "alpha": CrawlConfig(name="alpha", seeds=("https://alpha",)),
-            "beta": CrawlConfig(name="beta", seeds=("https://beta",)),
-            "gamma": CrawlConfig(name="gamma", seeds=("https://gamma",)),
-        },
-    )
-
-    calls: list[tuple[str, str]] = []
-
-    def fake_cmd_extract(args: argparse.Namespace) -> int:
-        calls.append((args.config, args.crawl_run_id))
-        return 0
-
-    monkeypatch.setattr(extract_cmds, "cmd_extract", fake_cmd_extract)
-
-    rc = extract_cmds.cmd_extract_all(
-        _ns(
-            provider=None,
-            model=None,
-            max_pages=None,
-            no_cache=False,
-            no_ledger=False,
-            bucket_path=str(bucket_path),
-        )
-    )
-
-    assert rc == 0
-    assert calls == [
-        ("alpha", "2026-01-01T00:00:00-1"),
-        ("alpha", "2026-01-02T00:00:00-2"),
-        ("beta", "2026-01-01T00:00:00-1"),
-        ("gamma", "2026-01-01T00:00:00-1"),
-    ]
-
-
-def test_cmd_extract_all_is_best_effort_on_a_failing_run(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from composer_cli import extract_cmds
-    from composer_crawler import CrawlConfig
-
-    bucket_path = tmp_path / "bucket"
-    _crawl_snapshot(bucket_path, "alpha", "2026-01-01T00:00:00-1", "completed")
-    _crawl_snapshot(bucket_path, "alpha", "2026-01-02T00:00:00-2", "completed")
-    _crawl_snapshot(bucket_path, "beta", "2026-01-01T00:00:00-1", "completed")
-
-    monkeypatch.setattr(
-        extract_cmds,
-        "crawl_choices",
-        lambda: {
-            "alpha": CrawlConfig(name="alpha", seeds=("https://alpha",)),
-            "beta": CrawlConfig(name="beta", seeds=("https://beta",)),
-        },
-    )
-
-    calls: list[tuple[str, str]] = []
-
-    def fake_cmd_extract(args: argparse.Namespace) -> int:
-        calls.append((args.config, args.crawl_run_id))
-        if args.crawl_run_id == "2026-01-01T00:00:00-1" and args.config == "alpha":
-            raise RuntimeError("model exploded")
-        return 0
-
-    monkeypatch.setattr(extract_cmds, "cmd_extract", fake_cmd_extract)
-
-    rc = extract_cmds.cmd_extract_all(
-        _ns(
-            provider=None,
-            model=None,
-            max_pages=None,
-            no_cache=False,
-            no_ledger=False,
-            bucket_path=str(bucket_path),
-        )
-    )
-
-    # the raising run doesn't stop the rest of the batch, but the overall run still fails
-    assert rc == 1
-    assert calls == [
-        ("alpha", "2026-01-01T00:00:00-1"),
-        ("alpha", "2026-01-02T00:00:00-2"),
-        ("beta", "2026-01-01T00:00:00-1"),
-    ]
-
-
-def test_cmd_extract_all_returns_0_with_no_crawl_snapshots(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from composer_cli import extract_cmds
-    from composer_crawler import CrawlConfig
-
-    monkeypatch.setattr(
-        extract_cmds, "crawl_choices", lambda: {"alpha": CrawlConfig(name="alpha", seeds=("https://alpha",))}
-    )
-    calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        extract_cmds, "cmd_extract", lambda args: calls.append((args.config, args.crawl_run_id)) or 0
-    )
-
-    rc = extract_cmds.cmd_extract_all(
-        _ns(
-            provider=None,
-            model=None,
-            max_pages=None,
-            no_cache=False,
-            no_ledger=False,
-            bucket_path=str(tmp_path / "bucket"),
-        )
-    )
-
-    assert rc == 0
-    assert calls == []
-
-
-# ---------------------------------------------------------------------------
 # cmd_rebuild_silver
 # ---------------------------------------------------------------------------
 
@@ -750,14 +667,12 @@ def test_cmd_rebuild_silver_replays_every_bucket_source_with_production_identity
 ) -> None:
     """The rebuild's source list is the bucket's, resolved through the real lookup.
 
-    Regression for #182: it used to be ``composer_scrapers.REGISTRY``, so the
-    crawl-config sources — the only ones that produce recordings — were skipped.
-    Only the scraper here is registered; the other two must be replayed anyway.
+    Regression for #182: it used to be ``composer_scrapers.REGISTRY``, so bucket
+    sources without an adapter were skipped. Only the scraper here is
+    registered; the orphan must be replayed anyway.
     """
     from composer_bronze.bucket import LocalBucket
     from composer_bronze.scraper import Scraper
-    from composer_cli import ingest_cmds
-    from composer_crawler import CrawlConfig
     from composer_models import Source
     from composer_scrapers import REGISTRY
 
@@ -766,16 +681,9 @@ def test_cmd_rebuild_silver_replays_every_bucket_source_with_production_identity
     bucket = LocalBucket(bucket_path)
     scraped = FakeSource(records=(person("Bach, Johann Sebastian"),), name="fake")
     monkeypatch.setitem(REGISTRY, "fake", scraped)
-    # a crawl config: no adapter, but `extract` wrote documents under its name
-    monkeypatch.setattr(
-        ingest_cmds,
-        "crawl_choices",
-        lambda: {"alpha": CrawlConfig(name="alpha", seeds=("https://alpha.example",))},
-    )
-    crawled = FakeSource(records=(person("Rattle, Simon"),), name="alpha")
-    # an orphan: data in the bucket, adapter and config both long gone
+    # an orphan: data in the bucket, adapter long gone
     orphan = FakeSource(records=(person("Hogwood, Christopher"),), name="ghost")
-    for source in (scraped, crawled, orphan):
+    for source in (scraped, orphan):
         Scraper(source).fetch_to_bucket(bucket)
 
     assert cmd_rebuild_silver(_ns(database_url=db_url, bucket_path=bucket_path)) == 0
@@ -785,7 +693,6 @@ def test_cmd_rebuild_silver_replays_every_bucket_source_with_production_identity
         rows = session.execute(select(Source.name, Source.base_url)).all()
     base_urls = {name: base_url for name, base_url in rows}
     assert base_urls == {
-        "alpha": "https://alpha.example",
         "fake": scraped.base_url,
         "ghost": "",
     }
@@ -867,8 +774,8 @@ def test_cmd_runs_shows_run_log(tmp_path: Path, capsys: pytest.CaptureFixture[st
 
 
 def test_verbose_means_debug_everywhere() -> None:
-    """``-v`` turns the root logger up rather than only our packages, so crawl4ai's
-    and ollama's own output is there when a crawl or extract misbehaves."""
+    """``-v`` turns the root logger up rather than only our packages, so
+    third-party output is there when a fetch misbehaves."""
     assert _log_level(_ns(verbose=True, log_level=None)) == logging.DEBUG
 
 

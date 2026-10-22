@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from composer_http import PageCache
+from composer_http import PageCache, SourceSession
 from composer_scrapers.wienerphil.fetch import (
     ARCHIVE_URL,
     fetch_detail,
@@ -24,11 +24,11 @@ from composer_scrapers.wienerphil.fetch import (
 
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.wienerphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
 
-def _client(handler: httpx.MockTransport) -> httpx.Client:
-    return httpx.Client(transport=handler)
+def _client(handler: httpx.MockTransport, cache: PageCache | None = None) -> SourceSession:
+    return SourceSession("test", httpx.Client(transport=handler), delay_s=0.0, cache=cache)
 
 
 def test_total_item_count_reads_an_unquoted_attribute() -> None:
@@ -99,11 +99,11 @@ def test_fetch_detail_mirrors_the_page_it_fetched(tmp_path: Path) -> None:
         return httpx.Response(200, text="<html>the concert</html>")
 
     cache = PageCache(tmp_path / "pages.db")
-    with _client(httpx.MockTransport(handler)) as client:
-        assert fetch_detail(client, CONCERT_URL, cache) == "<html>the concert</html>"
+    with _client(httpx.MockTransport(handler), cache=cache) as client:
+        assert fetch_detail(client, CONCERT_URL) == "<html>the concert</html>"
         # the second read is served from the mirror: an archive of concerts
         # already given does not change, so it is never fetched twice
-        assert fetch_detail(client, CONCERT_URL, cache) == "<html>the concert</html>"
+        assert fetch_detail(client, CONCERT_URL) == "<html>the concert</html>"
     assert requested == [CONCERT_URL]
     assert (cache.hits, cache.misses) == (1, 1)
 

@@ -12,12 +12,11 @@ from composer_gold import (
     DEFAULT_PERFORMER_LIMIT,
     DEFAULT_RULE1_CONFIG_PATH,
 )
+from composer_graph import DEFAULT_BATCH_SIZE
 from composer_scrapers import REGISTRY
 from composer_warehouse.persons import AUTO_THRESHOLD, MODEL_PATH
 
-from .crawl_cmds import cmd_crawl, crawl_choices
-from .export_cmds import cmd_export_kumu
-from .extract_cmds import cmd_extract, cmd_extract_all
+from .export_cmds import cmd_export_kumu, cmd_export_neo4j
 from .ingest_cmds import (
     cmd_derive_concerts,
     cmd_derive_recordings,
@@ -32,7 +31,6 @@ from .person_cmds import (
     cmd_person_review,
     cmd_person_train,
 )
-from .pipeline_cmds import cmd_run
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
 
@@ -84,30 +82,6 @@ def _add_work_parsers(sub: _SubParsers) -> None:
     p_rematch.set_defaults(func=cmd_rematch)
 
 
-def _add_provider_args(parser: argparse.ArgumentParser) -> None:
-    """``--provider``/``--model``: shared by ``extract``, ``extract-all`` and ``run``
-    (all build an extractor)."""
-    parser.add_argument("--provider", choices=("ollama", "gemini"), help="LLM backend (env $LLM_PROVIDER)")
-    parser.add_argument("--model", help="model for the provider (env $OLLAMA_MODEL/$GOOGLE_AI_MODEL)")
-
-
-def _add_extract_cache_args(parser: argparse.ArgumentParser) -> None:
-    """``--no-cache``/``--no-ledger``: shared by ``extract``, ``extract-all`` and ``run``."""
-    parser.add_argument(
-        "--no-cache",
-        action="store_true",
-        help="re-ask the model for every page instead of reusing cached answers "
-        "(also bypasses the ledger, below)",
-    )
-    parser.add_argument(
-        "--no-ledger",
-        action="store_true",
-        help="re-run every page's kind through the model even if its content and extractor "
-        "fingerprint are unchanged (a chunk that produces an identical prompt can still hit "
-        "the answer cache unless --no-cache is also given)",
-    )
-
-
 def _add_bucket_path_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--bucket-path", default=DEFAULT_BUCKET_PATH, help="root directory of the bucket")
 
@@ -119,66 +93,10 @@ def _add_pipeline_parsers(sub: _SubParsers) -> None:
     _add_bucket_path_arg(p_fetch)
     p_fetch.set_defaults(func=cmd_fetch)
 
-    p_crawl = sub.add_parser(
-        "crawl",
-        help="crawl raw pages/endpoints into the bucket, no parsing (configs come from "
-        "composer_crawler.CRAWL_REGISTRY and the dashboard-managed crawl configs file)",
-    )
-    p_crawl.add_argument("config", choices=sorted(crawl_choices()))
-    p_crawl.add_argument("--max-pages", type=int, help="cap on URLs scraped (overrides the config)")
-    p_crawl.add_argument(
-        "--query",
-        help="rank discovered URLs by relevance to this topic (overrides the config's relevance_query)",
-    )
-    _add_bucket_path_arg(p_crawl)
-    p_crawl.set_defaults(func=cmd_crawl)
-
-    p_extract = sub.add_parser(
-        "extract",
-        help="LLM-extract concerts/performers from a crawl snapshot into the bucket "
-        "(Ollama or Gemini, per $LLM_PROVIDER; runs between crawl and process)",
-    )
-    p_extract.add_argument("config", choices=sorted(crawl_choices()))
-    p_extract.add_argument("--crawl-run-id", help="crawl run to read (default: latest completed)")
-    _add_provider_args(p_extract)
-    p_extract.add_argument("--max-pages", type=int, help="stop after N crawled pages (for testing)")
-    _add_extract_cache_args(p_extract)
-    _add_bucket_path_arg(p_extract)
-    p_extract.set_defaults(func=cmd_extract)
-
-    p_extract_all = sub.add_parser(
-        "extract-all",
-        help="LLM-extract every loadable crawl snapshot for every crawl-config source "
-        "(best-effort: one run failing doesn't stop the rest)",
-    )
-    _add_provider_args(p_extract_all)
-    p_extract_all.add_argument(
-        "--max-pages", type=int, help="stop after N crawled pages per run (for testing)"
-    )
-    _add_extract_cache_args(p_extract_all)
-    _add_bucket_path_arg(p_extract_all)
-    p_extract_all.set_defaults(func=cmd_extract_all)
-
-    p_run = sub.add_parser(
-        "run",
-        help="crawl, extract and load one crawl config in a single unattended chain "
-        "(the same three steps, run back to back)",
-    )
-    p_run.add_argument("config", choices=sorted(crawl_choices()))
-    p_run.add_argument("--max-pages", type=int, help="cap on URLs crawled (overrides the config)")
-    p_run.add_argument(
-        "--query",
-        help="rank discovered URLs by relevance to this topic (overrides the config's relevance_query)",
-    )
-    _add_provider_args(p_run)
-    _add_extract_cache_args(p_run)
-    _add_bucket_path_arg(p_run)
-    p_run.set_defaults(func=cmd_run)
-
     p_process = sub.add_parser(
         "process", help="ingest previously fetched records from the bucket into the DB"
     )
-    p_process.add_argument("source", choices=sorted(set(REGISTRY) | set(crawl_choices())))
+    p_process.add_argument("source", choices=sorted(REGISTRY))
     p_process.add_argument(
         "--run-id", help="bucket run_id to process (default: every loadable run, oldest to newest)"
     )
@@ -275,6 +193,27 @@ def _add_export_parsers(sub: _SubParsers) -> None:
     )
     p_kumu.set_defaults(func=cmd_export_kumu)
 
+    p_neo4j = sub.add_parser(
+        "export-neo4j",
+        help="replace a Neo4j database with the whole gold graph (entities, works, concerts, "
+        "recordings and the links between them)",
+    )
+    _add_gold_url_arg(p_neo4j)
+    p_neo4j.add_argument(
+        "--neo4j-url", default=settings.neo4j_url, help="bolt URL of the server (default: $NEO4J_URL)"
+    )
+    p_neo4j.add_argument("--neo4j-user", default=settings.neo4j_user, help="(default: $NEO4J_USER)")
+    p_neo4j.add_argument(
+        "--neo4j-password", default=settings.neo4j_password, help="(default: $NEO4J_PASSWORD)"
+    )
+    p_neo4j.add_argument(
+        "--database", default=None, help="the Neo4j database to replace (default: the server's default)"
+    )
+    p_neo4j.add_argument(
+        "--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="rows per write transaction"
+    )
+    p_neo4j.set_defaults(func=cmd_export_neo4j)
+
 
 def _add_person_parsers(sub: _SubParsers) -> None:
     p_dedupe = sub.add_parser(
@@ -338,8 +277,8 @@ def _log_level(args: argparse.Namespace) -> int:
     """The level to configure: ``-v`` wins, then ``--log-level``, then $LOG_LEVEL.
 
     ``-v`` deliberately turns the root logger up rather than only our packages, so
-    crawl4ai's and ollama's own chatter is there when a crawl or an extract is
-    behaving strangely. Dial individual runs back down with ``--log-level``.
+    third-party chatter (httpx, SQLAlchemy) is there when a fetch is behaving
+    strangely. Dial individual runs back down with ``--log-level``.
     """
     if args.verbose:
         return logging.DEBUG

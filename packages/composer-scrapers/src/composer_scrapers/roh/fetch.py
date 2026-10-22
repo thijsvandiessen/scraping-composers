@@ -21,13 +21,14 @@ a small heritage catalogue on modest hosting, not a CDN.
 ~15,700 nights, measured over a 300-work sample and agreeing with the totals the
 site's own search reports (5,690 opera and 9,757 ballet performances). Every
 fetch goes through
-:class:`~composer_http.PageCache`, which is what makes a sweep this long
+the session's page mirror, which is what makes a sweep this long
 survivable: at five seconds a full run is more than a day, and a run that dies
 at hour twenty must not start over. It also means the performance tier can be
 re-parsed — cast rows are the least regular markup on the site — without going
 back for fifteen thousand pages.
 
-The index pages are deliberately *not* mirrored. They are how a re-run learns
+The source is an archive and its cadence is ``STATIC``: scraped once, mirrored
+forever, re-run on demand. The index pages are deliberately *not* mirrored. They are how a re-run learns
 that the database has grown; served from a mirror they would pin every later
 sweep to the works that existed the first time.
 """
@@ -35,10 +36,8 @@ sweep to the works that existed the first time.
 from __future__ import annotations
 
 import logging
-import time
 
-import httpx
-from composer_http import PageCache, get_text, new_client
+from composer_http import SourceSession
 
 from .urls import BASE_URL, index_url
 
@@ -55,33 +54,27 @@ REQUEST_DELAY_S = 5.0
 TIMEOUT_S = 60.0
 
 
-def make_client() -> httpx.Client:
-    """A client that follows redirects.
-
-    The site answers ``http`` and the bare apex with a redirect to
-    ``https://www.``, and writes some of its own links with an explicit
-    ``:443`` that resolves the same way. None of the URLs this source builds
-    need a redirect, so this is a second line of defence — but a silent one is
-    worth having, because :func:`composer_http.get_text` raises only on 4xx and
-    5xx and an unfollowed 301 would return an empty body that parses as a page
-    with no records rather than as an error.
-    """
-    client = new_client(timeout=TIMEOUT_S)
-    client.follow_redirects = True
-    return client
+#: The site answers ``http`` and the bare apex with a redirect to
+#: ``https://www.``, and writes some of its own links with an explicit ``:443``
+#: that resolves the same way. None of the URLs this source builds need a
+#: redirect, so following them is a second line of defence — but a silent one
+#: is worth having, because a GET raises only on 4xx and 5xx and an unfollowed
+#: 301 would return an empty body that parses as a page with no records rather
+#: than as an error.
+FOLLOW_REDIRECTS = True
 
 
-def fetch_index(client: httpx.Client, letter: str) -> str:
+def fetch_index(session: SourceSession, letter: str) -> str:
     """One letter of the browse-by-title index.
 
     Not mirrored, and not tolerant of failure: the index is the only enumerator
     this source has, so a letter that cannot be read is a hole in the sweep that
     would otherwise pass unnoticed as a short run.
     """
-    return get_text(client, index_url(letter), label=f"index {letter}")
+    return session.get_text(index_url(letter), label=f"index {letter}")
 
 
-def fetch_page(client: httpx.Client, url: str, cache: PageCache | None = None) -> str | None:
+def fetch_page(session: SourceSession, url: str) -> str | None:
     """One work, production or performance page, from the mirror when it holds it.
 
     Returns None rather than raising when the page cannot be fetched. A sweep
@@ -91,19 +84,7 @@ def fetch_page(client: httpx.Client, url: str, cache: PageCache | None = None) -
     A page that could not be fetched is not mirrored, so the next run retries it
     instead of caching the failure.
     """
-    if cache is not None:
-        mirrored = cache.get(url)
-        if mirrored is not None:
-            return mirrored
-    try:
-        page = get_text(client, url, label=url)
-    except httpx.HTTPError as exc:
-        log.warning("skipping %s: %s", url, exc)
-        return None
-    if cache is not None:
-        cache.put(url, page)
-    time.sleep(REQUEST_DELAY_S)
-    return page
+    return session.try_get_text(url, label=url, mirror=True)
 
 
-__all__ = ["BASE_URL", "REQUEST_DELAY_S", "fetch_index", "fetch_page", "make_client"]
+__all__ = ["BASE_URL", "FOLLOW_REDIRECTS", "REQUEST_DELAY_S", "TIMEOUT_S", "fetch_index", "fetch_page"]

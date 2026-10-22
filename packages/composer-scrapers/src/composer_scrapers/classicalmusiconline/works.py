@@ -53,9 +53,13 @@ def _cell(pattern: re.Pattern[str], row: str) -> str:
 
 
 def iter_work_mentions(
-    page: str, composer_name: str, composer_id: str, base_url: str = ""
+    page: str, composer_name: str, composer_id: str, base_url: str = "", composer_url: str = ""
 ) -> list[SourceWorkMention]:
-    """Parse a composer page's works table into work mentions."""
+    """Parse a composer page's works table into work mentions.
+
+    A row without a production link is linked to ``composer_url``, the page
+    that lists it, so it still points at the work rather than the homepage.
+    """
     mentions: list[SourceWorkMention] = []
     for row in _ROW.findall(page):
         linked = _LINKED_TITLE.search(row)
@@ -75,7 +79,7 @@ def iter_work_mentions(
                     "composer": composer_name,
                     "composer_id": composer_id,
                     "production_id": production_id,
-                    "url": base_url + path if path else None,
+                    "url": base_url + path if path else composer_url or None,
                 },
             )
         )

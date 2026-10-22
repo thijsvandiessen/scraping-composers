@@ -46,6 +46,12 @@ const PREDICATE_LABELS: Record<string, string> = {
   based_in: "Based in",
   student_of: "Studied with",
   teacher_of: "Taught",
+  influenced_by: "Influenced by",
+  // Family, labelled by what the object is to the subject: child_of names a parent.
+  child_of: "Parent",
+  parent_of: "Child",
+  spouse_of: "Spouse",
+  sibling_of: "Sibling",
   recorded_on: "Recorded",
   recorded_at: "Recording venue",
   sitelink_count: "Wikipedia sitelinks",

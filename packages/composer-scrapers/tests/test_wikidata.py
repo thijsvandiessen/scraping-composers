@@ -2,17 +2,21 @@
 
 import re
 import urllib.parse
+from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
+from composer_http import PageCache
+from composer_http.testing import mock_session
 from composer_schema import SourceClaim
 from composer_scrapers.wikidata import WikidataAdapter
-from composer_scrapers.wikidata.parse import _format_time, _records_from_rows
+from composer_scrapers.wikidata.parse import RELATIONS, _format_time, _records_from_rows
 from composer_scrapers.wikidata.query import (
     LABEL_LANGUAGES,
     MULTI_QUERY,
     QUERY,
+    RELATIONS_QUERY,
     _fetch_metrics,
     _fetch_page,
     _fetch_qids,
@@ -160,7 +164,7 @@ def test_truncated_body_is_retried_via_uncached_post(monkeypatch: pytest.MonkeyP
             return httpx.Response(200, text='{"results": {"bindings": [{"item": {"va')
         return httpx.Response(200, json={"results": {"bindings": []}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         assert _run_query(client, "SELECT ?item WHERE {}", "test") == []
 
     assert len(requests) == 2
@@ -176,7 +180,7 @@ def test_fetch_page_binds_the_batch_as_values() -> None:
         captured.append(urllib.parse.parse_qs(request.read().decode())["query"][0])
         return httpx.Response(200, json={"results": {"bindings": [row("Q6600"), row("Q7")]}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         _fetch_page(client, ["Q6600", "Q7"])
 
     assert "VALUES ?item { wd:Q6600 wd:Q7 }" in captured[0]
@@ -211,14 +215,15 @@ def test_fetch_page_concatenates_both_queries_label_bearing_rows_first() -> None
     responses = {
         "?itemLabel": [row("Q7294", "Johannes Brahms", birth="1833-05-07T00:00:00Z")],
         "UNION": [row("Q7294", genreLabel="symphony"), row("Q7294", alias="Brahms")],
+        "?relation": [relation("Q7294", "P1066", "Q61658", "Eduard Marxsen")],
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
         query = urllib.parse.parse_qs(request.read().decode())["query"][0]
-        key = "?itemLabel" if "?itemLabel" in query else "UNION"
+        key = next(key for key in responses if key in query)
         return httpx.Response(200, json={"results": {"bindings": responses[key]}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         (record,) = _records_from_rows(_fetch_page(client, ["Q7294"]))
 
     assert record.name == "Johannes Brahms"
@@ -227,6 +232,7 @@ def test_fetch_page_concatenates_both_queries_label_bearing_rows_first() -> None
         SourceClaim("born_on", value="1833-05-07"),
         SourceClaim("has_genre", "genre", "symphony"),
         SourceClaim("also_known_as", value="Brahms"),
+        SourceClaim("student_of", "person", "Eduard Marxsen", object_wikidata_id="Q61658"),
     )
 
 
@@ -237,7 +243,7 @@ def test_fetch_page_fails_when_wdqs_drops_an_item() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"results": {"bindings": [row("Q6600")]}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         with pytest.raises(RuntimeError, match="1 of 2 requested items"):
             _fetch_page(client, ["Q6600", "Q7"])
 
@@ -251,7 +257,7 @@ def test_fetch_qids_orders_the_population_numerically() -> None:
         rows = [row(q) for q in ("Q1339", "Q101424951", "Q255", "Q7294", "Q1339")]
         return httpx.Response(200, json={"results": {"bindings": rows}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         assert _fetch_qids(client) == ["Q255", "Q1339", "Q7294", "Q101424951"]
 
 
@@ -272,7 +278,7 @@ def test_fetch_metrics_keys_rows_by_qid() -> None:
         ]
         return httpx.Response(200, json={"results": {"bindings": rows}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         metrics = _fetch_metrics(client, ["Q255", "Q7"])
 
     assert metrics["Q255"] == {"sitelinks": "273", "statements": "547", "identifiers": "370", "works": "342"}
@@ -314,6 +320,61 @@ def test_metrics_become_literal_claims_and_land_in_raw() -> None:
     assert record.raw["sitelinks"] == "273"
 
 
+def relation(qid: str, prop: str, other: str, label: str) -> dict[str, Any]:
+    """A RELATIONS_QUERY row: ``qid`` relates to ``other`` via ``prop``."""
+    return row(qid) | {
+        "relation": {"type": "uri", "value": f"http://www.wikidata.org/prop/direct/{prop}"},
+        "other": {"type": "uri", "value": f"http://www.wikidata.org/entity/{other}"},
+        "otherLabel": {"type": "literal", "value": label},
+    }
+
+
+def test_relations_become_person_claims_pinned_to_the_other_qid() -> None:
+    (record,) = _records_from_rows(
+        [
+            row("Q7294", "Johannes Brahms"),
+            relation("Q7294", "P1066", "Q61658", "Eduard Marxsen"),
+            relation("Q7294", "P737", "Q255", "Ludwig van Beethoven"),
+            relation("Q7294", "P22", "Q1683937", "Johann Jakob Brahms"),
+        ]
+    )
+
+    assert record.claims == (
+        SourceClaim("has_profession", "profession", "composer"),
+        SourceClaim("child_of", "person", "Johann Jakob Brahms", object_wikidata_id="Q1683937"),
+        SourceClaim("influenced_by", "person", "Ludwig van Beethoven", object_wikidata_id="Q255"),
+        SourceClaim("student_of", "person", "Eduard Marxsen", object_wikidata_id="Q61658"),
+    )
+    assert record.raw["relations"][0] == {
+        "predicate": "child_of",
+        "item": "Q1683937",
+        "label": "Johann Jakob Brahms",
+    }
+
+
+def test_relations_to_unnamed_items_or_unasked_properties_are_skipped() -> None:
+    (record,) = _records_from_rows(
+        [
+            row("Q7294", "Johannes Brahms"),
+            relation("Q7294", "P1066", "Q99999999", "Q99999999"),  # label service echoed the QID
+            relation("Q7294", "P1038", "Q61658", "Eduard Marxsen"),  # not a RELATIONS property
+        ]
+    )
+    assert record.claims == (SourceClaim("has_profession", "profession", "composer"),)
+    assert "relations" not in record.raw
+
+
+def test_relations_query_asks_every_relation_and_only_of_humans() -> None:
+    rendered = RELATIONS_QUERY.format(
+        values="wd:Q7294", relations=" ".join(f"wdt:{p}" for p, _ in RELATIONS), languages="en,mul"
+    )
+    for prop, _ in RELATIONS:
+        assert f"wdt:{prop}" in rendered
+    # P737 also names movements and works; only people become person entities
+    assert "?other wdt:P31 wd:Q5" in rendered
+    assert "OPTIONAL" not in rendered
+
+
 def test_records_without_metrics_get_no_metric_claims() -> None:
     (record,) = _records_from_rows([row("Q9", "Uncounted Composer")], {"Q999": {"sitelinks": "5"}})
     assert record.claims == (SourceClaim("has_profession", "profession", "composer"),)
@@ -330,7 +391,7 @@ def test_run_query_raises_after_all_retries_exhausted(monkeypatch: pytest.Monkey
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="Internal Server Error")
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         with pytest.raises(httpx.HTTPStatusError):
             _run_query(client, "SELECT ?x WHERE {}", "test query")
 
@@ -346,7 +407,7 @@ def test_run_query_honors_retry_after_header(monkeypatch: pytest.MonkeyPatch) ->
             return httpx.Response(429, headers={"Retry-After": "30"}, text="Rate limited")
         return httpx.Response(200, json={"results": {"bindings": []}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         result = _run_query(client, "SELECT ?x WHERE {}", "test query")
 
     assert result == []
@@ -363,7 +424,7 @@ def test_run_query_retries_on_malformed_json(monkeypatch: pytest.MonkeyPatch) ->
             return httpx.Response(200, text='{"results": {"bindings": [{"item": {"va')
         return httpx.Response(200, json={"results": {"bindings": []}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as client:
         result = _run_query(client, "SELECT ?x WHERE {}", "test query")
 
     assert len(attempts) == 3
@@ -387,11 +448,7 @@ def _fake_wdqs(monkeypatch: pytest.MonkeyPatch, population: list[str]) -> list[s
         rows = [row(qid, f"Composer {qid}") for qid in qids]
         return httpx.Response(200, json={"results": {"bindings": rows}})
 
-    monkeypatch.setattr(
-        "composer_scrapers.wikidata.new_client",
-        lambda **_: httpx.Client(transport=httpx.MockTransport(handler)),
-    )
-    monkeypatch.setattr("composer_scrapers.wikidata.time.sleep", lambda _: None)
+    monkeypatch.setattr(WikidataAdapter, "open_session", lambda self: mock_session(handler))
     return asked
 
 
@@ -427,3 +484,58 @@ def test_fetch_refuses_an_empty_population(monkeypatch: pytest.MonkeyPatch) -> N
 
     with pytest.raises(RuntimeError, match="no composer ids"):
         list(WikidataAdapter().fetch())
+
+
+# ---------------------------------------------------------------------------
+# the mirror: keyed by the query, so an edited query is a miss
+# ---------------------------------------------------------------------------
+
+
+def _counting_wdqs(answers: dict[str, Any]) -> tuple[list[str], Any]:
+    """A handler answering every query with *answers*, recording each query asked."""
+    asked: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(urllib.parse.parse_qs(request.read().decode())["query"][0])
+        return httpx.Response(200, json=answers)
+
+    return asked, handler
+
+
+def test_a_mirrored_query_is_not_asked_twice(tmp_path: Path) -> None:
+    asked, handler = _counting_wdqs({"results": {"bindings": [row("Q1")]}})
+    session = mock_session(handler, cache=PageCache(tmp_path / "pages.db"))
+    for _ in range(2):
+        assert _run_query(session, "SELECT ?item WHERE {}", "test", mirror=True) == [row("Q1")]
+    assert len(asked) == 1
+
+
+def test_an_edited_query_is_asked_again(tmp_path: Path) -> None:
+    """The mirror key is the query's digest: changing the SPARQL in code must
+    not keep serving what the old query returned."""
+    asked, handler = _counting_wdqs({"results": {"bindings": [row("Q1")]}})
+    session = mock_session(handler, cache=PageCache(tmp_path / "pages.db"))
+    _run_query(session, "SELECT ?item WHERE {}", "test", mirror=True)
+    _run_query(session, "SELECT ?item ?label WHERE {}", "test", mirror=True)
+    assert len(asked) == 2
+
+
+def test_the_id_list_is_never_mirrored(tmp_path: Path) -> None:
+    """The id list is the enumerator: a re-run must see composers added since."""
+    asked, handler = _counting_wdqs({"results": {"bindings": [row("Q1")]}})
+    session = mock_session(handler, cache=PageCache(tmp_path / "pages.db"))
+    _fetch_qids(session)
+    _fetch_qids(session)
+    assert len(asked) == 2
+
+
+def test_a_short_detail_page_is_not_mirrored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A page missing a bound item fails the run; mirroring it would fail
+    every run after it, too, until the cadence ran out."""
+    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
+    asked, handler = _counting_wdqs({"results": {"bindings": [row("Q1")]}})
+    session = mock_session(handler, cache=PageCache(tmp_path / "pages.db"))
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="1 of 2"):
+            _fetch_page(session, ["Q1", "Q2"])
+    assert len(asked) == 2  # the detail query, asked afresh each time

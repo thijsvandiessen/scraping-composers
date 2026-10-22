@@ -21,9 +21,11 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
+from composer_http import SourceSession
+
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, WorkMentionDocument
 from .artists import _Credit, collect_credits, credit_record, iter_conductor_records
-from .fetch import BASE_URL, fetch_conductors, iter_concerts
+from .fetch import BASE_URL, REQUEST_DELAY_S, fetch_conductors, iter_concerts
 from .performances import _performances
 
 log = logging.getLogger(__name__)
@@ -31,12 +33,15 @@ log = logging.getLogger(__name__)
 __all__ = ["BASE_URL", "RcoAdapter"]
 
 
-class RcoAdapter(SourceAdapter):
+class RcoAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "rco"
     base_url = BASE_URL
-    cadence = RefreshCadence.WEEKLY
+    cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield conductor profiles, then work mentions + credits from the calendar.
 
         Pass 1: fetch the conductors page; yield one EntityDocument per conductor
@@ -52,7 +57,7 @@ class RcoAdapter(SourceAdapter):
         ingested_at = datetime.now(UTC)
 
         # Pass 1: conductor profiles
-        conductors_page = fetch_conductors()
+        conductors_page = fetch_conductors(session)
         conductor_records = iter_conductor_records(conductors_page)
         log.info("rco conductors: %d records", len(conductor_records))
         for record in conductor_records:
@@ -70,7 +75,7 @@ class RcoAdapter(SourceAdapter):
         # Pass 2: concert credits + work mentions
         credit_registry: dict[str, _Credit] = {}
         works = 0
-        for concert in iter_concerts(max_pages=max_pages):
+        for concert in iter_concerts(session, max_pages=max_pages):
             collect_credits(concert, credit_registry)
             for mention in _performances(concert):
                 works += 1

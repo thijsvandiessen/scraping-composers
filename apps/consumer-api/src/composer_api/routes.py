@@ -155,7 +155,8 @@ def list_composers(
     filters: FilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, filters, pager, profession="composer", sort=sort)
+    """People credited with at least three works, whatever their profession claims say."""
+    return list_people(db, filters, pager, "composer", sort=sort)
 
 
 @v1.get("/composers/{composer_id}", response_model=ComposerDetail)
@@ -181,7 +182,7 @@ def list_soloists(
     filters: FilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, filters, pager, profession="soloist", sort=sort)
+    return list_people(db, filters, pager, "soloist", sort=sort)
 
 
 @v1.get("/soloists/{soloist_id}", response_model=ComposerDetail)
@@ -196,7 +197,7 @@ def list_conductors(
     filters: FilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
-    return list_people(db, filters, pager, profession="conductor", sort=sort)
+    return list_people(db, filters, pager, "conductor", sort=sort)
 
 
 @v1.get("/conductors/{conductor_id}", response_model=ComposerDetail)

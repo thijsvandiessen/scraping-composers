@@ -1,6 +1,9 @@
-"""Data sources. Each source exposes a SourceAdapter subclass that implements
-``fetch(max_pages=None) -> Iterator[EntityDocument | WorkMentionDocument]``.
-Register new sources in REGISTRY to make them available to the CLI.
+"""Data sources. Every source is a package of the same shape (see :mod:`.base`):
+``fetch.py`` holds its requests, parse modules turn bodies into records, and
+``__init__.py`` holds an :class:`HttpSourceAdapter` subclass implementing
+``scrape(session, max_pages=None) -> Iterator[EntityDocument | WorkMentionDocument]``
+against a :class:`~composer_http.SourceSession`. Register new sources in REGISTRY
+to make them available to the CLI.
 
 The document/adapter contracts live in :mod:`composer_schema` and are re-exported
 here so each source can keep importing them from its parent package.
@@ -21,9 +24,12 @@ from composer_schema import (
     is_due,
 )
 
+from .base import HttpSourceAdapter
+
 __all__ = [
     "REGISTRY",
     "EntityDocument",
+    "HttpSourceAdapter",
     "RefreshCadence",
     "ScrapedDocument",
     "SourceAdapter",

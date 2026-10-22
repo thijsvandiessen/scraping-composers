@@ -3,6 +3,8 @@
 Two data feeds:
 1. Calendar: paginated HTML listing (slug discovery) + JSON detail per concert.
 2. Conductors: single JSON listing of all conductors with biographies.
+
+The listings stay live; each concert's JSON detail is mirrored.
 """
 
 from __future__ import annotations
@@ -10,12 +12,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 from collections.abc import Iterator
 from typing import Any
 
 import httpx
-from composer_http import get_text, new_client
+from composer_http import SourceSession
 
 BASE_URL = "https://www.concertgebouworkest.nl"
 REQUEST_DELAY_S = 0.5
@@ -27,14 +28,18 @@ _SLUG_RE = re.compile(r'href="/en/calendar/([a-z0-9][a-z0-9-]*-\d{4}-\d{2}-\d{2}
 log = logging.getLogger(__name__)
 
 
-def _make_client() -> httpx.Client:
-    return new_client()
+def _is_json(text: str) -> bool:
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
 
 
-def _get_json(client: httpx.Client, url: str, label: str) -> dict[str, Any]:
-    # Decoded separately rather than via composer_http.get_json, which retries a
+def _get_json(session: SourceSession, url: str, label: str, *, mirror: bool = False) -> dict[str, Any]:
+    # Decoded here rather than via SourceSession.get_json, which retries a
     # failed decode: here an unparseable body raises ValueError on the first try.
-    data: dict[str, Any] = json.loads(get_text(client, url, label=label))
+    data: dict[str, Any] = json.loads(session.get_text(url, label=label, mirror=mirror, valid=_is_json))
     return data
 
 
@@ -43,7 +48,7 @@ def page_slugs(html: str) -> list[str]:
     return _SLUG_RE.findall(html)
 
 
-def iter_concerts(max_pages: int | None = None) -> Iterator[dict[str, Any]]:
+def iter_concerts(session: SourceSession, max_pages: int | None = None) -> Iterator[dict[str, Any]]:
     """Yield concert detail dicts for every event on the calendar.
 
     Paginates the HTML calendar to discover slugs, then fetches the JSON detail
@@ -52,33 +57,29 @@ def iter_concerts(max_pages: int | None = None) -> Iterator[dict[str, Any]]:
     """
     seen: set[str] = set()
     count = 0
-    with _make_client() as client:
-        offset = 0
-        while True:
-            url = f"{BASE_URL}/en/calendar/?limit={PAGE_SIZE}&locale=en&offset={offset}"
-            html = get_text(client, url, label=f"calendar offset={offset}")
-            new_slugs = [s for s in page_slugs(html) if s not in seen]
-            if not new_slugs:
-                break
-            for slug in new_slugs:
-                seen.add(slug)
-                detail_url = f"{BASE_URL}/api/pages/calendar/{slug}/?locale=en&dialog=1"
-                try:
-                    concert = _get_json(client, detail_url, f"concert {slug}")
-                except httpx.HTTPError as exc:
-                    log.warning("skipping concert %s: %s", slug, exc)
-                    continue
-                yield concert
-                count += 1
-                if max_pages is not None and count >= max_pages:
-                    return
-                time.sleep(REQUEST_DELAY_S)
-            offset += PAGE_SIZE
-            time.sleep(REQUEST_DELAY_S)
+    offset = 0
+    while True:
+        url = f"{BASE_URL}/en/calendar/?limit={PAGE_SIZE}&locale=en&offset={offset}"
+        html = session.get_text(url, label=f"calendar offset={offset}")
+        new_slugs = [s for s in page_slugs(html) if s not in seen]
+        if not new_slugs:
+            break
+        for slug in new_slugs:
+            seen.add(slug)
+            detail_url = f"{BASE_URL}/api/pages/calendar/{slug}/?locale=en&dialog=1"
+            try:
+                concert = _get_json(session, detail_url, f"concert {slug}", mirror=True)
+            except httpx.HTTPError as exc:
+                log.warning("skipping concert %s: %s", slug, exc)
+                continue
+            yield concert
+            count += 1
+            if max_pages is not None and count >= max_pages:
+                return
+        offset += PAGE_SIZE
 
 
-def fetch_conductors() -> dict[str, Any]:
+def fetch_conductors(session: SourceSession) -> dict[str, Any]:
     """Fetch the conductors overview page with all conductor profiles."""
     url = f"{BASE_URL}/api/pages/orchestra/conductors/?locale=en"
-    with _make_client() as client:
-        return _get_json(client, url, "conductors page")
+    return _get_json(session, url, "conductors page")

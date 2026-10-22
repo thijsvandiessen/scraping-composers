@@ -11,9 +11,9 @@ empty pages). That API needs no authentication, so it is read directly:
 The shop's search (``POST /api/bv/product/query``) returns the same records a
 thousand at a time, but it is no inventory: it answers HTTP 500 past the 10,000th
 hit (an Elasticsearch result window) and omits products hidden from search. So
-the sitemap drives, one request per product, through
-:class:`~composer_http.PageCache`: the first sweep is paid once, an interrupted
-run resumes, and the raw JSON stays on disk for re-parsing without the network.
+the sitemap drives (live, never mirrored), one request per product, through the
+session's page mirror: a sweep is paid once per cadence, an interrupted run
+resumes, and the raw JSON stays on disk for re-parsing without the network.
 """
 
 from __future__ import annotations
@@ -21,12 +21,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-import httpx
-from composer_http import PageCache, get_text, new_client
+from composer_http import SourceSession
 
 log = logging.getLogger(__name__)
 
@@ -51,11 +49,7 @@ def api_url(product_id: str) -> str:
     return f"{BASE_URL}/api/bv/product/{product_id}?lang=en"
 
 
-def make_client() -> httpx.Client:
-    """A client that follows redirects, identified by the project's contact UA."""
-    client = new_client()
-    client.follow_redirects = True
-    return client
+FOLLOW_REDIRECTS = True
 
 
 def product_ids(sitemap_xml: str) -> list[str]:
@@ -63,45 +57,39 @@ def product_ids(sitemap_xml: str) -> list[str]:
     return list(dict.fromkeys(_PRODUCT_LOC.findall(sitemap_xml)))
 
 
-def fetch_sitemap(client: httpx.Client) -> str:
-    return get_text(client, SITEMAP_URL, label="sitemap")
+def fetch_sitemap(session: SourceSession) -> str:
+    return session.get_text(SITEMAP_URL, label="sitemap")
 
 
-def fetch_product(
-    client: httpx.Client, product_id: str, cache: PageCache | None = None
-) -> dict[str, Any] | None:
+def _json_object(body: str) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return None
+    return payload if isinstance(payload, dict) else None  # pyright: ignore[reportUnknownVariableType]
+
+
+def fetch_product(session: SourceSession, product_id: str) -> dict[str, Any] | None:
     """One product's JSON, from the mirror when it holds it.
 
     Returns ``None`` rather than raising when the product cannot be fetched or
     read: a sweep of seventeen thousand products must not be lost to one of them.
     Only a readable answer is mirrored, so a failure is retried on the next run.
     """
-    url = api_url(product_id)
-    body = cache.get(url) if cache is not None else None
-    fetched = body is None
+    body = session.try_get_text(
+        api_url(product_id), label=product_id, mirror=True, valid=lambda b: _json_object(b) is not None
+    )
     if body is None:
-        try:
-            body = get_text(client, url, label=product_id)
-        except httpx.HTTPError as exc:
-            log.warning("baerenreiter: skipping %s: %s", product_id, exc)
-            time.sleep(REQUEST_DELAY_S)
-            return None
-    try:
-        payload = json.loads(body)
-    except ValueError:
+        return None
+    payload = _json_object(body)
+    if payload is None:
         log.warning("baerenreiter: %s did not answer JSON", product_id)
-        payload = None
-    if fetched:
-        if cache is not None and isinstance(payload, dict):
-            cache.put(url, body)
-        time.sleep(REQUEST_DELAY_S)
-    return payload if isinstance(payload, dict) else None
+    return payload
 
 
 def iter_products(
-    client: httpx.Client,
+    session: SourceSession,
     ids: Iterable[str],
-    cache: PageCache | None = None,
     max_pages: int | None = None,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     """``(product_id, payload)`` for each of *ids* that answers; ``max_pages``
@@ -109,5 +97,5 @@ def iter_products(
     for requested, product_id in enumerate(ids):
         if max_pages is not None and requested >= max_pages:
             return
-        if (payload := fetch_product(client, product_id, cache)) is not None:
+        if (payload := fetch_product(session, product_id)) is not None:
             yield product_id, payload

@@ -1,6 +1,6 @@
 """New York Philharmonic performance history (Kaggle dataset nyphil/perf-history).
 
-One kagglehub-cached download (see ``data``), parsed into two record types:
+One kagglehub-cached download (see ``fetch``), parsed into two record types:
 
 1. Per-(role, name) ``person`` records aggregating each composer/conductor/
    soloist's appearances (see ``people``).
@@ -18,7 +18,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
-from .data import BASE_URL, _load_programs
+from .fetch import BASE_URL, _load_programs
 from .people import ROLES, _aggregate, _record
 from .performances import _performances
 

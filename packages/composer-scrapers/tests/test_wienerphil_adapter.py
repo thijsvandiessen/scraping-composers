@@ -6,6 +6,7 @@ import logging
 
 import httpx
 import pytest
+from composer_http.testing import mock_session
 from composer_schema import EntityDocument, WorkMentionDocument
 from composer_scrapers import REGISTRY
 from composer_scrapers.wienerphil import WienerPhilAdapter
@@ -29,7 +30,7 @@ DETAILS = {
 
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.wienerphil.fetch.time.sleep", lambda _: None)
+    monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
 
 def _serve(monkeypatch: pytest.MonkeyPatch, landing: str, fragment: str) -> list[str]:
@@ -51,10 +52,7 @@ def _serve(monkeypatch: pytest.MonkeyPatch, landing: str, fragment: str) -> list
             return httpx.Response(200, text=DETAILS[path])
         return httpx.Response(404)
 
-    monkeypatch.setattr(
-        "composer_scrapers.wienerphil._make_client",
-        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
-    )
+    monkeypatch.setattr(WienerPhilAdapter, "open_session", lambda self: mock_session(handler))
     return requested
 
 

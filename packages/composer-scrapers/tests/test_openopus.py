@@ -7,9 +7,11 @@ from typing import Any
 
 import httpx
 import pytest
+from composer_http import SourceSession
+from composer_http.testing import mock_session
 from composer_scrapers import EntityDocument, RefreshCadence, WorkMentionDocument
 from composer_scrapers.openopus import OpenOpusAdapter, _stable_id, _year
-from composer_scrapers.openopus.fetch import _fetch_dump, _make_client
+from composer_scrapers.openopus.fetch import _fetch_dump
 
 # A dump excerpt mirroring the real /work/dump.json shape: composers keyed by
 # ``complete_name`` and works by ``title`` only — neither carries an id. One
@@ -71,12 +73,11 @@ def _patch_dump(monkeypatch: pytest.MonkeyPatch, dump: dict[str, Any]) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=json.dumps(dump))
 
-    class _MockedClient(httpx.Client):
-        def __init__(self, **kw: Any) -> None:
-            kw["transport"] = httpx.MockTransport(handler)
-            super().__init__(**kw)
+    monkeypatch.setattr(OpenOpusAdapter, "open_session", lambda self: mock_session(handler))
 
-    monkeypatch.setattr("composer_scrapers.openopus.fetch.httpx.Client", _MockedClient)
+
+def _dump_session(dump: dict[str, Any]) -> SourceSession:
+    return mock_session(lambda request: httpx.Response(200, text=json.dumps(dump)))
 
 
 def _fetch_all(
@@ -111,18 +112,16 @@ def test_year_handles_missing_values() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_fetch_dump_returns_composers(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_dump(monkeypatch, _DUMP)
-    with _make_client() as client:
-        composers = _fetch_dump(client)
+def test_fetch_dump_returns_composers() -> None:
+    with _dump_session(_DUMP) as session:
+        composers = _fetch_dump(session)
     assert [c["name"] for c in composers] == ["Bach", "Adams"]
 
 
-def test_fetch_dump_rejects_payload_without_composers(monkeypatch: pytest.MonkeyPatch) -> None:
-    _patch_dump(monkeypatch, {"status": {"success": "false"}})
-    with _make_client() as client:
+def test_fetch_dump_rejects_payload_without_composers() -> None:
+    with _dump_session({"status": {"success": "false"}}) as session:
         with pytest.raises(ValueError, match="composers"):
-            _fetch_dump(client)
+            _fetch_dump(session)
 
 
 def test_fetch_dump_retries_on_server_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -135,14 +134,8 @@ def test_fetch_dump_retries_on_server_error(monkeypatch: pytest.MonkeyPatch) -> 
             return httpx.Response(503, text="error")
         return httpx.Response(200, text=json.dumps(_DUMP))
 
-    class _MockedClient(httpx.Client):
-        def __init__(self, **kw: Any) -> None:
-            kw["transport"] = httpx.MockTransport(handler)
-            super().__init__(**kw)
-
-    monkeypatch.setattr("composer_scrapers.openopus.fetch.httpx.Client", _MockedClient)
-    with _make_client() as client:
-        composers = _fetch_dump(client)
+    with mock_session(handler) as session:
+        composers = _fetch_dump(session)
     assert len(attempts) == 3
     assert len(composers) == 2
 

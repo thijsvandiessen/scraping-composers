@@ -12,8 +12,8 @@ from typing import Any
 
 import httpx
 import pytest
-from composer_http import PageCache
-from composer_scrapers.baerenreiter import fetch
+from composer_http import PageCache, SourceSession
+from composer_http.testing import mock_session
 from composer_scrapers.baerenreiter.fetch import api_url, iter_products, product_ids
 
 SITEMAP = (
@@ -30,12 +30,11 @@ SITEMAP = (
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Politeness delays are real seconds; drop them for the suite."""
-    monkeypatch.setattr("composer_scrapers.baerenreiter.fetch.time.sleep", lambda _: None)
     monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
 
-def _client(handler: Any) -> httpx.Client:
-    return httpx.Client(transport=httpx.MockTransport(handler))
+def _client(handler: Any, cache: PageCache | None = None) -> SourceSession:
+    return mock_session(handler, cache=cache)
 
 
 def test_sitemap_ids_are_read_through_the_namespace_prefix_and_deduplicated() -> None:
@@ -75,13 +74,13 @@ def test_a_mirrored_product_is_read_without_a_request(
     cache = PageCache(tmp_path / "pages.db")
     cache.put(api_url("A"), json.dumps({"id": "A", "title": "Mirrored"}))
     slept: list[float] = []
-    monkeypatch.setattr(fetch.time, "sleep", slept.append)
+    monkeypatch.setattr("composer_http.time.sleep", slept.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError(f"unexpected request to {request.url}")
 
-    with _client(handler) as client:
-        got = list(iter_products(client, ["A"], cache))
+    with _client(handler, cache=cache) as client:
+        got = list(iter_products(client, ["A"]))
 
     assert got == [("A", {"id": "A", "title": "Mirrored"})]
     assert slept == []
@@ -95,8 +94,8 @@ def test_only_a_readable_answer_is_mirrored(tmp_path: Path) -> None:
             return httpx.Response(200, json={"id": "GOOD", "title": "T"})
         return httpx.Response(200, text="not json")
 
-    with _client(handler) as client:
-        list(iter_products(client, ["GOOD", "BROKEN"], cache))
+    with _client(handler, cache=cache) as client:
+        list(iter_products(client, ["GOOD", "BROKEN"]))
 
     assert cache.get(api_url("GOOD")) is not None
     assert cache.get(api_url("BROKEN")) is None

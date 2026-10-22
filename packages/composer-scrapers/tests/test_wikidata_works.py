@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 import pytest
+from composer_http.testing import mock_session
 from composer_scrapers import REGISTRY
 from composer_scrapers.wikidata import WikidataWorksAdapter
 from composer_scrapers.wikidata.works import (
@@ -125,23 +126,23 @@ def test_unnameable_works_and_composers_are_skipped() -> None:
 
 def test_fetch_work_page_binds_the_batch_and_requires_every_work() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        query = urllib.parse.parse_qs(request.content.decode())["query"][0]
+        query = urllib.parse.parse_qs(request.read().decode())["query"][0]
         assert "VALUES ?item { wd:Q1 wd:Q2 }" in query
         return httpx.Response(200, json={"results": {"bindings": [row("Q1", "A", NINTH)]}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+    with mock_session(handler) as session:
         with pytest.raises(RuntimeError, match="1 of 2 requested works"):
-            _fetch_work_page(client, ["Q1", "Q2"])
+            _fetch_work_page(session, ["Q1", "Q2"])
 
 
 def test_fetch_work_qids_orders_numerically() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert urllib.parse.parse_qs(request.content.decode())["query"][0] == WORK_ID_QUERY
+        assert urllib.parse.parse_qs(request.read().decode())["query"][0] == WORK_ID_QUERY
         bindings = [{"item": uri(q)} for q in ("Q100", "Q20", "Q3", "Q20")]
         return httpx.Response(200, json={"results": {"bindings": bindings}})
 
-    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        assert _fetch_work_qids(client) == ["Q3", "Q20", "Q100"]
+    with mock_session(handler) as session:
+        assert _fetch_work_qids(session) == ["Q3", "Q20", "Q100"]
 
 
 def test_queries_ask_for_the_first_performance_properties() -> None:
@@ -150,21 +151,25 @@ def test_queries_ask_for_the_first_performance_properties() -> None:
 
 
 def test_fetch_pages_through_the_population(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("composer_scrapers.wikidata.works.time.sleep", lambda _: None)
-
     def handler(request: httpx.Request) -> httpx.Response:
-        query = urllib.parse.parse_qs(request.content.decode())["query"][0]
+        query = urllib.parse.parse_qs(request.read().decode())["query"][0]
         if query == WORK_ID_QUERY:
             return httpx.Response(200, json={"results": {"bindings": [{"item": uri("Q151")}]}})
         bindings = [row("Q151", "Symphony No. 9", NINTH, premiere="1824-05-07T00:00:00Z")]
         return httpx.Response(200, json={"results": {"bindings": bindings}})
 
-    transport = httpx.MockTransport(handler)
-    monkeypatch.setattr(
-        "composer_scrapers.wikidata.works.new_client", lambda **_: httpx.Client(transport=transport)
-    )
+    monkeypatch.setattr(WikidataWorksAdapter, "open_session", lambda self: mock_session(handler))
     (mention,) = WikidataWorksAdapter().fetch()
     assert mention.raw["premiere"]["date"] == "1824-05-07"
+
+
+def test_fetch_refuses_an_empty_population(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": {"bindings": []}})
+
+    monkeypatch.setattr(WikidataWorksAdapter, "open_session", lambda self: mock_session(handler))
+    with pytest.raises(RuntimeError, match="no works with a premiere date"):
+        list(WikidataWorksAdapter().fetch())
 
 
 def test_the_adapter_is_registered() -> None:

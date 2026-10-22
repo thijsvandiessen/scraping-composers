@@ -13,13 +13,14 @@ for the List view of every work performed):
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
+from composer_http import SourceSession
+
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, WorkMentionDocument
 from .dropdowns import SELECTS, _options, _record
-from .fetch import BASE_URL, REQUEST_DELAY_S, _fetch_list_page, _fetch_search_page, _make_client
+from .fetch import BASE_URL, REQUEST_DELAY_S, _fetch_list_page, _fetch_search_page
 from .performances import _performances
 
 log = logging.getLogger(__name__)
@@ -27,21 +28,23 @@ log = logging.getLogger(__name__)
 __all__ = ["BASE_URL", "ConcertgebouwAdapter"]
 
 
-class ConcertgebouwAdapter(SourceAdapter):
+class ConcertgebouwAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "concertgebouw_archive"
     base_url = BASE_URL
-    cadence = RefreshCadence.MONTHLY
+    # an archive of concerts already given: scraped once
+    cadence = RefreshCadence.STATIC
+    request_delay_s = REQUEST_DELAY_S
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield every composer/conductor/soloist in the archive's search filters
         (one ``person`` record each) followed by every work-performance in the List
         view (one work mention each). The whole source is two fetches;
         ``max_pages`` is accepted for interface compatibility and ignored."""
         ingested_at = datetime.now(UTC)
-        with _make_client() as client:
-            page = _fetch_search_page(client)
-            time.sleep(REQUEST_DELAY_S)
-            list_page = _fetch_list_page(client)
+        page = _fetch_search_page(session)
+        list_page = _fetch_list_page(session)
         for select_id, profession in SELECTS:
             count = 0
             for value, label in _options(page, select_id):

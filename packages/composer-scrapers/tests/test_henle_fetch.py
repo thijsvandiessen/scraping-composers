@@ -13,8 +13,8 @@ from typing import Any
 
 import httpx
 import pytest
-from composer_http import PageCache
-from composer_scrapers.henle import fetch
+from composer_http import PageCache, SourceSession
+from composer_http.testing import mock_session
 from composer_scrapers.henle.fetch import fetch_sitemap, iter_products, product_urls
 
 SITEMAP_DIR = "https://www.henle.de/sitemap/salesChannel-x"
@@ -40,12 +40,11 @@ PRODUCT = '<html><h1 class="product-detail-name">Waltz</h1></html>'
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     """Politeness delays are real seconds; drop them for the suite."""
-    monkeypatch.setattr("composer_scrapers.henle.fetch.time.sleep", lambda _: None)
     monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
 
 
-def _client(handler: Any) -> httpx.Client:
-    return httpx.Client(transport=httpx.MockTransport(handler))
+def _client(handler: Any, cache: PageCache | None = None) -> SourceSession:
+    return mock_session(handler, cache=cache)
 
 
 def test_product_urls_keep_only_products_and_the_first_url_per_id() -> None:
@@ -99,13 +98,13 @@ def test_a_mirrored_page_is_read_without_a_request(tmp_path: Path, monkeypatch: 
     cache = PageCache(tmp_path / "pages.db")
     cache.put("https://www.henle.de/en/x/A", PRODUCT)
     slept: list[float] = []
-    monkeypatch.setattr(fetch.time, "sleep", slept.append)
+    monkeypatch.setattr("composer_http.time.sleep", slept.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError(f"unexpected request to {request.url}")
 
-    with _client(handler) as client:
-        got = list(iter_products(client, [("A", "https://www.henle.de/en/x/A")], cache))
+    with _client(handler, cache=cache) as client:
+        got = list(iter_products(client, [("A", "https://www.henle.de/en/x/A")]))
 
     assert got == [("A", "https://www.henle.de/en/x/A", PRODUCT)]
     assert slept == []
@@ -118,8 +117,8 @@ def test_only_a_product_page_is_mirrored(tmp_path: Path) -> None:
         return httpx.Response(200, text=PRODUCT if request.url.path.endswith("/GOOD") else "<html></html>")
 
     urls = [(pid, f"https://www.henle.de/en/x/{pid}") for pid in ("GOOD", "EMPTY")]
-    with _client(handler) as client:
-        list(iter_products(client, urls, cache))
+    with _client(handler, cache=cache) as client:
+        list(iter_products(client, urls))
 
     assert cache.get("https://www.henle.de/en/x/GOOD") is not None
     assert cache.get("https://www.henle.de/en/x/EMPTY") is None

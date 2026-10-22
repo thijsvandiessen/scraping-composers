@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from composer_models import Claim, Entity, EntityRecord, Source
@@ -11,6 +12,21 @@ CONCERT_WORKS_CAP = 20
 INCOMING_CLAIMS_CAP = 50
 
 WORK_PROOF_CAP = 5
+
+
+def mention_url(raw: str) -> str | None:
+    """The page a mention was scraped from, as its source recorded it.
+
+    Scrapers keep the work's own page (a catalogue entry, a production page)
+    under ``url`` in the raw payload; a proof without a concert or recording
+    falls back to it rather than to the source's homepage.
+    """
+    try:
+        payload = json.loads(raw)
+    except ValueError:
+        return None
+    url = payload.get("url") if isinstance(payload, dict) else None
+    return url if isinstance(url, str) and url else None
 
 
 def outgoing_claims(db: Session, entity_id: uuid.UUID) -> list[ClaimOut]:

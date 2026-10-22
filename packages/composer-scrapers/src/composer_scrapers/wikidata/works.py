@@ -15,18 +15,16 @@ so it is a world premiere and belongs on the work.
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx
-from composer_http import new_client
+from composer_http import SourceSession
 from composer_schema.premiere import PREMIERE_KEY, supersedes
 
-from .. import RefreshCadence, SourceAdapter, WorkMentionDocument
+from .. import HttpSourceAdapter, RefreshCadence, WorkMentionDocument
 from .parse import _BARE_QID, BASE_URL, _format_time, _literal
-from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, _qid, _run_query, _values
+from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
 
 log = logging.getLogger(__name__)
 
@@ -53,18 +51,23 @@ WHERE {{
 """
 
 
-def _fetch_work_qids(client: httpx.Client) -> list[str]:
+def _fetch_work_qids(session: SourceSession) -> list[str]:
     """Every QID with a premiere date and a composer, numerically ordered."""
-    qids = {_qid(row) for row in _run_query(client, WORK_ID_QUERY, "work id list")}
+    qids = {_qid(row) for row in _run_query(session, WORK_ID_QUERY, "work id list")}
     return sorted(qids, key=lambda qid: (len(qid), qid))
 
 
-def _fetch_work_page(client: httpx.Client, qids: list[str]) -> list[dict[str, Any]]:
+def _fetch_work_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
     """The detail rows for one batch of works. Every bound id matched the id
     query's required patterns, so each must come back; a short answer means
-    rows went missing in transit (issue #181) and fails the run."""
+    rows went missing in transit (issue #181) and fails the run -- and is
+    never mirrored."""
     query = WORK_QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
-    rows = _run_query(client, query, f"page of {len(qids)} works")
+
+    def covered(rows: list[dict[str, Any]]) -> bool:
+        return not set(qids) - {_qid(row) for row in rows}
+
+    rows = _run_query(session, query, f"page of {len(qids)} works", mirror=True, complete=covered)
     missing = set(qids) - {_qid(row) for row in rows}
     if missing:
         raise RuntimeError(
@@ -143,28 +146,27 @@ def _mentions_from_rows(rows: list[dict[str, Any]], ingested_at: datetime) -> li
     return mentions
 
 
-class WikidataWorksAdapter(SourceAdapter):
+class WikidataWorksAdapter(HttpSourceAdapter[WorkMentionDocument]):
     name = "wikidata_works"
     base_url = BASE_URL
-    cadence = RefreshCadence.MONTHLY
+    cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
+    timeout_s = TIMEOUT_S
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[WorkMentionDocument]:
+    def scrape(self, session: SourceSession, max_pages: int | None = None) -> Iterator[WorkMentionDocument]:
         """Yield a mention for every work Wikidata records a premiere for.
         ``max_pages`` caps the number of batches, for test runs; ids are
         numerically ordered, so a capped run sees the longest-known works."""
-        with new_client(timeout=90) as client:
-            qids = _fetch_work_qids(client)
-            if not qids:
-                raise RuntimeError("wikidata returned no works with a premiere date")
-            batches = [qids[i : i + PAGE_SIZE] for i in range(0, len(qids), PAGE_SIZE)]
-            if max_pages is not None and max_pages < len(batches):
-                log.info("stopping after max_pages=%d", max_pages)
-                batches = batches[:max_pages]
-            log.info("wikidata_works: %d works in %d pages", len(qids), len(batches))
+        qids = _fetch_work_qids(session)
+        if not qids:
+            raise RuntimeError("wikidata returned no works with a premiere date")
+        batches = [qids[i : i + PAGE_SIZE] for i in range(0, len(qids), PAGE_SIZE)]
+        if max_pages is not None and max_pages < len(batches):
+            log.info("stopping after max_pages=%d", max_pages)
+            batches = batches[:max_pages]
+        log.info("wikidata_works: %d works in %d pages", len(qids), len(batches))
 
-            for page, batch in enumerate(batches, start=1):
-                if page > 1:
-                    time.sleep(REQUEST_DELAY_S)
-                mentions = _mentions_from_rows(_fetch_work_page(client, batch), datetime.now(UTC))
-                log.info("wikidata_works page %d/%d: %d mentions", page, len(batches), len(mentions))
-                yield from mentions
+        for page, batch in enumerate(batches, start=1):
+            mentions = _mentions_from_rows(_fetch_work_page(session, batch), datetime.now(UTC))
+            log.info("wikidata_works page %d/%d: %d mentions", page, len(batches), len(mentions))
+            yield from mentions

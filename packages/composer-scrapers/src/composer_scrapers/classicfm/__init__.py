@@ -19,8 +19,10 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceClaim
-from .fetch import ARTISTS_URL, BASE_URL, COMPOSERS_URL, fetch_index_pages
+from composer_http import SourceSession
+
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
+from .fetch import ARTISTS_URL, BASE_URL, COMPOSERS_URL, REQUEST_DELAY_S, fetch_index_pages
 from .parse import parse_entries
 
 log = logging.getLogger(__name__)
@@ -31,18 +33,20 @@ _COMPOSER_CLAIMS: tuple[SourceClaim, ...] = (SourceClaim("has_profession", "prof
 _ARTIST_CLAIMS: tuple[SourceClaim, ...] = ()
 
 
-class ClassicFmAdapter(SourceAdapter):
+class ClassicFmAdapter(HttpSourceAdapter[EntityDocument]):
     name = "classicfm"
     base_url = BASE_URL
-    cadence = RefreshCadence.MONTHLY
+    cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
+    follow_redirects = True
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument]:
+    def scrape(self, session: SourceSession, max_pages: int | None = None) -> Iterator[EntityDocument]:
         """Yield one EntityDocument per name on the composers and artists indexes.
 
         ``max_pages`` caps the total number of entries yielded — there is no
         real pagination here, just two static pages — for test runs.
         """
-        composers_html, artists_html = fetch_index_pages()
+        composers_html, artists_html = fetch_index_pages(session)
         ingested_at = datetime.now(UTC)
 
         count = 0

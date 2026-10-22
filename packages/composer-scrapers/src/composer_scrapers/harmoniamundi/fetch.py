@@ -18,8 +18,8 @@ on which release — and trains nothing. Our ``User-Agent`` is
 ``composer-ingest/0.1`` with a contact address, and falls under ``*``.
 
 **The mirror.** ~2000 pages at 100-150KB each, of which the fields this scraper
-reads are a few hundred bytes. Every page fetch goes through
-:class:`~composer_http.PageCache`, so the sweep is paid once, a run interrupted
+reads are a few hundred bytes. Every page fetch goes through the session's page
+mirror, so the sweep is paid once per cadence, a run interrupted
 halfway resumes where it stopped, and the raw HTML stays on disk — the
 tracklist blob is hand-edited free text and the parser for it will improve, so
 re-deriving it without re-fetching 2000 pages is worth the disk. Keep that
@@ -33,10 +33,8 @@ albums that existed the first time.
 from __future__ import annotations
 
 import logging
-import time
 
-import httpx
-from composer_http import PageCache, get_text, new_client
+from composer_http import SourceSession
 
 from .urls import SITEMAP_INDEX_URL
 
@@ -47,33 +45,26 @@ log = logging.getLogger(__name__)
 REQUEST_DELAY_S = 0.5
 
 
-def make_client() -> httpx.Client:
-    """A client that follows redirects.
-
-    Not optional here, and the failure it prevents is silent rather than loud:
-    ``/en/albums/<slug>`` (no trailing slash) answers ``301`` to
-    ``/en/albums/<slug>/``, and :func:`composer_http.get_text` only raises on
-    4xx and 5xx — so with redirects off a near-miss URL returns an *empty body*
-    that parses as "not an album page" instead of an error. Sitemap locs carry
-    the slash and :mod:`.urls` always builds it, making this the second line of
-    defence rather than the first.
-    """
-    client = new_client()
-    client.follow_redirects = True
-    return client
+#: Not optional here, and the failure it prevents is silent rather than loud:
+#: ``/en/albums/<slug>`` (no trailing slash) answers ``301`` to
+#: ``/en/albums/<slug>/``, and a GET only raises on 4xx and 5xx — so with
+#: redirects off a near-miss URL returns an *empty body* that parses as "not an
+#: album page" instead of an error. Sitemap locs carry the slash and :mod:`.urls`
+#: always builds it, making this the second line of defence rather than the first.
+FOLLOW_REDIRECTS = True
 
 
-def fetch_sitemap_index(client: httpx.Client) -> str:
+def fetch_sitemap_index(session: SourceSession) -> str:
     """The sitemap index, which lists the per-section urlsets."""
-    return get_text(client, SITEMAP_INDEX_URL, label="sitemap index")
+    return session.get_text(SITEMAP_INDEX_URL, label="sitemap index")
 
 
-def fetch_urlset(client: httpx.Client, url: str) -> str:
+def fetch_urlset(session: SourceSession, url: str) -> str:
     """One section urlset — an album, artist or composer page list."""
-    return get_text(client, url, label=url)
+    return session.get_text(url, label=url)
 
 
-def fetch_page(client: httpx.Client, url: str, cache: PageCache | None = None) -> str | None:
+def fetch_page(session: SourceSession, url: str) -> str | None:
     """One album, artist or composer page, from the mirror when it holds it.
 
     Returns ``None`` rather than raising when the page cannot be fetched. The
@@ -84,16 +75,4 @@ def fetch_page(client: httpx.Client, url: str, cache: PageCache | None = None) -
     A page that could not be fetched is not mirrored, so the next run retries it
     instead of caching the failure.
     """
-    if cache is not None:
-        mirrored = cache.get(url)
-        if mirrored is not None:
-            return mirrored
-    try:
-        page = get_text(client, url, label=url)
-    except httpx.HTTPError as exc:
-        log.warning("skipping %s: %s", url, exc)
-        return None
-    if cache is not None:
-        cache.put(url, page)
-    time.sleep(REQUEST_DELAY_S)
-    return page
+    return session.try_get_text(url, label=url, mirror=True)

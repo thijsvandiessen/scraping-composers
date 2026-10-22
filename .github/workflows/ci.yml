@@ -23,18 +23,20 @@ jobs:
           - { member: packages/composer-http,      cov: "--cov=composer_http" }
           - { member: packages/composer-bronze,    cov: "--cov=composer_bronze" }
           - { member: packages/composer-scrapers,  cov: "--cov=composer_scrapers" }
-          - { member: packages/composer-crawler,   cov: "--cov=composer_crawler" }
-          - { member: packages/composer-extract,   cov: "--cov=composer_extract" }
           - { member: packages/composer-warehouse, cov: "--cov=composer_warehouse" }
           - { member: packages/composer-gold,      cov: "--cov=composer_gold" }
+          - { member: packages/composer-graph,     cov: "--cov=composer_graph" }
           - { member: packages/composer-config,    cov: "--cov=composer_config" }
           - { member: apps/consumer-api,           cov: "--cov=composer_api" }
           - { member: apps/admin-api,              cov: "--cov=composer_admin" }
           - { member: apps/cli,                    cov: "--cov=composer_cli" }
           - { member: apps/dashboard,              cov: "--cov=scrapers --cov=config" }
+          # end-to-end: fetch → process → promote → gold API over synthetic sources,
+          # every step a real CLI subprocess against throwaway SQLite files
+          - { member: tests/e2e,                   cov: "--cov=composer_e2e" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.12"
       - run: uv sync --locked
@@ -74,18 +76,41 @@ jobs:
       COMPOSER_TEST_POSTGRES_URL: postgresql+psycopg://composers:composers@localhost:5432/composers_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.12"
       - run: uv sync --locked
       - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }} --cov-report=term-missing
+
+  test-neo4j:
+    name: neo4j tests (packages/composer-graph)
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:2026.09-community
+        env:
+          NEO4J_AUTH: neo4j/composers
+        ports:
+          - 7687:7687
+        options: >-
+          --health-cmd "wget -qO- http://localhost:7474 || exit 1"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      COMPOSER_TEST_NEO4J_URL: bolt://localhost:7687
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run --directory packages/composer-graph pytest --rootdir . --cov=composer_graph --cov-report=term-missing
 
   audit:
     name: dependency audit (pip-audit)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.12"
       # audit the pinned lock export without re-resolving; workspace members
@@ -101,7 +126,7 @@ jobs:
         working-directory: apps/frontend
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -117,7 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.12"
       - run: uv sync --locked
@@ -128,7 +153,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           python-version: "3.12"
       - run: uv sync --locked

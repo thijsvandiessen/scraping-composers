@@ -7,16 +7,18 @@ composer index -> each composer's work list -> each work's detail page.
 The only URL shape confirmed from a live page is the work detail path
 (``/cr/music/<slug>/<id>``); ``COMPOSER_INDEX_PATH`` below is the entry point to
 check first if a run discovers no composers.
+
+The index and listings are enumerators and stay live; work detail pages are
+mirrored. Catalogue URLs redirect (a retitled work's slug 301s to its current
+one), so the adapter's client follows redirects.
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Iterator
 
-import httpx
-from composer_http import get_text, user_agent
+from composer_http import SourceSession
 
 from .catalogue import WorkLink, composer_paths, next_page_path, work_links
 
@@ -33,20 +35,13 @@ MAX_LIST_PAGES = 100
 log = logging.getLogger(__name__)
 
 
-def _make_client() -> httpx.Client:
-    # Built here rather than with composer_http.new_client because catalogue URLs
-    # redirect (a retitled work's slug 301s to its current one) and new_client
-    # takes only a timeout and headers.
-    return httpx.Client(headers={"User-Agent": user_agent()}, timeout=30, follow_redirects=True)
-
-
 def _absolute(path: str) -> str:
     if path.startswith(("http://", "https://")):
         return path
     return BASE_URL + path if path.startswith("/") else f"{BASE_URL}/{path}"
 
 
-def _listing_pages(client: httpx.Client, path: str, label: str) -> Iterator[str]:
+def _listing_pages(session: SourceSession, path: str, label: str) -> Iterator[str]:
     """Yield the HTML of a listing page and each ``rel="next"`` page after it."""
     seen: set[str] = set()
     for page in range(MAX_LIST_PAGES):
@@ -54,9 +49,7 @@ def _listing_pages(client: httpx.Client, path: str, label: str) -> Iterator[str]
         if url in seen:
             return
         seen.add(url)
-        if page:
-            time.sleep(REQUEST_DELAY_S)
-        html = get_text(client, url, label=f"{label} page {page + 1}", retries=RETRIES)
+        html = session.get_text(url, label=f"{label} page {page + 1}", retries=RETRIES)
         yield html
         following = next_page_path(html)
         if following is None:
@@ -64,11 +57,11 @@ def _listing_pages(client: httpx.Client, path: str, label: str) -> Iterator[str]
         path = following
 
 
-def composer_index(client: httpx.Client) -> list[str]:
+def composer_index(session: SourceSession) -> list[str]:
     """Every composer path in the catalogue index."""
     paths: list[str] = []
     seen: set[str] = set()
-    for html in _listing_pages(client, COMPOSER_INDEX_PATH, "composer index"):
+    for html in _listing_pages(session, COMPOSER_INDEX_PATH, "composer index"):
         for path in composer_paths(html):
             if path not in seen:
                 seen.add(path)
@@ -76,11 +69,11 @@ def composer_index(client: httpx.Client) -> list[str]:
     return paths
 
 
-def composer_work_links(client: httpx.Client, composer_path: str) -> list[WorkLink]:
+def composer_work_links(session: SourceSession, composer_path: str) -> list[WorkLink]:
     """Every work link on one composer's pages, deduplicated by work id."""
     links: list[WorkLink] = []
     seen: set[str] = set()
-    for html in _listing_pages(client, composer_path, f"works for {composer_path}"):
+    for html in _listing_pages(session, composer_path, f"works for {composer_path}"):
         for link in work_links(html):
             if link.work_id not in seen:
                 seen.add(link.work_id)
@@ -88,27 +81,27 @@ def composer_work_links(client: httpx.Client, composer_path: str) -> list[WorkLi
     return links
 
 
-def iter_work_pages(max_pages: int | None = None) -> Iterator[tuple[WorkLink, str, str]]:
+def iter_work_pages(
+    session: SourceSession, max_pages: int | None = None
+) -> Iterator[tuple[WorkLink, str, str]]:
     """Walk the catalogue, yielding ``(link, url, html)`` per work detail page.
 
     ``max_pages`` caps the number of *detail* fetches, which is what a test run
     wants to bound; index and listing pages are cheap by comparison.
     """
-    with _make_client() as client:
-        composers = composer_index(client)
-        log.info("boosey: %d composers in the index", len(composers))
-        fetched = 0
-        seen: set[str] = set()
-        for composer_path in composers:
-            for link in composer_work_links(client, composer_path):
-                if link.work_id in seen:
-                    continue
-                seen.add(link.work_id)
-                if max_pages is not None and fetched >= max_pages:
-                    log.info("boosey: stopping after max_pages=%d work pages", max_pages)
-                    return
-                url = _absolute(link.path)
-                time.sleep(REQUEST_DELAY_S)
-                yield link, url, get_text(client, url, label=f"work {link.work_id}", retries=RETRIES)
-                fetched += 1
-        log.info("boosey: fetched %d work pages", fetched)
+    composers = composer_index(session)
+    log.info("boosey: %d composers in the index", len(composers))
+    fetched = 0
+    seen: set[str] = set()
+    for composer_path in composers:
+        for link in composer_work_links(session, composer_path):
+            if link.work_id in seen:
+                continue
+            seen.add(link.work_id)
+            if max_pages is not None and fetched >= max_pages:
+                log.info("boosey: stopping after max_pages=%d work pages", max_pages)
+                return
+            url = _absolute(link.path)
+            yield link, url, session.get_text(url, label=f"work {link.work_id}", retries=RETRIES, mirror=True)
+            fetched += 1
+    log.info("boosey: fetched %d work pages", fetched)

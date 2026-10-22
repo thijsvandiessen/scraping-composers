@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 import pytest
+from composer_http import SourceSession
+from composer_http.testing import mock_session
 from composer_scrapers import REGISTRY, EntityDocument, WorkMentionDocument
 from composer_scrapers.classicalmusiconline import BASE_URL, ClassicalMusicOnlineAdapter
 from composer_scrapers.classicalmusiconline.composers import (
@@ -75,15 +77,12 @@ COMPOSER_PAGE = """
 """
 
 
-def _patch_client(monkeypatch: pytest.MonkeyPatch, handler: Any) -> None:
-    class _MockedClient(httpx.Client):
-        def __init__(self, **kw: Any) -> None:
-            kw["transport"] = httpx.MockTransport(handler)
-            super().__init__(**kw)
-
-    monkeypatch.setattr("composer_scrapers.classicalmusiconline.fetch.httpx.Client", _MockedClient)
-    monkeypatch.setattr("composer_scrapers.classicalmusiconline.fetch.time.sleep", lambda _: None)
+def _patch_client(monkeypatch: pytest.MonkeyPatch, handler: Any) -> SourceSession:
+    """A session answered by *handler*, also handed to the adapter."""
+    session = mock_session(handler)
+    monkeypatch.setattr(ClassicalMusicOnlineAdapter, "open_session", lambda self: session)
     monkeypatch.setattr("composer_http.time.sleep", lambda _: None)
+    return session
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +190,13 @@ def test_work_mention_without_production_link_gets_a_stable_id() -> None:
     assert first.raw["production_id"] is None
     assert first.external_id == second.external_id
     assert first.external_id != "1060"
+    assert first.raw["url"] is None
+
+
+def test_work_mention_without_production_link_points_at_the_composer_page() -> None:
+    composer_url = BASE_URL + "/en/composer/Arensky/249"
+    mention = iter_work_mentions(COMPOSER_PAGE, "Arensky, Anton", "249", BASE_URL, composer_url)[2]
+    assert mention.raw["url"] == composer_url
 
 
 def test_work_mentions_ignore_pages_without_a_works_table() -> None:
@@ -218,9 +224,9 @@ def test_iter_composers_walks_the_alphabet_and_fetches_details(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: list[str] = []
-    _patch_client(monkeypatch, _handler(requests))
+    session = _patch_client(monkeypatch, _handler(requests))
 
-    results = list(iter_composers())
+    results = list(iter_composers(session))
 
     assert [entry.external_id for entry, _ in results] == ["1273", "785", "4321", "999", "888", "777"]
     assert all(page == COMPOSER_PAGE for _, page in results)
@@ -231,9 +237,9 @@ def test_iter_composers_walks_the_alphabet_and_fetches_details(
 
 def test_iter_composers_caps_detail_fetches_with_max_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     requests: list[str] = []
-    _patch_client(monkeypatch, _handler(requests))
+    session = _patch_client(monkeypatch, _handler(requests))
 
-    results = list(iter_composers(max_pages=2))
+    results = list(iter_composers(session, max_pages=2))
 
     assert len(results) == 2
     # stops inside letter A, so the remaining index pages are never fetched
@@ -244,9 +250,9 @@ def test_iter_composers_skips_a_composer_page_that_keeps_failing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     requests: list[str] = []
-    _patch_client(monkeypatch, _handler(requests, detail_status=500))
+    session = _patch_client(monkeypatch, _handler(requests, detail_status=500))
 
-    assert list(iter_composers()) == []
+    assert list(iter_composers(session)) == []
 
 
 def test_iter_composers_visits_each_composer_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,9 +266,9 @@ def test_iter_composers_visits_each_composer_once(monkeypatch: pytest.MonkeyPatc
             return httpx.Response(200, text=INDEX_PAGE if url[-1] in "AB" else "")
         return httpx.Response(200, text=COMPOSER_PAGE)
 
-    _patch_client(monkeypatch, handle)
+    session = _patch_client(monkeypatch, handle)
 
-    results = list(iter_composers())
+    results = list(iter_composers(session))
 
     assert len(results) == 6
     assert len([url for url in requests if "/en/composer/" in url]) == 6

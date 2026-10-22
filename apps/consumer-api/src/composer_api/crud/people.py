@@ -7,6 +7,7 @@ from composer_models import (
     EntityRecord,
     RecordingParticipant,
     Source,
+    Work,
 )
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
@@ -15,6 +16,13 @@ from ..deps import Filters, Pagination
 from ..errors import NotFoundError
 from ..schemas import ComposerDetail, ComposerPage, ComposerSummary
 from .common import outgoing_claims
+
+# Works a person needs to count as a composer. Not the ``composer`` profession
+# claim: wikidata's occupation tags pop stars, poets and conductors as
+# composers, while thousands of real composers in the work sources carry no
+# profession at all. One or two works is mostly a conductor's or arranger's
+# stray piece.
+COMPOSER_MIN_WORKS = 3
 
 
 def _profession_id(db: Session, profession: str) -> uuid.UUID | None:
@@ -28,6 +36,17 @@ def profession_filter(prof_id: uuid.UUID) -> ColumnElement[bool]:
     # person row (billions of comparisons — minutes instead of milliseconds).
     return Entity.id.in_(
         select(Claim.subject_id).where(Claim.predicate == "has_profession", Claim.object_id == prof_id)
+    )
+
+
+def works_filter(min_works: int) -> ColumnElement[bool]:
+    # Uncorrelated IN for the same reason as ``profession_filter``: one grouped
+    # pass over works (indexed on composer_entity_id), probed per person.
+    return Entity.id.in_(
+        select(Work.composer_entity_id)
+        .where(Work.composer_entity_id.is_not(None))
+        .group_by(Work.composer_entity_id)
+        .having(func.count() >= min_works)
     )
 
 
@@ -46,14 +65,18 @@ def list_people(
     db: Session,
     filters: Filters,
     pager: Pagination,
-    profession: str | None = None,
+    role: str,
     sort: str = "label",
 ) -> ComposerPage:
+    """People in ``role``: "composer" by work count, any other role by its
+    ``has_profession`` claim."""
     base = select(Entity).where(Entity.kind == "person")
     if filters.source:
         base = base.where(source_filter(filters.source))
-    if profession is not None:
-        prof_id = _profession_id(db, profession)
+    if role == "composer":
+        base = base.where(works_filter(COMPOSER_MIN_WORKS))
+    else:
+        prof_id = _profession_id(db, role)
         if prof_id is None:
             return ComposerPage(items=[], total=0, page=pager.page, limit=pager.limit)
         base = base.where(profession_filter(prof_id))

@@ -1,1224 +1,138 @@
 # composer-ingest
 
-Ingests classical composer data from IMSLP, Wikidata, Open Opus, Concertgebouw,
-NY Phil, Berlin Phil, and classical-music-online.net into a database, with full
-provenance: every record
-knows which source it came from, when it was first and last seen, and which
-ingest run produced it.
+Ingests classical composer, work, concert and recording data from 19 sources into
+a database, with full provenance: every record knows which source it came from,
+when it was first and last seen, and which ingest run produced it.
+
+This page is the overview. Each package and app has a README of its own with its
+domain details and what its tests cover; the [layout](#layout) below links to
+them.
+
+## Why this exists
+
+The project started from one question: what connects these composers in ways
+that aren't obvious? Teacher and pupil, a shared publisher, a premiere by the
+same orchestra, a work that kept being programmed decades later. Links like
+these are spread over many sources and rarely sit side by side. The idea was to
+put them on a timeline, where they would become visible.
+
+The catch is that a timeline showing every kind of connection at once isn't
+clear. Too many options, and the connections you were looking for get lost.
+So the work now is on the ontology: a small, deliberate set of entity kinds and
+claim predicates (`student_of`, `composed_by`, `performed`, `born_in`, …), each
+with one clear meaning. Then a timeline can be built for a specific question,
+like who taught whom or where a work was played, and show only the connections
+that answer it.
+
+The rest of the pipeline is groundwork for that. Collecting from many sources
+with full provenance means each connection on a timeline can show who asserted
+it, and two sources that disagree stay visible as two claims.
+
+## How it fits together
+
+Data lives in three tiers:
+
+- **Bronze** — the raw NDJSON bucket (`raw-data/`), written by `fetch`:
+  everything every source said, verbatim. It is the only way data enters the
+  pipeline, so everything downstream can be rebuilt from it.
+- **Silver** (`composers.db`) — the staging database built from bronze by
+  `process`: raw records with provenance, plus the interpretation passes over
+  them (entity resolution, claims, work matching, person dedupe, concerts and
+  recordings, human review decisions).
+- **Gold** (`gold.db`) — the curated copy rebuilt from silver by `promote`,
+  which the product API and the frontend serve.
+
+```
+sources ──fetch──▶ bronze ──process──▶ silver ──promote──▶ gold ──▶ consumer API ──▶ frontend
+                                         ▲                    └──▶ Kumu, Neo4j exports
+                       rebuild-silver ───┘ (replays bronze)
+```
+
+Entities are connected by claims, the Wikidata pattern: two sources asserting
+conflicting facts coexist as two claims, each carrying its source and the raw
+record it came from.
 
 ## Usage
 
 ```sh
 uv sync
 
-# the generic crawler (composer-ingest crawl) renders pages with crawl4ai in a
-# headless browser; install its Chromium once after syncing
-uv run crawl4ai-setup
-
 # scrapers identify themselves (User-Agent) to the sites they crawl; a
 # reachable contact email is required before fetching
 export SCRAPER_CONTACT_EMAIL="you@example.com"
 
-# fetch everything from IMSLP (~55k people, ~55 pages, a few minutes) to the
-# bucket, then load the snapshot into the database (no network)
-uv run composer-ingest fetch imslp
-uv run composer-ingest process imslp
+uv run composer-ingest fetch imslp                # source → bronze
+uv run composer-ingest fetch imslp --max-pages 1  # quick test run
+uv run composer-ingest process imslp              # bronze → silver (no network)
+uv run composer-ingest dedupe-persons             # link duplicate people
+uv run composer-ingest promote                    # silver → gold
 
-# quick test run
-uv run composer-ingest fetch imslp --max-pages 1
-
-# classical-music-online.net is a two-level crawl: 26 alphabet index pages give
-# ~11.6k composers (name, life years, country), then every composer's own page
-# is fetched for its works. That is ~11.6k requests — a couple of hours,
-# unattended; --max-pages caps the composer pages for a smoke run. Processing
-# the resulting snapshot needs no network.
-uv run composer-ingest fetch classicalmusiconline --max-pages 5
-uv run composer-ingest process classicalmusiconline
-
-# extract concerts + performers from crawled pages with a local Ollama model:
-# crawl a site, run the model over each page's markdown (stored at crawl time),
-# then process the extracted docs like any other snapshot. Needs Ollama running
-# (e.g. `ollama pull qwen2.5`); set OLLAMA_MODEL/OLLAMA_BASE_URL to override.
-# The same crawl → extract steps are buttons on the dashboard's Crawls page.
-uv run composer-ingest crawl lso
-uv run composer-ingest extract lso                       # → work-mention + person docs; prints run_id
-uv run composer-ingest process lso --run-id <run_id>     # load the extract snapshot
-uv run composer-ingest derive-concerts                   # group the mentions into concerts
-
-# re-extracting a crawl only pays for pages whose text actually changed: model
-# answers are cached (see "Not analysing the same page twice" below)
-uv run composer-ingest extract lso --no-cache            # force every page back through the model
-
-# extract-all: LLM-extract every loadable crawl snapshot of every crawl-config
-# source in one call — every past crawl run, not just the latest — instead of
-# looping `extract <config> --crawl-run-id <id>` by hand. Best-effort: one run
-# failing doesn't stop the rest of the batch, and it prints which (source, run)
-# pairs failed. Accepts the same --provider/--model/--no-cache/--no-ledger flags
-# as `extract`, applied to every run.
-uv run composer-ingest extract-all
-
-# crawl and extract are slow and unattended, so they narrate themselves on stderr:
-# discovery, a periodic page count, and what each run dropped. DEBUG adds a line
-# per crawled page, per markdown chunk and per model call (with its latency and
-# token counts). Global flags come before the subcommand.
-uv run composer-ingest -v crawl lso              # DEBUG, crawl4ai and ollama included
-uv run composer-ingest --log-level warning run lso
-# LOG_LEVEL in .env sets the default for the CLI and the admin API alike
-
-# inspect the dataset and the collection log
-uv run composer-ingest stats
-uv run composer-ingest runs
-
-# inspect one entity's claims and which source asserts each — every claim
-# keeps its source and the raw record it came from, so you can compare
-# disagreeing facts and decide which to trust
+uv run composer-ingest stats                      # what's in silver
 uv run composer-ingest claims "Beethoven, Ludwig van" --kind person
-uv run composer-ingest claims "Beethoven, Ludwig van" --predicate born_on
-
-# world premieres (date + place of first performance) for every work Wikidata
-# records one for (P1191/P4647), as work mentions; processing fills
-# Work.premiere_date/premiere_place, earliest date across sources winning
-uv run composer-ingest fetch wikidata_works --max-pages 1   # 500 works, smoke run
-uv run composer-ingest process wikidata_works
-
-# inspect resolved works (by composer or title) and the titles they were seen under
-uv run composer-ingest works "Beethoven"
-
-# work mentions the matcher wasn't confident about, and how to resolve them
-uv run composer-ingest review
-uv run composer-ingest review --accept 42 <work-uuid>   # match a mention to a work
-uv run composer-ingest review --new 42                  # create a new work from a mention
-uv run composer-ingest rematch                          # re-run matching after tuning
-
-# link near-duplicate person entities ("Beethoven" vs "Beethoven, Ludwig van")
-uv run composer-ingest dedupe-persons
-uv run composer-ingest person-review                    # pairs the matcher wasn't sure about
-uv run composer-ingest person-review --accept 7         # confirm a duplicate link
-uv run composer-ingest person-review --reject 7         # reject a proposed link
-
-# group performance mentions into concerts (also runs before every promote)
-uv run composer-ingest derive-concerts
 ```
 
-Data lands in `composers.db` (SQLite) by default. **Postgres is fully
-supported for silver** — including `rebuild-silver`, whose atomic swap has a
-real Postgres equivalent (see [Schema and migrations](#schema-and-migrations)):
+The full command list is in [`apps/cli`](apps/cli/README.md). To browse the
+data, run the [consumer API](apps/consumer-api/README.md) and the
+[frontend](apps/frontend/README.md); to run the pipeline from a browser, the
+[admin API](apps/admin-api/README.md) and the [dashboard](apps/dashboard/README.md).
+
+Data lands in SQLite by default. Postgres is fully supported for silver and,
+on a server of its own, for gold:
 
 ```sh
 uv sync --extra postgres
-export DATABASE_URL="postgresql+psycopg://user:pass@host:5432/composers"
-uv run alembic upgrade head          # creates the schema on a fresh database
-```
-
-A local one for development comes with the repo:
-
-```sh
-docker compose up -d postgres
+docker compose up -d postgres postgres-gold
 export DATABASE_URL="postgresql+psycopg://composers:composers@localhost:5433/composers"
-```
-
-Silver lives in its own schema (`SILVER_SCHEMA`, default `silver`), never in
-`public`, because `rebuild-silver` replaces that schema wholesale. The role
-needs `CREATE` on the database — `GRANT CREATE ON DATABASE composers TO app` —
-and nothing more; no superuser, no ownership of `public`.
-
-Gold is configured separately: `GOLD_DATABASE_URL` (default
-`sqlite:///gold.db`, a single file). To serve gold from Postgres instead, give it
-a server of its own:
-
-```sh
-docker compose up -d postgres-gold
 export GOLD_DATABASE_URL="postgresql+psycopg://composers:composers@localhost:5434/composers_gold"
+uv run alembic upgrade head          # creates the silver schema on a fresh database
 ```
 
-Like silver, it lives in a dedicated schema (`GOLD_SCHEMA`, default `gold`) that
-`promote` swaps in by rename, and the gold API picks up each new build without a
-restart. `promote` reads silver through a normal session, so any combination of
-backends works. While it reads a Postgres silver it holds off `rebuild-silver`,
-and the other way round.
-
-## Bronze, silver & gold
-
-Data lives in three tiers. **Bronze** is the raw NDJSON bucket (`raw-data/`,
-written by `fetch`): everything every source said, verbatim, as complete
-documents — the only tier holding the full fetch output, and the only way data
-enters the pipeline. **Silver** (`composers.db`) is the staging database built
-from bronze by `process`: raw records with provenance plus the interpretation
-passes over them — entity resolution, claims, work matching, person dedupe,
-and human review decisions. **Gold** (`gold.db`) is the curated copy rebuilt
-from silver by the promote step:
-
-```sh
-uv run composer-ingest promote        # silver → gold (full rebuild, atomic swap)
-```
-
-Promotion applies the curation rules: people and ensembles are dropped unless
-they are *credited* — a participant on at least the configured number of
-concerts or recordings — or composed a work some source mentioned; duplicate person entities
-(linked by `dedupe-persons`) are collapsed into their canonical row with claims,
-works, and mentions re-pointed; entities left unreferenced are pruned. Silver is
-never modified by promotion, so it is repeatable at any time; status and
-stats land in `gold.db.manifest.json` (on Postgres, a row in
-`composer_meta.build_manifest`).
-
-Being *listed* by a source is deliberately not evidence. Archives publish full
-artist and ensemble indexes, and taking those at face value is what filled gold
-with soloists and orchestras that appear on no programme; the concert and
-recording tables are the only thing rule 1 believes.
-
-Each run is configurable: every rule can be switched off (CLI
-`--no-drop-unevidenced-persons`, `--no-collapse-duplicates`,
-`--no-prune-unreferenced`; the same toggles appear in the dashboard's promote
-form and in the `POST /admin/v1/promote` body), and `--gold-url` writes the
-gold database elsewhere. Rule 1's concert/recording/composer/sitelink
-thresholds live in `rule1_config.json` (CLI `--rule1-config PATH`, default the
-repo's `packages/composer-gold/rule1_config.json`) rather than CLI flags, so
-they can be tuned by editing that file or through the admin API's
-`GET`/`PUT /admin/v1/rule1-config` without touching code. In code the knobs
-travel as a single `PromoteConfig` passed to `promote()`.
-
-### Mapping gold in Kumu
-
-`export-kumu` writes a [Kumu](https://kumu.io) blueprint — the
-`{"elements": [...], "connections": [...]}` JSON its import accepts — that you
-drag onto a map's canvas (or host and point Kumu at as a remote link):
-
-```sh
-uv run composer-ingest export-kumu                      # → kumu.json
-uv run composer-ingest export-kumu --limit 1500         # a wider slice
-uv run composer-ingest export-kumu --min-weight 3       # only well-evidenced pairings
-uv run composer-ingest export-kumu --no-claims -o performances.json
-```
-
-Gold is far too large to hand Kumu whole, so the export is a *slice*: the
-`--limit` most-credited performers and ensembles, the composers whose music they
-programmed, and the biographical context hanging off both. Two kinds of edge go
-in — **performances** (performer → composer, derived by walking a concert's or
-recording's participants and its programme back to each work's composer, and
-weighted by how many performances back the pairing) and **claims** (the
-object-valued rows of `claims`: profession, birthplace, citizenship, genre,
-period, teacher). Literal claims like `born_on` and `program_count` are not
-edges; they ride along as element fields, which is where Kumu wants them for
-styling and filtering. Roles become tags, so one person can be a composer *and*
-a conductor without the map having to choose. Elements left with no connection
-are dropped.
-
-The defaults produce roughly a thousand elements, which Kumu opens comfortably;
-`--limit 0` exports every performer and is a good deal more than it enjoys.
-
-### Not analysing the same page twice
-
-A crawl writes a whole new snapshot every run, but most of a site is the same text
-as last time. Re-extracting it used to re-ask the model about every page — hours of
-GPU time to recompute answers it had already given. Model answers are therefore
-cached in `extract-cache.db` (`EXTRACT_CACHE_PATH`), so an `extract` only pays for
-pages whose text actually changed.
-
-The key is a SHA-256 of the **whole request**, not of the page: the model, the
-system prompt, the user prompt (which folds in the page markdown *and* its
-title/description metadata), the JSON schema demanded of the answer, and the
-generation options. Anything that could change the answer changes the key — so
-editing the prompts in `composer_extract/prompt.py`, or pointing `OLLAMA_MODEL` at
-a different model, re-asks every page by itself. There is no version constant to
-remember to bump, which is the failure mode that makes a prompt improvement look
-like it did nothing.
-
-Only answers that validate are stored, so the truncated JSON that
-`composer_extract/resilience.py` exists to survive is never cached; empty answers
-*are* cached, since "this page has no concert on it" is the common case and would
-otherwise be recomputed forever. The cache is an optimization and never a reason to
-fail — an unreachable or damaged database degrades to "not cached" and is logged.
-
-```sh
-uv run composer-ingest extract lso            # prints e.g. "412 cached, 38 asked (92% of calls saved)"
-uv run composer-ingest extract lso --no-cache # bypass it for one run
-rm extract-cache.db                           # the hard reset
-sqlite3 extract-cache.db "select model, schema_name, count(*) from extraction_cache group by 1, 2"
-```
-
-Crawling cannot skip the fetch itself: the markdown only exists once crawl4ai has
-rendered the page in its headless browser, and crawl4ai's request headers are
-browser-global, so there is no seam for a per-URL `If-None-Match`. (ETags are
-captured in each record's `headers` where a site sends them, but coverage across
-the configured sources is too sparse to build on.) What the crawl does instead is
-stamp every page with `content_sha256` and compare it against the previous
-snapshot, so the closing tally reports how much of a re-crawl was worth doing:
-
-```
-crawl 'lso' finished in 812s: 450 pages, 0 skipped, 2 without markdown, 412 unchanged
-```
-
-### Rebuilding silver
-
-Interpretation (entity resolution, work matching) is applied when a record is
-first loaded — improving the heuristics doesn't fix rows already in the
-database. `rebuild-silver` closes that gap by replaying the bucket into a fresh
-database with the current code, then re-running dedupe and concert derivation:
-
-```sh
-uv run composer-ingest rebuild-silver   # bucket → composers.db (atomic swap)
-```
-
-What gets replayed is **every source the bucket has data for, and every one of
-its loadable document snapshots** — the same union `process` loads, not just
-the newest run. The source list comes from the bucket rather than the scraper
-registry, so the crawl-config sources count too: they have no adapter, but the
-`extract` step writes their LLM-derived documents in the same format a scraper
-writes, and they are the only source of recordings. A source that has been
-crawled but not yet extracted has no document snapshot and is skipped.
-
-Human review decisions survive the rebuild: accepted/rejected person pairs
-carry over directly (entity ids are deterministic), and manual work matches
-are re-resolved by the work's composer + title (created again if matching no
-longer produces the work). The run log (`ingest_runs`) starts fresh, and
-**work ids may change** across rebuilds — only entity ids are stable.
-
-The swap is atomic on both backends. On SQLite it is a file replace, and
-status lands in `composers.db.manifest.json` beside the database. On Postgres
-the rebuild builds into a staging schema and promotes it with `ALTER SCHEMA …
-RENAME` inside one transaction — Postgres DDL is transactional, so this is
-exactly as indivisible — and status lands in a `composer_meta.build_manifest`
-table, which sits outside everything the swap touches. Readers follow the swap
-without a restart. Budget roughly twice silver's size on disk: the demoted
-schema is dropped just after the rename, not before it.
-
-**Concerts are derived in silver** from the mentions' raw performance
-context (`composer-ingest derive-concerts`, also run automatically before
-every promote): mentions are grouped into concerts per source (berlinphil by
-its concert id, nyphil by program + date, concertgebouw by date + city, rco
-and wienerphil by their own concert ids, dates normalized to ISO) with season
-and event type; conductors, soloists (with their instrument/voice) _and the
-orchestra_ are resolved to entities by normalized name — against the person
-**and** ensemble entities whatever the credit's role, because a credit's slot
-says how the source filed the name, not what the name is (choirs turn up among
-the soloists); and each concert keeps its programme. Promotion copies the concert
-tables into gold, collapsing participant links to canonical entities. That
-powers the concert browser, per-person concert lists, and concert-count
-sorting in both APIs.
-
-## Schema and migrations
-
-The two backends answer "how does an existing database get a schema change?"
-differently, and both answers are deliberate.
-
-**SQLite has no migrations, and doesn't need any.** The schema comes from
-`Base.metadata.create_all`, and a schema change means running `rebuild-silver`:
-bronze holds the full documents, so nothing in silver is irreplaceable. That is
-cheaper than writing migrations for a tier that is rebuilt anyway — and SQLite
-has no real `ALTER`, so every non-trivial migration would be a table-copy
-recipe.
-
-**Postgres uses Alembic**, because a hosted database is not disposable the same
-way. `uv run alembic upgrade head` is the whole bootstrap for an empty
-database — it creates the schema itself, not just the tables in it.
-`rebuild-silver` still builds its staging schema from the models directly and
-stamps it at head, so a rebuilt database looks migrated rather than hand-made.
-
-What keeps the two from drifting apart is a test, not discipline:
-`test_head_matches_the_models` asserts that `alembic upgrade head` produces
-exactly what `create_all` would. Add a column to a model without writing a
-revision and it fails.
-
-**Always autogenerate against Postgres.** Types are rendered from the models,
-so one revision serves both dialects (`sa.Uuid()` becomes `UUID` on Postgres
-and `CHAR(32)` on SQLite) — but reflecting a *SQLite* database compares
-`CHAR(32)` against the model's `Uuid` and proposes a bogus `alter_column`.
-
-```sh
-docker compose up -d postgres
-DATABASE_URL=postgresql+psycopg://composers:composers@localhost:5433/composers \
-  uv run alembic revision --autogenerate -m "add work.canonical_work_id"
-uv run ruff format packages/composer-models/src/composer_models/migrations/versions
-```
-
-Moving an existing SQLite silver to Postgres is a **rebuild from bronze**, not
-a dump and restore: `DATABASE_URL=postgresql+psycopg://… uv run composer-ingest
-rebuild-silver`. Entity ids are deterministic, so they survive; work ids and
-the run log do not, exactly as with any other rebuild.
-
-## Consumer API (read the dataset)
-
-Two read-only FastAPI apps with identical routes — gold is the product API,
-silver serves the staging data for inspection:
-
-```sh
-uv sync
-uv run uvicorn composer_api:gold_app --port 8000     # curated (default)
-uv run uvicorn composer_api:silver_app --port 8003   # staging
-# open http://localhost:8000/docs
-```
-
-- `GET /v1/composers` / `/v1/soloists` / `/v1/conductors` (+ `/{id}`) — searchable, paginated people;
-  `?sort=concerts` orders by concert count (each item carries `concert_count`)
-- `GET /v1/people/{id}/concerts` — the concerts a person took part in, with dates, venues, and works
-- `GET /v1/concerts?q=&source=` / `GET /v1/concerts/{id}` — browse concerts (search by venue or
-  participant); the detail carries all musicians (role, discipline, entity link) and the programme
-- `GET /v1/stats` — dataset counts: entities per kind, records per source, works, mention statuses
-- `GET /v1/entities?q=&kind=` / `GET /v1/entities/{id}` — search every entity kind; the detail shows
-  each claim with its source plus the (capped) list of claims pointing at the entity
-- `GET /v1/works?q=` — resolved works by title or composer, with aliases and mention counts
-- `GET /v1/mentions?status=` — work mentions with the matcher's decision;
-  `status=needs_review` is the review queue, each entry with its best candidate work
-
-Every claim in a detail response carries its provenance: `source` (the scraper
-name), `source_url` (the exact page the fact came from, e.g.
-`https://www.wikidata.org/wiki/Q255`, falling back to the source homepage), and
-`source_external_id` (the source's own id for the person, e.g. the Wikidata QID).
-
-### Frontend (Astro)
-
-A public-facing web UI (`apps/frontend/`) over the gold consumer API: a
-searchable composer list plus a detail page where every fact shows the source
-it came from — Wikidata-backed facts link to the exact item page (and show the
-QID). It is a pure HTTP client of the gold API, like the dashboard, and renders
-server-side so no CORS setup is needed. Data appears once `composer-ingest
-promote` has produced `gold.db`.
-
-```sh
-cd apps/frontend
-npm install
-GOLD_API_URL=http://localhost:8000 npm run dev   # http://localhost:4321
-npm run build && npm start                        # production build
-```
-
-## Admin API (manage & run scrapers)
-
-A small FastAPI app for triggering scrapes from a browser instead of the CLI.
-It is **separate from the read-only consumer API** so it can be deployed in its
-own, locked-down environment.
-
-```sh
-uv sync
-export ADMIN_API_KEY=dev-key
-uv run uvicorn composer_admin:admin_app --port 8001
-# open http://localhost:8001/docs and click "Try it out"
-```
-
-Each scraper carries a **refresh cadence** (`monthly`, `yearly`, or `static`)
-declared on its `SourceAdapter`. The API surfaces which scrapers are _due_ so
-you can refresh by staleness rather than by data type:
-
-The two ingest phases are separate endpoints, mirroring the CLI's `fetch` and
-`process`:
-
-- `GET  /admin/v1/scrapers` — every scraper with its cadence, last snapshot, and `due` flag
-- `POST /admin/v1/scrapers/{name}/fetch` — fetch one source to the bucket (background, returns the `snapshot_id`)
-- `POST /admin/v1/scrapers/fetch-due` — fetch every scraper whose raw data is stale
-- `GET  /admin/v1/snapshots` — every raw snapshot in the bucket with its status, record count, and size
-- `POST /admin/v1/snapshots/{source}/{snapshot_id}/process` — load a snapshot into the database (background, returns a `run_id`)
-- `POST /admin/v1/snapshots/{source}/{snapshot_id}/abandon` — give up on a snapshot stuck on `running`
-- `GET  /admin/v1/runs` / `GET /admin/v1/runs/{run_id}` — load history and status
-
-A fetch or crawl that is killed outright never finalizes its manifest, so it
-stays `running` for good: the dashboard keeps showing it as live and no new run
-for that source can start. **Abandon** is the way out — it marks the snapshot
-failed and corrects its record count to what is on disk, deleting nothing (a
-crawl streams its pages to the bucket as it goes, so an interrupted one keeps
-everything it had fetched). The Crawls page grows an **Abandon** button on any
-row whose last snapshot is `running`.
-
-Fetch status lives in the snapshot's manifest on disk; loads are recorded in
-`ingest_runs` (the same log the CLI `runs` command shows). `ADMIN_API_KEY` is
-**required**: every admin request must carry a matching `X-Admin-Key` header,
-and while the variable is unset the API fails closed and refuses all requests
-with a 503 — so set it for local use too (any value, e.g. `dev-key`). The
-fetch endpoints run the scrapers, so the admin API process also needs
-`SCRAPER_CONTACT_EMAIL` set (see Usage).
-
-### Dashboard (Django + Unfold)
-
-A web UI (`apps/dashboard/`) on top of the admin API, styled with
-[Unfold](https://unfoldadmin.com/) and living behind the Django admin login,
-with one page per ingest phase:
-
-- **Scrapers** — every scraper with its cadence, due/fresh state, and last
-  snapshot; a **Fetch** button each and a **Fetch all due** button. Fetching
-  only writes raw data to the bucket.
-- **Load** — every raw snapshot in the bucket (status, record count, size)
-  with a **Load into DB** button on complete ones, plus the recent-loads log.
-- **Promote** — gold status (last rebuild, curation stats) and the button to
-  rebuild gold from silver.
-- **Data (silver)** (Overview / Entities / Works / Review) — inspect the
-  staging data: dataset counts, a searchable entity browser (per-kind pages,
-  random sampling, claims with per-source provenance, cross-linked entities),
-  a searchable works browser, and the work-mention review queue (resolving
-  stays on the CLI: `review --accept` / `--new`).
-- **Musicians (gold)** (Composers / Soloists / Conductors / Concerts) —
-  role-based people pages over the curated gold database with per-person
-  concert counts (sortable), and a concert browser whose detail pages show
-  each concert's musicians and programme.
-
-Scrapers/Load/Promote pages auto-refresh every 5 seconds while work is in
-progress.
-
-```sh
-uv sync
-export ADMIN_API_KEY=dev-key  # the admin API requires it; the dashboard forwards it
-export DASHBOARD_DEBUG=1      # DEBUG defaults off; local dev needs it on (see below)
-uv run python apps/dashboard/manage.py migrate            # once: Django's own tables
-uv run python apps/dashboard/manage.py createsuperuser    # once: your login
-uv run uvicorn composer_api:gold_app --port 8000      # gold API (Musicians pages)
-uv run uvicorn composer_admin:admin_app --port 8001   # admin API (scrape/load/promote)
-uv run uvicorn composer_api:silver_app --port 8003    # silver API (Data pages)
-uv run python apps/dashboard/manage.py runserver 8002             # the dashboard
-# open http://localhost:8002 and log in
-```
-
-`DEBUG` is off unless `DASHBOARD_DEBUG=1` is set. With `DEBUG` off,
-`runserver` does not serve static files, so the Unfold admin CSS breaks —
-always set it for local development.
-
-The dashboard never touches any composer database — scrape/load/promote
-actions go through the admin API (`ADMIN_API_URL`, default
-`http://localhost:8001`; `ADMIN_API_KEY` forwarded as `X-Admin-Key`, so it
-must be set in the dashboard's environment too)
-and data inspection goes through the consumer APIs (`GOLD_API_URL`, default
-`http://localhost:8000`; `SILVER_API_URL`, default `http://localhost:8003`
-
-## Ingest flow
-
-Every source moves through the same pipeline; only the adapter knows the
-source's protocol.
-
-1. **Fetch** — the source's `SourceAdapter`
-   (`packages/composer-scrapers/src/composer_scrapers/<name>/`) talks to the source's API or
-   pages and yields a stream of typed documents: `EntityDocument` for named
-   entities (with `SourceClaim`s attached) and `WorkMentionDocument` for
-   concert-programme `(composer, title)` entries.
-2. **Load** — the ingest loop (`packages/composer-warehouse/src/composer_warehouse/ingestion/`) opens an
-   `IngestRun` and consumes the stream:
-   - A document already known for this source — matched on
-     `(source, external_id)` — always gets its `last_seen` timestamp and run id
-     touched; if its content (title/composer/raw, or name/url/raw plus claims)
-     differs from what's stored, that's updated too. A changed work mention is
-     also re-run through the matching pipeline, so a corrected title doesn't
-     keep the decision made for the old one (a mention that re-matches
-     elsewhere leaves its previous work behind for the dedupe pass to fold in).
-     An unchanged re-sighting costs no extra write beyond the timestamp bump,
-     which is what makes re-ingesting idempotent.
-   - A new `EntityDocument` is attached to a canonical `Entity` via its
-     normalized `(kind, dedup_key)` (created if the label is new) and stored
-     verbatim as an `entity_records` row; its `SourceClaim`s, plus a
-     `mentioned_in` claim recording where it was found, become `claims` rows.
-   - A new `WorkMentionDocument` lands in `raw_work_mentions` and immediately
-     runs through the work-matching pipeline described under
-     [Works](#works) (auto-match / flag for review / create a new work).
-
-   Existing keys are preloaded up front and commits happen in 1000-record
-   batches, so the per-record loop needs no queries. A mid-run failure commits
-   what was ingested so far and marks the run `failed` with partial counts.
-
-3. **Record** — the finished run's status, seen/new counts, and timestamps land
-   in `ingest_runs` (shown by `composer-ingest runs` and the admin API).
-
-The two phases are deliberately separate commands — source requests are slow,
-so scraping never blocks on (or fails with) the database load:
-
-```sh
-uv run composer-ingest fetch imslp    # network → ./raw-data/imslp/<run_id>/records.ndjson
-uv run composer-ingest process imslp  # disk → DB; latest run by default, --run-id to pick one
-```
-
-The bucket (`scraper/bucket.py`; NDJSON per run under `BUCKET_PATH`, default
-`./raw-data`) is the only way data enters the database: after an ETL change you
-can re-process a snapshot without hitting the source again, and `LocalBucket`
-can be swapped for an S3 implementation without touching callers.
-
-Each snapshot carries a `manifest.json` recording the fetch's status
-(`running`/`completed`/`failed`), record count, and timestamps, so a crashed
-fetch can never be mistaken for a complete snapshot: `process` (and the admin
-API) only load complete snapshots when picking "latest" — pass `--run-id`
-explicitly to override.
-
-## Data model
-
-Entities connected by claims (the Wikidata pattern), on top of a raw
-provenance layer. This is the silver staging schema: it records what sources
-say, verbatim, plus the matching passes over it; curation and conflict
-resolution happen downstream when data is promoted into gold.
-
-- **`sources`** — where data comes from (`imslp`, `imslp_works`,
-  `imslp_recordings`, `wikidata`, `wikidata_works`, `openopus`, `concertgebouw`, `nyphil`,
-  `berlinphil`, `wienerphil`, `laphil`, `decca`, `harmoniamundi`, `roh`,
-  `classicalmusiconline`, `boosey`, `baerenreiter`, `henle`, ...).
-- **`ingest_runs`** — the collection log: one row per ingest, with source,
-  timestamps, status, and seen/new counts.
-- **`entity_records`** — raw records per source, unique on
-  `(source, external_id)`. Stores the original payload as JSON plus
-  `first_seen`/`last_seen` timestamps and run ids. Re-ingesting is idempotent.
-- **`entities`** — canonical, deduplicated nodes. `kind` says what a node is:
-  `person`, `profession`, `period`, `genre`, `place`, `work`, `ensemble`,
-  `publisher`, `instrumentation` (an open set — `kind` is a plain string column,
-  and a claim naming a new one creates it).
-  Records from different sources link here via `(kind, dedup_key)` — a
-  normalized label (see `normalize.py`: name-order flipping, diacritic
-  stripping, case/punctuation folding) — so adding a second source later
-  attaches to existing entities instead of duplicating them.
-  `person` is the one kind ingest does not take on trust: every source that
-  credits concert or recording participants mints one entity per credited
-  *name* and files it as a person, whether it names a violinist or an
-  orchestra. So the label decides at write time — a name carrying an ensemble
-  word ("Symphony Orchestra", "Knabenchor", "String Quartet"; see
-  `composer_schema.kinds`) is stored as an `ensemble`, which keeps it out of
-  the person dedupe pass and out of every `kind='person'` read. The word list
-  is deliberately narrow: re-kinding a real person is the worse error, so an
-  ensemble whose name says nothing about being one ("Academy of St Martin in
-  the Fields") stays a person until the list earns another word.
-  Existing rows predating the guard are corrected by `rebuild-silver`, which
-  replays the bucket through the current heuristics — entity ids are
-  `uuid5(kind + dedup_key)`, so a re-kinded entity gets a new id and no
-  in-place update would do.
-- **`claims`** — typed edges between entities, e.g.
-  `person --has_profession--> profession`, `person --born_in--> place`,
-  `person --composed--> work`. The object is either another entity
-  (`object_id`) or a literal (`value`, e.g. a date string). Every claim
-  carries the source and the raw record it was extracted from, so two sources
-  asserting conflicting facts coexist as two claims. IMSLP's people list
-  reports nothing beyond names (it mixes composers, performers, editors, and
-  ensembles), so it produces no claims; richer sources will.
-
-### Works
-
-Concert programmes name works as free text — "Symphony No. 5 in C minor",
-"Sinfonie Nr. 5 c-moll", "Beethoven's Fifth" are all the same piece. Rather than
-deduplicating on the exact title (which collides across composers and splits the
-same work across spellings), works go through a resolution pipeline
-(`packages/composer-warehouse/src/composer_warehouse/works/`):
-
-- **`raw_work_mentions`** — one row per `(composer, title)` a source reported,
-  with the full performance context kept in `raw`, idempotent on
-  `(source, external_id)`. Each carries the matcher's decision: `match_status`
-  (`auto_matched`/`needs_review`/`created`/`manual_matched`), score and method.
-- **`works`** — canonical compositions. The pipeline extracts catalogue/opus
-  numbers, key, type and number from the title, finds candidate works by the
-  same composer, and scores them (a matching `BWV`/`Op.` number is near-certain
-  identity; otherwise a `difflib` title comparison sharpened by the extracted
-  features). High scores auto-match, middling scores are flagged for `review`,
-  low scores create a new work. Work ids are assigned at creation, not derived
-  from the title.
-  `premiere_date` / `premiere_place` hold the work's **world premiere**, from
-  any mention whose payload states one under `raw["premiere"]`
-  (`composer_schema.premiere`) — today `wikidata_works` (P1191 date and P4647
-  location of first performance) and the ROH's operas. The earliest date wins
-  (a later "premiere" is nearly always a house premiere), a full date refines a
-  bare year of the same premiere, and `premiere_source_id` names the source
-  that won. House and production premieres never land here.
-- **`work_titles`** — every title a work was seen under (its aliases).
-
-Composers stay `person` entities (deduplicated as above); works reference them
-by id. Performance events, richer work metadata and external ids build on this
-layer next.
-
-### People deduplication
-
-Exact-key dedup unifies "Beethoven, Ludwig van" ↔ "Ludwig van Beethoven" but
-misses surname-only ("Beethoven"), initials ("Bach, J.S." vs "Bach, Johann
-Sebastian"), and other variants. The `dedupe-persons` pass
-(`packages/composer-warehouse/src/composer_warehouse/persons/`) closes the gap **non-destructively**: it parses
-each person name (surname / given / initials / particles), groups by surname,
-and scores pairs with a few heuristics — given-name compatibility plus
-birth-year corroboration (a conflicting `born_on` year rules a pair out; a
-matching one confirms it). High-confidence pairs and human `accepted` reviews
-are recorded in **`person_matches`**; ambiguous ones wait there for
-`person-review`.
-
-The links themselves are then derived from those pairs as *clusters*, not pair
-by pair: `persons/cluster.py` merges the pairs strongest-first into disjoint
-groups, picks one canonical per group (the fullest given names, chosen from the
-whole membership), and points every member straight at it. So
-`Entity.canonical_entity_id` is always one hop to a canonical — no chains, no
-cycles — and a `rejected` review becomes a cannot-link the group honours even
-when the merge arrives transitively through a third record. Nothing is deleted
-and ids stay stable, so the pass is re-runnable as the heuristics grow
-(phonetic matching, nickname maps, external ids, …).
-
-## Adding a source
-
-Create a package `packages/composer-scrapers/src/composer_scrapers/<name>/` and subclass
-`SourceAdapter` (the contracts live in `composer_schema` and are re-exported from
-`composer_scrapers`):
-
-```python
-from datetime import UTC, datetime
-from collections.abc import Iterator
-from composer_scrapers import (
-    EntityDocument,
-    SourceAdapter,
-    SourceClaim,
-    WorkMentionDocument,
-)
-
-
-class MyAdapter(SourceAdapter):
-    name = "mysource"
-    base_url = "https://example.com"
-
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
-        ingested_at = datetime.now(UTC)
-        for row in _fetch_data(max_pages):
-            yield EntityDocument(
-                id=row["id"],
-                url=row.get("url"),
-                source_name=self.name,
-                ingested_at=ingested_at,
-                name=row["name"],
-                claims=(SourceClaim("has_profession", "profession", row["role"]),),
-            )
-```
-
-Every document inherits the `ScrapedDocument` base: `id` (source-local identifier),
-`url`, `source_name`, and `ingested_at` (UTC timestamp set at fetch time). Use
-`EntityDocument` for named entities (people, places, …) and `WorkMentionDocument`
-for concert-programme entries (a `(composer, title)` pair). Attach typed assertions
-to an entity as `SourceClaim`s in `EntityDocument.claims`.
-
-Keep HTTP/API access in `fetch.py` and parsing in one module per view; put the
-public `fetch()` orchestration in `__init__.py`. Then add an instance to `REGISTRY`
-in `composer_scrapers/__init__.py`.
+Every setting is listed in [`composer-config`](packages/composer-config/README.md);
+how silver's schema is migrated is in [`composer-models`](packages/composer-models/README.md#schema-and-migrations).
+
+## Sources
+
+`imslp`, `imslp_works`, `imslp_recordings`, `wikidata`, `wikidata_works`, `openopus`,
+`classicalmusiconline`, `classicfm`, `concertgebouw_archive`, `rco`, `nyphil`,
+`berlinphil`, `wienerphil`, `laphil`, `roh`, `decca`, `harmoniamundi`, `boosey`,
+`baerenreiter` and `henle`. What each one reads, its refresh cadence, per-source
+notes, and how to add a source are in
+[`composer-scrapers`](packages/composer-scrapers/README.md).
+
+## Layout
+
+A [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) split
+by data tier, sharing one lockfile. Libraries under `packages/` depend only on
+the tiers below them.
+
+| Member | What it is |
+| --- | --- |
+| [`composer-config`](packages/composer-config/README.md) | the settings object every member reads |
+| [`composer-schema`](packages/composer-schema/README.md) | source contracts: document types, the `SourceAdapter` interface, the ensemble guard, instrumentation parsing |
+| [`composer-models`](packages/composer-models/README.md) | the silver/gold ORM schema, entity identity, and Postgres migrations |
+| [`composer-http`](packages/composer-http/README.md) | polite, retrying HTTP, the `SourceSession`, and the page mirror |
+| [`composer-bronze`](packages/composer-bronze/README.md) | the raw NDJSON bucket and the fetch workflow |
+| [`composer-scrapers`](packages/composer-scrapers/README.md) | the per-source adapters and `REGISTRY` |
+| [`composer-warehouse`](packages/composer-warehouse/README.md) | silver: ingest, work matching, person dedupe, concerts and recordings, `rebuild-silver` |
+| [`composer-gold`](packages/composer-gold/README.md) | promotion into gold, and the Kumu export |
+| [`composer-graph`](packages/composer-graph/README.md) | loading gold into Neo4j |
+| [`consumer-api`](apps/consumer-api/README.md) | the read-only product API (gold) and staging API (silver) |
+| [`admin-api`](apps/admin-api/README.md) | the fetch/load/promote orchestration API |
+| [`cli`](apps/cli/README.md) | `composer-ingest`, the command-line pipeline |
+| [`dashboard`](apps/dashboard/README.md) | the Django UI over the two APIs |
+| [`frontend`](apps/frontend/README.md) | the public Astro site over the gold API |
+| [`tests/e2e`](tests/e2e/README.md) | the end-to-end suite over synthetic sources |
 
 ## Development
 
-This repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/)
-split by data tier, sharing one lockfile. `uv sync` installs the whole workspace.
-
-Libraries under `packages/` (each depends only on the tiers below it):
-
-- `composer-config` — the one pydantic-settings `Settings` object every other member reads
-- `composer-schema` — source contracts (document types + the `SourceAdapter` interface), zero heavy deps
-- `composer-models` — the ORM schema shared by the silver and gold DBs, engine helpers, and the
-  dedup keys / seeded entity UUIDs that define entity identity
-- `composer-http` — the polite User-Agent (contact identity) and retrying HTTP helpers, shared by
-  `composer-scrapers` and `composer-crawler`
-- `composer-bronze` — the raw NDJSON bucket and fetch orchestration
-- `composer-scrapers` — the per-source adapters and `REGISTRY`
-- `composer-crawler` — the generic config-driven crawl4ai crawler, into the same bucket
-- `composer-extract` — local-LLM (Ollama) extraction of concerts/recordings from crawled pages
-- `composer-warehouse` — the silver staging DB: ingestion and person/work matching
-- `composer-gold` — promotion of the staging DB into a curated copy
-
-Apps under `apps/`:
-
-- `consumer-api` — the read-only product API (depends on models + gold only)
-- `admin-api` — the scrape/ingest/promote orchestration API (depends on every tier)
-- `cli` — the command-line pipeline
-- `dashboard` — the Django UI (a pure HTTP client of the two APIs)
-
 ```sh
-# tests run per member (each owns its pytest config; the Django settings stay
-# scoped to the dashboard) — mock sources, in-memory SQLite, no network:
-uv run --directory packages/composer-schema pytest
-uv run --directory packages/composer-models pytest
-uv run --directory packages/composer-http pytest
-uv run --directory packages/composer-bronze pytest
-uv run --directory packages/composer-scrapers pytest
-uv run --directory packages/composer-crawler pytest
-uv run --directory packages/composer-extract pytest
-uv run --directory packages/composer-warehouse pytest
-uv run --directory packages/composer-gold pytest
-uv run --directory apps/consumer-api pytest
-uv run --directory apps/admin-api pytest
-uv run --directory apps/cli pytest
-uv run --directory apps/dashboard pytest
-
-uv run pyright             # strict type checking (whole workspace)
-uv run ruff check          # lint
-uv run ruff format --check # formatting
+uv sync --locked
+uv run --directory packages/composer-warehouse pytest   # one member's tests
+uv run pyright && uv run ruff check && uv run ruff format --check
 ```
 
-Document/adapter test factories live in `composer_schema.testing`; the warehouse
-re-exports them alongside its DB fixtures in `composer_warehouse.testing`, which
-each member's `tests/conftest.py` loads via `pytest_plugins`.
-
-CI (`.github/workflows/ci.yml`) runs the per-member test matrix alongside the
-type, lint and dependency-audit jobs on every pull request to `main`, and again
-on the merge commit. Commit messages and PR titles must follow
-[Conventional Commits](https://www.conventionalcommits.org/) (`feat: ...`,
-`fix: ...`); `.github/workflows/conventional-commits.yml` enforces this on
-every pull request.
-
-## IMSLP API quirks
-
-The endpoint (`/imslpscripts/API.ISCR.php`) takes its parameters as a single
-slash-separated string, returns rows keyed by stringified indices alongside a
-`metadata` entry holding the pagination flag, and embeds names in MediaWiki
-category titles (`Category:Beethoven, Ludwig van`). `sources/imslp/`
-handles all of this, plus retries and a polite request delay.
-
-It serves two lists and IMSLP documents no others: `type=1` is the people, read
-by `imslp`, and `type=2` is the ~267,000 works, read by `imslp_works`. Both
-arrive in the shape above, so `imslp/fetch.py::worklist_page` is shared between
-the two sources rather than written twice.
-
-## IMSLP works: the whole catalogue, enriched in a second pass
-
-`imslp_works` used to be the one source here that discovered *who* to scrape
-from somewhere other than the source: it read gold's composer list, guessed
-each composer's IMSLP category URL, and crawled the work lists under it. That
-capped it at whoever gold already knew — 7,256 works.
-
-The `type=2` worklist replaces all of that. Every work IMSLP lists arrives in
-~267 requests carrying its composer, title, IMSLP catalogue number and page id,
-so there is no category to resolve, no pagination to follow, and no scoping.
-
-The **detail pages are now a second pass** over that spine, and the split is the
-thing to understand before changing this source:
-
-- The bulk row alone produces both documents and the `composed_by` /
-  `catalogue_number` claims. A work is reported whether or not anyone read its
-  page.
-- The page adds `has_scoring`, `has_key`, `has_genre` and `composed_in`. At one
-  request per work, sweeping all 267k is tens of hours, so `--max-pages` bounds
-  it — and bounds *only* it. `raw["enriched"]` records whether the page was
-  actually read, which is what distinguishes a work with no stated scoring from
-  one nobody has looked at yet.
-
-Detail pages come from `action=parse&prop=text`, not `/wiki/<Title>`: the
-infobox is field-for-field identical in both (verified over six random works),
-the parser output is 6.2KB against 13.8KB, and `imslp_recordings` requests the
-same pages at the same URL — so the two share one `PageCache` mirror and
-whichever sweep runs second gets the overlap free. The one thing parser output
-lacks is a `<title>` tag, which is why `parse_work` takes the title as an
-argument rather than reading it off the page.
-
-`imslp_recordings` uses the *other* IMSLP API, the wiki's own `api.php`, and
-that one has quirks of its own. It runs MediaWiki 1.18, so continuation comes
-back under `query-continue` rather than the modern `continue`, an unknown page
-id answers 200 with an `{"error": ...}` body rather than 404, and `action=parse`
-takes one page per call — there is no batching to be had, and the IMSLP
-extensions register no API action of their own.
-
-## IMSLP commercial recordings
-
-`imslp_recordings` reads `Category:Pages with commercial recordings` — 26,933
-work pages naming the albums each work appears on, the tracks of it on each, and
-everyone credited. It is the cheapest source of *credits* here, which is what
-gold's person selection actually counts: a `recording_participants` row that
-resolved to an entity is evidence someone played, where appearing in a source's
-artist index is not.
-
-Two things about it are worth knowing before changing it:
-
-- **The data is not in the HTML you can see.** The "Commercial 💿" tab renders
-  client-side from a `JGCommRec` JS global — but that global sits inside the
-  *parser output*, so `action=parse&prop=text` serves it at 6.2KB against 13.8KB
-  for the rendered page. It is not in the wikitext; `prop=revisions` gets you
-  nothing.
-- **Pages are addressed by id.** `list=categorymembers` returns a `pageid`
-  beside every title and `action=parse` takes one, which is how the titles in
-  this category (`'E spingole frangese!`, `1.X.1905 (Janáček, Leoš)`) stay out
-  of a URL. The response names the page back, so the work title and its
-  `(Surname, Given)` composer suffix come from the API rather than the listing.
-
-A full sweep is ~27k calls at one per second — hours, so it goes through
-`composer_http.PageCache` and an interrupted run resumes where it stopped.
-
-## harmonia mundi: sitemaps, because the REST API is off limits
-
-`harmoniamundi` replaced a crawl4ai + LLM config over the same site. The crawl
-produced 985 recording mentions of which every one had a null release date and
-a null catalogue number — both printed on every album page — plus invented roles
-(a baritone as `soprano`), `record_key`s pointing at artist pages so no work
-ever folded into a release, and album pages read as *concerts*, one dated 1907.
-
-The site is WordPress with a hand-filled template, so every one of those fields
-is in a named class: `div.feature.ref` is the catalogue number,
-`time.release_date` the release month, `div.feature.cd_number` the *format*
-(`"1 CD"`, `"Digital"` — not a disc count), and `div.album_humans` lists each
-person with the role they were credited under and a link to their page when they
-have one. A person becomes a composer here only because the label filed them
-under Composers.
-
-Being WordPress, it also answers `/wp-json/wp/v2/albums` with the whole post
-list — a far cheaper enumerator than the sitemaps, and **`Disallow`ed**: the
-`User-agent: *` group is `Allow: /` with four exceptions and `/wp-json` is one
-of them. So enumeration goes through `sitemap_index.xml`, which is allowed and
-just as complete (1752 album, 104 artist and 129 composer pages, matching the
-site's own totals), and every field is read from the rendered page. Note also
-`Content-Signal: ai-train=no, use=reference` — a catalogue index is reference
-use, and this trains nothing.
-
-One field is genuinely free text: the "Contents" tracklist, a rich-text box
-whose conventions have drifted across thirty years of releases. It is read from
-the two signals that hold across the catalogue — life dates in brackets open a
-composer, a leading bullet marks a track — and `<strong>` is deliberately
-ignored, because some albums bold every track and others bold the work. The
-verbatim text rides along in every mention's `raw`, so a better parse can be
-derived later without re-fetching 2000 pages.
-
-## Royal Opera House: the composer is three levels above the performance
-
-`roh` reads the Covent Garden performance database — every opera, ballet and
-concert given at the Royal Opera House since the 1730s. It is the deepest
-performance archive here and the only one reaching back to the eighteenth
-century.
-
-**The site's own search is the wrong way in.**
-`SearchResults.aspx?searchtype=performance&genre=Opera` paginates 5,690 opera
-performances twenty to a page (9,757 more for ballet), and neither the listing
-nor the performance page behind it names a composer. Carmen, 14 January 1947,
-records the company, the venue, the conductor, thirty-three cast members, the
-translator and the programme it was catalogued from; it does not record Bizet.
-Some 15,700 requests would yield no composers at all.
-
-The composer is on the **work** page, in a labelled row, three levels up:
-
-```
-work.aspx?work=551          Composer: Giuseppe Verdi      <- the only level with one
-  production.aspx?...=3775  Director: Elijah Moshinsky
-    performance.aspx?...    Conductor, cast, venue, date
-```
-
-So enumeration goes through `performanceindex.aspx` instead — 27 letter pages,
-no pagination, every work in the database with its genre — and the sweep
-descends from there. That is **27 requests where the search needs 773** (285
-pages of opera results plus 488 of ballet), and it
-reaches every composer the archive holds. The index has 995 rows; 47 are
-cross-references, leaving **948 works — 577 ballets, 287 operas, 62 concert
-works** and a scatter of plays, poems and musicals. 926 of them name a composer,
-340 distinct.
-
-**A ballet's title is not a work by its composer.** "Adagio Hammerklavier" is
-Hans van Manen's; Beethoven wrote the *Piano Sonata No. 29 in B-flat, Op. 106*
-that the page names on the next row. So where a work page distinguishes a
-`Music title:` it — not the staged title — is what pairs with the composer;
-that is **661 of the 948**, so it is the common case, not an edge one. The index compounds the trap by printing one bracketed name after every
-title: the composer for an opera, the *choreographer* for a ballet, with nothing
-to say which. It is recorded and never read as a composer.
-
-Two more things the markup hides:
-
-- **The hierarchy is not strict.** Some performances hang off a work with no
-  production between them — Aida's two 1988 concert excerpts — under a separate
-  "Performances not linked to a production" table. A walk that only descends
-  through productions drops them and looks complete doing it.
-- **A production page never says which work it stages.** There is no link
-  upward and no work id in the markup, so a production is only ever read as a
-  child of the work that listed it.
-
-Some index rows are cross-reference stubs rather than works ("The Barber of
-Seville: see 'Il barbiere di Siviglia'"). Their wording varies too much to
-filter on — "see", "See also", ": see", "- See" — so they are recognised by what
-their page carries: nothing at all.
-
-A person becomes a composer here only because a work page filed them under
-`Composer`. Cast members get no profession at all — the cast column holds the
-*part*, not the discipline ("Don José", "Tavern Dancer", "Harpsichord
-continuo"), and a 1947 Carmen credits opera singers and ballet dancers in the
-same table.
-
-**Which rows name a person is an allowlist per level**, read off the pages
-rather than guessed, because the inverse rule ("anything unrecognised is a
-credit") files `Opera in four acts` as a human being the first time a new label
-appears. The staging tier proves the point twice over: a hundred sampled
-productions produced a dozen labels used exactly once (`Cloth designer`,
-`Incidental dances`, `Artistic Collaborator`), and two co-production partners
-are filed under labels that are the partner's *own name* — `Theater an der
-Wien, Vienna` as the `<th>`. Nothing is lost to an unrecognised label, since
-every non-credit row is kept as a field regardless; the adapter just logs what
-it did not recognise, which is how the lists grow. `Additional music: Ian Page
-(recitatives)` is the find that justifies reading the staging tier at all: a
-production can commission a composer the work page never names.
-
-`robots.txt` disallows only `/search/autocomplete*`, which this source does not
-touch, and asks `User-agent: *` for `Crawl-delay: 180` — three minutes, which
-over ~18,000 pages is three weeks for one sweep. The adapter uses **five
-seconds**, a deliberate departure recorded in `roh/fetch.py`; it is still ten
-times slower than the other HTML sources here. (~18,000 = 995 works, ~1,140
-productions and ~15,700 nights, measured over a 300-work sample and agreeing
-with the site's own search totals of 5,690 opera and 9,757 ballet performances
-— about 25 hours.) Every page goes through
-`composer_http.PageCache`, which is what makes a run of that length survivable:
-the tiers are drained in order, so every composer is known at ~1,000 pages of
-the ~18,000, and a run that dies at hour twenty resumes where it stopped.
-
-## Boosey & Hawkes work metadata
-
-`boosey` is the first source carrying *work* metadata — scoring, duration, year
-of composition — rather than concert programmes or people. It walks the
-publisher's catalogue in three hops (composer index → each composer's work list
-→ each work's detail page) and emits **two documents per work**, sharing the
-work's Boosey id:
-
-- a `WorkMentionDocument`, which the work matcher resolves to a canonical `works`
-  row, with everything the page stated kept in `raw`;
-- an `EntityDocument` of kind `work`, whose claims (`has_scoring`,
-  `has_duration`, `composed_in`, `composed_by`, `published_by`) make that
-  metadata queryable next to every other claim.
-
-Both are needed because the two land in different tables — `Entity(kind="work")`
-is not the same row as a `Work`, and nothing links them.
-
-```bash
-uv run composer-ingest fetch boosey --max-pages 5
-uv run composer-ingest process boosey
-uv run composer-ingest claims "Kerori" --kind work --source boosey
-```
-
-Two things to know before running it wide:
-
-- **Work entity labels are composer-qualified** ("Kerori (Walter Steffens)").
-  Entity dedup keys on the normalised label alone, so a bare title would merge
-  two composers' identically-named works into one entity and pool their claims.
-- **Parsing is label-driven, not markup-driven.** `boosey/works.py` flattens a
-  page to text lines and reads "Scoring", "Duration", "Year Composed" … off by
-  label, so it survives a redesign and skips labels it does not recognise. Add
-  aliases to `_LABELS` rather than writing new regexes. Discovery
-  (`boosey/catalogue.py`) keys only on the stable `/cr/music/<slug>/<id>` URL
-  shape; the id is the trailing integer, and the slug is decorative.
-
-## Bärenreiter catalogue: instrumentation in detail
-
-`baerenreiter` reads every edition Bärenreiter sells or hires: about 17,000
-products, of which ~13,000 are reached (see below for what is left out). It is
-shaped like `boosey` — a work mention plus a composer-qualified work entity per
-edition — and adds what boosey's pages do not state: the instrumentation **part
-by part**, with counts and doublings.
-
-The site is a client-rendered single-page app, so its HTML is an empty shell for
-every product (the reason an earlier generic crawl of it stored 34,719 empty
-pages). The data comes from the JSON API the page itself calls, which needs no
-authentication:
-
-| | |
-| --- | --- |
-| `/api/sitemap/products_en.xml` | every product id — the inventory |
-| `/api/bv/product/{id}?lang=en` | one product, every field its page shows |
-
-The shop's search API is not an inventory: it answers HTTP 500 past the 10,000th
-hit and omits products hidden from search, so the sweep is one request per
-sitemap id, mirrored through the page cache (≈3 hours the first time, free after).
-
-```bash
-uv run composer-ingest fetch baerenreiter --max-pages 50
-uv run composer-ingest process baerenreiter
-```
-
-The API's field names are the publisher's German internals: `art` (*Artikel*, a
-shop product) plus an abbreviation — `artAuCompos` composer, `artTiMain` title,
-and the `artBstz…` (*Besetzung*, scoring) family. `baerenreiter/products.py` is
-the one place that maps them to the labels the page shows:
-
-| API field | Page label | Lands as |
-| --- | --- | --- |
-| `artBstzMainDispl` | Scoring | `written_for` edges, `has_scoring` literal |
-| `artBstzDispl` | Instrumentation in detail | `includes_instrument` edges, `raw["instrumentation"]["parts"]` |
-| `artBstzOrchNum` | Instrumentation | shorthand; read when there is no detail list |
-| `artAuCompos` / `artAuText` / `artAuArr` | Composer / Librettist / Arranger | `composed_by` / `text_by` / `arranged_by` |
-| `orderId`, `artPrTyDispl`, `artISMN` | Edition number, Product format, ISMN | `catalogue_number`, `edition_type`, `ismn` |
-| `artTiDatOr`, `artLength` | Date of composition, Duration | `composed_in`, `has_duration` (minutes) |
-| `state` | Availability | `raw["availability"]` |
-
-The detail list is read entry by entry (`baerenreiter/instrumentation.py`); a
-parenthetical is a count, a choir's voicing, or the instruments a player doubles
-on (or that realise a continuo), told apart by what it contains:
-
-```
-Flute (2) (Piccolo flute)  ->  {"instrument": "flute", "count": 2, "also": ["piccolo"]}
-Mixed choir (SATB) (2)     ->  {"instrument": "mixed choir", "count": 2, "voicing": "SATB"}
-Basso continuo (Violoncello, Organ)
-                           ->  {"instrument": "basso continuo", "also": ["cello", "organ"]}
-```
-
-Names resolve through the same `composer_schema.instrumentation` table the
-`claims` extractor uses, so "Violoncello" here and "Cello" elsewhere are one
-entity; ~96% of entries resolve, and what does not is kept verbatim under
-`raw["instrumentation"]["unmatched"]` rather than guessed. Counts stay in `raw`,
-as the shorthand's do. About a sixth of the catalogue states *only* the
-shorthand, which is read the same way as a publisher shorthand (including
-Bärenreiter's German abbreviations and a sized string section, `str (4.4.3.2.1)`).
-
-Left out on purpose:
-
-- **Digital twins.** `BA05163D` is `BA05163` as a PDF — same edition, same
-  contents — so it is not fetched when the print product is listed; its id is
-  recorded on the print edition as `digital_edition_id`. Digital-only editions
-  are kept.
-- **Books, magazines and media** (`NON_MUSIC_TYPES`): their contents are chapters.
-
-An anthology's items are works of their own: each item with a composer becomes a
-work mention (`<product>#<n>`), and the anthology itself is only an entity.
-
-## Henle catalogue: difficulty per work
-
-`henle` reads every edition G. Henle sells: the 2,241 products in henle.de's
-English sitemap. It is shaped like `baerenreiter` (a work mention plus a
-composer-qualified work entity) and adds what no other source here states: Henle's
-**level of difficulty**. Henle grades every piano, violin, flute, cello and
-clarinet work from 1 (easy) to 9 (difficult), and grades it *per work*, so a
-volume of nine Mozart sonatas says which one is the hardest.
-
-The shop is Shopware, rendered on the server; its `/api/` is disallowed in
-`robots.txt`, so the product page itself is the record. One request per product,
-mirrored through the page cache (≈40 minutes the first time, free after; ~55KB
-per page gzipped).
-
-```bash
-uv run composer-ingest fetch henle --max-pages 20
-uv run composer-ingest process henle
-uv run composer-ingest claims "Impromptu c minor op. 90,1 D 899" --kind work --source henle
-```
-
-`henle/products.py` reads the page by its class names:
-
-| Page | Markup | Lands as |
-| --- | --- | --- |
-| Composer | `h2.product-detail-subtitle` | `composed_by` (an anthology's "Piano Music (Collection)" is not a person; its rows name their own composers) |
-| Scoring ("Piano solo", "String Quartets") | `.product-detail-properties-container` | `written_for` / `includes_instrument` edges, `has_scoring` literal |
-| Edition type ("Urtext Edition, paperbound") | `.product-detail-properties-container` | `edition_type` |
-| Contributors ("… (Editor)", "… (Fingering Piano)") | `.product-persons-contributors-row` | `edited_by`, `fingering_by`; other roles stay in `raw` |
-| HN number, ISMN, pages | `itemprop="sku"`, `itemprop="ISMN"`, `.product-detail-weight` | `catalogue_number`, `ismn`, `page_count` |
-| Contents: title, grade 1–9, band, ABRSM grade | `.mws-henle-work` rows | one work each, `difficulty_level`; band and ABRSM in `raw` |
-
-What a product becomes depends on its contents table:
-
-- **Several rows** (a volume): each row is a work (`HN-1#3`) with its own grade
-  and a `part_of` edge to the volume, which is only an entity (`HN-1`) carrying the
-  edition facts. A bold row is a set ("4 Impromptus op. 90 D 899") whose pieces
-  follow as rows of their own; nothing in the markup says where the set ends, so
-  rows are not nested, and `raw["heading"]` marks the set.
-- **One row or none**: the edition is the work (`HN-659`), one mention and one
-  entity carrying every claim.
-
-Parts, study score and complete-edition volume are separate products (HN 741,
-HN 9741, …) and arrive as separate mentions of the same composer-qualified title;
-the matcher and entity dedup fold them. Henle's scoring names shelves as well as
-forces: "Violin Concertos" is read as violin and orchestra, while "Chamber music
-with winds" names no scoring and is counted in the fetch log's `scorings
-unrecognised`.
-
-## Publisher catalogues via the crawler
-
-`boosey`, `baerenreiter` and `henle` are hand-written adapters for one publisher each.
-Every other publisher's catalogue is reachable with the generic crawler and the `claims` extract kind,
-with no code at all — which is what `claims` is for: it records whatever a page
-states, so a site nobody wrote a parser for still contributes.
-
-A sheet-music page states two things at once, and both land on the work:
-
-- facts about the piece — `written_for`, `includes_instrument`, `in_key`,
-  `catalogue_number`, `composed_in`, `duration_minutes`;
-- facts about the printed edition of it — `published_by`, `edited_by`,
-  `fingering_by`, `edition_type`, `ismn`, `page_count`, `difficulty_level`.
-
-Edition facts are claims on the *work*, not on an "edition" entity of their own,
-so two editions of one piece merge. That is a deliberate trade: edition dedup is
-a problem in its own right and nothing downstream needs it solved yet.
-
-### Scoring is stored twice
-
-"Which works are for piano" is the question a publisher's catalogue is built to
-answer — Bärenreiter's own navigation offers *works for string orchestra* as a
-facet — and free text cannot answer it: the same scoring is written `for piano
-solo`, `Klavier zu vier Händen`, `Piano, 4 hands`. So the stated scoring is kept
-twice over:
-
-- verbatim, as an `orchestration` literal — what the page actually said;
-- folded onto canonical *scoring categories*, as one `written_for` claim each,
-  pointing at an `instrumentation` entity.
-
-The category, not the instrument, is the unit: `piano`, `string orchestra` and
-`violin and piano` are each one entity, because that is how the catalogues
-themselves are organised and because a string orchestra is not a list of
-instruments. A category that names instruments rather than an ensemble also emits
-them (`instrumentation.py`'s `CONTAINS`), so a violin sonata still answers "works
-for piano":
-
-```
-Beethoven: Violin Sonata no. 5  --orchestration--> "Violine und Klavier"   (literal)
-                                --written_for----> violin and piano        (instrumentation)
-                                --written_for----> violin                  (instrumentation)
-                                --written_for----> piano                   (instrumentation)
-```
-
-Nothing is guessed. A phrase no category is recognised in keeps its literal and is
-*counted*, and the extract run's log names the commonest misses:
-
-```
-claims: 412 pages, 480 chunks, 0 retried, 0 failed, 3106 claims
-  (new predicates: plate_number(88); unrecognised scoring: 12 solo voices(31), …)
-```
-
-Those two lists are the review queue: fold a recurring predicate into
-`vocabulary.py`'s `ALIASES` and a recurring scoring phrase into
-`instrumentation.py`'s `CATEGORIES`, and the next run curates it.
-
-### Orchestral shorthand
-
-An orchestral catalogue does not print prose. It prints a positional notation, in
-two dialects that say the same thing (`shorthand.py`):
-
-| | Beethoven's Fifth |
-| --- | --- |
-| Chester/Novello | `3223 / 2230 / timp.perc / str[8]` |
-| Boosey & Hawkes | `3.2.2.3 - 2.2.3.0 - timp - strings[6]` |
-| Bärenreiter | `2,2,2,2 – 2,2,3,0 – Pk,Schlg – Str` (German abbreviations) |
-
-The first two sections are *positional*: four counts standing for the four standing
-woodwind desks (flute, oboe, clarinet, bassoon) and the four brass ones (horn,
-trumpet, trombone, tuba), in score order. A parenthetical says how many of a desk's
-players double on something else — `3(pic)`, `4(2pic)`, `3(III=picc)`,
-`4(III,IV=picc)` and `Dcl(=Ebcl)` all occur — and `[N]` counts the string parts.
-
-A symphony is not "a work for flute" the way a sonata is a work for piano, so the
-two are different predicates:
-
-```
-Beethoven: Symphony No. 5  --orchestration-------> "3.2.2.3 - 2.2.3.0 - timp - strings[6]"
-                           --written_for---------> orchestra
-                           --includes_instrument-> flute, oboe, clarinet, bassoon,
-                                                   horn, trumpet, trombone,
-                                                   timpani, strings
-```
-
-Both point at the same `instrumentation` entities, so `piano` is one node whether a
-sonata is for it or a symphony contains it, and "everything involving a piano" is
-the union of the two predicates. The same split applies to a named ensemble:
-`string quartet` is what the work is `written_for`, and violin/viola/cello are what
-it `includes_instrument` (`instrumentation.py`'s `MEMBERS`).
-
-Player counts and the string-part number are structure rather than facts to
-compare, so they travel in the record's `raw` payload under `"scoring"` instead of
-becoming a claim each:
-
-```json
-{"instruments": ["flute", "oboe", "…"],
- "counts": {"flute": 3, "oboe": 2, "clarinet": 2, "bassoon": 3, "…": 1},
- "string_parts": 6}
-```
-
-Detection is deliberately strict, because a false positive files a work under an
-ensemble it was never written for: a shorthand must name strings **and** carry at
-least one four-count section. Prose never does — it always names an instrument
-after a count — so `flute, 2 oboes, …, strings` stays on the prose path and is
-recognised as nothing rather than as a work for flute.
-
-### Crawl recipes
-
-A recipe goes in via the dashboard's **New crawl** form (or `PUT
-/admin/v1/crawls/<name>`) rather than `CRAWL_REGISTRY` — a code-registered config
-wins over the stored one and is read-only in the dashboard, so tuning an allow
-pattern would mean a commit each time.
-
-Henle and Bärenreiter have no recipe: a crawl of either stored next to nothing
-(Bärenreiter's pages render client-side; Henle's facts sit in shop markup the
-`claims` prompt did not read), so each has an adapter of its own (see above).
-
-Two things to check before a wide run:
-
-- **Facet URLs are often not crawlable.** Search and filter paths are usually
-  absent from `sitemap.xml` and frequently `Disallow`ed in `robots.txt`;
-  `respect_robots` defaults to on, so those pages will simply be skipped. Read
-  the site's `robots.txt` first, and fall back to sitemap-driven detail pages if
-  the facets are excluded — the detail pages state the scoring themselves, so the
-  facet listings are a convenience, not a requirement.
-- **These are commercial catalogues.** Keep the request delay polite and check
-  the site's terms of use before running anything at scale.
-
-### Enabling this on an existing crawl costs one re-extract
-
-The `claims` system prompt is part of both the answer-cache key and the
-extraction ledger's fingerprint (see [Not analysing the same page
-twice](#not-analysing-the-same-page-twice)), so widening it invalidates every
-cached `claims` answer: the next `extract` run on a crawl with `claims` enabled
-sends every page back through the model once. `concerts` and `recordings` are
-unaffected — their prompts did not change, so their caches stay warm.
+Each member owns its tests and pytest config, and each README's **Tests**
+section says what they cover. [`CLAUDE.md`](CLAUDE.md) has everything CI runs
+(the full test matrix, the Postgres and Neo4j suites, the dependency audit, the
+frontend checks) and the commit-message rules: Conventional Commits, enforced on
+every commit and on the PR title.

@@ -19,8 +19,10 @@ import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceClaim, WorkMentionDocument
-from .fetch import BASE_URL, _fetch_dump, _make_client
+from composer_http import SourceSession
+
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
+from .fetch import BASE_URL, TIMEOUT_S, _fetch_dump
 
 log = logging.getLogger(__name__)
 
@@ -50,17 +52,19 @@ def _year(date: object) -> str | None:
     return date.removesuffix("-01-01") or None
 
 
-class OpenOpusAdapter(SourceAdapter):
+class OpenOpusAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "openopus"
     base_url = BASE_URL
     cadence = RefreshCadence.YEARLY
+    timeout_s = TIMEOUT_S
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Yield one ``person`` record per composer in the dump, followed by
         one work mention per catalogued work. ``max_pages`` caps the number of
         composers processed, for test runs."""
-        with _make_client() as client:
-            composers = _fetch_dump(client)
+        composers = _fetch_dump(session)
         ingested_at = datetime.now(UTC)
         seen = 0
         mentions = 0

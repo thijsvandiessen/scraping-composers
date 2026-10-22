@@ -3,7 +3,6 @@ about them."""
 
 from __future__ import annotations
 
-import httpx
 import pytest
 from composer_scrapers import REGISTRY
 from composer_scrapers.laphil import LaPhilAdapter
@@ -65,13 +64,12 @@ def _stub_site(monkeypatch: pytest.MonkeyPatch, site: dict[str, str], sitemap: s
     """Serve *site* to the adapter, returning the list it records fetches in."""
     fetched: list[str] = []
 
-    def fetch_page(_client: object, url: str, _cache: object = None) -> str | None:
+    def fetch_page(_session: object, url: str) -> str | None:
         fetched.append(url)
         return site.get(url)
 
     monkeypatch.setattr("composer_scrapers.laphil.fetch_sitemap", lambda _client: sitemap)
     monkeypatch.setattr("composer_scrapers.laphil.fetch_page", fetch_page)
-    monkeypatch.setattr("composer_scrapers.laphil.make_client", lambda: httpx.Client())
     return fetched
 
 

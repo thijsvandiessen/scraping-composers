@@ -37,12 +37,19 @@ class SourceClaim:
     The object is either another entity (set ``object_kind`` +
     ``object_label``, e.g. ("profession", "composer") for has_profession) or
     a literal (set ``value``, e.g. "1756-01-27" for born_on).
+
+    ``object_wikidata_id`` pins an entity object to the Wikidata item it names,
+    the way a record's own wikidata URL pins its subject. Without it the object
+    is resolved by label alone, and a teacher named in a Wikidata claim would
+    land beside -- not on -- the composer entity Wikidata's own record for that
+    teacher created.
     """
 
     predicate: str
     object_kind: str | None = None
     object_label: str | None = None
     value: str | None = None
+    object_wikidata_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +116,11 @@ def deserialize_document(d: dict[str, Any]) -> EntityDocument | WorkMentionDocum
 
 # ---------------------------------------------------------------------------
 # Refresh cadence — how often a source's data is worth re-scraping. Drives the
-# admin interface's "what's due" view so scrapes can be triggered by staleness.
+# admin interface's "what's due" view so scrapes can be triggered by staleness,
+# and how long an HTTP source's page mirror serves a page before refetching it
+# (see composer_scrapers.base). The adapters use two: STATIC for archives of
+# things already given — scraped once, re-run on demand for what was added —
+# and YEARLY for everything else.
 # ---------------------------------------------------------------------------
 
 
@@ -166,7 +177,7 @@ class SourceAdapter(ABC):
 
     name: ClassVar[str]
     base_url: ClassVar[str]
-    cadence: ClassVar[RefreshCadence] = RefreshCadence.MONTHLY
+    cadence: ClassVar[RefreshCadence] = RefreshCadence.YEARLY
 
     @abstractmethod
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]: ...

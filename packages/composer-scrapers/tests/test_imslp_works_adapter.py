@@ -44,7 +44,7 @@ UNREAD: Result = (SPARSE_ROW, None)
 
 
 def _stub(monkeypatch: pytest.MonkeyPatch, results: list[Result]) -> None:
-    def fake(max_details: int | None = None) -> Iterator[Result]:
+    def fake(_session: object, max_details: int | None = None) -> Iterator[Result]:
         for index, result in enumerate(results):
             yield result if max_details is None or index < max_details else (result[0], None)
 

@@ -25,9 +25,11 @@ import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
-from .. import EntityDocument, RefreshCadence, SourceAdapter, SourceClaim, WorkMentionDocument
+from composer_http import SourceSession
+
+from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
 from .catalogue import WorkLink
-from .fetch import BASE_URL, iter_work_pages
+from .fetch import BASE_URL, REQUEST_DELAY_S, iter_work_pages
 from .works import ParsedWork, duration_minutes, parse_work
 
 log = logging.getLogger(__name__)
@@ -72,14 +74,18 @@ def _raw(work: ParsedWork, link: WorkLink, url: str) -> dict[str, object]:
     }
 
 
-class BooseyAdapter(SourceAdapter):
+class BooseyAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
     name = "boosey"
     base_url = BASE_URL
     # A publisher's back catalogue changes slowly: new works appear, existing
     # entries rarely move.
     cadence = RefreshCadence.YEARLY
+    request_delay_s = REQUEST_DELAY_S
+    follow_redirects = True
 
-    def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
+    def scrape(
+        self, session: SourceSession, max_pages: int | None = None
+    ) -> Iterator[EntityDocument | WorkMentionDocument]:
         """Walk the catalogue, yielding a work mention and a work entity per work.
 
         ``max_pages`` caps the number of work detail pages fetched.
@@ -87,7 +93,7 @@ class BooseyAdapter(SourceAdapter):
         ingested_at = datetime.now(UTC)
         works = 0
         skipped = 0
-        for link, url, html in iter_work_pages(max_pages=max_pages):
+        for link, url, html in iter_work_pages(session, max_pages=max_pages):
             work = parse_work(html)
             if work is None:
                 skipped += 1
