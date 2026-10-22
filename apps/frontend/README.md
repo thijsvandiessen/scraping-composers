@@ -8,7 +8,7 @@ piece of information where it was found.
 
 ## Running
 
-The app needs the gold consumer API (see the repo README):
+The app needs the gold consumer API (see [`consumer-api`](../consumer-api/README.md)):
 
 ```sh
 uv run uvicorn composer_api:gold_app --port 8000
@@ -72,3 +72,9 @@ npx openapi-ts -i http://localhost:8000/openapi.json -o src/lib/generated
   changes don't break the frontend (re-run `npm run gen` to pick them up).
 - No client-side JavaScript: search, sort, and pagination are plain GET forms
   and links.
+
+## Checks
+
+There is no test suite. CI's frontend job runs `npm run lint`,
+`npm run format:check`, `npm run check` (Astro's type check) and
+`npm run build`.
