@@ -92,7 +92,7 @@ how silver's schema is migrated is in [`composer-models`](packages/composer-mode
 
 ## Sources
 
-`imslp`, `imslp_works`, `imslp_recordings`, `wikidata`, `openopus`,
+`imslp`, `imslp_works`, `imslp_recordings`, `wikidata`, `wikidata_works`, `openopus`,
 `classicalmusiconline`, `classicfm`, `concertgebouw_archive`, `rco`, `nyphil`,
 `berlinphil`, `wienerphil`, `laphil`, `roh`, `decca`, `harmoniamundi`, `boosey`,
 `baerenreiter` and `henle`. What each one reads, its refresh cadence, per-source

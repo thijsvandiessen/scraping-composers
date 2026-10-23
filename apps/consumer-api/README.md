@@ -53,6 +53,6 @@ SQLite file, and into Postgres when `COMPOSER_TEST_POSTGRES_URL` is set.
 | People | Soloist, conductor and composer lists: role selection, a person in two roles, search, pagination, the source filter, sorting by concert or recording count, invalid paging (422), detail with claims, and 404s for a missing person or the wrong role. |
 | Provenance | `source_url` pointing at the record page or falling back to the source's base URL, in silver and after promotion. |
 | Entities and stats | Search across kinds, the kind filter, random sampling, linked claim objects, incoming claims, 404s, and dataset counts. |
-| Works and mentions | Works with aliases and mention counts, search by composer, the source filter, work detail with proof, the review queue with its candidate, and a composer's works with concert and catalogue proof. |
+| Works and mentions | Works with aliases and mention counts, search by composer, the source filter, work detail with proof and its premiere date and place, the review queue with its candidate, and a composer's works with concert and catalogue proof. |
 | Concerts and recordings | Lists newest first with summaries, search by participant and source, details with participants, programme and works, and a person's concerts and recordings. |
 | Gold curation | Gold hiding people without performance evidence, keeping works with their mention counts, and stats reflecting curation. |

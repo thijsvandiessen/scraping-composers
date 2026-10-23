@@ -13,6 +13,7 @@ everything after that (bucket, ingest, matching) is shared.
 | `imslp_works` | IMSLP work catalogue — all of it | yearly | [imslp](docs/imslp.md) |
 | `imslp_recordings` | IMSLP's commercial recordings of the catalogue | yearly | [imslp](docs/imslp.md) |
 | `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | yearly | |
+| `wikidata_works` | every Wikidata work with a date of first performance (P1191) and a composer, with its premiere place (P4647) | yearly | work mentions carrying `raw["premiere"]`, which fills `Work.premiere_date` |
 | `openopus` | Open Opus work catalogue | yearly | |
 | `classicalmusiconline` | classical-music-online.net composer catalogue and works | yearly | two levels: 26 index pages, then ~11.6k composer pages (a couple of hours); `--max-pages` caps the composer pages |
 | `classicfm` | composer and artist name lists from classicfm.com | yearly | |
@@ -155,6 +156,7 @@ Most sources are tested in three layers, one file each:
 | `roh` | ✓ | ✓ | ✓ |
 | `wienerphil` | `test_wienerphil.py`, `test_wienerphil_details.py` | ✓ | ✓ |
 | `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror | | |
+| `wikidata_works` | `test_wikidata_works.py` covers all three | | |
 
 `test_base.py` covers what every source shares: the session carries the
 adapter's manners, the mirror's lifetime follows the cadence, and every

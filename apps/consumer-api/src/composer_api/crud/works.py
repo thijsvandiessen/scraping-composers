@@ -351,6 +351,7 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
         musical_key=work.musical_key,
         number=work.number,
         premiere_date=work.premiere_date,
+        premiere_place=work.premiere_place,
         mention_count=mention_count,
         aliases=aliases,
         proof=proofs,

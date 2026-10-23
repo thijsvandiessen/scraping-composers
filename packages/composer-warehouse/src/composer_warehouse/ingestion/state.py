@@ -43,6 +43,8 @@ class IngestState:
     # Candidate works keyed by composer, so the matcher only compares within a
     # composer's catalogue. Refreshed as new works are created during the run.
     work_candidates: dict[uuid.UUID | None, list[Candidate]]
+    # work id -> the premiere date it carries, for works that carry one
+    work_premieres: dict[uuid.UUID, str] = field(default_factory=dict)
     seen: int = 0
     new: int = 0
     seen_entity_ids: set[uuid.UUID] = field(default_factory=set)
@@ -93,10 +95,13 @@ def load_state(session: Session, source: Source, run: IngestRun) -> IngestState:
         ).tuples()
     )
     work_candidates: dict[uuid.UUID | None, list[Candidate]] = {}
+    work_premieres: dict[uuid.UUID, str] = {}
     for work in session.scalars(select(Work)):
         work_candidates.setdefault(work.composer_entity_id, []).append(
             Candidate(work.id, extract_features(work.canonical_title))
         )
+        if work.premiere_date is not None:
+            work_premieres[work.id] = work.premiere_date
 
     return IngestState(
         session=session,
@@ -108,4 +113,5 @@ def load_state(session: Session, source: Source, run: IngestRun) -> IngestState:
         existing_mentions=existing_mentions,
         existing_work_titles=existing_work_titles,
         work_candidates=work_candidates,
+        work_premieres=work_premieres,
     )

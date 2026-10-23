@@ -39,6 +39,11 @@ passes over it; curation happens when it is promoted into gold.
   (`auto_matched`/`needs_review`/`created`/`manual_matched`), score and method.
 - **`works`** and **`work_titles`** — canonical compositions and every title a
   work was seen under. Work ids are assigned at creation.
+  `works.premiere_date`/`premiere_place` hold the world premiere from any
+  mention stating one under `raw["premiere"]` (`composer_schema.premiere`;
+  today `wikidata_works` and the ROH's operas). The earliest date wins, a full
+  date refines a bare year of the same premiere, and `premiere_source_id` names
+  the source that won. House and production premieres never land here.
 - **`person_matches`** — scored person pairs and review decisions from
   `dedupe-persons`.
 - **`concerts`** and **`recordings`** (with their participants and

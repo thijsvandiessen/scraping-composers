@@ -129,6 +129,7 @@ class WorkDetail(BaseModel):
     musical_key: str | None
     number: int | None
     premiere_date: str | None
+    premiere_place: str | None = None
     mention_count: int
     aliases: list[str]
     proof: list[WorkProofOut]

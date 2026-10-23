@@ -611,9 +611,35 @@ def test_work_detail_returns_metadata_aliases_and_proof(client: TestClient) -> N
     assert work["opus_number"] == "67"
     assert work["mention_count"] == 2
     assert work["aliases"] == ["Sinfonie Nr. 5, op. 67"]
-    assert work["premiere_date"] is None  # nothing populates it yet — see #244
+    assert work["premiere_date"] is None  # no fixture mention carries raw["premiere"]
+    assert work["premiere_place"] is None
     assert [p["source"] for p in work["proof"]] == ["programmes"]
     assert work["proof"][0]["source_url"] == "https://programmes.example"
+
+
+def test_gold_work_detail_carries_the_premiere(promote_gold: PromoteGold) -> None:
+    factory = _seeded_factory()
+    with factory() as s:
+        ingest_source(
+            s,
+            FakeSource(
+                records=(
+                    perf_mention(
+                        "Q1:Q255",
+                        "Symphony No. 5, Op. 67",
+                        "Beethoven, Ludwig van",
+                        {"premiere": {"date": "1808-12-22", "place": "Theater an der Wien"}},
+                    ),
+                ),
+                name="wikidata_works",
+            ),
+        )
+        gold_factory = promote_gold(s)
+    gold = TestClient(create_app("test-gold", lambda: gold_factory))
+
+    work_id = gold.get("/v1/works").json()["items"][0]["id"]
+    work = gold.get(f"/v1/works/{work_id}").json()
+    assert (work["premiere_date"], work["premiere_place"]) == ("1808-12-22", "Theater an der Wien")
 
 
 def test_work_detail_unknown_id_is_404(client: TestClient) -> None:

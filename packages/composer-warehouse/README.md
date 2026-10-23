@@ -163,6 +163,7 @@ factories) come from `composer_warehouse.testing`.
 | --- | --- |
 | `test_ingest.py` | Entities, records and claims from a fake source; a second source attaching to the same entity; claim objects as deduplicated entities; QID-pinned claims; `mentioned_in` URLs; 1000-record batch commits; a failing source marking the run failed; ensemble-named credits landing as ensembles. |
 | `test_ingest_reingest.py` | Re-sighted entity records: idempotency, content changes, label updates, and the `last_*` timestamps. |
+| `test_ingest_premieres.py` | A mention's world premiere carried onto its work: a new work, a later source backfilling a NULL, an earlier date winning across sources and within one run, a later one not, a full date refining a year, a corrected mention, the winning source recorded, and house premieres ignored. |
 | `test_ingest_mentions.py` | Work mentions: creating a work and alias, matching an existing work, the same title under two composers, re-ingesting with a corrected title or composer, and mentions kept when a source fails. |
 
 **Works**
