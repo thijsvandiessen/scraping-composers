@@ -744,7 +744,9 @@ def test_concert_detail_has_participants_and_programme(concerts_client: TestClie
 
 
 def test_concert_detail_404(concerts_client: TestClient) -> None:
-    assert concerts_client.get("/v1/concerts/999").status_code == 404
+    assert concerts_client.get(f"/v1/concerts/{uuid.uuid4()}").status_code == 404
+    # ids are uuids; the old integer form is rejected rather than looked up
+    assert concerts_client.get("/v1/concerts/999").status_code == 422
 
 
 def test_person_concerts_404_and_invalid_sort(concerts_client: TestClient) -> None:
@@ -954,7 +956,9 @@ def test_recording_detail_has_artists_and_works(recordings_client: TestClient) -
 
 
 def test_recording_detail_404(recordings_client: TestClient) -> None:
-    assert recordings_client.get("/v1/recordings/999").status_code == 404
+    assert recordings_client.get(f"/v1/recordings/{uuid.uuid4()}").status_code == 404
+    # ids are uuids; the old integer form is rejected rather than looked up
+    assert recordings_client.get("/v1/recordings/999").status_code == 422
 
 
 def test_person_recordings_lists_credits(recordings_client: TestClient) -> None:

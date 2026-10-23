@@ -22,7 +22,7 @@ uv run --directory tests/e2e pytest --rootdir . --cov=composer_e2e
 
 | File | Covers |
 | --- | --- |
-| `test_pipeline.py` | One completed snapshot per source; silver keeping every listed name; dedupe linking the QID twins from source evidence; derived concerts and recordings; one work per piece across mentions; gold keeping only credited people, once each, with the duplicate's claims carried over; concerts, recordings and works copied to gold; the API listing composers with three works, citing every source, and resolving concert participants (a dropped conductor stays on the programme unlinked); a second ingestion flowing through to gold; and `rebuild-silver` reproducing the same gold. |
+| `test_pipeline.py` | One completed snapshot per source; silver keeping every listed name; dedupe linking the QID twins from source evidence; derived concerts and recordings; one work per piece across mentions; gold keeping only credited people, once each, with the duplicate's claims carried over; concerts, recordings and works copied to gold; the API listing composers with three works, citing every source, and resolving concert participants (a dropped conductor stays on the programme unlinked); a second ingestion flowing through to gold; concert and recording ids (and the API links built on them) surviving a second ingestion whose new concert and release sort before the old ones; and `rebuild-silver` reproducing the same gold. |
 
 The coverage figure measures only the harness and synthetic sources, not the
 product code the subprocesses run.

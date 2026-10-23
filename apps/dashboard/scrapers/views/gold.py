@@ -112,7 +112,7 @@ def concerts_list(request: HttpRequest) -> HttpResponse:
     return render(request, "scrapers/concerts_list.html", context)
 
 
-def concert_detail(request: HttpRequest, concert_id: int) -> HttpResponse:
+def concert_detail(request: HttpRequest, concert_id: uuid.UUID) -> HttpResponse:
     """One concert: participants and its programme, from gold."""
     api = DataAPI.gold()
     concert: dict[str, object] | None = None
@@ -182,7 +182,7 @@ def recordings_list(request: HttpRequest) -> HttpResponse:
     return render(request, "scrapers/recordings_list.html", context)
 
 
-def recording_detail(request: HttpRequest, recording_id: int) -> HttpResponse:
+def recording_detail(request: HttpRequest, recording_id: uuid.UUID) -> HttpResponse:
     """One recording: its credited artists and the works on it, from gold."""
     api = DataAPI.gold()
     recording: dict[str, object] | None = None

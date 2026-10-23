@@ -18,7 +18,9 @@ uv run uvicorn composer_api:silver_app --port 8003   # staging
 - `GET /v1/people/{id}/concerts` / `/v1/people/{id}/recordings` — the concerts a person took part
   in and the recordings they are credited on
 - `GET /v1/concerts?q=&source=` / `GET /v1/concerts/{id}` — browse concerts (search by venue or
-  participant); the detail carries all musicians (role, discipline, entity link) and the programme
+  participant); the detail carries all musicians (role, discipline, entity link) and the programme.
+  Concert and recording ids are UUIDs derived from the source and its own key, so a link stays
+  valid across promotes
 - `GET /v1/recordings?q=&source=` / `GET /v1/recordings/{id}` — the same for recordings
 - `GET /v1/stats` — dataset counts: entities per kind, records per source, works, mention statuses
 - `GET /v1/entities?q=&kind=` / `GET /v1/entities/{id}` — search every entity kind; the detail shows

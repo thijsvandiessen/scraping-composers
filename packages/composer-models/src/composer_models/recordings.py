@@ -26,7 +26,7 @@ class Recording(Base):
     __tablename__ = "recordings"
     __table_args__ = (UniqueConstraint("source_id", "external_key", name="uq_recording_source_key"),)
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)  # event_uuid(), stable across derives
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
     external_key: Mapped[str] = mapped_column(Text)  # per-source recording identity
     title: Mapped[str | None] = mapped_column(Text)
@@ -57,7 +57,7 @@ class RecordingParticipant(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    recording_id: Mapped[int] = mapped_column(ForeignKey("recordings.id"))
+    recording_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("recordings.id"))
     role: Mapped[str] = mapped_column(String(50))  # conductor | soloist | ensemble
     name: Mapped[str] = mapped_column(Text)
     discipline: Mapped[str | None] = mapped_column(Text)  # soloist instrument/voice
@@ -76,7 +76,7 @@ class RecordingWork(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    recording_id: Mapped[int] = mapped_column(ForeignKey("recordings.id"))
+    recording_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("recordings.id"))
     mention_id: Mapped[int] = mapped_column(ForeignKey("raw_work_mentions.id"))
 
     recording: Mapped[Recording] = relationship(back_populates="works")

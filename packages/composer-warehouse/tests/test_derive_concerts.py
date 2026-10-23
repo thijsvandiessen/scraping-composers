@@ -1,6 +1,7 @@
 """Tests for the silver concert-derivation pass."""
 
-from composer_models import Concert, ConcertParticipant, ConcertWork, Entity
+from composer_models import Concert, ConcertParticipant, ConcertWork, Entity, Source
+from composer_models.normalize import event_uuid
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.testing import FakeSource, ensemble, ingest_source, perf_mention, person
 from sqlalchemy import func, select
@@ -345,6 +346,54 @@ def test_derive_concerts_is_rerunnable(session: Session) -> None:
     assert session.scalar(select(func.count(Concert.id))) == 4
     assert session.scalar(select(func.count(ConcertWork.id))) == 5
     assert session.scalar(select(func.count(ConcertParticipant.id))) == 5
+
+
+def _concert_ids(session: Session) -> dict[tuple[str, str], object]:
+    return dict(
+        ((source, key), concert_id)
+        for concert_id, source, key in session.execute(
+            select(Concert.id, Source.name, Concert.external_key).join(Source, Source.id == Concert.source_id)
+        ).tuples()
+    )
+
+
+def test_concert_ids_derive_from_source_and_key(session: Session) -> None:
+    _seed_performances(session)
+    derive_concerts(session)
+
+    for (source, key), concert_id in _concert_ids(session).items():
+        assert concert_id == event_uuid("concert", source, key)
+    # participants and programme rows point at the same ids
+    assert set(session.scalars(select(ConcertWork.concert_id))) == set(_concert_ids(session).values())
+
+
+def test_concert_ids_survive_a_new_concert(session: Session) -> None:
+    """A concert that sorts first must not renumber the rest — the API
+    serves these ids in ``/concerts/{id}`` and links break if they move."""
+    _seed_performances(session)
+    derive_concerts(session)
+    before = _concert_ids(session)
+
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                perf_mention(
+                    "perf:early",
+                    "Symfonie nr. 1",
+                    "Brahms, Johannes",
+                    {"date": "01-01-1900", "city": "Amsterdam", "conductor": "Mengelberg, Willem"},
+                ),
+            ),
+            name="concertgebouw_archive",
+            base_url="https://cg.example",
+        ),
+    )
+    derive_concerts(session)
+    after = _concert_ids(session)
+
+    assert len(after) == len(before) + 1
+    assert {key: after[key] for key in before} == before
 
 
 def test_work_profile_mentions_derive_no_concert(session: Session) -> None:

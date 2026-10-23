@@ -9,7 +9,8 @@ This pass groups them into recordings per source, folds the page-scoped groups
 into one row per release (see ``cluster``), resolves artist names to person and
 ensemble entities by normalized name, and links each recording to the works on
 it. Re-running rebuilds the recording tables from scratch, so the pass can be
-repeated after new loads.
+repeated after new loads; a recording's id is derived from its source and key,
+so it is the same after every re-run.
 """
 
 from __future__ import annotations
@@ -20,8 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from composer_models import Entity, RawWorkMention, Recording, RecordingParticipant, RecordingWork, Source
-from composer_models.db import resync_pk_sequence
-from composer_models.normalize import dedup_key
+from composer_models.normalize import dedup_key, event_uuid
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
@@ -184,7 +184,7 @@ class _RowBatch:
             return self.ensemble_by_key.get(key) or self.person_by_key.get(key)
         return self.person_by_key.get(key) or self.ensemble_by_key.get(key)
 
-    def add_participant(self, recording_id: int, role: str, name: str, discipline: str | None) -> None:
+    def add_participant(self, recording_id: uuid.UUID, role: str, name: str, discipline: str | None) -> None:
         resolved = self._resolve(role, dedup_key(name))
         if resolved is not None:
             self.participant_links += 1
@@ -200,7 +200,7 @@ class _RowBatch:
             }
         )
 
-    def add_recording(self, recording_id: int, key: Key, data: dict[str, Any]) -> None:
+    def add_recording(self, recording_id: uuid.UUID, key: Key, data: dict[str, Any]) -> None:
         source_id, external_key = key
         self.recordings.append(
             {
@@ -246,9 +246,13 @@ def derive_recordings(session: Session) -> DeriveRecordingsStats:
     clusters = cluster_recordings(grouped)
     merged = sorted((_merge_cluster(grouped, members) for members in clusters), key=lambda item: item[0])
 
+    source_names: dict[int, str] = {
+        source_id: name for source_id, name in session.execute(select(Source.id, Source.name)).tuples()
+    }
     rows = _RowBatch(person_by_key, ensemble_by_key)
-    for recording_id, (key, data) in enumerate(merged, start=1):
-        rows.add_recording(recording_id, key, data)
+    for key, data in merged:
+        # A merged cluster is named by its fullest member's key (see _merge_cluster).
+        rows.add_recording(event_uuid("recording", source_names.get(key[0], ""), key[1]), key, data)
 
     for i in range(0, len(rows.recordings), INSERT_BATCH):
         session.execute(insert(Recording), rows.recordings[i : i + INSERT_BATCH])
@@ -256,8 +260,6 @@ def derive_recordings(session: Session) -> DeriveRecordingsStats:
         session.execute(insert(RecordingParticipant), rows.participants[i : i + INSERT_BATCH])
     for i in range(0, len(rows.works), INSERT_BATCH):
         session.execute(insert(RecordingWork), rows.works[i : i + INSERT_BATCH])
-    # The ids above were assigned explicitly, so the sequence never advanced.
-    resync_pk_sequence(session, Recording.__tablename__)
     session.commit()
 
     return DeriveRecordingsStats(

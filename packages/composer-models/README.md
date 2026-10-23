@@ -90,10 +90,10 @@ provides the Postgres fixtures the other members use.
 
 | File | Covers |
 | --- | --- |
-| `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, and reading a QID back out of a key. |
+| `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, stable concert/recording UUIDs per kind, source and key, and reading a QID back out of a key. |
 | `test_db.py` | `init_db` creating every table, an entity round-trip, unbounded scraper-sourced columns, unique key columns, and rejecting a schema name that cannot be escaped. |
 | `test_migrations.py` | Postgres only: `upgrade head` creating the schema from nothing, and head matching the models. |
 
 This package's tests don't reach `stamp_head` in `alembic_support.py` or the
-Postgres sequence resync in `db.py`; both run under the Postgres tests of
-`composer-warehouse` (rebuild) and `composer-gold` (promote).
+Postgres sequence resync in `db.py`; the first runs under the Postgres tests of
+`composer-warehouse` (rebuild), the second under `composer-gold` (promote).

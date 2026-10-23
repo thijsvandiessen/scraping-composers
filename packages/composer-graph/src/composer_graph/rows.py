@@ -111,7 +111,7 @@ def _clean(row: Row) -> Row:
     return {key: value for key, value in row.items() if value is not None and value != []}
 
 
-def _rel(start: str | int, end: str | int, **props: Any) -> Row:
+def _rel(start: str, end: str, **props: Any) -> Row:
     """A relationship row: the endpoint ids, and the properties to set on it."""
     return {"from": start, "to": end, "props": _clean(props)}
 
@@ -218,7 +218,7 @@ def concert_nodes(session: Session) -> Iterator[Row]:
     for concert_id, date, season, event_type, venue, url, source in rows:
         yield _clean(
             {
-                "id": concert_id,
+                "id": str(concert_id),
                 "date": date,
                 "season": season,
                 "event_type": event_type,
@@ -248,7 +248,7 @@ def recording_nodes(session: Session) -> Iterator[Row]:
     for recording_id, title, release_date, label, catalogue_number, format_, url, source in rows:
         yield _clean(
             {
-                "id": recording_id,
+                "id": str(recording_id),
                 "title": title,
                 "release_date": release_date,
                 "label": label,
@@ -314,7 +314,7 @@ def performed_in(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup,
                 continue
             yield (
                 RelGroup("PERFORMED_IN", label, event_label),
-                _rel(str(entity_id), event_id, role=role, discipline=discipline),
+                _rel(str(entity_id), str(event_id), role=role, discipline=discipline),
             )
 
 
@@ -348,7 +348,7 @@ def programmed(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, R
         )
         for event_id, work_id, times in rows:
             assert work_id is not None  # guarded by the WHERE above
-            yield RelGroup("PROGRAMMED", event_label, "Work"), _rel(event_id, str(work_id), times=times)
+            yield RelGroup("PROGRAMMED", event_label, "Work"), _rel(str(event_id), str(work_id), times=times)
 
 
 def claim_relationships(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, Row]]:

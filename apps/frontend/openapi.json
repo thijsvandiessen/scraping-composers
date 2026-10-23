@@ -353,8 +353,9 @@
             "title": "Event Type"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "participants": {
             "items": {
@@ -467,8 +468,9 @@
             "title": "Date"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "role": {
             "title": "Role",
@@ -649,8 +651,9 @@
             "title": "Event Type"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "season": {
             "anyOf": [
@@ -1075,8 +1078,9 @@
             "title": "Format"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "label": {
             "anyOf": [
@@ -1212,8 +1216,9 @@
             "title": "Format"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "label": {
             "anyOf": [
@@ -1407,8 +1412,9 @@
             "title": "Format"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "label": {
             "anyOf": [
@@ -1974,6 +1980,7 @@
   "paths": {
     "/v1/composers": {
       "get": {
+        "description": "People credited with at least three works, whatever their profession claims say.",
         "operationId": "list_composers_v1_composers_get",
         "parameters": [
           {
@@ -2279,8 +2286,9 @@
             "name": "concert_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Concert Id",
-              "type": "integer"
+              "type": "string"
             }
           }
         ],
@@ -2874,8 +2882,9 @@
             "name": "recording_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Recording Id",
-              "type": "integer"
+              "type": "string"
             }
           }
         ],

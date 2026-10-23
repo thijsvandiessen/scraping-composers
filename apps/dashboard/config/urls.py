@@ -50,13 +50,13 @@ urlpatterns = [
     path("admin/data/review/", admin.site.admin_view(views.review), name="review"),
     path("admin/data/concerts/", admin.site.admin_view(views.concerts_list), name="concerts_list"),
     path(
-        "admin/data/concerts/<int:concert_id>/",
+        "admin/data/concerts/<uuid:concert_id>/",
         admin.site.admin_view(views.concert_detail),
         name="concert_detail",
     ),
     path("admin/data/recordings/", admin.site.admin_view(views.recordings_list), name="recordings_list"),
     path(
-        "admin/data/recordings/<int:recording_id>/",
+        "admin/data/recordings/<uuid:recording_id>/",
         admin.site.admin_view(views.recording_detail),
         name="recording_detail",
     ),

@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from composer_models.normalize import MAX_KEY_CHARS, dedup_key, entity_uuid, wikidata_id
+from composer_models.normalize import MAX_KEY_CHARS, dedup_key, entity_uuid, event_uuid, wikidata_id
 
 
 @pytest.mark.parametrize(
@@ -38,6 +38,27 @@ def test_entity_uuid_differs_by_kind() -> None:
 
 def test_entity_uuid_differs_by_key() -> None:
     assert entity_uuid("person", "ludwig van beethoven") != entity_uuid("person", "wolfgang amadeus mozart")
+
+
+def test_event_uuid_is_stable() -> None:
+    # The public API serves this in /concerts/{id}; it must not drift between derives.
+    assert event_uuid("concert", "nyphil", "1|1989-10-31") == event_uuid("concert", "nyphil", "1|1989-10-31")
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        ("recording", "nyphil", "1|1989-10-31"),  # kind
+        ("concert", "berlinphil", "1|1989-10-31"),  # source
+        ("concert", "nyphil", "2|1989-10-31"),  # key
+    ],
+)
+def test_event_uuid_differs(other: tuple[str, str, str]) -> None:
+    assert event_uuid("concert", "nyphil", "1|1989-10-31") != event_uuid(*other)
+
+
+def test_event_uuid_is_apart_from_entity_uuid() -> None:
+    assert event_uuid("concert", "nyphil", "x") != entity_uuid("concert", "nyphil:x")
 
 
 def test_dedup_key_empty_string() -> None:

@@ -25,7 +25,7 @@ class Concert(Base):
     __tablename__ = "concerts"
     __table_args__ = (UniqueConstraint("source_id", "external_key", name="uq_concert_source_key"),)
 
-    id: Mapped[int] = mapped_column(primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)  # event_uuid(), stable across derives
     source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
     external_key: Mapped[str] = mapped_column(Text)  # per-source concert identity
     date: Mapped[str | None] = mapped_column(Text)  # ISO where derivable
@@ -55,7 +55,7 @@ class ConcertParticipant(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    concert_id: Mapped[int] = mapped_column(ForeignKey("concerts.id"))
+    concert_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("concerts.id"))
     role: Mapped[str] = mapped_column(String(50))  # conductor | soloist | ensemble
     name: Mapped[str] = mapped_column(Text)
     discipline: Mapped[str | None] = mapped_column(Text)  # soloist instrument/voice
@@ -74,7 +74,7 @@ class ConcertWork(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    concert_id: Mapped[int] = mapped_column(ForeignKey("concerts.id"))
+    concert_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("concerts.id"))
     mention_id: Mapped[int] = mapped_column(ForeignKey("raw_work_mentions.id"))
 
     concert: Mapped[Concert] = relationship(back_populates="works")
