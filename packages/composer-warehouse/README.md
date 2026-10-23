@@ -104,6 +104,13 @@ groups are folded into one row per release, artists are resolved to person and
 ensemble entities, and each recording is linked to its works. Both passes
 rebuild their tables from scratch, so they can be re-run after new loads.
 
+Concert and recording ids are **stable**: each is a uuid5 of the kind, the
+source's name and the source's own key (`event_uuid` in `composer-models`), not
+a row number, so a new concert doesn't move the others and
+`/v1/concerts/{id}` links survive every derive and promote. A merged recording
+takes the key of its fullest member, so its id moves only if a fuller page for
+the same release turns up later.
+
 ## Rebuilding silver
 
 Interpretation (entity resolution, work matching) is applied when a record is
@@ -127,7 +134,8 @@ Human review decisions survive the rebuild: accepted/rejected person pairs
 carry over directly (entity ids are deterministic), and manual work matches
 are re-resolved by the work's composer + title (created again if matching no
 longer produces the work). The run log (`ingest_runs`) starts fresh, and
-**work ids may change** across rebuilds — only entity ids are stable.
+**work ids may change** across rebuilds — entity, concert and recording ids are
+stable.
 
 The swap is atomic on both backends (`build.py`, `postgres.py`). On SQLite it
 is a file replace, and status lands in `composers.db.manifest.json` beside the
@@ -182,10 +190,10 @@ factories) come from `composer_warehouse.testing`.
 
 | File | Covers |
 | --- | --- |
-| `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, re-running. |
-| `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads. |
+| `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, re-running, and ids derived from source + key that a new concert sorting first doesn't move. |
+| `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, and ids derived from source + key. |
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |
-| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database. Two cases also run on Postgres. |
+| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
 | `test_postgres_target.py` | Postgres only: the schema swap, readers across it, the manifest table, and the locks that keep a rebuild and a reader apart. |
 
 `ingestion/runner.py`'s `create_run` has no test here; the admin API, its only

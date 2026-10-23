@@ -103,7 +103,7 @@ def concerts(
 
 
 @v1.get("/concerts/{concert_id}", response_model=ConcertDetail)
-def concert_detail(concert_id: int, db: DbSession) -> ConcertDetail:
+def concert_detail(concert_id: uuid.UUID, db: DbSession) -> ConcertDetail:
     """One concert: participants (with roles and disciplines) and its programme."""
     return get_concert(db, concert_id)
 
@@ -132,7 +132,7 @@ def recordings(
 
 
 @v1.get("/recordings/{recording_id}", response_model=RecordingDetail)
-def recording_detail(recording_id: int, db: DbSession) -> RecordingDetail:
+def recording_detail(recording_id: uuid.UUID, db: DbSession) -> RecordingDetail:
     """One recording: its credited artists and the works on it."""
     return get_recording(db, recording_id)
 

@@ -5,7 +5,8 @@ mentions carry each source's full performance payload in
 ``raw_work_mentions.raw``; this pass groups them into concerts per source,
 resolves conductor, soloist and ensemble names to entities by normalized name,
 and links each concert to its programme. Re-running rebuilds the concert
-tables from scratch, so the pass can be repeated after new loads.
+tables from scratch, so the pass can be repeated after new loads; a concert's
+id is derived from its source and key, so it is the same after every re-run.
 
 Participants resolve against *all* person and ensemble entities — silver keeps
 duplicate spellings side by side; the gold promote step re-points them to
@@ -20,8 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from composer_models import Concert, ConcertParticipant, ConcertWork, Entity, RawWorkMention, Source
-from composer_models.db import resync_pk_sequence
-from composer_models.normalize import dedup_key
+from composer_models.normalize import dedup_key, event_uuid
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
@@ -97,7 +97,7 @@ class _RowBatch:
             return self.ensemble_by_key.get(key) or self.person_by_key.get(key)
         return self.person_by_key.get(key) or self.ensemble_by_key.get(key)
 
-    def add_participant(self, concert_id: int, role: str, name: str, discipline: str | None) -> None:
+    def add_participant(self, concert_id: uuid.UUID, role: str, name: str, discipline: str | None) -> None:
         resolved = self._resolve(role, dedup_key(name))
         if resolved is not None:
             self.participant_links += 1
@@ -113,7 +113,7 @@ class _RowBatch:
             }
         )
 
-    def add_concert(self, concert_id: int, key: tuple[int, str], data: dict[str, Any]) -> None:
+    def add_concert(self, concert_id: uuid.UUID, key: tuple[int, str], data: dict[str, Any]) -> None:
         source_id, external_key = key
         self.concerts.append(
             {
@@ -157,9 +157,12 @@ def derive_concerts(session: Session) -> DeriveConcertsStats:
         ).tuples()
     }
 
+    source_names: dict[int, str] = {
+        source_id: name for source_id, name in session.execute(select(Source.id, Source.name)).tuples()
+    }
     rows = _RowBatch(person_by_key, ensemble_by_key)
-    for concert_id, (key, data) in enumerate(sorted(_group_concerts(session).items()), start=1):
-        rows.add_concert(concert_id, key, data)
+    for key, data in sorted(_group_concerts(session).items()):
+        rows.add_concert(event_uuid("concert", source_names.get(key[0], ""), key[1]), key, data)
 
     for i in range(0, len(rows.concerts), INSERT_BATCH):
         session.execute(insert(Concert), rows.concerts[i : i + INSERT_BATCH])
@@ -167,8 +170,6 @@ def derive_concerts(session: Session) -> DeriveConcertsStats:
         session.execute(insert(ConcertParticipant), rows.participants[i : i + INSERT_BATCH])
     for i in range(0, len(rows.works), INSERT_BATCH):
         session.execute(insert(ConcertWork), rows.works[i : i + INSERT_BATCH])
-    # The ids above were assigned explicitly, so the sequence never advanced.
-    resync_pk_sequence(session, Concert.__tablename__)
     session.commit()
 
     return DeriveConcertsStats(

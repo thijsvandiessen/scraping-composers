@@ -6,7 +6,9 @@ from composer_models import (
     Recording,
     RecordingParticipant,
     RecordingWork,
+    Source,
 )
+from composer_models.normalize import event_uuid
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ensemble, ingest_source, perf_mention, person
@@ -236,6 +238,16 @@ def test_derive_recordings_is_rerunnable(session: Session) -> None:
     assert session.scalar(select(func.count(Recording.id))) == 1
     assert session.scalar(select(func.count(RecordingWork.id))) == 2
     assert session.scalar(select(func.count(RecordingParticipant.id))) == 2
+
+
+def test_recording_id_derives_from_source_and_key(session: Session) -> None:
+    _seed(session)
+    derive_recordings(session)
+
+    recording = session.scalars(select(Recording)).one()
+    source = session.get_one(Source, recording.source_id)
+    assert recording.id == event_uuid("recording", source.name, recording.external_key)
+    assert set(session.scalars(select(RecordingWork.recording_id))) == {recording.id}
 
 
 def _scraped_raw() -> dict[str, object]:

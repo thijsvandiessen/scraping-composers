@@ -52,7 +52,7 @@ export const zComposerPage = z.object({
  */
 export const zConcertOut = z.object({
     date: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     role: z.string(),
     season: z.string().nullable(),
     source: z.string(),
@@ -90,7 +90,7 @@ export const zConcertSummary = z.object({
     conductors: z.array(z.string()),
     date: z.string().nullable(),
     event_type: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     season: z.string().nullable(),
     soloist_count: z.int(),
     source: z.string(),
@@ -123,7 +123,7 @@ export const zConcertWorkOut = z.object({
 export const zConcertDetail = z.object({
     date: z.string().nullable(),
     event_type: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     participants: z.array(zConcertParticipantOut),
     season: z.string().nullable(),
     source: z.string(),
@@ -209,7 +209,7 @@ export const zMentionPage = z.object({
 export const zRecordingOut = z.object({
     catalogue_number: z.string().nullable(),
     format: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     label: z.string().nullable(),
     release_date: z.string().nullable(),
     role: z.string(),
@@ -248,7 +248,7 @@ export const zRecordingSummary = z.object({
     catalogue_number: z.string().nullable(),
     conductors: z.array(z.string()),
     format: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     label: z.string().nullable(),
     performer_count: z.int(),
     release_date: z.string().nullable(),
@@ -282,7 +282,7 @@ export const zRecordingWorkOut = z.object({
 export const zRecordingDetail = z.object({
     catalogue_number: z.string().nullable(),
     format: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     label: z.string().nullable(),
     participants: z.array(zRecordingParticipantOut),
     release_date: z.string().nullable(),
@@ -462,7 +462,7 @@ export const zConcertsV1ConcertsGetQuery = z.object({
 export const zConcertsV1ConcertsGetResponse = zConcertListPage;
 
 export const zConcertDetailV1ConcertsConcertIdGetPath = z.object({
-    concert_id: z.int()
+    concert_id: z.uuid()
 });
 
 /**
@@ -566,7 +566,7 @@ export const zRecordingsV1RecordingsGetQuery = z.object({
 export const zRecordingsV1RecordingsGetResponse = zRecordingListPage;
 
 export const zRecordingDetailV1RecordingsRecordingIdGetPath = z.object({
-    recording_id: z.int()
+    recording_id: z.uuid()
 });
 
 /**

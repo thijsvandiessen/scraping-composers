@@ -19,6 +19,7 @@ from composer_models import (
     WorkTitle,
 )
 from composer_models.db import get_engine
+from composer_models.normalize import event_uuid
 from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
 from composer_models.testing import requires_postgres
 from composer_schema import SourceClaim
@@ -395,9 +396,10 @@ def test_rebuild_replays_bucket_into_postgres(tmp_path: Path, pg_url: str) -> No
             version = silver.execute(text("SELECT version_num FROM alembic_version")).scalar()
             assert version is not None
 
-            # And the derivations' explicit ids left the sequence usable.
-            silver.add(Concert(source_id=1, external_key="manual"))
-            silver.commit()
+            # The concert's id is derived from its source and key, so a
+            # rebuild hands out the same one the live silver had.
+            concert = silver.scalars(select(Concert)).one()
+            assert concert.id == event_uuid("concert", concert.source.name, concert.external_key)
     finally:
         engine.dispose()
 

@@ -178,7 +178,7 @@ class MentionPage(BaseModel):
 
 
 class ConcertOut(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     date: str | None
     venue: str | None
@@ -198,7 +198,7 @@ class ConcertPage(BaseModel):
 
 
 class ConcertSummary(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     date: str | None
     venue: str | None
@@ -230,7 +230,7 @@ class ConcertWorkOut(BaseModel):
 
 
 class ConcertDetail(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     date: str | None
     venue: str | None
@@ -242,7 +242,7 @@ class ConcertDetail(BaseModel):
 
 
 class RecordingOut(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     title: str | None
     release_date: str | None
@@ -264,7 +264,7 @@ class RecordingPage(BaseModel):
 
 
 class RecordingSummary(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     title: str | None
     release_date: str | None
@@ -297,7 +297,7 @@ class RecordingWorkOut(BaseModel):
 
 
 class RecordingDetail(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     title: str | None
     release_date: str | None

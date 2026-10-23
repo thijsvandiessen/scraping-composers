@@ -20,7 +20,10 @@ The dataset is small and every name in it is there to exercise one rule:
 - Nobody, Obscure and the Listed-Only Consort are listed but credited nowhere.
 
 ``COMPOSER_E2E_EDITION`` (default 1) selects which fetch this is: edition 2 is a
-later run of the same sources, with one concert added and one fact changed.
+later run of the same sources, with one concert and one release added and one
+fact changed. The additions' keys (``c0``, ``p0``) sort before every edition-1
+key, so a derive pass that numbered its rows in key order would hand the old
+concerts and recordings new ids — the property the stable-id test pins.
 """
 
 from __future__ import annotations
@@ -118,7 +121,7 @@ _CONCERTS: list[_Concert] = [
 
 _EDITION_2_CONCERTS: list[_Concert] = [
     (
-        "c4",
+        "c0",  # sorts first on purpose: see the module docstring
         "2024-09-05",
         "Guest, One-Off",
         None,
@@ -217,6 +220,14 @@ _RELEASES: list[tuple[str, str, list[tuple[str, str]]]] = [
     ),
 ]
 
+_EDITION_2_RELEASES: list[tuple[str, str, list[tuple[str, str]]]] = [
+    (
+        "p0",  # sorts first on purpose: see the module docstring
+        "Beethoven: Symphony No. 5",
+        [("Ludwig van Beethoven", "Symphony No. 5 in C minor, Op. 67")],
+    ),
+]
+
 
 class SyntheticDecca(SourceAdapter):
     """A label catalogue: one work mention per work on a release, in the
@@ -226,7 +237,8 @@ class SyntheticDecca(SourceAdapter):
     base_url: ClassVar[str] = "https://www.deccaclassics.com"
 
     def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument | WorkMentionDocument]:
-        for product_id, album, works in _RELEASES:
+        releases = _RELEASES + (_EDITION_2_RELEASES if edition() >= 2 else [])
+        for product_id, album, works in releases:
             url = f"{self.base_url}/products/{product_id}"
             for index, (composer, title) in enumerate(works):
                 yield WorkMentionDocument(

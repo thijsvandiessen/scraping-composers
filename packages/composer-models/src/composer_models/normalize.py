@@ -33,6 +33,17 @@ def entity_uuid(kind: str, key: str) -> uuid.UUID:
     return uuid.uuid5(_NAMESPACE, f"{kind}:{key}")
 
 
+def event_uuid(kind: str, source_name: str, external_key: str) -> uuid.UUID:
+    """Deterministic UUID for a derived concert or recording.
+
+    Keyed on the source's *name* and the source's own event key, not on
+    ``sources.id`` or derive order, so the id survives re-derives, silver
+    rebuilds and promotes — the public API serves it in ``/concerts/{id}``.
+    The NUL separator keeps these out of ``entity_uuid``'s space.
+    """
+    return uuid.uuid5(_NAMESPACE, f"{kind}\x00{source_name}\x00{external_key}")
+
+
 # A dedup key's wikidata suffix. The base is punctuation-stripped, so the pipe
 # can only be the separator this module wrote.
 _WIKIDATA_SUFFIX = re.compile(r"\|(Q\d+)$")

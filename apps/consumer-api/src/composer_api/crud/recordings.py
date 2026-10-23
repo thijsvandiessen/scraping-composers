@@ -44,7 +44,7 @@ def person_recordings(db: Session, person_id: uuid.UUID, page: int, limit: int) 
     ).all()
 
     # works on the page's recordings, capped per recording
-    works_by_recording: dict[int, list[str]] = {}
+    works_by_recording: dict[uuid.UUID, list[str]] = {}
     recording_ids = [recording.id for recording, _role, _src in rows]
     if recording_ids:
         work_rows = db.execute(
@@ -107,9 +107,9 @@ def list_recordings(
     ).all()
 
     recording_ids = [recording.id for recording, _src in rows]
-    conductors_by_recording: dict[int, list[str]] = {}
-    performers_by_recording: dict[int, int] = {}
-    works_by_recording: dict[int, int] = {}
+    conductors_by_recording: dict[uuid.UUID, list[str]] = {}
+    performers_by_recording: dict[uuid.UUID, int] = {}
+    works_by_recording: dict[uuid.UUID, int] = {}
     if recording_ids:
         for recording_id, role, name in db.execute(
             select(RecordingParticipant.recording_id, RecordingParticipant.role, RecordingParticipant.name)
@@ -153,7 +153,7 @@ def list_recordings(
     )
 
 
-def get_recording(db: Session, recording_id: int) -> RecordingDetail:
+def get_recording(db: Session, recording_id: uuid.UUID) -> RecordingDetail:
     row = db.execute(
         select(Recording, Source.name)
         .join(Source, Source.id == Recording.source_id)

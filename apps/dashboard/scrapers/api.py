@@ -7,6 +7,7 @@ consumer API (``/v1``).
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -177,7 +178,7 @@ class DataAPI(_BaseAPI):
         params = filters.add_to({"page": page, "limit": limit})
         return self._json_dict("GET", "/v1/concerts", params=params)
 
-    def get_concert(self, concert_id: int) -> dict[str, Any]:
+    def get_concert(self, concert_id: uuid.UUID) -> dict[str, Any]:
         return self._json_dict("GET", f"/v1/concerts/{concert_id}")
 
     def person_recordings(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
@@ -190,7 +191,7 @@ class DataAPI(_BaseAPI):
         params = filters.add_to({"page": page, "limit": limit})
         return self._json_dict("GET", "/v1/recordings", params=params)
 
-    def get_recording(self, recording_id: int) -> dict[str, Any]:
+    def get_recording(self, recording_id: uuid.UUID) -> dict[str, Any]:
         return self._json_dict("GET", f"/v1/recordings/{recording_id}")
 
     def list_works(
