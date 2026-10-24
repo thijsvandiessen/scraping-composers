@@ -244,6 +244,23 @@ def test_abandon_frees_a_source_stuck_on_a_dead_run(client: TestClient, bucket_p
     assert client.post("/admin/v1/scrapers/fake/fetch").status_code == 202
 
 
+def test_list_scrapers_reports_a_stuck_snapshot_older_than_the_last(
+    client: TestClient, bucket_path: Path
+) -> None:
+    """``last_snapshot`` alone hides a killed fetch once a newer snapshot exists,
+    yet it still blocks fetching; ``running_snapshots`` is what surfaces it."""
+    _stale_running_snapshot(bucket_path, "fake", "2026-01-01T00:00:00-stale00", records=3)
+    newer = "2026-02-01T00:00:00-newer00"
+    LocalBucket(bucket_path).write_manifest(SnapshotManifest.start("fake", newer).completed(1))
+
+    fake = next(s for s in client.get("/admin/v1/scrapers").json() if s["name"] == "fake")
+
+    assert fake["last_snapshot"]["id"] == newer
+    assert [s["id"] for s in fake["running_snapshots"]] == ["2026-01-01T00:00:00-stale00"]
+    archive = client.get("/admin/v1/scrapers/archive").json()
+    assert archive["running_snapshots"] == []
+
+
 def test_abandon_rejects_a_snapshot_that_is_not_running(client: TestClient) -> None:
     snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
 

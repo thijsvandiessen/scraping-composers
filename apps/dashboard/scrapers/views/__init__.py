@@ -15,6 +15,7 @@ from .gold import (
     recordings_list,
 )
 from .pipeline import (
+    abandon_snapshot,
     fetch_due,
     index,
     load_index,
@@ -27,6 +28,7 @@ from .pipeline import (
 )
 
 __all__ = [
+    "abandon_snapshot",
     "concert_detail",
     "concerts_list",
     "data",

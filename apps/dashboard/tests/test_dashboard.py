@@ -35,6 +35,7 @@ SCRAPERS_PAYLOAD = [
         "cadence": "monthly",
         "due": True,
         "last_snapshot": None,
+        "running_snapshots": [],
     },
     {
         "name": "wikidata",
@@ -42,6 +43,7 @@ SCRAPERS_PAYLOAD = [
         "cadence": "monthly",
         "due": False,
         "last_snapshot": SNAPSHOT_PAYLOAD,
+        "running_snapshots": [],
     },
 ]
 
@@ -64,6 +66,14 @@ def test_client_fetch_scraper_posts_to_named_scraper() -> None:
         return httpx.Response(202, json={"source": "imslp", "snapshot_id": "snap-1", "status": "running"})
 
     assert _api(handler).fetch_scraper("imslp")["snapshot_id"] == "snap-1"
+
+
+def test_client_abandon_snapshot_posts_to_the_snapshot() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert (request.method, request.url.path) == ("POST", "/admin/v1/snapshots/imslp/snap-1/abandon")
+        return httpx.Response(200, json={**SNAPSHOT_PAYLOAD, "source": "imslp", "status": "failed"})
+
+    assert _api(handler).abandon_snapshot("imslp", "snap-1")["status"] == "failed"
 
 
 def test_client_snapshots_process_and_runs() -> None:
@@ -172,6 +182,16 @@ class StubAPI:
         self._maybe_fail()
         return {"run_id": 12, "source": source, "status": "running"}
 
+    def abandon_snapshot(self, source: str, snapshot_id: str) -> dict[str, Any]:
+        self._maybe_fail()
+        return {
+            **SNAPSHOT_PAYLOAD,
+            "source": source,
+            "id": snapshot_id,
+            "status": "failed",
+            "record_count": 7,
+        }
+
     def gold_status(self) -> dict[str, Any]:
         self._maybe_fail()
         return {
@@ -258,6 +278,43 @@ def test_index_auto_refreshes_while_a_fetch_is_active(
     assert '<meta http-equiv="refresh" content="5">' in page
 
 
+def test_index_offers_abandon_for_a_stuck_snapshot_older_than_the_last(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    stuck = {**SNAPSHOT_PAYLOAD, "id": "2026-06-01T08:00:00-dead0000", "status": "running"}
+    scrapers = [{**SCRAPERS_PAYLOAD[1], "running_snapshots": [stuck]}]
+    _install(monkeypatch, StubAPI(scrapers=scrapers))
+    page = staff_client.get("/admin/scrapers/").content.decode()
+    assert "older snapshot 2026-06-01T08:00:00-dead0000 still marked running" in page
+    assert 'action="/admin/scrapers/wikidata/2026-06-01T08:00:00-dead0000/abandon"' in page
+
+
+def test_index_offers_abandon_for_a_running_last_snapshot(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    running = {**SNAPSHOT_PAYLOAD, "status": "running"}
+    scrapers = [{**SCRAPERS_PAYLOAD[1], "last_snapshot": running, "running_snapshots": [running]}]
+    _install(monkeypatch, StubAPI(scrapers=scrapers))
+    page = staff_client.get("/admin/scrapers/").content.decode()
+    assert "older snapshot" not in page  # the last one is already shown as running
+    assert f'action="/admin/scrapers/wikidata/{SNAPSHOT_PAYLOAD["id"]}/abandon"' in page
+
+
+def test_abandon_snapshot_redirects_with_message(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install(monkeypatch, StubAPI())
+    response = staff_client.post("/admin/scrapers/imslp/snap-9/abandon", follow=True)
+    assert response.redirect_chain[0] == ("/admin/scrapers/", 302)
+    assert "abandoned snapshot imslp/snap-9: 7 record(s) kept on disk" in response.content.decode()
+
+
+def test_abandon_snapshot_surfaces_api_error(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    _install(monkeypatch, StubAPI(error="API returned 409: snapshot imslp/snap-9 is not running"))
+    response = staff_client.post("/admin/scrapers/imslp/snap-9/abandon", follow=True)
+    assert "is not running" in response.content.decode()
+
+
 def test_start_fetch_redirects_with_message(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     _install(monkeypatch, StubAPI())
     response = staff_client.post("/admin/scrapers/imslp/fetch", follow=True)
@@ -322,6 +379,7 @@ def test_post_endpoints_reject_get(monkeypatch: pytest.MonkeyPatch, staff_client
     assert staff_client.get("/admin/scrapers/imslp/fetch").status_code == 405
     assert staff_client.get("/admin/scrapers/fetch-due").status_code == 405
     assert staff_client.get("/admin/load/wikidata/snap-1/process").status_code == 405
+    assert staff_client.get("/admin/scrapers/imslp/snap-1/abandon").status_code == 405
 
 
 # ---------------------------------------------------------------------------
