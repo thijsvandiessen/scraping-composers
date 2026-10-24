@@ -13,6 +13,7 @@ everything after that (bucket, ingest, matching) is shared.
 | `imslp_works` | IMSLP work catalogue — all of it | yearly | [imslp](docs/imslp.md) |
 | `imslp_recordings` | IMSLP's commercial recordings of the catalogue | yearly | [imslp](docs/imslp.md) |
 | `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | yearly | |
+| `wikidata_places` | every place a Wikidata composer was born, died or held citizenship in, then the places containing those | yearly | place records with `place_type`, `located_in`, `in_country`, coordinates, GeoNames id and ISO 3166 code; see [`composer-warehouse`](../composer-warehouse/README.md#places) |
 | `wikidata_works` | every Wikidata work with a date of first performance (P1191) and a composer, with its premiere place (P4647) | yearly | work mentions carrying `raw["premiere"]`, which fills `Work.premiere_date` |
 | `openopus` | Open Opus work catalogue | yearly | |
 | `classicalmusiconline` | classical-music-online.net composer catalogue and works | yearly | two levels: 26 index pages, then ~11.6k composer pages (a couple of hours); `--max-pages` caps the composer pages |
@@ -155,7 +156,8 @@ Most sources are tested in three layers, one file each:
 | `rco` | ✓ | — | `test_rco_fetch.py` (calendar slugs only) |
 | `roh` | ✓ | ✓ | ✓ |
 | `wienerphil` | `test_wienerphil.py`, `test_wienerphil_details.py` | ✓ | ✓ |
-| `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror | | |
+| `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror and QID-pinned place claims | | |
+| `wikidata_places` | `test_wikidata_places.py` covers all three: type precedence, parent rounds, coordinates | | |
 | `wikidata_works` | `test_wikidata_works.py` covers all three | | |
 
 `test_base.py` covers what every source shares: the session carries the
