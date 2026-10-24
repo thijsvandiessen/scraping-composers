@@ -89,15 +89,16 @@ and nothing more.
 uv run --directory packages/composer-models pytest --rootdir . --cov=composer_models
 ```
 
-`test_migrations.py` only runs against Postgres (`COMPOSER_TEST_POSTGRES_URL`),
-the backend where a database is migrated rather than replayed. `testing.py`
+`test_migrations.py` runs against Postgres (`COMPOSER_TEST_POSTGRES_URL`), the
+backend where a database is migrated rather than replayed, apart from its
+single-head check. `testing.py`
 provides the Postgres fixtures the other members use.
 
 | File | Covers |
 | --- | --- |
 | `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, stable concert/recording UUIDs per kind, source and key, and reading a QID back out of a key. |
 | `test_db.py` | `init_db` creating every table, an entity round-trip, unbounded scraper-sourced columns, unique key columns, and rejecting a schema name that cannot be escaped. |
-| `test_migrations.py` | Postgres only: `upgrade head` creating the schema from nothing, and head matching the models. |
+| `test_migrations.py` | The tree having a single head (no database needed). Postgres only: `upgrade head` creating the schema from nothing, and head matching the models. |
 
 This package's tests don't reach `stamp_head` in `alembic_support.py` or the
 Postgres sequence resync in `db.py`; the first runs under the Postgres tests of

@@ -9,6 +9,11 @@ urlpatterns = [
     path("admin/scrapers/", admin.site.admin_view(views.index), name="scrapers_index"),
     path("admin/scrapers/fetch-due", admin.site.admin_view(views.fetch_due), name="fetch_due"),
     path("admin/scrapers/<str:name>/fetch", admin.site.admin_view(views.start_fetch), name="start_fetch"),
+    path(
+        "admin/scrapers/<str:source>/<str:snapshot_id>/abandon",
+        admin.site.admin_view(views.abandon_snapshot),
+        name="abandon_snapshot",
+    ),
     path("admin/load/", admin.site.admin_view(views.load_index), name="load_index"),
     path("admin/promote/", admin.site.admin_view(views.promote_page), name="promote"),
     path("admin/promote/start", admin.site.admin_view(views.start_promote), name="start_promote"),

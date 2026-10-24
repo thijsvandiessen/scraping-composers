@@ -46,6 +46,9 @@
       <span class="sc-badge sc-{{ snapshot.status }}">{{ snapshot.status }}</span>
       {{ snapshot.started_at|slice:":16" }}
       {% if snapshot.error %}<div class="sc-error-text">{{ snapshot.error }}</div>{% endif %}
+      {% for stuck in scraper.running_snapshots %}{% if stuck.id != snapshot.id %}
+      <div class="sc-error-text">older snapshot {{ stuck.id }} still marked running — it blocks new fetches</div>
+      {% endif %}{% endfor %}
     </td>
     <td class="sc-num">{{ snapshot.record_count|default_if_none:"—" }}</td>
     {% else %}
@@ -57,6 +60,14 @@
         {% csrf_token %}
         <button type="submit" class="sc-btn">Fetch</button>
       </form>
+      {% for stuck in scraper.running_snapshots %}
+      <form method="post" action="{% url 'abandon_snapshot' stuck.source stuck.id %}">
+        {% csrf_token %}
+        <button type="submit" class="sc-btn"
+          title="Mark snapshot {{ stuck.id }} failed. Only for a fetch whose process is gone: a live one keeps writing to it. Nothing is deleted.">
+          Abandon {{ stuck.started_at|slice:":10" }}</button>
+      </form>
+      {% endfor %}
     </td>
   </tr>
   {% empty %}

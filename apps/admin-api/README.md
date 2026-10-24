@@ -21,7 +21,7 @@ Each scraper declares a refresh cadence (see
 API surfaces which scrapers are _due_ so you can refresh by staleness. Fetch and
 load are separate endpoints, mirroring the CLI's `fetch` and `process`:
 
-- `GET  /admin/v1/scrapers` (+ `/{name}`) — every scraper with its cadence, last snapshot, and `due` flag
+- `GET  /admin/v1/scrapers` (+ `/{name}`) — every scraper with its cadence, last snapshot, `due` flag, and any snapshots still `running`
 - `POST /admin/v1/scrapers/{name}/fetch` — fetch one source to the bucket (background, returns the `snapshot_id`)
 - `POST /admin/v1/scrapers/fetch-due` — fetch every scraper whose raw data is stale
 - `GET  /admin/v1/snapshots` — every raw snapshot in the bucket with its status, record count, and size
@@ -53,6 +53,6 @@ finished by the time the POST returns. The Postgres cases are skipped unless
 
 | File | Covers |
 | --- | --- |
-| `test_admin.py` | Scrapers with cadence and `due`; fetch writing a snapshot and manifest, conflicts, 404s, and a failed fetch; `fetch-due`; snapshot listing; process, abandon and their conflicts; runs; promote with rule toggles, URLs and `rule1-config` (including validation); `rebuild-silver` and silver status on SQLite and Postgres; promote into Postgres gold; the admin-key guard failing closed. |
+| `test_admin.py` | Scrapers with cadence, `due` and their `running` snapshots (an older stuck one included); fetch writing a snapshot and manifest, conflicts, 404s, and a failed fetch; `fetch-due`; snapshot listing; process, abandon and their conflicts; runs; promote with rule toggles, URLs and `rule1-config` (including validation); `rebuild-silver` and silver status on SQLite and Postgres; promote into Postgres gold; the admin-key guard failing closed. |
 | `test_snapshot_kinds.py` | Raw `pages` snapshots left by the retired crawler stay listed and refuse to load, while `documents` snapshots load. |
 | `test_logconfig.py` | Request-supplied values cannot forge log lines. |

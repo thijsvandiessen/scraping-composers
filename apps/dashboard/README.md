@@ -6,7 +6,10 @@ with one page per pipeline phase:
 
 - **Scrapers** — every scraper with its cadence, due/fresh state, and last
   snapshot; a **Fetch** button each and a **Fetch all due** button. Fetching
-  only writes raw data to the bucket.
+  only writes raw data to the bucket. A snapshot still marked `running` gets an
+  **Abandon** button, for a fetch whose process was killed (see the
+  [admin API](../admin-api/README.md)); an older one is flagged too, since the
+  page otherwise shows only the last snapshot and it still blocks fetching.
 - **Load** — every raw snapshot in the bucket (status, record count, size)
   with a **Load into DB** button on complete ones, plus the recent-loads log.
 - **Promote** — gold status (last rebuild, curation stats), the rule-1
@@ -59,7 +62,7 @@ views against a stubbed client. No network.
 | --- | --- |
 | API clients | Admin and data client endpoints and parameters, the admin-key header, and surfacing API errors and connection failures. |
 | Access | Every page requiring the admin login, and POST-only endpoints rejecting GET. |
-| Scrapers and Load | The due badge, starting a fetch (and a conflict), fetch-due, processing a snapshot, auto-refresh while work runs, and the error banner when the API is down. |
+| Scrapers and Load | The due badge, starting a fetch (and a conflict), fetch-due, abandoning a stuck snapshot (an older one flagged, an API error shown), processing a snapshot, auto-refresh while work runs, and the error banner when the API is down. |
 | Promote | Gold status, the promote form and its options and validation, and the rule-1 config form. |
 | Data (silver) | The overview, entity pages (pagination, kind tabs, random sample, claims and links), works pages, and the review queue. |
 | Musicians (gold) | People pages per role with concert counts and sorting, a person's concerts, concert and recording lists and details, gold work details, and entity pages surviving gold being down. |

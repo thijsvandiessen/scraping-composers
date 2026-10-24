@@ -47,13 +47,15 @@ def _start_fetch(background: BackgroundTasks, adapter: SourceAdapter, max_pages:
     return FetchStarted(source=adapter.name, snapshot_id=snapshot_id, status="running")
 
 
-def _scraper_out(adapter: SourceAdapter, last: Snapshot | None, now: datetime) -> ScraperOut:
+def _scraper_out(adapter: SourceAdapter, snapshots: list[Snapshot], now: datetime) -> ScraperOut:
+    last = snapshots[-1] if snapshots else None
     return ScraperOut(
         name=adapter.name,
         base_url=adapter.base_url,
         cadence=adapter.cadence.value,
         due=is_due(adapter.cadence, last_started(last), now),
         last_snapshot=snapshot_out(last) if last is not None else None,
+        running_snapshots=[snapshot_out(s) for s in snapshots if s.manifest.status == "running"],
     )
 
 
@@ -61,7 +63,7 @@ def _scraper_out(adapter: SourceAdapter, last: Snapshot | None, now: datetime) -
 def list_scrapers() -> list[ScraperOut]:
     now = utcnow()
     store = bucket()
-    return [_scraper_out(adapter, last_snapshot(store, name), now) for name, adapter in REGISTRY.items()]
+    return [_scraper_out(adapter, store.list_snapshots(name), now) for name, adapter in REGISTRY.items()]
 
 
 @admin.get("/scrapers/{name}", response_model=ScraperOut)
@@ -69,7 +71,7 @@ def get_scraper(name: str) -> ScraperOut:
     adapter = REGISTRY.get(name)
     if adapter is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown scraper {name!r}")
-    return _scraper_out(adapter, last_snapshot(bucket(), name), utcnow())
+    return _scraper_out(adapter, bucket().list_snapshots(name), utcnow())
 
 
 @admin.post("/scrapers/fetch-due", response_model=list[FetchStarted])
