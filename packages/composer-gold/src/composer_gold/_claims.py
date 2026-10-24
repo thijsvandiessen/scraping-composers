@@ -48,7 +48,11 @@ def collect_person_claims(build: GoldBuild) -> set[uuid.UUID]:
 
 def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
     """Rule 3: keep referenced non-person entities (to a fixpoint),
-    collecting the discovery-edge claims along the way."""
+    collecting their claims about each other along the way.
+
+    A claim is kept whether it discovers its object or points at one already
+    kept: a place's ``in_country`` names a country some composer's
+    ``citizen_of`` reached first, and that edge is the hierarchy."""
     build.all_other = set(build.silver.scalars(select(Entity.id).where(Entity.kind != "person")))
     # Ensembles are judged by rule 1 (credits), not by being referenced: an
     # ensemble a kept person points at but that never played a concert or
@@ -63,14 +67,10 @@ def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
         for chunk in chunked(sorted(frontier, key=str)):
             for c in build.silver.execute(select(Claim).where(Claim.subject_id.in_(chunk))).scalars():
                 obj = build.root(c.object_id) if c.object_id is not None else None
-                if (
-                    obj is None
-                    or obj in build.kept_roots
-                    or obj in build.kept_other
-                    or obj in build.unevidenced_ensembles
-                ):
+                if obj is None or obj in build.kept_roots or obj in build.unevidenced_ensembles:
                     continue
-                next_frontier.add(obj)
+                if obj not in build.kept_other:
+                    next_frontier.add(obj)
                 build.claim_rows.append(
                     {
                         "subject_id": c.subject_id,

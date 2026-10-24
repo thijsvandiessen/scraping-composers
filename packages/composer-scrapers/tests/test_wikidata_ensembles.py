@@ -73,7 +73,7 @@ def test_an_orchestra_becomes_a_qid_pinned_ensemble_document() -> None:
     assert document.name == "Vienna Philharmonic"
     assert set(document.claims) == {
         SourceClaim("ensemble_type", value="orchestra"),
-        SourceClaim("based_in", "place", "Vienna"),
+        SourceClaim("based_in", "place", "Vienna", object_wikidata_id="Q1741"),
         SourceClaim("also_known_as", value="Wiener Philharmoniker"),
         SourceClaim("musicbrainz_id", value="mb-1"),
     }
@@ -97,13 +97,13 @@ def test_the_type_comes_from_the_classes_then_the_name(classes: set[str], label:
 
 def test_a_headquarters_that_is_a_settlement_is_the_home_city() -> None:
     rows = [row("Q1", "Orchestra", hq="Q1741=Vienna", hqSettlement="true", hqAdmin="Q40=Austria")]
-    assert SourceClaim("based_in", "place", "Vienna") in claims_of(rows)
+    assert SourceClaim("based_in", "place", "Vienna", object_wikidata_id="Q1741") in claims_of(rows)
 
 
 def test_a_headquarters_that_is_a_building_is_read_through_its_admin_area() -> None:
     rows = [row("Q1", "Orchestra", hq="Q2=Musikverein", hqSettlement="false", hqAdmin="Q1741=Vienna")]
     based_in = [c for c in claims_of(rows) if c.predicate == "based_in"]
-    assert based_in == [SourceClaim("based_in", "place", "Vienna")]
+    assert based_in == [SourceClaim("based_in", "place", "Vienna", object_wikidata_id="Q1741")]
 
 
 def test_an_unnamed_home_city_is_skipped() -> None:

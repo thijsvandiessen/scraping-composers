@@ -603,6 +603,40 @@ def _seed_referrers_silver(session: Session) -> None:
     derive_concerts(session)
 
 
+def test_rule3_keeps_claims_between_entities_already_kept(session: Session, tmp_path: Path) -> None:
+    """Austria is kept through Mahler's citizen_of before the walk reaches
+    Vienna; Vienna's in_country still has to come along, or the place
+    hierarchy is lost."""
+    _seed_silver(session)
+    places = FakeSource(
+        records=(
+            person("Mahler, Gustav", SourceClaim("citizen_of", "place", "Austria"), external_id="p:mahler"),
+            EntityDocument(
+                id="p:vienna",
+                url=None,
+                source_name="places",
+                ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
+                name="Vienna",
+                kind="place",
+                claims=(SourceClaim("in_country", "place", "Austria"),),
+            ),
+        ),
+        name="places",
+    )
+    ingest_source(session, places)
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        vienna = gold.scalars(select(Entity).where(Entity.label == "Vienna")).one()
+        austria = gold.scalars(select(Entity).where(Entity.label == "Austria")).one()
+        assert gold.scalar(
+            select(Claim.id).where(
+                Claim.subject_id == vienna.id, Claim.predicate == "in_country", Claim.object_id == austria.id
+            )
+        )
+
+
 def test_min_referrers_default_keeps_single_referrer(session: Session, tmp_path: Path) -> None:
     _seed_referrers_silver(session)
     gold_path = tmp_path / "gold.db"

@@ -13,6 +13,7 @@ everything after that (bucket, ingest, matching) is shared.
 | `imslp_works` | IMSLP work catalogue — all of it | yearly | [imslp](docs/imslp.md) |
 | `imslp_recordings` | IMSLP's commercial recordings of the catalogue | yearly | [imslp](docs/imslp.md) |
 | `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | yearly | |
+| `wikidata_places` | every place a Wikidata composer was born, died or held citizenship in, then the places containing those | yearly | place records with `place_type`, `located_in`, `in_country`, coordinates, GeoNames id and ISO 3166 code; see [`composer-warehouse`](../composer-warehouse/README.md#places) |
 | `wikidata_works` | every Wikidata work with a date of first performance (P1191) and a composer, with its premiere place (P4647) | yearly | work mentions carrying `raw["premiere"]`, which fills `Work.premiere_date` |
 | `wikidata_ensembles` | every Wikidata orchestra (Q42998) and choir (Q131186), subclasses included, with their names in the sources' languages, headquarters city, MusicBrainz id and the groups they are part of | yearly | the anchors `anchor-ensembles` folds name-keyed ensembles onto; see below |
 | `openopus` | Open Opus work catalogue | yearly | |
@@ -40,8 +41,7 @@ mirrored detail query and a mirrored multi-valued query per 500 items, the
 detail page checked for coverage. Each ensemble record carries an
 `ensemble_type` (from its class: choir over orchestra; else from name cues such
 as `Quartet` or `Chor`; else `other`), a `based_in` city (the headquarters if it
-is a settlement, else the headquarters' P131) as a place by label with the
-city's QID kept in `raw["based_in"]`, an `also_known_as` per label and alias in
+is a settlement, else the headquarters' P131) pinned to the city's QID, an `also_known_as` per label and alias in
 English, `mul`, German, French, Italian, Dutch, Spanish, Czech, Swedish, Danish,
 Polish and Hungarian, and `part_of` only towards another ensemble in the
 population. Chamber ensembles and opera companies are not population classes
@@ -168,7 +168,8 @@ Most sources are tested in three layers, one file each:
 | `rco` | ✓ | — | `test_rco_fetch.py` (calendar slugs only) |
 | `roh` | ✓ | ✓ | ✓ |
 | `wienerphil` | `test_wienerphil.py`, `test_wienerphil_details.py` | ✓ | ✓ |
-| `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror | | |
+| `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror and QID-pinned place claims | | |
+| `wikidata_places` | `test_wikidata_places.py` covers all three: type precedence, parent rounds, coordinates | | |
 | `wikidata_works` | `test_wikidata_works.py` covers all three | | |
 | `wikidata_ensembles` | `test_wikidata_ensembles.py` covers all three, including the mirror | | |
 

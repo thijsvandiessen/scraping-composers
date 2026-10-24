@@ -13,9 +13,9 @@ Philharmoniker" and "Vienna Philharmonic Orchestra" both reach one item. Each
 record also carries a type (``ensemble_type``), a home city (``based_in``) and
 the groups it belongs to (``part_of``).
 
-The home city is a ``place`` claim by label, the way composers' birth places
-are: there is no QID-keyed place entity yet, so the city's QID is kept in
-``raw["based_in"]`` for when there is.
+The home city is a ``place`` claim pinned to the city's QID, the way composers'
+birth places are (#352), so an orchestra's Vienna is the entity the
+``wikidata_places`` record and every composer born there land on.
 """
 
 from __future__ import annotations
@@ -215,7 +215,7 @@ def _documents_from_rows(
         # several headquarters are rare; the lowest QID is the stable pick
         city = min(item["cities"], default=None, key=lambda c: (len(c[0]), c[0]))
         if city is not None:
-            claims.append(SourceClaim("based_in", "place", city[1]))
+            claims.append(SourceClaim("based_in", "place", city[1], object_wikidata_id=city[0]))
         names = _distinct_names(label, item["names"])
         claims.extend(SourceClaim("also_known_as", value=name) for name in names)
         claims.extend(SourceClaim("musicbrainz_id", value=mbid) for mbid in sorted(item["musicbrainz"]))

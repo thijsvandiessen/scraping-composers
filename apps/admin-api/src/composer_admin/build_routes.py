@@ -19,6 +19,7 @@ from composer_gold import (
 from composer_warehouse.build import BuildTarget
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.ensembles import anchor_ensembles
+from composer_warehouse.places import link_places
 from composer_warehouse.rebuild import rebuild_silver, silver_target
 from composer_warehouse.recordings import derive_recordings
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -39,9 +40,10 @@ def _promote_in_background(gold_url: str, config: PromoteConfig) -> None:
     """Rebuild the gold database; status lives in the gold manifest."""
     with session_scope() as session:
         try:
-            # Ensemble anchors, concerts and recordings are silver-derived state
-            # the gold build copies; refresh them first so the Promote button
-            # never publishes stale derivations.
+            # Place links, ensemble anchors, concerts and recordings are
+            # silver-derived state the gold build reads; refresh them first so
+            # the Promote button never publishes stale derivations.
+            link_places(session)
             anchor_ensembles(session)
             derive_concerts(session)
             derive_recordings(session)

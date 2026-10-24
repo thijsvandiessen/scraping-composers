@@ -223,3 +223,23 @@ def test_members_of_reads_the_whole_group() -> None:
     assert members_of("Members Of The Wiener Philharmoniker") == "wiener philharmoniker"
     assert members_of("Mitglieder der Wiener Philharmoniker") == "wiener philharmoniker"
     assert members_of("Wiener Philharmoniker") is None
+
+
+def test_the_home_city_is_the_pinned_place_composers_are_born_in(session: Session) -> None:
+    vienna = SourceClaim("based_in", "place", "Vienna", object_wikidata_id="Q900020")
+    _ingest(session, (_wikidata(VPO, "Vienna Philharmonic", vienna),), ())
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                person(
+                    "Mahler, Gustav",
+                    SourceClaim("died_in", "place", "Vienna", object_wikidata_id="Q900020"),
+                    url="https://www.wikidata.org/wiki/Q900021",
+                ),
+            ),
+            name="wikidata",
+        ),
+    )
+    places = session.scalars(select(Entity).where(Entity.kind == "place")).all()
+    assert [p.dedup_key for p in places] == ["vienna|Q900020"]
