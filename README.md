@@ -1,6 +1,6 @@
 # composer-ingest
 
-Ingests classical composer, work, concert and recording data from 19 sources into
+Ingests classical composer, work, concert and recording data from 22 sources into
 a database, with full provenance: every record knows which source it came from,
 when it was first and last seen, and which ingest run produced it.
 
@@ -92,7 +92,8 @@ how silver's schema is migrated is in [`composer-models`](packages/composer-mode
 
 ## Sources
 
-`imslp`, `imslp_works`, `imslp_recordings`, `wikidata`, `wikidata_works`, `wikidata_places`, `openopus`,
+`imslp`, `imslp_works`, `imslp_recordings`, `wikidata`, `wikidata_works`, `wikidata_places`,
+`wikidata_genres`, `openopus`,
 `classicalmusiconline`, `classicfm`, `concertgebouw_archive`, `rco`, `nyphil`,
 `berlinphil`, `wienerphil`, `laphil`, `roh`, `decca`, `harmoniamundi`, `boosey`,
 `baerenreiter` and `henle`. What each one reads, its refresh cadence, per-source

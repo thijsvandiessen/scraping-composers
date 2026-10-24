@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Annotated
@@ -44,3 +45,14 @@ class Filters:
 
 
 FilterQuery = Annotated[Filters, Depends()]
+
+
+@dataclass(frozen=True)
+class PeopleFilters(Filters):
+    """``Filters`` plus the people lists' ``genre``: a genre or movement id,
+    matching persons tagged with it or anything below it in the hierarchy."""
+
+    genre: uuid.UUID | None = None
+
+
+PeopleFilterQuery = Annotated[PeopleFilters, Depends()]
