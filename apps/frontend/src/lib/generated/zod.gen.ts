@@ -203,6 +203,48 @@ export const zEntityPage = z.object({
 });
 
 /**
+ * GenrePeoplePage
+ */
+export const zGenrePeoplePage = z.object({
+    items: z.array(zEntitySummary),
+    limit: z.int(),
+    page: z.int(),
+    total: z.int()
+});
+
+/**
+ * GenreRef
+ */
+export const zGenreRef = z.object({
+    id: z.uuid(),
+    label: z.string()
+});
+
+/**
+ * GenreDetail
+ */
+export const zGenreDetail = z.object({
+    children: z.array(zGenreRef),
+    id: z.uuid(),
+    kind: z.string(),
+    label: z.string(),
+    parents: z.array(zGenreRef),
+    person_count: z.int(),
+    wikidata_id: z.string().nullable()
+});
+
+/**
+ * GenreSummary
+ */
+export const zGenreSummary = z.object({
+    id: z.uuid(),
+    kind: z.string(),
+    label: z.string(),
+    person_count: z.int(),
+    wikidata_id: z.string().nullable()
+});
+
+/**
  * IncomingClaimOut
  */
 export const zIncomingClaimOut = z.object({
@@ -468,7 +510,8 @@ export const zListComposersV1ComposersGetQuery = z.object({
     page: z.int().gte(1).optional().default(1),
     limit: z.int().gte(1).lte(100).optional().default(20),
     q: z.string().nullish(),
-    source: z.string().nullish()
+    source: z.string().nullish(),
+    genre: z.uuid().nullish()
 });
 
 /**
@@ -526,7 +569,8 @@ export const zListConductorsV1ConductorsGetQuery = z.object({
     page: z.int().gte(1).optional().default(1),
     limit: z.int().gte(1).lte(100).optional().default(20),
     q: z.string().nullish(),
-    source: z.string().nullish()
+    source: z.string().nullish(),
+    genre: z.uuid().nullish()
 });
 
 /**
@@ -588,6 +632,40 @@ export const zEntityDetailV1EntitiesEntityIdGetPath = z.object({
  * Successful Response
  */
 export const zEntityDetailV1EntitiesEntityIdGetResponse = zEntityDetail;
+
+export const zGenresV1GenresGetQuery = z.object({
+    kind: z.string().regex(/^(genre|movement)$/).optional().default('genre')
+});
+
+/**
+ * Response Genres V1 Genres Get
+ *
+ * Successful Response
+ */
+export const zGenresV1GenresGetResponse = z.array(zGenreSummary);
+
+export const zGenreDetailV1GenresGenreIdGetPath = z.object({
+    genre_id: z.uuid()
+});
+
+/**
+ * Successful Response
+ */
+export const zGenreDetailV1GenresGenreIdGetResponse = zGenreDetail;
+
+export const zGetGenrePeopleV1GenresGenreIdPeopleGetPath = z.object({
+    genre_id: z.uuid()
+});
+
+export const zGetGenrePeopleV1GenresGenreIdPeopleGetQuery = z.object({
+    page: z.int().gte(1).optional().default(1),
+    limit: z.int().gte(1).lte(100).optional().default(20)
+});
+
+/**
+ * Successful Response
+ */
+export const zGetGenrePeopleV1GenresGenreIdPeopleGetResponse = zGenrePeoplePage;
 
 export const zMentionsV1MentionsGetQuery = z.object({
     status: z.string().nullish(),
@@ -654,7 +732,8 @@ export const zListSoloistsV1SoloistsGetQuery = z.object({
     page: z.int().gte(1).optional().default(1),
     limit: z.int().gte(1).lte(100).optional().default(20),
     q: z.string().nullish(),
-    source: z.string().nullish()
+    source: z.string().nullish(),
+    genre: z.uuid().nullish()
 });
 
 /**

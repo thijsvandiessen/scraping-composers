@@ -97,11 +97,12 @@ WHERE {{
 # the cross product ran to tens of thousands of rows per item -- 57MB of JSON
 # that WDQS truncates mid-stream at its 60s cap. UNION adds instead of
 # multiplies, so a page costs the sum of the values, not the product. Each row
-# binds exactly one of the four properties (a country as item and label);
-# ``_fold_rows`` reads whichever is present, so these rows concatenate onto the
-# QUERY rows above.
+# binds exactly one of the four properties (a country, genre or movement as
+# item and label); ``_fold_rows`` reads whichever is present, so these rows
+# concatenate onto the QUERY rows above. The items are what the claims are
+# pinned to: see ``_PINNED_KINDS`` and ``ITEM_FIELDS`` in ``parse``.
 MULTI_QUERY = """\
-SELECT ?item ?country ?countryLabel ?genreLabel ?movementLabel ?alias
+SELECT ?item ?country ?countryLabel ?genre ?genreLabel ?movement ?movementLabel ?alias
 WHERE {{
   VALUES ?item {{ {values} }}
   {{ ?item wdt:P27 ?country . }}

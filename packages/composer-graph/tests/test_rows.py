@@ -52,6 +52,10 @@ def test_entities_become_labelled_nodes_with_their_literal_claims(session: Sessi
     assert beinum["sources"] == ["archive"]
     assert nodes["Arnhem"][0] == "Place"
     assert nodes["conductor"][0] == "Profession"
+    # the QID a node is matched on in Cypher; absent (not null) without one
+    assert nodes["dance music"][0] == "Genre"
+    assert nodes["dance music"][1]["wikidata_id"] == "Q316930"
+    assert "wikidata_id" not in beinum
     assert all(value is not None for _, row in nodes.values() for value in row.values())
 
 
@@ -109,6 +113,10 @@ def test_object_claims_become_typed_relationships(session: Session, tmp_path: Pa
     assert ("Beinum, Eduard van", "BORN_IN", "Arnhem") in edges
     assert ("Beinum, Eduard van", "HAS_PROFESSION", "conductor") in edges
     assert ("Beinum, Eduard van", "STUDENT_OF", "Mengelberg, Willem") in edges
+    assert ("Beinum, Eduard van", "HAS_GENRE", "waltz") in edges
+    assert ("waltz", "SUBCLASS_OF", "dance music") in edges
+    subclass = next(group for group, _ in rels if group.type == "SUBCLASS_OF")
+    assert (subclass.start, subclass.end) == ("Genre", "Genre")
     born_in = next(row for group, row in rels if group.type == "BORN_IN")
     assert born_in["props"]["sources"] == ["archive"]
 

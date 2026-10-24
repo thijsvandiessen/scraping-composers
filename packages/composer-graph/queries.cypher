@@ -7,6 +7,7 @@
 //   (:Concert|Recording)-[:PROGRAMMED {times}]->(:Work)-[:COMPOSED_BY]->(:Person)
 //   (:Person)-[:BORN_IN|DIED_IN|CITIZEN_OF]->(:Place)
 //   (:Person)-[:HAS_GENRE|IN_MOVEMENT|HAS_PROFESSION|ASSOCIATED_PERIOD]->(...)
+//   (:Genre)-[:SUBCLASS_OF]->(:Genre), (:Movement)-[:SUBCLASS_OF]->(:Movement)
 //   (:Person)-[:STUDENT_OF|TEACHER_OF|INFLUENCED_BY]->(:Person)
 //   (:Person)-[:CHILD_OF|PARENT_OF|SPOUSE_OF|SIBLING_OF]->(:Person)
 //
@@ -115,6 +116,22 @@ RETURN city.label AS city, e.label AS orchestra, e.wikidata_id AS qid, count(eve
 ORDER BY events DESC LIMIT 25;
 
 
+// --- genres ---------------------------------------------------------------
+
+// Roll-up: everyone tagged with dance music or any genre below it (waltz,
+// Viennese waltz, ...). Match the top on wikidata_id, not label: labels follow
+// Wikidata's renames, the QID does not. *0.. includes dance music itself.
+MATCH (p:Person)-[:HAS_GENRE]->(:Genre)-[:SUBCLASS_OF*0..]->(:Genre {wikidata_id: 'Q316930'})
+RETURN DISTINCT p.label AS person
+ORDER BY person LIMIT 50;
+
+// Genres with no path up to a broader one: the ones the hierarchy cannot roll up.
+MATCH (g:Genre)<-[:HAS_GENRE]-(p:Person)
+WHERE NOT (g)-[:SUBCLASS_OF]->()
+RETURN g.label AS genre, g.wikidata_id AS qid, count(p) AS persons
+ORDER BY persons DESC LIMIT 25;
+
+
 // --- Graph Data Science ---------------------------------------------------
 
 // Project a weighted performer → composer graph into GDS (in memory; drop it
@@ -141,3 +158,4 @@ YIELD nodeId, communityId
 WITH communityId, collect(gds.util.asNode(nodeId).label) AS members
 RETURN communityId, size(members) AS size, members[0..10] AS sample
 ORDER BY size DESC LIMIT 15;
+

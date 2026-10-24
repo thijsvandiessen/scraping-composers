@@ -3,6 +3,7 @@ import uuid
 import pytest
 from composer_models.normalize import (
     MAX_KEY_CHARS,
+    QID_KEYED_KINDS,
     dedup_key,
     entity_key,
     entity_uuid,
@@ -125,16 +126,37 @@ def test_wikidata_id_ignores_a_pipe_that_is_not_an_id() -> None:
     assert wikidata_id("johann strauss") is None
 
 
+def test_qid_key() -> None:
+    assert qid_key("Q215") == "wikidata:Q215"
+
+
+def test_genres_and_movements_with_a_qid_are_keyed_on_it_alone() -> None:
+    """A renamed Wikidata label must not split the genre in two (#349)."""
+    assert QID_KEYED_KINDS == {"genre", "movement", "ensemble"}
+    for kind in QID_KEYED_KINDS:
+        assert entity_key(kind, "waltz", "Q215") == "wikidata:Q215"
+        assert entity_key(kind, "Waltz (dance)", "Q215") == entity_key(kind, "waltz", "Q215")
+
+
+def test_entity_key_falls_back_to_the_label_key() -> None:
+    # a genre without a QID (a non-Wikidata source) keeps the label key
+    assert entity_key("genre", "Symphonic Poem") == dedup_key("Symphonic Poem")
+    # every other kind keeps dedup_key's label|QID form, which seeds person ids
+    assert entity_key("person", "Beethoven, Ludwig van", "Q255") == "ludwig van beethoven|Q255"
+    assert entity_key("place", "Bonn") == "bonn"
+
+
+def test_wikidata_id_reads_both_key_forms() -> None:
+    assert wikidata_id(qid_key("Q215")) == "Q215"
+    assert wikidata_id(entity_key("genre", "waltz", "Q215")) == "Q215"
+    assert wikidata_id(entity_key("person", "Beethoven, Ludwig van", "Q255")) == "Q255"
+    # a label key can't spell the prefix: dedup_key strips the colon
+    assert dedup_key("wikidata:Q215") == "wikidataq215"
+    assert wikidata_id("wikidataq215") is None
+
+
 def test_an_ensemble_with_a_qid_is_keyed_on_the_qid_alone() -> None:
+    """One orchestra under every name it is printed (#350)."""
     assert entity_key("ensemble", "Wiener Philharmoniker", "Q900001") == "wikidata:Q900001"
     assert entity_key("ensemble", "Vienna Philharmonic", "Q900001") == qid_key("Q900001")
-
-
-def test_other_kinds_and_qidless_ensembles_keep_the_name_key() -> None:
-    assert entity_key("person", "Beethoven, Ludwig van", "Q255") == "ludwig van beethoven|Q255"
     assert entity_key("ensemble", "The Vienna Philharmonic") == "the vienna philharmonic"
-
-
-def test_wikidata_id_reads_a_qid_key() -> None:
-    assert wikidata_id(qid_key("Q900001")) == "Q900001"
-    assert wikidata_id("wikidata:junk") is None

@@ -65,6 +65,10 @@ CLAIM_TYPES: dict[str, str] = {
     "in_movement": "IN_MOVEMENT",
     "has_profession": "HAS_PROFESSION",
     "associated_period": "ASSOCIATED_PERIOD",
+    # Genre → genre and movement → movement, from Wikidata's P279: (a)-[:SUBCLASS_OF]->(b)
+    # means a is a kind of b, so a genre and everything below it is
+    # (g)<-[:SUBCLASS_OF*0..]-(sub).
+    "subclass_of": "SUBCLASS_OF",
     # Person ↔ person, from Wikidata. Read as subject → object: (a)-[:STUDENT_OF]->(b)
     # means a studied with b; (a)-[:CHILD_OF]->(b) means b is a's parent.
     "student_of": "STUDENT_OF",
@@ -149,7 +153,11 @@ def _literal_properties(literals: dict[str, list[str]]) -> Row:
 
 
 def entity_nodes(session: Session) -> Iterator[tuple[str, Row]]:
-    """(label, row) for every gold entity of a kind the graph models."""
+    """(label, row) for every gold entity of a kind the graph models.
+
+    ``wikidata_id`` is the QID the entity's dedup key carries, when it carries
+    one: the stable handle to match a node on, since labels follow Wikidata's
+    renames."""
     literals = literal_claims(session, (*_LITERAL_SINGLE, *_LITERAL_COUNTS, *_LITERAL_LISTS))
     provenance = entity_sources(session)
     rows = session.execute(

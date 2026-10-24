@@ -6,8 +6,10 @@ and metrics queries); ``parse`` folds the result rows into one SourceRecord per
 composer and formats birth/death dates to their recorded precision. ``works``
 is a second adapter over the same service: works with a recorded premiere.
 ``places`` is a third: the places composers point at, with type, hierarchy and
-coordinates. ``ensembles`` a fourth: orchestras and choirs, the anchors
-name-keyed ensembles are folded onto.
+coordinates. ``genres`` is a fourth: the genres and movements those composers
+are tagged with, and their ``subclass of`` hierarchy.
+``ensembles`` a fifth: orchestras and choirs, the anchors name-keyed
+ensembles are folded onto.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence
 from .ensembles import WikidataEnsemblesAdapter
+from .genres import WikidataGenresAdapter
 from .parse import BASE_URL, _records_from_rows
 from .places import WikidataPlacesAdapter
 from .query import PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _fetch_metrics, _fetch_page, _fetch_qids
@@ -31,6 +34,7 @@ __all__ = [
     "BASE_URL",
     "WikidataAdapter",
     "WikidataEnsemblesAdapter",
+    "WikidataGenresAdapter",
     "WikidataPlacesAdapter",
     "WikidataWorksAdapter",
 ]

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from composer_cli import _log_level, main
 from composer_cli.export_cmds import cmd_export_kumu
+from composer_cli.genre_cmds import cmd_genres, cmd_link_genres
 from composer_cli.ingest_cmds import (
     cmd_anchor_ensembles,
     cmd_derive_concerts,
@@ -37,7 +38,15 @@ from composer_warehouse.persons import AUTO_THRESHOLD, training
 from composer_warehouse.persons.evaluation import read_dataset
 from composer_warehouse.persons.fellegi_sunter import LinkageModel
 from composer_warehouse.persons.training import sample_non_match_levels
-from composer_warehouse.testing import FakeSource, ensemble, ingest_source, mention, perf_mention, person
+from composer_warehouse.testing import (
+    FakeSource,
+    ensemble,
+    genre,
+    ingest_source,
+    mention,
+    perf_mention,
+    person,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -469,6 +478,68 @@ def test_cmd_person_review_reject(tmp_path: Path) -> None:
         assert (
             session.scalar(select(func.count(Entity.id)).where(Entity.canonical_entity_id.is_not(None))) == 1
         )  # only the auto-linked Bach pair, not the rejected one
+
+
+# ---------------------------------------------------------------------------
+# genres / link-genres
+# ---------------------------------------------------------------------------
+
+
+def _seed_genres(db_url: str) -> None:
+    with init_db(get_engine(db_url))() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    genre("Q215", "waltz", ("Q316930", "dance music")),
+                    genre("Q316930", "dance music"),
+                    genre("Q50", "sardana"),
+                ),
+                name="wikidata_genres",
+            ),
+        )
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    person(
+                        "Serra, Joaquim",
+                        SourceClaim("has_genre", "genre", "sardana", object_wikidata_id="Q50"),
+                        SourceClaim("has_genre", "genre", "Waltz"),
+                    ),
+                )
+            ),
+        )
+
+
+def test_cmd_genres_reports_the_orphan_count(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _seed_genres(db_url)
+
+    assert cmd_link_genres(_ns(database_url=db_url)) == 0
+    assert "linked 1 label-only" in capsys.readouterr().out
+
+    assert cmd_genres(_ns(database_url=db_url, kind="genre", limit=5)) == 0
+    out = capsys.readouterr().out
+    assert "genres: 4" in out
+    assert "label only             1 (1 linked to a QID one)" in out
+    assert "orphans                1 (no subclass_of path to a top-level genre)" in out
+    assert "1  sardana (Q50)" in out
+    assert "movements" not in out
+
+
+def test_main_routes_to_genres_for_both_kinds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _seed_genres(db_url)
+    monkeypatch.setattr(sys, "argv", ["composer-ingest", "--database-url", db_url, "genres"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "genres: 4" in out
+    assert "movements: 0" in out
 
 
 # ---------------------------------------------------------------------------

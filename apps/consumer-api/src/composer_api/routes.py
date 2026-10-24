@@ -5,9 +5,11 @@ from fastapi import APIRouter, Query
 
 from .crud import (
     composer_works,
+    genre_people,
     get_concert,
     get_ensemble,
     get_entity,
+    get_genre,
     get_person,
     get_recording,
     get_stats,
@@ -15,6 +17,7 @@ from .crud import (
     list_concerts,
     list_ensembles,
     list_entities,
+    list_genre_facets,
     list_mentions,
     list_people,
     list_recordings,
@@ -22,7 +25,7 @@ from .crud import (
     person_concerts,
     person_recordings,
 )
-from .deps import DbSession, EnsembleQuery, FilterQuery, PageQuery
+from .deps import DbSession, EnsembleQuery, FilterQuery, PageQuery, PeopleFilterQuery
 from .schemas import (
     ComposerDetail,
     ComposerPage,
@@ -34,6 +37,9 @@ from .schemas import (
     EnsemblePage,
     EntityDetail,
     EntityPage,
+    GenreDetail,
+    GenrePeoplePage,
+    GenreSummary,
     MentionPage,
     RecordingDetail,
     RecordingListPage,
@@ -83,6 +89,27 @@ def ensembles(
 def ensemble_detail(ensemble_id: uuid.UUID, db: DbSession) -> EnsembleDetail:
     """One ensemble: its other names, the groups it is part of, and its claims."""
     return get_ensemble(db, ensemble_id)
+
+
+@v1.get("/genres", response_model=list[GenreSummary])
+def genres(
+    db: DbSession, kind: Annotated[str, Query(pattern="^(genre|movement)$")] = "genre"
+) -> list[GenreSummary]:
+    """The top-level genres (or movements) as facets, each counting the persons
+    tagged with it or with any genre below it."""
+    return list_genre_facets(db, kind)
+
+
+@v1.get("/genres/{genre_id}", response_model=GenreDetail)
+def genre_detail(genre_id: uuid.UUID, db: DbSession) -> GenreDetail:
+    """One genre or movement with its direct parents and children."""
+    return get_genre(db, genre_id)
+
+
+@v1.get("/genres/{genre_id}/people", response_model=GenrePeoplePage)
+def get_genre_people(genre_id: uuid.UUID, db: DbSession, pager: PageQuery) -> GenrePeoplePage:
+    """Persons tagged with the genre or any genre below it."""
+    return genre_people(db, genre_id, pager)
 
 
 @v1.get("/works", response_model=WorkPage)
@@ -174,7 +201,7 @@ def get_person_recordings(
 def list_composers(
     db: DbSession,
     pager: PageQuery,
-    filters: FilterQuery,
+    filters: PeopleFilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
     """People credited with at least three works, whatever their profession claims say."""
@@ -201,7 +228,7 @@ def get_composer_works(
 def list_soloists(
     db: DbSession,
     pager: PageQuery,
-    filters: FilterQuery,
+    filters: PeopleFilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
     return list_people(db, filters, pager, "soloist", sort=sort)
@@ -216,7 +243,7 @@ def get_soloist(soloist_id: uuid.UUID, db: DbSession) -> ComposerDetail:
 def list_conductors(
     db: DbSession,
     pager: PageQuery,
-    filters: FilterQuery,
+    filters: PeopleFilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
     return list_people(db, filters, pager, "conductor", sort=sort)

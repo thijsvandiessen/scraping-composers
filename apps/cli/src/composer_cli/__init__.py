@@ -17,6 +17,7 @@ from composer_scrapers import REGISTRY
 from composer_warehouse.persons import AUTO_THRESHOLD, MODEL_PATH
 
 from .export_cmds import cmd_export_kumu, cmd_export_neo4j
+from .genre_cmds import cmd_genres, cmd_link_genres
 from .ingest_cmds import (
     cmd_anchor_ensembles,
     cmd_derive_concerts,
@@ -273,6 +274,18 @@ def _add_person_parsers(sub: _SubParsers) -> None:
         "derive-recordings", help="rebuild the recording tables from the work mentions' release context"
     )
     p_recordings.set_defaults(func=cmd_derive_recordings)
+
+    p_genres = sub.add_parser(
+        "genres", help="report how far the genre/movement hierarchy reaches, orphans included"
+    )
+    p_genres.add_argument("--kind", choices=("genre", "movement"), help="one kind only (default both)")
+    p_genres.add_argument("--limit", type=int, default=10, help="most-used orphans to list")
+    p_genres.set_defaults(func=cmd_genres)
+
+    p_link_genres = sub.add_parser(
+        "link-genres", help="point label-only genres/movements at the QID-keyed entity they name"
+    )
+    p_link_genres.set_defaults(func=cmd_link_genres)
 
     p_preview = sub.add_parser(
         "person-review", help="list (or resolve) person duplicate pairs flagged for review"

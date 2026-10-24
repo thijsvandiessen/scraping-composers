@@ -22,7 +22,7 @@ or the scraper stack.
   (Chester/Novello `3223 / 2230 / timp.perc / str[8]`, Boosey
   `3.2.2.3 - 2.2.3.0 - timp - strings[6]`) into the instruments a work
   includes.
-- `testing.py` — `person()`, `mention()`, `FakeSource` and friends, which every
+- `testing.py` — `person()`, `genre()`, `mention()`, `FakeSource` and friends, which every
   other member's tests use (the warehouse re-exports them).
 
 ## Tests
