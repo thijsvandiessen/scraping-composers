@@ -90,6 +90,7 @@ from .roh import RohAdapter  # noqa: E402
 from .wienerphil import WienerPhilAdapter  # noqa: E402
 from .wikidata import (  # noqa: E402
     WikidataAdapter,
+    WikidataCatalogueAdapter,
     WikidataEnsemblesAdapter,
     WikidataGenresAdapter,
     WikidataPlacesAdapter,
@@ -105,6 +106,7 @@ REGISTRY: dict[str, SourceAdapter] = {
     "wikidata_places": WikidataPlacesAdapter(),
     "wikidata_ensembles": WikidataEnsemblesAdapter(),
     "wikidata_genres": WikidataGenresAdapter(),
+    "wikidata_catalogue": WikidataCatalogueAdapter(),
     "concertgebouw_archive": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),
     "berlinphil": BerlinPhilAdapter(),

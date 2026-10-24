@@ -7,7 +7,8 @@ runs the same passes in the same order through :func:`refresh_derived`. A pass
 added here reaches all of them at once.
 
 Order matters: entity links come first (places, then genres, then ensemble
-anchors), so the event derivations that read entities see the linked ones.
+anchors), then work links, so the event derivations that read entities and
+works see the linked ones.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from .ensembles import AnchorStats, anchor_ensembles
 from .genres import GenreLinkStats, link_label_genres
 from .places import LinkPlacesStats, link_places
 from .recordings import DeriveRecordingsStats, derive_recordings
+from .works.links import LinkStats, link_works
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,7 @@ class DerivedStats:
     places: LinkPlacesStats
     genres: GenreLinkStats
     ensembles: AnchorStats
+    works: LinkStats
     concerts: DeriveConcertsStats
     recordings: DeriveRecordingsStats
 
@@ -37,8 +40,14 @@ def refresh_derived(session: Session) -> DerivedStats:
     places = link_places(session)
     genres = link_label_genres(session)
     ensembles = anchor_ensembles(session)
+    works = link_works(session)
     concerts = derive_concerts(session)
     recordings = derive_recordings(session)
     return DerivedStats(
-        places=places, genres=genres, ensembles=ensembles, concerts=concerts, recordings=recordings
+        places=places,
+        genres=genres,
+        ensembles=ensembles,
+        works=works,
+        concerts=concerts,
+        recordings=recordings,
     )

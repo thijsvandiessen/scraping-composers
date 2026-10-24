@@ -6,7 +6,8 @@ record benefits from improved normalization or matching, an old one never
 does. ``rebuild_silver`` closes that gap: it replays every document snapshot
 of every source in the bucket (the bronze tier — the only place the full
 documents, claims included, live) into a fresh database, re-runs the
-derivation passes, and atomically swaps the result in.
+derivation passes (work links, concerts, recordings), and atomically swaps the
+result in.
 
 What gets replayed comes from the bucket itself, not from
 ``composer_scrapers.REGISTRY``: a crawl-config source has no adapter, but the
@@ -68,6 +69,7 @@ class RebuildStats:
     places_linked: int = 0
     genres_linked: int = 0
     ensembles_anchored: int = 0
+    work_links: int = 0
     concerts: int = 0
     recordings: int = 0
 
@@ -195,10 +197,12 @@ def _apply_work_decisions(session: Session, decisions: Sequence[WorkDecision]) -
             )
         )
         if work is None:
+            composer_id = decision.composer_entity_id
+            composer = session.get(Entity, composer_id) if composer_id is not None else None
             work = new_work(
-                decision.composer_entity_id,
+                composer_id,
                 decision.canonical_title,
-                extract_features(decision.canonical_title),
+                extract_features(decision.canonical_title, composer=composer.label if composer else None),
             )
             session.add(work)
             session.flush()
@@ -275,6 +279,7 @@ def _replay(
         places_linked=derived.places.linked,
         genres_linked=derived.genres.linked,
         ensembles_anchored=derived.ensembles.anchored,
+        work_links=derived.works.links,
         concerts=derived.concerts.concerts,
         recordings=derived.recordings.recordings,
     )

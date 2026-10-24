@@ -72,7 +72,7 @@ def cmd_promote(args: argparse.Namespace) -> int:
     session_factory = init_db(engine)
     with session_factory() as session:
         try:
-            # Place and genre links, ensemble anchors, concerts and recordings are silver-derived
+            # Place, genre and work links, ensemble anchors, concerts and recordings are silver-derived
             # state the gold build reads; refresh them first so promote-after-load
             # never publishes stale derivations.
             refresh_derived(session)

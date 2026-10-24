@@ -1,6 +1,7 @@
 """Tests for scoring work candidates and deciding match/review/create."""
 
 import uuid
+from dataclasses import replace
 
 from composer_warehouse.works.extract import extract_features
 from composer_warehouse.works.match import AUTO_THRESHOLD, REVIEW_THRESHOLD, Candidate, resolve, score
@@ -57,3 +58,60 @@ def test_similar_title_without_hard_identifier_needs_review() -> None:
     assert result.work_id is None
     assert result.candidate_work_id == cand.work_id
     assert REVIEW_THRESHOLD <= result.score < AUTO_THRESHOLD
+
+
+MOZART = "Mozart, Wolfgang Amadeus"
+
+
+def test_k_and_kv_match_as_one_koechel_number() -> None:
+    a = extract_features("Symphony no. 40 in G minor K. 550", composer=MOZART)
+    b = extract_features("Symfonie nr. 40 in g kl.t., KV 550", composer=MOZART)
+    assert score(a, b) == (0.97, "catalogue")
+
+
+def test_different_koechel_numbers_conflict() -> None:
+    a = extract_features("Symphony No. 40, K. 550", composer=MOZART)
+    b = extract_features("Symphony No. 41, KV 551", composer=MOZART)
+    assert score(a, b)[1] == "catalogue_conflict"
+
+
+def test_different_catalogues_neither_match_nor_conflict() -> None:
+    # Old and new Köchel numbers are different schemes: no shared key, no conflict
+    a = extract_features("Symphony No. 25, K. 183", composer=MOZART)
+    b = extract_features("Symphony No. 25, K. 173dB", composer=MOZART)
+    assert score(a, b)[1] == "title_fuzzy"
+
+
+def test_a_shared_wikidata_item_is_near_certain() -> None:
+    a = replace(extract_features("Eine kleine Nachtmusik"), identifiers=frozenset({("wikidata", "Q201234")}))
+    b = replace(extract_features("Serenade No. 13"), identifiers=frozenset({("wikidata", "Q201234")}))
+    assert score(a, b) == (0.99, "wikidata")
+
+
+def test_different_wikidata_items_conflict() -> None:
+    a = replace(extract_features("Serenade"), identifiers=frozenset({("wikidata", "Q1")}))
+    b = replace(extract_features("Serenade"), identifiers=frozenset({("wikidata", "Q2")}))
+    assert score(a, b) == (0.05, "external_conflict")
+
+
+def test_a_part_never_matches_its_parent() -> None:
+    parent = extract_features("Brandenburg Concerto No. 3 in G major, BWV 1048")
+    part = extract_features("Allegro (From Brandenburg Concerto No. 3, BWV 1048)")
+    arrangement = extract_features("Brandenburg Concerto No. 3, BWV 1048 (arr. for woodwind quintet)")
+    assert score(parent, part) == (0.05, "derivation_conflict")
+    assert score(parent, arrangement) == (0.05, "derivation_conflict")
+    assert score(part, arrangement) == (0.05, "derivation_conflict")
+
+
+def test_parts_of_different_parents_conflict() -> None:
+    a = extract_features("Allegro (from Brandenburg Concerto No. 3, BWV 1048)")
+    b = extract_features("Allegro (from Brandenburg Concerto No. 4, BWV 1049)")
+    assert score(a, b) == (0.05, "parent_conflict")
+
+
+def test_two_parts_of_one_parent_are_told_apart_by_title() -> None:
+    a = extract_features("Allegro (from Brandenburg Concerto No. 3, BWV 1048)")
+    b = extract_features("Adagio (from Brandenburg Concerto No. 3, BWV 1048)")
+    s, method = score(a, b)
+    assert method == "title_fuzzy"
+    assert s < AUTO_THRESHOLD
