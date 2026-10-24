@@ -91,6 +91,7 @@ from .wienerphil import WienerPhilAdapter  # noqa: E402
 from .wikidata import (  # noqa: E402
     WikidataAdapter,
     WikidataCatalogueAdapter,
+    WikidataGenresAdapter,
     WikidataPlacesAdapter,
     WikidataWorksAdapter,
 )
@@ -102,6 +103,7 @@ REGISTRY: dict[str, SourceAdapter] = {
     "wikidata": WikidataAdapter(),
     "wikidata_works": WikidataWorksAdapter(),
     "wikidata_places": WikidataPlacesAdapter(),
+    "wikidata_genres": WikidataGenresAdapter(),
     "wikidata_catalogue": WikidataCatalogueAdapter(),
     "concertgebouw_archive": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),

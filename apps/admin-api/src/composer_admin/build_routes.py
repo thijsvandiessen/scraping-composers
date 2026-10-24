@@ -17,11 +17,8 @@ from composer_gold import (
     promote,
 )
 from composer_warehouse.build import BuildTarget
-from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.places import link_places
+from composer_warehouse.derived import refresh_derived
 from composer_warehouse.rebuild import rebuild_silver, silver_target
-from composer_warehouse.recordings import derive_recordings
-from composer_warehouse.works.links import link_works
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -40,13 +37,10 @@ def _promote_in_background(gold_url: str, config: PromoteConfig) -> None:
     """Rebuild the gold database; status lives in the gold manifest."""
     with session_scope() as session:
         try:
-            # Place links, work links, concerts and recordings are silver-derived state the
-            # gold build reads; refresh them first so the Promote button never publishes
-            # stale derivations.
-            link_places(session)
-            link_works(session)
-            derive_concerts(session)
-            derive_recordings(session)
+            # Place, genre and work links, concerts and recordings are silver-derived
+            # state the gold build reads; refresh them first so the Promote button
+            # never publishes stale derivations.
+            refresh_derived(session)
             promote(session, gold_url, config)
         except Exception:
             # Recorded as a failed manifest by promote; log for the server console.

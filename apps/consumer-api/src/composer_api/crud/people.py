@@ -12,10 +12,11 @@ from composer_models import (
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
-from ..deps import Filters, Pagination
+from ..deps import Pagination, PeopleFilters
 from ..errors import NotFoundError
 from ..schemas import ComposerDetail, ComposerPage, ComposerSummary
 from .common import outgoing_claims
+from .genres import genre_filter
 
 # Works a person needs to count as a composer. Not the ``composer`` profession
 # claim: wikidata's occupation tags pop stars, poets and conductors as
@@ -63,7 +64,7 @@ def source_filter(source: str) -> ColumnElement[bool]:
 
 def list_people(
     db: Session,
-    filters: Filters,
+    filters: PeopleFilters,
     pager: Pagination,
     role: str,
     sort: str = "label",
@@ -82,6 +83,8 @@ def list_people(
         base = base.where(profession_filter(prof_id))
     if filters.q:
         base = base.where(Entity.label.ilike(f"%{filters.q}%"))
+    if filters.genre is not None:
+        base = base.where(genre_filter(filters.genre))
 
     total = db.scalar(select(func.count()).select_from(base.subquery()))
 

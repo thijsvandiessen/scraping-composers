@@ -335,3 +335,29 @@ class RecordingDetail(BaseModel):
     url: str | None
     participants: list[RecordingParticipantOut]
     works: list[RecordingWorkOut]
+
+
+class GenreRef(BaseModel):
+    id: uuid.UUID
+    label: str
+
+
+class GenreSummary(BaseModel):
+    id: uuid.UUID
+    label: str
+    kind: str  # genre | movement
+    wikidata_id: str | None
+    # distinct persons tagged with this genre or any genre below it
+    person_count: int
+
+
+class GenreDetail(GenreSummary):
+    parents: list[GenreRef]
+    children: list[GenreRef]
+
+
+class GenrePeoplePage(BaseModel):
+    items: list[EntitySummary]
+    total: int
+    page: int
+    limit: int

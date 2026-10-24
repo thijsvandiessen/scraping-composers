@@ -9,11 +9,10 @@ from composer_gold import PromoteConfig, Rule1Config, gold_target, promote
 from composer_models.db import get_engine, init_db
 from composer_scrapers import REGISTRY
 from composer_warehouse.concerts import derive_concerts
+from composer_warehouse.derived import refresh_derived
 from composer_warehouse.ingestion import ingest_documents
-from composer_warehouse.places import link_places
 from composer_warehouse.rebuild import rebuild_silver
 from composer_warehouse.recordings import derive_recordings
-from composer_warehouse.works.links import link_works
 
 log = logging.getLogger(__name__)
 
@@ -60,13 +59,10 @@ def cmd_promote(args: argparse.Namespace) -> int:
     session_factory = init_db(engine)
     with session_factory() as session:
         try:
-            # Place links, work links, concerts and recordings are silver-derived state the
-            # gold build reads; refresh them first so promote-after-load never publishes
-            # stale derivations.
-            link_places(session)
-            link_works(session)
-            derive_concerts(session)
-            derive_recordings(session)
+            # Place, genre and work links, concerts and recordings are silver-derived
+            # state the gold build reads; refresh them first so promote-after-load
+            # never publishes stale derivations.
+            refresh_derived(session)
             config = PromoteConfig(
                 rule1=Rule1Config.from_json(args.rule1_config),
                 min_referrers=args.min_referrers,

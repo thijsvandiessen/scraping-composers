@@ -6,8 +6,9 @@ and metrics queries); ``parse`` folds the result rows into one SourceRecord per
 composer and formats birth/death dates to their recorded precision. ``works``
 is a second adapter over the same service: works with a recorded premiere.
 ``places`` is a third: the places composers point at, with type, hierarchy and
-coordinates.
-``catalogue`` is a fourth: works with a catalogue number, carrying their
+coordinates. ``genres`` is a fourth: the genres and movements those composers
+are tagged with, and their ``subclass of`` hierarchy.
+``catalogue`` is a fifth: works with a catalogue number, carrying their
 MusicBrainz ids, ISWCs and parent works for the warehouse's work identity.
 """
 
@@ -21,6 +22,7 @@ from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence
 from .catalogue import WikidataCatalogueAdapter
+from .genres import WikidataGenresAdapter
 from .parse import BASE_URL, _records_from_rows
 from .places import WikidataPlacesAdapter
 from .query import PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _fetch_metrics, _fetch_page, _fetch_qids
@@ -32,6 +34,7 @@ __all__ = [
     "BASE_URL",
     "WikidataAdapter",
     "WikidataCatalogueAdapter",
+    "WikidataGenresAdapter",
     "WikidataPlacesAdapter",
     "WikidataWorksAdapter",
 ]

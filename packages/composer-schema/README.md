@@ -29,7 +29,7 @@ or the scraper stack.
   (`Anh.`, `BWV Anh.`, `KV Anh.`) as schemes of their own, and the bare letters
   (`D`, `S`, `LW`, `B`, `L`, `H`) only for the composer who uses them. The
   warehouse's work matcher keys on these.
-- `testing.py` — `person()`, `mention()`, `FakeSource` and friends, which every
+- `testing.py` — `person()`, `genre()`, `mention()`, `FakeSource` and friends, which every
   other member's tests use (the warehouse re-exports them).
 
 ## Tests
