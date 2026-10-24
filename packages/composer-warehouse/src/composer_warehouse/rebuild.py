@@ -6,7 +6,8 @@ record benefits from improved normalization or matching, an old one never
 does. ``rebuild_silver`` closes that gap: it replays every document snapshot
 of every source in the bucket (the bronze tier — the only place the full
 documents, claims included, live) into a fresh database, re-runs the
-derivation passes, and atomically swaps the result in.
+derivation passes (work links, concerts, recordings), and atomically swaps the
+result in.
 
 What gets replayed comes from the bucket itself, not from
 ``composer_scrapers.REGISTRY``: a crawl-config source has no adapter, but the
@@ -51,6 +52,7 @@ from .ingestion import ingest_documents, new_work
 from .persons import dedupe_persons
 from .recordings import derive_recordings
 from .works import add_alias, extract_features
+from .works.links import link_works
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +68,7 @@ class RebuildStats:
     person_decisions_dropped: int = 0
     work_decisions_applied: int = 0
     work_decisions_dropped: int = 0
+    work_links: int = 0
     concerts: int = 0
     recordings: int = 0
 
@@ -193,10 +196,12 @@ def _apply_work_decisions(session: Session, decisions: Sequence[WorkDecision]) -
             )
         )
         if work is None:
+            composer_id = decision.composer_entity_id
+            composer = session.get(Entity, composer_id) if composer_id is not None else None
             work = new_work(
-                decision.composer_entity_id,
+                composer_id,
                 decision.canonical_title,
-                extract_features(decision.canonical_title),
+                extract_features(decision.canonical_title, composer=composer.label if composer else None),
             )
             session.add(work)
             session.flush()
@@ -258,6 +263,7 @@ def _replay(
         person_applied, person_dropped = _apply_person_decisions(session, person_decisions)
         deduped = dedupe_persons(session)
         work_applied, work_dropped = _apply_work_decisions(session, work_decisions)
+        link_stats = link_works(session)
         concert_stats = derive_concerts(session)
         recording_stats = derive_recordings(session)
 
@@ -271,6 +277,7 @@ def _replay(
         person_decisions_dropped=person_dropped,
         work_decisions_applied=work_applied,
         work_decisions_dropped=work_dropped,
+        work_links=link_stats.links,
         concerts=concert_stats.concerts,
         recordings=recording_stats.recordings,
     )

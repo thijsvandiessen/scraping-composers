@@ -20,11 +20,58 @@ def test_bach_catalogue_number() -> None:
 
 
 def test_mozart_kochel_number() -> None:
-    f = extract_features("Piano Sonata No. 11 in A major, K. 331")
-    assert f.catalogue_prefix == "K"
+    f = extract_features("Piano Sonata No. 11 in A major, K. 331", composer="Mozart, Wolfgang Amadeus")
+    assert f.catalogue_prefix == "KV"
     assert f.catalogue_number == "331"
+    assert f.identifiers == {("KV", "331")}
     assert f.work_type == "sonata"
     assert f.number == 11
+
+
+def test_a_bare_k_means_nothing_without_the_composer() -> None:
+    # K is Köchel for Mozart, Kirkpatrick for Scarlatti, and nothing for anyone else
+    assert extract_features("Piano Sonata No. 11 in A major, K. 331").identifiers == frozenset()
+    scarlatti = extract_features("Sonata in D minor, K. 9", composer="Scarlatti, Domenico")
+    assert scarlatti.identifiers == {("Kk", "9")}
+
+
+def test_every_catalogue_number_in_the_title_is_an_identifier() -> None:
+    f = extract_features("Sonata in D minor, K. 9, L. 413", composer="Scarlatti, Domenico")
+    assert f.identifiers == {("Kk", "9"), ("L", "413")}
+    assert (f.catalogue_prefix, f.catalogue_number) == ("Kk", "9")  # the first, for display
+
+
+def test_structured_fields_add_catalogue_numbers_and_an_opus() -> None:
+    f = extract_features("Piano Sonata No.14", composer="Beethoven, Ludwig van", structured=["Op.27 No.2"])
+    assert (f.opus_number, f.number) == ("27", 14)
+    f = extract_features("Symphony in G minor", composer="Mozart, Wolfgang Amadeus", structured=["K.550"])
+    assert f.identifiers == {("KV", "550")}
+
+
+def test_an_imslp_internal_number_is_not_a_catalogue() -> None:
+    assert extract_features("Sonata", structured=["ILB 193"]).identifiers == frozenset()
+
+
+def test_a_movement_carries_its_parents_number_as_the_parents() -> None:
+    f = extract_features("Allegro (From Brandenburg Concerto No. 3, BWV 1048)")
+    assert f.derivation == "part"
+    assert f.identifiers == frozenset()
+    assert f.parent_identifiers == {("BWV", "1048")}
+    assert (f.catalogue_prefix, f.catalogue_number) == ("BWV", "1048")
+
+
+def test_arrangement_and_version_cues() -> None:
+    arranged = extract_features("Brandenburg Concerto No. 3, BWV 1048 (arr. for woodwind quintet)")
+    assert arranged.derivation == "arrangement"
+    assert extract_features("Konzert (Bearb. für Klavier)").derivation == "arrangement"
+    assert extract_features("Sinfonie in g KV 550 (1. Fassung)").derivation == "version"
+    assert extract_features("Symphony No. 4 (1841 version)").derivation == "version"
+    assert extract_features("Sonata (Urfassung)").derivation == "version"
+
+
+def test_words_that_merely_contain_a_cue_are_not_derived() -> None:
+    assert extract_features("Arrival of the Queen of Sheba").derivation is None
+    assert extract_features("Concerto in A major, from the Paris set").derivation is None
 
 
 def test_german_title_number_and_key() -> None:

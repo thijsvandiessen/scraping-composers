@@ -32,7 +32,7 @@ from .person_cmds import (
     cmd_person_train,
 )
 from .query_cmds import cmd_claims, cmd_runs, cmd_stats
-from .work_cmds import cmd_rematch, cmd_review, cmd_works
+from .work_cmds import cmd_rematch, cmd_review, cmd_work_identity, cmd_works
 
 if TYPE_CHECKING:
     # What ArgumentParser.add_subparsers returns; argparse doesn't expose a
@@ -80,6 +80,12 @@ def _add_work_parsers(sub: _SubParsers) -> None:
         "rematch", help="re-run matching over unmatched/needs-review mentions (after tuning)"
     )
     p_rematch.set_defaults(func=cmd_rematch)
+
+    p_identity = sub.add_parser(
+        "work-identity",
+        help="per source: the share of works with a catalogue number or external work id, and derived links",
+    )
+    p_identity.set_defaults(func=cmd_work_identity)
 
 
 def _add_bucket_path_arg(parser: argparse.ArgumentParser) -> None:

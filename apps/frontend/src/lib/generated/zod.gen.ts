@@ -328,6 +328,29 @@ export const zHttpValidationError = z.object({
 });
 
 /**
+ * WorkIdentifierOut
+ *
+ * A strong key for a work: a catalogue number (scheme ``BWV``, ``KV``,
+ * ``Hob``...) or an external id (``wikidata``, ``musicbrainz``, ``iswc``).
+ */
+export const zWorkIdentifierOut = z.object({
+    scheme: z.string(),
+    value: z.string()
+});
+
+/**
+ * WorkLinkOut
+ *
+ * A part/arrangement/version relation: ``relation`` is ``part_of``,
+ * ``arrangement_of`` or ``version_of``, read from the derived work.
+ */
+export const zWorkLinkOut = z.object({
+    relation: z.string(),
+    title: z.string(),
+    work_id: z.uuid()
+});
+
+/**
  * WorkProofOut
  */
 export const zWorkProofOut = z.object({
@@ -344,12 +367,14 @@ export const zComposerWorkOut = z.object({
     canonical_title: z.string(),
     catalogue: z.string().nullable(),
     id: z.uuid(),
+    identifiers: z.array(zWorkIdentifierOut).optional().default([]),
     mention_count: z.int(),
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
     premiere_date: z.string().nullable(),
     proof: z.array(zWorkProofOut),
+    wikidata_id: z.string().nullish(),
     work_type: z.string().nullable()
 });
 
@@ -374,13 +399,18 @@ export const zWorkDetail = z.object({
     catalogue: z.string().nullable(),
     composer_id: z.uuid().nullable(),
     composer_label: z.string().nullable(),
+    derived: z.array(zWorkLinkOut).optional().default([]),
     id: z.uuid(),
+    identifiers: z.array(zWorkIdentifierOut).optional().default([]),
+    links: z.array(zWorkLinkOut).optional().default([]),
     mention_count: z.int(),
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
     premiere_date: z.string().nullable(),
+    premiere_place: z.string().nullish(),
     proof: z.array(zWorkProofOut),
+    wikidata_id: z.string().nullish(),
     work_type: z.string().nullable()
 });
 
@@ -394,11 +424,13 @@ export const zWorkSummary = z.object({
     composer_id: z.uuid().nullable(),
     composer_label: z.string().nullable(),
     id: z.uuid(),
+    identifiers: z.array(zWorkIdentifierOut).optional().default([]),
     mention_count: z.int(),
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
     premiere_date: z.string().nullable(),
+    wikidata_id: z.string().nullish(),
     work_type: z.string().nullable()
 });
 

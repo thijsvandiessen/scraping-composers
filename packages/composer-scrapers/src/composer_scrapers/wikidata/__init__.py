@@ -5,6 +5,8 @@ Service. ``query`` holds the SPARQL access (id-list query + per-batch detail
 and metrics queries); ``parse`` folds the result rows into one SourceRecord per
 composer and formats birth/death dates to their recorded precision. ``works``
 is a second adapter over the same service: works with a recorded premiere.
+``catalogue`` is a third: works with a catalogue number, carrying their
+MusicBrainz ids, ISWCs and parent works for the warehouse's work identity.
 """
 
 from __future__ import annotations
@@ -16,13 +18,14 @@ from datetime import UTC, datetime
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence
+from .catalogue import WikidataCatalogueAdapter
 from .parse import BASE_URL, _records_from_rows
 from .query import PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _fetch_metrics, _fetch_page, _fetch_qids
 from .works import WikidataWorksAdapter
 
 log = logging.getLogger(__name__)
 
-__all__ = ["BASE_URL", "WikidataAdapter", "WikidataWorksAdapter"]
+__all__ = ["BASE_URL", "WikidataAdapter", "WikidataCatalogueAdapter", "WikidataWorksAdapter"]
 
 
 class WikidataAdapter(HttpSourceAdapter[EntityDocument]):

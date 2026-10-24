@@ -204,6 +204,14 @@
             "title": "Id",
             "type": "string"
           },
+          "identifiers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkIdentifierOut"
+            },
+            "title": "Identifiers",
+            "type": "array"
+          },
           "mention_count": {
             "title": "Mention Count",
             "type": "integer"
@@ -258,6 +266,17 @@
             },
             "title": "Proof",
             "type": "array"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
           },
           "work_type": {
             "anyOf": [
@@ -1673,10 +1692,34 @@
             ],
             "title": "Composer Label"
           },
+          "derived": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkLinkOut"
+            },
+            "title": "Derived",
+            "type": "array"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "identifiers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkIdentifierOut"
+            },
+            "title": "Identifiers",
+            "type": "array"
+          },
+          "links": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkLinkOut"
+            },
+            "title": "Links",
+            "type": "array"
           },
           "mention_count": {
             "title": "Mention Count",
@@ -1726,12 +1769,34 @@
             ],
             "title": "Premiere Date"
           },
+          "premiere_place": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premiere Place"
+          },
           "proof": {
             "items": {
               "$ref": "#/components/schemas/WorkProofOut"
             },
             "title": "Proof",
             "type": "array"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
           },
           "work_type": {
             "anyOf": [
@@ -1761,6 +1826,50 @@
           "proof"
         ],
         "title": "WorkDetail",
+        "type": "object"
+      },
+      "WorkIdentifierOut": {
+        "description": "A strong key for a work: a catalogue number (scheme ``BWV``, ``KV``,\n``Hob``...) or an external id (``wikidata``, ``musicbrainz``, ``iswc``).",
+        "properties": {
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheme",
+          "value"
+        ],
+        "title": "WorkIdentifierOut",
+        "type": "object"
+      },
+      "WorkLinkOut": {
+        "description": "A part/arrangement/version relation: ``relation`` is ``part_of``,\n``arrangement_of`` or ``version_of``, read from the derived work.",
+        "properties": {
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation",
+          "work_id",
+          "title"
+        ],
+        "title": "WorkLinkOut",
         "type": "object"
       },
       "WorkPage": {
@@ -1893,6 +2002,14 @@
             "title": "Id",
             "type": "string"
           },
+          "identifiers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkIdentifierOut"
+            },
+            "title": "Identifiers",
+            "type": "array"
+          },
           "mention_count": {
             "title": "Mention Count",
             "type": "integer"
@@ -1940,6 +2057,17 @@
               }
             ],
             "title": "Premiere Date"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
           },
           "work_type": {
             "anyOf": [

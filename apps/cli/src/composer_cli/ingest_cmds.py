@@ -12,6 +12,7 @@ from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.ingestion import ingest_documents
 from composer_warehouse.rebuild import rebuild_silver
 from composer_warehouse.recordings import derive_recordings
+from composer_warehouse.works.links import link_works
 
 log = logging.getLogger(__name__)
 
@@ -58,9 +59,10 @@ def cmd_promote(args: argparse.Namespace) -> int:
     session_factory = init_db(engine)
     with session_factory() as session:
         try:
-            # Concerts and recordings are silver-derived state the gold build
+            # Work links, concerts and recordings are silver-derived state the gold build
             # copies; refresh them first so promote-after-load never publishes
             # stale derivations.
+            link_works(session)
             derive_concerts(session)
             derive_recordings(session)
             config = PromoteConfig(

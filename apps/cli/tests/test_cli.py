@@ -15,8 +15,8 @@ from composer_cli.export_cmds import cmd_export_kumu
 from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_eval, cmd_person_review, cmd_person_train
 from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
-from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
-from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work
+from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_work_identity, cmd_works, work_identity
+from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work, WorkIdentifier
 from composer_models.db import get_engine, init_db
 from composer_schema import SourceClaim
 from composer_warehouse.concerts import derive_concerts
@@ -25,6 +25,7 @@ from composer_warehouse.persons.evaluation import read_dataset
 from composer_warehouse.persons.fellegi_sunter import LinkageModel
 from composer_warehouse.persons.training import sample_non_match_levels
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
+from composer_warehouse.works.links import link_works
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -248,6 +249,84 @@ def test_cmd_rematch_processes_pending_mentions(tmp_path: Path, capsys: pytest.C
     )
     assert cmd_rematch(_ns(database_url=db_url)) == 0
     assert "re-matched" in capsys.readouterr().out
+
+
+def test_cmd_rematch_reads_structured_catalogue_fields(tmp_path: Path) -> None:
+    """A pending mention is re-read with its source's structured fields, so
+    an IMSLP page's "K.550" matches a work carrying KV 550."""
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    mozart = "Mozart, Wolfgang Amadeus"
+    _ingest(db_url, mention("Symphony No. 40 in G minor, KV 550", mozart, "m1"))
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(perf_mention("w1", "Sinfonie g-Moll", mozart, {"opus_catalogue_number": "K.550"}),),
+                name="imslp_works",
+            ),
+        )
+        pending = session.scalars(select(RawWorkMention).where(RawWorkMention.external_id == "w1")).one()
+        # undo the ingest's decision so rematch has something to do
+        pending.match_status, pending.work_id = "unmatched", None
+        session.commit()
+
+    assert cmd_rematch(_ns(database_url=db_url)) == 0
+
+    with factory() as session:
+        rematched = session.scalars(select(RawWorkMention).where(RawWorkMention.external_id == "w1")).one()
+        assert (rematched.match_status, rematched.match_method) == ("auto_matched", "catalogue")
+        assert session.scalar(select(func.count(Work.id))) == 1
+        assert ("KV", "550") in set(
+            session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)).tuples()
+        )
+
+
+def test_work_identity_reports_the_share_of_anchored_works(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    bach = "Bach, Johann Sebastian"
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    mention("Brandenburg Concerto No. 3, BWV 1048", bach, "a1"),
+                    mention("Allegro (from Brandenburg Concerto No. 3, BWV 1048)", bach, "a2"),
+                    mention("Air on the G String", bach, "a3"),
+                    mention("Sheep May Safely Graze", bach, "a4"),
+                ),
+                name="catalogue",
+            ),
+        )
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    perf_mention(
+                        "Q1:Q1339", "Mass in B minor", bach, {"item": "https://www.wikidata.org/entity/Q1"}
+                    ),
+                ),
+                name="wikidata_works",
+            ),
+        )
+        link_works(session)
+        rows = {row.source: row for row in work_identity(session)}
+
+    catalogue = rows["catalogue"]
+    assert (catalogue.mentions, catalogue.works) == (4, 4)
+    assert (catalogue.with_catalogue, catalogue.with_external, catalogue.derived_links) == (1, 0, 1)
+    assert rows["wikidata_works"].with_external == 1
+    overall = rows["(all)"]
+    assert (overall.works, overall.with_either) == (5, 2)
+    # the issue's baseline: 2.4% of works had a catalogue number
+    assert overall.share(overall.with_either) > 2.4
+
+    assert cmd_work_identity(_ns(database_url=db_url)) == 0
+    out = capsys.readouterr().out
+    assert "catalogue" in out and "wikidata_works" in out and "40.0%" in out
 
 
 # ---------------------------------------------------------------------------

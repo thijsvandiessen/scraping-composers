@@ -26,7 +26,9 @@ uv run uvicorn composer_api:silver_app --port 8003   # staging
 - `GET /v1/entities?q=&kind=` / `GET /v1/entities/{id}` — search every entity kind; the detail shows
   each claim with its source plus the (capped) list of claims pointing at the entity
 - `GET /v1/works?q=&source=` / `GET /v1/works/{id}` — resolved works by title or composer, with
-  aliases, mention counts and proof
+  aliases, mention counts, proof, `identifiers` (catalogue numbers and external ids) and
+  `wikidata_id`; the detail adds `links` (the works it is a part, arrangement or version of)
+  and `derived` (its own parts, arrangements and versions)
 - `GET /v1/mentions?status=` — work mentions with the matcher's decision;
   `status=needs_review` is the review queue, each entry with its best candidate work
 
@@ -53,6 +55,6 @@ SQLite file, and into Postgres when `COMPOSER_TEST_POSTGRES_URL` is set.
 | People | Soloist, conductor and composer lists: role selection, a person in two roles, search, pagination, the source filter, sorting by concert or recording count, invalid paging (422), detail with claims, and 404s for a missing person or the wrong role. |
 | Provenance | `source_url` pointing at the record page or falling back to the source's base URL, in silver and after promotion. |
 | Entities and stats | Search across kinds, the kind filter, random sampling, linked claim objects, incoming claims, 404s, and dataset counts. |
-| Works and mentions | Works with aliases and mention counts, search by composer, the source filter, work detail with proof and its premiere date and place, the review queue with its candidate, and a composer's works with concert and catalogue proof. |
+| Works and mentions | Works with aliases and mention counts, search by composer, the source filter, work detail with proof and its premiere date and place, identifiers, Wikidata id and part/derived links in gold, the review queue with its candidate, and a composer's works with concert and catalogue proof. |
 | Concerts and recordings | Lists newest first with summaries, search by participant and source, details with participants, programme and works, and a person's concerts and recordings. |
 | Gold curation | Gold hiding people without performance evidence, keeping works with their mention counts, and stats reflecting curation. |

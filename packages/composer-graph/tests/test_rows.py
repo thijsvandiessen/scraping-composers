@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any
 
+from composer_gold import promote
 from composer_graph.rows import (
     RelGroup,
     Skipped,
@@ -12,9 +13,14 @@ from composer_graph.rows import (
     entity_nodes,
     performed_in,
     programmed,
+    work_links,
     work_nodes,
 )
+from composer_models.db import init_db
+from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
+from composer_warehouse.works.links import link_works
 from graph_fixture import gold_session
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 
@@ -105,3 +111,28 @@ def test_object_claims_become_typed_relationships(session: Session, tmp_path: Pa
     assert ("Beinum, Eduard van", "STUDENT_OF", "Mengelberg, Willem") in edges
     born_in = next(row for group, row in rels if group.type == "BORN_IN")
     assert born_in["props"]["sources"] == ["archive"]
+
+
+def test_works_carry_identifiers_and_link_to_their_parent(session: Session, tmp_path: Path) -> None:
+    bach = "Bach, Johann Sebastian"
+    concerto = "Brandenburg Concerto No. 3, BWV 1048"
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                perf_mention("Q1:Q1339", concerto, bach, {"item": "http://www.wikidata.org/entity/Q1"}),
+                mention("Allegro (from Brandenburg Concerto No. 3, BWV 1048)", bach, "m2"),
+            ),
+            name="wikidata_works",
+        ),
+    )
+    link_works(session)
+    promote(session, f"sqlite:///{tmp_path / 'gold.db'}")
+    with init_db(create_engine(f"sqlite:///{tmp_path / 'gold.db'}"))() as gold:
+        works = {row["title"]: row for row in work_nodes(gold)}
+        edges = _named(gold, list(work_links(gold, Skipped())))
+
+    assert works[concerto]["identifiers"] == ["BWV 1048", "wikidata Q1"]
+    assert works[concerto]["wikidata_id"] == "Q1"
+    assert "identifiers" not in works["Allegro (from Brandenburg Concerto No. 3, BWV 1048)"]
+    assert edges == {("Allegro (from Brandenburg Concerto No. 3, BWV 1048)", "PART_OF", concerto)}

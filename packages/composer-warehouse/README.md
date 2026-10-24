@@ -46,12 +46,41 @@ Concert programmes name works as free text — "Symphony No. 5 in C minor",
 deduplicating on the exact title (which collides across composers and splits the
 same work across spellings), works go through a resolution pipeline (`works/`):
 it extracts catalogue/opus numbers, key, type and number from the title, finds
-candidate works by the same composer, and scores them. A matching `BWV`/`Op.`
-number is near-certain identity; otherwise a `difflib` title comparison
-sharpened by the extracted features decides. High scores auto-match, middling
-scores are flagged for `composer-ingest review`, low scores create a new work.
-Work ids are assigned at creation, not derived from the title. The tables are
-described in [`composer-models`](../composer-models/README.md#data-model).
+candidate works by the same composer, and scores them. Strong keys come first:
+a shared Wikidata item, MusicBrainz work or ISWC, then a shared catalogue
+number, then a matching opus; a scheme numbered differently on both sides is a
+conflict. Otherwise a `difflib` title comparison sharpened by the extracted
+features decides. High scores auto-match, middling scores are flagged for
+`composer-ingest review`, low scores create a new work. Work ids are assigned at
+creation, not derived from the title. The tables are described in
+[`composer-models`](../composer-models/README.md#data-model).
+
+**Catalogue numbers** are normalised per composer by
+[`composer_schema.catalogues`](../composer-schema/README.md): `K. 550`, `KV 550`
+and `K.550` are all Köchel `KV 550` for Mozart (lettered sixth-edition numbers
+are `KV6`), `K` is Kirkpatrick for Domenico Scarlatti, Hoboken separators are
+unified (`Hob XVI:52`), and a bare `D`/`S`/`B`/`L`/`H` only counts for the
+composer who uses that catalogue. Besides the title, `works/sources.py` reads
+what a source states elsewhere in the payload: IMSLP's "Opus/Catalogue Number"
+(not its internal `ILB` number), and `wikidata_works`/`wikidata_catalogue`'s
+item QID, catalogue codes, MusicBrainz ids and ISWCs. Henle and Bärenreiter
+`catalogue_number`s are edition numbers and are not read. Every identifier a
+mention brings is stored in `work_identifiers` against its work, and the
+matcher's candidates carry them (`works.load_candidates`), so a work found by
+its IMSLP catalogue field still matches on it in the next run.
+
+**Parts, arrangements and versions** share their parent's number without being
+it. A title cue — `(from …)`/`(aus …)`, `arr.`/`Bearb.`/`transcr.`,
+`1. Fassung`/`Urfassung`/`revised version` — marks the mention as derived: it
+never matches a work of another kind, and its catalogue numbers are kept as the
+parent's. `works/links.py` (`link_works`) then rebuilds `work_links`: a derived
+work points at the one non-derived work by the same composer holding one of its
+parent numbers (`part_of`, `arrangement_of`, `version_of`; method `catalogue`),
+and a `wikidata_catalogue` work *part of* (P361) another item points at the work
+with that QID (method `wikidata`). It runs in `rebuild-silver` and before every
+promote. `composer-ingest work-identity` reports, per source, the share of
+works with a catalogue number or external id and how many are linked to a
+parent.
 
 ## People deduplication
 
@@ -170,8 +199,9 @@ factories) come from `composer_warehouse.testing`.
 
 | File | Covers |
 | --- | --- |
-| `test_work_extract.py` | Extracting catalogue numbers (BWV, K., Op.), key, type and number from titles, including German titles. |
-| `test_work_matching.py` | Scoring candidates and deciding auto-match, review or create. |
+| `test_work_extract.py` | Extracting catalogue numbers (BWV, K., Op.), key, type and number from titles, including German titles; numbers read for the composer (a bare `K` only for Mozart or Scarlatti), structured catalogue fields, and the part/arrangement/version cues that make a parent's number the parent's. |
+| `test_work_matching.py` | Scoring candidates and deciding auto-match, review or create; K and KV as one Köchel number, catalogue and Wikidata conflicts, old and new Köchel kept apart, and derived works never matching their parent. |
+| `test_work_identity.py` | Identity end to end (#351): the four Mozart No. 40 titles resolving to one work plus a version linked to it, a Brandenburg movement and arrangement linked to BWV 1048 without merging, an ambiguous parent left unlinked, IMSLP's structured catalogue field and a shared Wikidata item as strong keys, stored identifiers matching in the next run, Wikidata ids normalised, P361 links, and `link_works` rebuilding rather than accumulating. |
 
 **People**
 
@@ -194,7 +224,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, re-running, and ids derived from source + key that a new concert sorting first doesn't move. |
 | `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, and ids derived from source + key. |
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |
-| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
+| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, work links recreated on every rebuild. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
 | `test_postgres_target.py` | Postgres only: the schema swap, readers across it, the manifest table, and the locks that keep a rebuild and a reader apart. |
 
 `ingestion/runner.py`'s `create_run` has no test here; the admin API, its only

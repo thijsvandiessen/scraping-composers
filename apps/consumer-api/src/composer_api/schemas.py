@@ -89,6 +89,23 @@ class EntityDetail(BaseModel):
     incoming: list[IncomingClaimOut]
 
 
+class WorkIdentifierOut(BaseModel):
+    """A strong key for a work: a catalogue number (scheme ``BWV``, ``KV``,
+    ``Hob``...) or an external id (``wikidata``, ``musicbrainz``, ``iswc``)."""
+
+    scheme: str
+    value: str
+
+
+class WorkLinkOut(BaseModel):
+    """A part/arrangement/version relation: ``relation`` is ``part_of``,
+    ``arrangement_of`` or ``version_of``, read from the derived work."""
+
+    relation: str
+    work_id: uuid.UUID
+    title: str
+
+
 class WorkSummary(BaseModel):
     id: uuid.UUID
     canonical_title: str
@@ -97,6 +114,8 @@ class WorkSummary(BaseModel):
     work_type: str | None
     opus_number: str | None
     catalogue: str | None
+    identifiers: list[WorkIdentifierOut] = []
+    wikidata_id: str | None = None
     musical_key: str | None
     number: int | None
     premiere_date: str | None
@@ -126,6 +145,8 @@ class WorkDetail(BaseModel):
     work_type: str | None
     opus_number: str | None
     catalogue: str | None
+    identifiers: list[WorkIdentifierOut] = []
+    wikidata_id: str | None = None
     musical_key: str | None
     number: int | None
     premiere_date: str | None
@@ -133,6 +154,10 @@ class WorkDetail(BaseModel):
     mention_count: int
     aliases: list[str]
     proof: list[WorkProofOut]
+    # the works this one is a part/arrangement/version of
+    links: list[WorkLinkOut] = []
+    # the parts, arrangements and versions of this one
+    derived: list[WorkLinkOut] = []
 
 
 class ComposerWorkOut(BaseModel):
@@ -141,6 +166,8 @@ class ComposerWorkOut(BaseModel):
     work_type: str | None
     opus_number: str | None
     catalogue: str | None
+    identifiers: list[WorkIdentifierOut] = []
+    wikidata_id: str | None = None
     musical_key: str | None
     number: int | None
     premiere_date: str | None

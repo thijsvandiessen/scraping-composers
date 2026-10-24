@@ -15,7 +15,9 @@ export-neo4j`. Open Neo4j Browser at http://localhost:7475 and connect to
 People, ensembles, places, genres, movements, professions and periods become
 labelled nodes, with their literal claims (`born_on`, `sitelink_count`, …) as
 properties. Works, concerts and recordings are nodes too, linked by `COMPOSED_BY`,
-`PERFORMED_IN {role}` and `PROGRAMMED`. Object claims become relationships
+`PERFORMED_IN {role}` and `PROGRAMMED`; a work node carries its `identifiers`
+("BWV 1048", "wikidata Q…") and `wikidata_id`, and a part, arrangement or version
+points at its parent with `PART_OF`, `ARRANGEMENT_OF` or `VERSION_OF {method}`. Object claims become relationships
 (`BORN_IN`, `HAS_GENRE`, …) that carry the sources asserting them. That includes
 the Wikidata person ↔ person relations: `STUDENT_OF`, `TEACHER_OF`,
 `INFLUENCED_BY`, and the family links. Nothing is pre-aggregated: how strongly
@@ -40,7 +42,7 @@ uv run --directory packages/composer-graph pytest --rootdir . --cov=composer_gra
 
 | File | Covers |
 | --- | --- |
-| `test_rows.py` | Reading gold as graph rows: labelled entity nodes with literal claims as properties, concert and work nodes, `COMPOSED_BY`, `PERFORMED_IN` with the role, `PROGRAMMED`, and object claims as typed relationships. |
+| `test_rows.py` | Reading gold as graph rows: labelled entity nodes with literal claims as properties, concert and work nodes (with their identifiers and Wikidata id), `PART_OF` between works, `COMPOSED_BY`, `PERFORMED_IN` with the role, `PROGRAMMED`, and object claims as typed relationships. |
 | `test_load.py` | Loading into a real Neo4j: the event graph, performer → composer strength as a path count, composers connected by shared programmes, and a second load replacing the first. |
 
 `test_load.py` is skipped unless `COMPOSER_TEST_NEO4J_URL` points at a server

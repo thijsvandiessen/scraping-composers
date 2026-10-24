@@ -15,7 +15,7 @@ from .core import IngestRun, Source
 from .entities import Claim, Entity, EntityRecord
 from .persons import PersonMatch
 from .recordings import Recording, RecordingParticipant, RecordingWork
-from .works import RawWorkMention, Work, WorkTitle
+from .works import RawWorkMention, Work, WorkIdentifier, WorkLink, WorkTitle
 
 __all__ = [
     "Base",
@@ -33,6 +33,8 @@ __all__ = [
     "RecordingWork",
     "Source",
     "Work",
+    "WorkIdentifier",
+    "WorkLink",
     "WorkTitle",
     "utcnow",
 ]

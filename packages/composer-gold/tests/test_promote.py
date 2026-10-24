@@ -19,6 +19,8 @@ from composer_models import (
     RawWorkMention,
     Recording,
     Work,
+    WorkIdentifier,
+    WorkLink,
 )
 from composer_models.db import init_db
 from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
@@ -32,6 +34,7 @@ from composer_warehouse.testing import (
     perf_mention,
     person,
 )
+from composer_warehouse.works.links import link_works
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -1138,3 +1141,36 @@ def test_a_works_premiere_survives_promotion(session: Session, tmp_path: Path) -
         assert (work.premiere_date, work.premiere_place) == ("1741", "Dresden")
         assert silver_source is not None
         assert work.premiere_source_id == silver_source
+
+
+def test_work_identifiers_and_links_survive_promotion(session: Session, tmp_path: Path) -> None:
+    bach = "Bach, Johann Sebastian"
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                mention("Brandenburg Concerto No. 3, BWV 1048", bach, "a1"),
+                mention("Allegro (from Brandenburg Concerto No. 3, BWV 1048)", bach, "a2"),
+            ),
+            name="a",
+        ),
+    )
+    link_works(session)
+    silver_link = session.scalars(select(WorkLink)).one()
+    gold_path = tmp_path / "gold.db"
+
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        link = gold.scalars(select(WorkLink)).one()
+        assert (link.work_id, link.relation, link.target_work_id) == (
+            silver_link.work_id,
+            "part_of",
+            silver_link.target_work_id,
+        )
+        identifier = gold.scalars(select(WorkIdentifier)).one()
+        assert (identifier.work_id, identifier.scheme, identifier.value) == (
+            link.target_work_id,
+            "BWV",
+            "1048",
+        )
