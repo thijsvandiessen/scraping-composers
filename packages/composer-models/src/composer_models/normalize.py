@@ -56,8 +56,9 @@ _QID_KEY = re.compile(r"^wikidata:(Q\d+)$")
 #: or movement is a vocabulary term: its QID names it, and its label is display
 #: text Wikidata may rename. ``label|QID`` (what :func:`dedup_key` writes for a
 #: person) would split one genre into two entities on a rename — and a silver
-#: rebuild replays every bronze run, old labels included (#349).
-QID_KEYED_KINDS = frozenset({"genre", "movement"})
+#: rebuild replays every bronze run, old labels included (#349). An ensemble
+#: with a QID is that orchestra under whatever name it is printed (#350).
+QID_KEYED_KINDS = frozenset({"genre", "movement", "ensemble"})
 
 
 def dedup_key(name: str, wikidata_id: str | None = None) -> str:

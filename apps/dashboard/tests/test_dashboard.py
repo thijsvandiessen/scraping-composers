@@ -563,6 +563,30 @@ class StubDataAPI:
         self._maybe_fail()
         return ENTITY_DETAIL_PAYLOAD
 
+    def list_ensembles(
+        self,
+        filters: Filters = NO_FILTERS,
+        anchored: bool | None = None,
+        page: int = 1,
+        limit: int = 20,
+        sort: str = "label",
+    ) -> dict[str, Any]:
+        self._maybe_fail()
+        assert (anchored, sort) == (False, "appearances")
+        items = [
+            {
+                "id": ENTITY_ID,
+                "label": "Junge Philharmonie Wien",
+                "wikidata_id": None,
+                "ensemble_type": "orchestra",
+                "home_city": None,
+                "canonical_entity_id": None,
+                "concert_count": 4,
+                "recording_count": 1,
+            }
+        ]
+        return {"items": items, "total": 21, "page": page, "limit": limit}
+
     def list_people(
         self, role: str, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20, sort: str = "label"
     ) -> dict[str, Any]:
@@ -762,6 +786,7 @@ def _install_data(monkeypatch: pytest.MonkeyPatch, stub: StubDataAPI) -> None:
 def test_data_pages_require_admin_login() -> None:
     for url in (
         "/admin/data/",
+        "/admin/data/ensembles/",
         "/admin/data/entities/",
         f"/admin/data/entities/{ENTITY_ID}/",
         "/admin/data/works/",
@@ -792,6 +817,39 @@ def test_entities_page_renders_rows_and_pagination(
     # arrow keys page through results: the handler targets the prev/next links
     assert 'id="sc-prev"' in page and 'id="sc-next"' in page
     assert "ArrowRight" in page and "ArrowLeft" in page
+
+
+def test_ensembles_page_lists_the_unanchored_with_entity_links(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install_data(monkeypatch, StubDataAPI())
+    page = staff_client.get("/admin/data/ensembles/?q=wien").content.decode()
+    assert "Junge Philharmonie Wien" in page
+    assert f"/admin/data/entities/{ENTITY_ID}/" in page
+    assert "orchestra" in page
+    assert "21 unanchored" in page and "page 1 of 2" in page
+    assert "q=wien" in page  # the next link keeps the search
+
+
+def test_ensembles_page_shows_an_api_error(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    _install_data(monkeypatch, StubDataAPI(error="API unreachable"))
+    assert "API unreachable" in staff_client.get("/admin/data/ensembles/").content.decode()
+
+
+def test_data_client_lists_ensembles() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/ensembles"
+        assert dict(request.url.params) == {
+            "page": "1",
+            "limit": "20",
+            "sort": "appearances",
+            "q": "wien",
+            "anchored": "false",
+        }
+        return httpx.Response(200, json={"items": [], "total": 0, "page": 1, "limit": 20})
+
+    api = _data_api(handler)
+    assert api.list_ensembles(Filters(q="wien"), anchored=False, sort="appearances")["total"] == 0
 
 
 def test_entities_page_tolerates_junk_page_param(

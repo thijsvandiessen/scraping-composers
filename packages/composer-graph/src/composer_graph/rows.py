@@ -80,13 +80,16 @@ CLAIM_TYPES: dict[str, str] = {
     "parent_of": "PARENT_OF",
     "spouse_of": "SPOUSE_OF",
     "sibling_of": "SIBLING_OF",
+    # Ensemble → home city and ensemble → the larger group it belongs to.
+    "based_in": "BASED_IN",
+    "part_of": "PART_OF",
 }
 
 # Literal claims carried onto entity nodes. Single-valued ones take the value
 # the most sources back; counts become integers so Cypher can order by them;
 # list-valued ones keep every distinct value. Bookkeeping claims
 # (statement_count, mentioned_in, ...) are left out.
-_LITERAL_SINGLE = ("born_on", "died_on", "first_season", "last_season", "musicbrainz_id")
+_LITERAL_SINGLE = ("born_on", "died_on", "first_season", "last_season", "musicbrainz_id", "ensemble_type")
 _LITERAL_COUNTS = ("sitelink_count", "work_count", "program_count")
 _LITERAL_LISTS = ("also_known_as", "performs_as", "has_function")
 

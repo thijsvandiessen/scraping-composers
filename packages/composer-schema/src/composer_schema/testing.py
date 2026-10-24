@@ -63,11 +63,14 @@ def person(
     )
 
 
-def ensemble(name: str, *claims: SourceClaim, external_id: str | None = None) -> EntityDocument:
-    """A group (orchestra, choir) — the ``ensemble`` entity kind."""
+def ensemble(
+    name: str, *claims: SourceClaim, external_id: str | None = None, url: str | None = None
+) -> EntityDocument:
+    """A group (orchestra, choir) — the ``ensemble`` entity kind. A
+    ``wikidata.org/wiki/Q...`` ``url`` keys the ensemble on its QID."""
     return EntityDocument(
         id=external_id or f"Category:{name}",
-        url=None,
+        url=url,
         source_name="fake",
         ingested_at=_INGESTED_AT,
         name=name,

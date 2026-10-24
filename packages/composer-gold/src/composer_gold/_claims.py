@@ -59,8 +59,11 @@ def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
     build.all_other = set(build.silver.scalars(select(Entity.id).where(Entity.kind != "person")))
     # Ensembles are judged by rule 1 (credits), not by being referenced: an
     # ensemble a kept person points at but that never played a concert or
-    # recording stays out, and the walk does not expand through it.
-    frontier = {r for r in referenced if r not in build.kept_roots and r not in build.unevidenced_ensembles}
+    # recording stays out, and the walk does not expand through it. A kept
+    # ensemble seeds the walk itself, so its own object claims (``based_in``,
+    # ``part_of``) are copied and the places they name are kept.
+    seeds = referenced | (build.kept_ensembles - build.kept_roots)
+    frontier = {r for r in seeds if r not in build.kept_roots and r not in build.unevidenced_ensembles}
     while frontier:
         build.kept_other |= frontier
         next_frontier: set[uuid.UUID] = set()
@@ -97,14 +100,15 @@ def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
 
 
 def collect_other_literal_claims(build: GoldBuild) -> None:
-    """Own claims of kept non-person entities (literals, e.g. mentioned_in)."""
-    for chunk in chunked(sorted(build.kept_other, key=str)):
+    """Own claims of kept non-person entities (literals, e.g. mentioned_in),
+    plus those of the name variants folded onto a kept ensemble, re-pointed."""
+    for chunk in chunked(sorted(build.kept_other | build.ensemble_members(), key=str)):
         for c in build.silver.execute(
             select(Claim).where(Claim.subject_id.in_(chunk), Claim.object_id.is_(None))
         ).scalars():
             build.claim_rows.append(
                 {
-                    "subject_id": c.subject_id,
+                    "subject_id": build.root(c.subject_id),
                     "predicate": c.predicate,
                     "object_id": None,
                     "value": c.value,

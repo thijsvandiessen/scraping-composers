@@ -85,8 +85,9 @@ def copy_entities(build: GoldBuild, gold: Connection, ids: set[uuid.UUID]) -> No
 
 
 def copy_records(build: GoldBuild, gold: Connection) -> None:
-    """Entity records of everything kept, re-pointed."""
-    record_owner_ids = sorted(build.kept_members | build.kept_other, key=str)
+    """Entity records of everything kept, re-pointed — including those of the
+    name variants folded onto a kept ensemble, which land on its root."""
+    record_owner_ids = sorted(build.kept_members | build.kept_other | build.ensemble_members(), key=str)
     for chunk in chunked(record_owner_ids):
         rows = [
             {

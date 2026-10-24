@@ -133,6 +133,56 @@ export const zConcertDetail = z.object({
 });
 
 /**
+ * EntityRef
+ */
+export const zEntityRef = z.object({
+    id: z.uuid(),
+    label: z.string()
+});
+
+/**
+ * EnsembleDetail
+ */
+export const zEnsembleDetail = z.object({
+    aliases: z.array(z.string()),
+    canonical_entity_id: z.uuid().nullable(),
+    claims: z.array(zClaimOut),
+    concert_count: z.int().optional().default(0),
+    ensemble_type: z.string().nullable(),
+    home_city: zEntityRef.nullable(),
+    id: z.uuid(),
+    label: z.string(),
+    musicbrainz_id: z.string().nullable(),
+    part_of: z.array(zEntityRef),
+    recording_count: z.int().optional().default(0),
+    wikidata_id: z.string().nullable()
+});
+
+/**
+ * EnsembleSummary
+ */
+export const zEnsembleSummary = z.object({
+    canonical_entity_id: z.uuid().nullable(),
+    concert_count: z.int().optional().default(0),
+    ensemble_type: z.string().nullable(),
+    home_city: zEntityRef.nullable(),
+    id: z.uuid(),
+    label: z.string(),
+    recording_count: z.int().optional().default(0),
+    wikidata_id: z.string().nullable()
+});
+
+/**
+ * EnsemblePage
+ */
+export const zEnsemblePage = z.object({
+    items: z.array(zEnsembleSummary),
+    limit: z.int(),
+    page: z.int(),
+    total: z.int()
+});
+
+/**
  * EntitySummary
  */
 export const zEntitySummary = z.object({
@@ -567,6 +617,30 @@ export const zGetConductorV1ConductorsConductorIdGetPath = z.object({
  * Successful Response
  */
 export const zGetConductorV1ConductorsConductorIdGetResponse = zComposerDetail;
+
+export const zEnsemblesV1EnsemblesGetQuery = z.object({
+    page: z.int().gte(1).optional().default(1),
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish(),
+    anchored: z.boolean().nullish(),
+    type: z.string().nullish(),
+    sort: z.string().regex(/^(label|appearances)$/).optional().default('label')
+});
+
+/**
+ * Successful Response
+ */
+export const zEnsemblesV1EnsemblesGetResponse = zEnsemblePage;
+
+export const zEnsembleDetailV1EnsemblesEnsembleIdGetPath = z.object({
+    ensemble_id: z.uuid()
+});
+
+/**
+ * Successful Response
+ */
+export const zEnsembleDetailV1EnsemblesEnsembleIdGetResponse = zEnsembleDetail;
 
 export const zEntitiesV1EntitiesGetQuery = z.object({
     q: z.string().nullish(),

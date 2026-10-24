@@ -108,6 +108,14 @@ WHERE NOT x:Work AND NOT x:Concert AND NOT x:Recording
 RETURN path LIMIT 50;
 
 
+// Orchestras by home city, with their Wikidata id: ensembles anchored to
+// Wikidata (see anchor-ensembles) carry ensemble_type and BASED_IN.
+MATCH (e:Ensemble {ensemble_type: 'orchestra'})-[:BASED_IN]->(city:Place)
+OPTIONAL MATCH (e)-[:PERFORMED_IN]->(event)
+RETURN city.label AS city, e.label AS orchestra, e.wikidata_id AS qid, count(event) AS events
+ORDER BY events DESC LIMIT 25;
+
+
 // --- genres ---------------------------------------------------------------
 
 // Roll-up: everyone tagged with dance music or any genre below it (waltz,

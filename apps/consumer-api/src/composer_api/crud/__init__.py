@@ -1,4 +1,5 @@
 from .concerts import get_concert, list_concerts, person_concerts
+from .ensembles import get_ensemble, list_ensembles
 from .entities import get_entity, get_stats, list_entities
 from .genres import genre_people, get_genre, list_genre_facets
 from .people import get_person, list_people
@@ -9,6 +10,7 @@ __all__ = [
     "composer_works",
     "get_concert",
     "genre_people",
+    "get_ensemble",
     "get_entity",
     "get_genre",
     "get_person",
@@ -16,6 +18,7 @@ __all__ = [
     "get_stats",
     "get_work",
     "list_concerts",
+    "list_ensembles",
     "list_entities",
     "list_genre_facets",
     "list_mentions",

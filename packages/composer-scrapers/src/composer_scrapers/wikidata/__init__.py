@@ -8,8 +8,10 @@ is a second adapter over the same service: works with a recorded premiere.
 ``places`` is a third: the places composers point at, with type, hierarchy and
 coordinates. ``genres`` is a fourth: the genres and movements those composers
 are tagged with, and their ``subclass of`` hierarchy.
-``catalogue`` is a fifth: works with a catalogue number, carrying their
-MusicBrainz ids, ISWCs and parent works for the warehouse's work identity.
+``ensembles`` a fifth: orchestras and choirs, the anchors name-keyed
+ensembles are folded onto. ``catalogue`` a sixth: works with a catalogue
+number, carrying their MusicBrainz ids, ISWCs and parent works for the
+warehouse's work identity.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence
 from .catalogue import WikidataCatalogueAdapter
+from .ensembles import WikidataEnsemblesAdapter
 from .genres import WikidataGenresAdapter
 from .parse import BASE_URL, _records_from_rows
 from .places import WikidataPlacesAdapter
@@ -34,6 +37,7 @@ __all__ = [
     "BASE_URL",
     "WikidataAdapter",
     "WikidataCatalogueAdapter",
+    "WikidataEnsemblesAdapter",
     "WikidataGenresAdapter",
     "WikidataPlacesAdapter",
     "WikidataWorksAdapter",

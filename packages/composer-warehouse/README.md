@@ -130,6 +130,39 @@ in `rebuild-silver`, points a bare place at the one pinned place with the same
 name through `canonical_entity_id`, the link gold follows for duplicate persons
 too. A name two pinned places share ("Georgia") is left unlinked.
 
+## Ensembles
+
+Every concert and recording source mints one ensemble per printed name, so one
+orchestra sits in silver under each spelling ("Vienna Philharmonic", "The
+Vienna Philharmonic", "Wiener Philharmoniker"). The `wikidata_ensembles` source
+supplies **anchors**: ensembles keyed on their QID alone (`wikidata:Q…`, see
+`entity_key` in `composer-models`), each with a type (`ensemble_type`), a home
+city (`based_in`, pinned to the city's QID like every Wikidata place, so it is
+the same place entity composers are born in) and every label and
+alias Wikidata holds in the sources' languages.
+
+`anchor_ensembles` (`ensembles/`, `composer-ingest anchor-ensembles`, also run
+before every derive in promote and rebuild) points each name-keyed ensemble at
+the anchor it names through `canonical_entity_id`, the same non-destructive
+link the person dedupe writes:
+
+- The match key is `dedup_key` minus a leading article, with a few ensemble
+  words mapped to one spelling (`Philharmoniker`/`Philharmonic Orchestra` →
+  `philharmonic`, `Orchester`/`Orchestre`/`Orkest` → `orchestra`). Nothing
+  fuzzy: a name is one of the anchor's names or it is left alone, which keeps
+  "Wiener Philharmoniker Streichquartett" and "Junge Philharmonie Wien" apart.
+- A name two anchors carry is linked only when exactly one anchor's home city
+  is spelled out in it; otherwise it is counted as ambiguous.
+- "Members of X" / "Mitglieder der X" stay their own ensemble.
+- No human decides ensemble links, so the pass clears the column for the kind
+  first: re-runs are idempotent and a link goes when its evidence does.
+- It reports, without moving anything, how many person entities carry an
+  anchor's name and how many name-keyed ensembles carry a Wikidata person's.
+
+The derive passes fall back to the anchors' names (`alias_index`) for a credit
+no source minted an entity for. Gold collapses each anchor's spellings into
+one ensemble.
+
 ## Concerts and recordings
 
 **Concerts are derived in silver** from the mentions' raw performance context
@@ -264,12 +297,18 @@ factories) come from `composer_warehouse.testing`.
 | `test_person_training.py` | Fitting the model: automatic labels, comparison vectors, non-match sampling, the prior, and `train()` end to end (including an empty warehouse). |
 | `test_person_evaluation.py` | The labelling rules, the deterministic split, downsampling weights, metrics, and that the shipped model beats the pre-#173 scorer on the committed dataset. |
 
+**Ensembles**
+
+| File | Covers |
+| --- | --- |
+| `test_anchor_ensembles.py` | The four Vienna Philharmonic spellings folded onto the QID-keyed anchor; the quartet, chamber orchestra and "Members of" kept apart; a shared name split by home city or left ambiguous; idempotent re-runs and stale links cleared; the person/ensemble boundary counts; unanchored ensembles on a programme; the home city landing on the pinned place composers point at; match keys. |
+
 **Concerts, recordings and rebuild**
 
 | File | Covers |
 | --- | --- |
 | `test_link_places.py` | Linking a bare place to the pinned place of the same name, leaving ambiguous and unmatched names alone, and a re-run dropping a link that became ambiguous. |
-| `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, re-running, and ids derived from source + key that a new concert sorting first doesn't move. |
+| `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, a credit resolved through an ensemble anchor's alias, re-running, and ids derived from source + key that a new concert sorting first doesn't move. |
 | `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, and ids derived from source + key. |
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |
 | `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, work links recreated on every rebuild, and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |

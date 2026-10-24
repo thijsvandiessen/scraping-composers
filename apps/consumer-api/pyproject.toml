@@ -6,7 +6,8 @@ requires-python = ">=3.11"
 dependencies = [
     "composer-models",
     "composer-gold",
-    "fastapi>=0.143.0",
+    "composer-schema",
+    "fastapi>=0.157.0",
     "uvicorn[standard]>=0.54.0",
     "python-dotenv>=1.2.4",
     "composer-config",

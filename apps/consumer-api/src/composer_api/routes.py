@@ -7,6 +7,7 @@ from .crud import (
     composer_works,
     genre_people,
     get_concert,
+    get_ensemble,
     get_entity,
     get_genre,
     get_person,
@@ -14,6 +15,7 @@ from .crud import (
     get_stats,
     get_work,
     list_concerts,
+    list_ensembles,
     list_entities,
     list_genre_facets,
     list_mentions,
@@ -23,7 +25,7 @@ from .crud import (
     person_concerts,
     person_recordings,
 )
-from .deps import DbSession, FilterQuery, PageQuery, PeopleFilterQuery
+from .deps import DbSession, EnsembleQuery, FilterQuery, PageQuery, PeopleFilterQuery
 from .schemas import (
     ComposerDetail,
     ComposerPage,
@@ -31,6 +33,8 @@ from .schemas import (
     ConcertDetail,
     ConcertListPage,
     ConcertPage,
+    EnsembleDetail,
+    EnsemblePage,
     EntityDetail,
     EntityPage,
     GenreDetail,
@@ -67,6 +71,24 @@ def entities(
 @v1.get("/entities/{entity_id}", response_model=EntityDetail)
 def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
     return get_entity(db, entity_id)
+
+
+@v1.get("/ensembles", response_model=EnsemblePage)
+def ensembles(
+    db: DbSession, pager: PageQuery, filters: FilterQuery, ensemble_filters: EnsembleQuery
+) -> EnsemblePage:
+    """Orchestras, choirs and other groups, with their type and home city.
+
+    ``anchored=false`` lists the ones no Wikidata item accounts for; with
+    ``sort=appearances`` the most-credited come first.
+    """
+    return list_ensembles(db, filters, pager, ensemble_filters)
+
+
+@v1.get("/ensembles/{ensemble_id}", response_model=EnsembleDetail)
+def ensemble_detail(ensemble_id: uuid.UUID, db: DbSession) -> EnsembleDetail:
+    """One ensemble: its other names, the groups it is part of, and its claims."""
+    return get_ensemble(db, ensemble_id)
 
 
 @v1.get("/genres", response_model=list[GenreSummary])
