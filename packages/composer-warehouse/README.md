@@ -85,6 +85,22 @@ stay stable, so the pass is re-runnable.
 `person-eval` scores it against the committed evaluation set in
 `tests/data/person_eval_pairs.jsonl.gz`.
 
+## Places
+
+A place's identity is its Wikidata item. The `wikidata` composer records pin
+every `born_in` / `died_in` / `citizen_of` claim to the place's QID, and the
+`wikidata_places` source records the places themselves under the same QID:
+their `place_type` (`settlement`, `region`, `country`, `historical_state`,
+`building`), the places containing them (`located_in`, `in_country`), and
+`coordinates`, `geonames_id` and `iso_3166_code`. Every claim about a place
+lands on its one pinned entity, and two places sharing a name stay two.
+
+A source without QIDs (classicalmusiconline's countries) still creates a bare
+place by label. `places.link_places`, run automatically before every promote and
+in `rebuild-silver`, points a bare place at the one pinned place with the same
+name through `canonical_entity_id`, the link gold follows for duplicate persons
+too. A name two pinned places share ("Georgia") is left unlinked.
+
 ## Concerts and recordings
 
 **Concerts are derived in silver** from the mentions' raw performance context
@@ -138,7 +154,7 @@ they tag.
 ## Derived state
 
 `refresh_derived` (`derived.py`) runs every pass that recomputes silver state
-from silver itself: genre linking, then concerts, then recordings. It is what
+from silver itself: place linking, genre linking, then concerts, then recordings. It is what
 `rebuild-silver`, `composer-ingest promote` and the admin API's Promote call,
 so a pass added there reaches all three.
 
@@ -147,7 +163,7 @@ so a pass added there reaches all three.
 Interpretation (entity resolution, work matching) is applied when a record is
 first loaded — improving the heuristics doesn't fix rows already in the
 database. `rebuild-silver` closes that gap by replaying the bucket into a fresh
-database with the current code, then re-running dedupe and the derived passes:
+database with the current code, then re-running dedupe and the derived passes (place and genre linking, concerts, recordings):
 
 ```sh
 uv run composer-ingest rebuild-silver   # bucket → composers.db (atomic swap)
@@ -222,6 +238,7 @@ factories) come from `composer_warehouse.testing`.
 
 | File | Covers |
 | --- | --- |
+| `test_link_places.py` | Linking a bare place to the pinned place of the same name, leaving ambiguous and unmatched names alone, and a re-run dropping a link that became ambiguous. |
 | `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, re-running, and ids derived from source + key that a new concert sorting first doesn't move. |
 | `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, and ids derived from source + key. |
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |

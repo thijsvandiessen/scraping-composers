@@ -59,9 +59,9 @@ def cmd_promote(args: argparse.Namespace) -> int:
     session_factory = init_db(engine)
     with session_factory() as session:
         try:
-            # Genre links, concerts and recordings are silver-derived state the
-            # gold build copies; refresh them first so promote-after-load never
-            # publishes stale derivations.
+            # Place and genre links, concerts and recordings are silver-derived
+            # state the gold build reads; refresh them first so promote-after-load
+            # never publishes stale derivations.
             refresh_derived(session)
             config = PromoteConfig(
                 rule1=Rule1Config.from_json(args.rule1_config),

@@ -6,8 +6,8 @@ asked again — and every caller that publishes or rebuilds silver
 runs the same passes in the same order through :func:`refresh_derived`. A pass
 added here reaches all of them at once.
 
-Order matters: entity links come first, so the event derivations that read
-entities see the linked ones.
+Order matters: entity links come first (places, then genres), so the event
+derivations that read entities see the linked ones.
 """
 
 from __future__ import annotations
@@ -18,11 +18,13 @@ from sqlalchemy.orm import Session
 
 from .concerts import DeriveConcertsStats, derive_concerts
 from .genres import GenreLinkStats, link_label_genres
+from .places import LinkPlacesStats, link_places
 from .recordings import DeriveRecordingsStats, derive_recordings
 
 
 @dataclass(frozen=True)
 class DerivedStats:
+    places: LinkPlacesStats
     genres: GenreLinkStats
     concerts: DeriveConcertsStats
     recordings: DeriveRecordingsStats
@@ -30,7 +32,8 @@ class DerivedStats:
 
 def refresh_derived(session: Session) -> DerivedStats:
     """Run every derivation pass over silver, in dependency order."""
+    places = link_places(session)
     genres = link_label_genres(session)
     concerts = derive_concerts(session)
     recordings = derive_recordings(session)
-    return DerivedStats(genres=genres, concerts=concerts, recordings=recordings)
+    return DerivedStats(places=places, genres=genres, concerts=concerts, recordings=recordings)

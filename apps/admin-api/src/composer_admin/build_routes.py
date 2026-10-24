@@ -37,9 +37,9 @@ def _promote_in_background(gold_url: str, config: PromoteConfig) -> None:
     """Rebuild the gold database; status lives in the gold manifest."""
     with session_scope() as session:
         try:
-            # Genre links, concerts and recordings are silver-derived state the
-            # gold build copies; refresh them first so the Promote button never
-            # publishes stale derivations.
+            # Place and genre links, concerts and recordings are silver-derived
+            # state the gold build reads; refresh them first so the Promote button
+            # never publishes stale derivations.
             refresh_derived(session)
             promote(session, gold_url, config)
         except Exception:

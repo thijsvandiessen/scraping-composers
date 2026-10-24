@@ -64,9 +64,11 @@ SELECT ?item WHERE { ?item wdt:P106 wd:Q36834 . }
 
 # The single-valued fields, plus the label. Each item contributes a handful of
 # rows here: the truthy date/place/id properties have one best value apiece.
+# Places are returned as items as well as labels, so their claims can be pinned
+# to the QID (see ``_PINNED_KINDS`` in ``parse``).
 QUERY = """\
 SELECT ?item ?itemLabel ?birth ?birthPrecision ?death ?deathPrecision
-       ?birthPlaceLabel ?deathPlaceLabel ?musicbrainz
+       ?birthPlace ?birthPlaceLabel ?deathPlace ?deathPlaceLabel ?musicbrainz
 WHERE {{
   VALUES ?item {{ {values} }}
   # Take the truthy (best-rank) date via wdt:, then join the statement value
@@ -95,12 +97,12 @@ WHERE {{
 # the cross product ran to tens of thousands of rows per item -- 57MB of JSON
 # that WDQS truncates mid-stream at its 60s cap. UNION adds instead of
 # multiplies, so a page costs the sum of the values, not the product. Each row
-# binds exactly one of the four values; ``_fold_rows`` reads whichever is
-# present, so these rows concatenate onto the QUERY rows above. Genre and
-# movement come back as the item as well as its label: the QID is what the
-# entity is keyed on (see ``ITEM_FIELDS`` in ``parse``).
+# binds exactly one of the four properties (a country, genre or movement as
+# item and label); ``_fold_rows`` reads whichever is present, so these rows
+# concatenate onto the QUERY rows above. The items are what the claims are
+# pinned to: see ``_PINNED_KINDS`` and ``ITEM_FIELDS`` in ``parse``.
 MULTI_QUERY = """\
-SELECT ?item ?countryLabel ?genre ?genreLabel ?movement ?movementLabel ?alias
+SELECT ?item ?country ?countryLabel ?genre ?genreLabel ?movement ?movementLabel ?alias
 WHERE {{
   VALUES ?item {{ {values} }}
   {{ ?item wdt:P27 ?country . }}

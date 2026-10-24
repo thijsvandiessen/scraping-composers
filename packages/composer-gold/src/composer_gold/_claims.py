@@ -48,12 +48,14 @@ def collect_person_claims(build: GoldBuild) -> set[uuid.UUID]:
 
 def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
     """Rule 3: keep referenced non-person entities (to a fixpoint),
-    collecting their claims to other kept non-person entities along the way.
+    collecting their claims about each other along the way.
 
-    That is every edge between them, not only the one that discovered each: a
-    person tagged with both "waltz" and "dance music" seeds both, and the
-    ``subclass_of`` edge between them is what lets gold roll waltz up into
-    dance music (#349)."""
+    A claim is kept whether it discovers its object or points at one already
+    kept: a place's ``in_country`` names a country some composer's
+    ``citizen_of`` reached first, and that edge is the hierarchy. The same
+    holds for genres: a person tagged with "waltz" and "dance music" seeds
+    both, and ``subclass_of`` between them is what rolls one up into the
+    other (#349)."""
     build.all_other = set(build.silver.scalars(select(Entity.id).where(Entity.kind != "person")))
     # Ensembles are judged by rule 1 (credits), not by being referenced: an
     # ensemble a kept person points at but that never played a concert or

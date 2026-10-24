@@ -340,6 +340,59 @@ def test_genres_and_movements_without_a_label_or_an_item_are_skipped() -> None:
     assert "genre" not in record.raw
 
 
+def entity(qid: str) -> str:
+    return f"http://www.wikidata.org/entity/{qid}"
+
+
+def test_place_claims_are_pinned_to_the_item_they_name() -> None:
+    (record,) = _records_from_rows(
+        [
+            row("Q255", "Ludwig van Beethoven", birthPlace=entity("Q586"), birthPlaceLabel="Bonn"),
+            row("Q255", "Ludwig van Beethoven", deathPlace=entity("Q1741"), deathPlaceLabel="Vienna"),
+            row("Q255", country=entity("Q27306"), countryLabel="Electorate of Cologne"),
+        ]
+    )
+    assert SourceClaim("born_in", "place", "Bonn", object_wikidata_id="Q586") in record.claims
+    assert SourceClaim("died_in", "place", "Vienna", object_wikidata_id="Q1741") in record.claims
+    assert (
+        SourceClaim("citizen_of", "place", "Electorate of Cologne", object_wikidata_id="Q27306")
+        in record.claims
+    )
+    assert record.raw["birthPlace"] == ["Q586"]
+    assert record.raw["country"] == ["Q27306"]
+    assert "?birthPlace ?birthPlaceLabel" in QUERY and "?country ?countryLabel" in MULTI_QUERY
+
+
+def test_two_places_sharing_a_label_stay_two_claims() -> None:
+    (record,) = _records_from_rows(
+        [
+            row("Q1", "A", country=entity("Q230"), countryLabel="Georgia"),
+            row("Q1", "A", country=entity("Q1428"), countryLabel="Georgia"),
+        ]
+    )
+    assert [c.object_wikidata_id for c in record.claims if c.predicate == "citizen_of"] == ["Q1428", "Q230"]
+
+
+def test_a_place_label_without_its_item_is_claimed_unpinned() -> None:
+    (record,) = _records_from_rows([row("Q255", "Ludwig van Beethoven", birthPlaceLabel="Bonn")])
+    assert SourceClaim("born_in", "place", "Bonn") in record.claims
+
+
+def test_an_unknown_value_place_is_not_a_place() -> None:
+    genid = "http://www.wikidata.org/.well-known/genid/fe048b58a583dff76d1ac48db02c39be"
+    (record,) = _records_from_rows([row("Q255", "L", deathPlace=genid, deathPlaceLabel=genid)])
+    assert not [c for c in record.claims if c.predicate == "died_in"]
+
+
+def test_genres_are_pinned_once_alongside_places() -> None:
+    """Genres are pinned through ``ITEM_FIELDS`` (#349), places through the
+    pins; the two don't double up a genre claim."""
+    (record,) = _records_from_rows([row("Q255", "L", genre=entity("Q1344"), genreLabel="opera")])
+    assert [c for c in record.claims if c.predicate == "has_genre"] == [
+        SourceClaim("has_genre", "genre", "opera", object_wikidata_id="Q1344")
+    ]
+
+
 def test_metrics_become_literal_claims_and_land_in_raw() -> None:
     metrics = {"Q255": {"sitelinks": "273", "statements": "547", "identifiers": "370", "works": "342"}}
     (record,) = _records_from_rows([row("Q255", "Ludwig van Beethoven")], metrics)
