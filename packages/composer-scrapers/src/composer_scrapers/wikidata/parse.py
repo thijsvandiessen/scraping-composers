@@ -33,12 +33,19 @@ FIELDS: tuple[tuple[str, str, str | None], ...] = (
     ("birthPlaceLabel", "born_in", "place"),
     ("deathPlaceLabel", "died_in", "place"),
     ("countryLabel", "citizen_of", "place"),
-    ("genreLabel", "has_genre", "genre"),
-    ("movementLabel", "in_movement", "movement"),
     ("alias", "also_known_as", None),
     # P434 MusicBrainz artist id: carried as a claim so a MusicBrainz source
     # can be linked by identifier instead of fuzzy name matching.
     ("musicbrainz", "musicbrainz_id", None),
+)
+
+# MULTI_QUERY item variable -> (claim predicate, object entity kind). These
+# objects are pinned by QID, read from the variable itself, with the label from
+# ``<var>Label``: a genre or movement entity is keyed on its QID (#349), so a
+# label Wikidata renames stays the same entity.
+ITEM_FIELDS: tuple[tuple[str, str, str], ...] = (
+    ("genre", "has_genre", "genre"),
+    ("movement", "in_movement", "movement"),
 )
 
 # RELATIONS_QUERY property -> claim predicate; the object is always a person,
@@ -131,10 +138,16 @@ def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         uri = row["item"]["value"]
         qid = uri.rsplit("/", 1)[-1]
         item = items.setdefault(
-            qid, {"label": _literal(row, "itemLabel") or "", "values": {}, "relations": set()}
+            qid,
+            {"label": _literal(row, "itemLabel") or "", "values": {}, "items": {}, "relations": set()},
         )
         if (relation := _relation(row)) is not None:
             item["relations"].add(relation)
+        for var, _, _ in ITEM_FIELDS:
+            obj, label = _literal(row, var), _literal(row, f"{var}Label")
+            if obj is None or label is None or _BARE_QID.match(label):
+                continue  # unbound, or the object has no label
+            item["items"].setdefault(var, set()).add((obj.rsplit("/", 1)[-1], label))
         for var, _, kind in FIELDS:
             value = _literal(row, var)
             if value is None:
@@ -156,6 +169,9 @@ def _item_claims(item: dict[str, Any], item_metrics: dict[str, str]) -> tuple[So
                 claims.append(SourceClaim(predicate, value=value))
             else:
                 claims.append(SourceClaim(predicate, kind, value))
+    for var, predicate, kind in ITEM_FIELDS:
+        for obj, label in sorted(item["items"].get(var, ())):
+            claims.append(SourceClaim(predicate, kind, label, object_wikidata_id=obj))
     for predicate, other, label in sorted(item["relations"]):
         claims.append(SourceClaim(predicate, "person", label, object_wikidata_id=other))
     for var, predicate in METRICS:
@@ -179,6 +195,8 @@ def _records_from_rows(
         item_metrics = (metrics or {}).get(qid, {})
         raw = {"item": f"http://www.wikidata.org/entity/{qid}", "label": name}
         raw.update({var: sorted(values) for var, values in item["values"].items()})
+        for var, pairs in item["items"].items():
+            raw[var] = [{"item": obj, "label": label} for obj, label in sorted(pairs)]
         if item["relations"]:
             raw["relations"] = [
                 {"predicate": predicate, "item": other, "label": label}

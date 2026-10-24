@@ -17,7 +17,7 @@ passes over it; curation happens when it is promoted into gold.
   `(source, external_id)`. Stores the original payload as JSON plus
   `first_seen_at`/`last_seen_at` timestamps and run ids. Re-ingesting is idempotent.
 - **`entities`** — canonical, deduplicated nodes. `kind` says what a node is:
-  `person`, `profession`, `period`, `genre`, `place`, `work`, `ensemble`,
+  `person`, `profession`, `period`, `genre`, `movement`, `place`, `work`, `ensemble`,
   `publisher`, `instrumentation` (an open set — `kind` is a plain string column,
   and a claim naming a new one creates it). Records from different sources link
   here via `(kind, dedup_key)` — a normalized label (`normalize.py`:
@@ -26,7 +26,13 @@ passes over it; curation happens when it is promoted into gold.
   them. Entity ids are `uuid5(kind + dedup_key)`, so they are stable across
   rebuilds; a label guarded into `ensemble` by
   [`composer_schema.kinds`](../composer-schema/README.md) gets a different id.
-  `canonical_entity_id` points a duplicate person at its cluster canonical.
+  A Wikidata QID joins the key as `label|QID` for most kinds; a `genre` or
+  `movement` (`QID_KEYED_KINDS`) with a QID is keyed on `wikidata:QID` alone,
+  so a renamed Wikidata label stays one entity (`entity_key`).
+  `canonical_entity_id` points a duplicate person at its cluster canonical, and
+  a label-only genre or movement at the QID-keyed one it names.
+  `genres.py` holds the vocabulary's fixed points: the top-level genres and
+  movements (by QID) that facets and the orphan report measure against.
 - **`claims`** — typed edges between entities, e.g.
   `person --has_profession--> profession`, `person --born_in--> place`,
   `person --composed--> work`. The object is either another entity
@@ -96,7 +102,7 @@ provides the Postgres fixtures the other members use.
 
 | File | Covers |
 | --- | --- |
-| `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, stable concert/recording UUIDs per kind, source and key, and reading a QID back out of a key. |
+| `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, stable concert/recording UUIDs per kind, source and key, reading a QID back out of a key in either form, and `entity_key` keying genres and movements on the QID alone. |
 | `test_db.py` | `init_db` creating every table, an entity round-trip, unbounded scraper-sourced columns, unique key columns, and rejecting a schema name that cannot be escaped. |
 | `test_migrations.py` | The tree having a single head (no database needed). Postgres only: `upgrade head` creating the schema from nothing, and head matching the models. |
 

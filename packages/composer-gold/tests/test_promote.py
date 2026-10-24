@@ -21,12 +21,15 @@ from composer_models import (
     Work,
 )
 from composer_models.db import init_db
+from composer_models.normalize import entity_uuid
 from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 from composer_warehouse.concerts import derive_concerts
+from composer_warehouse.derived import refresh_derived
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import (
     FakeSource,
     ensemble,
+    genre,
     ingest_source,
     mention,
     perf_mention,
@@ -1138,3 +1141,95 @@ def test_a_works_premiere_survives_promotion(session: Session, tmp_path: Path) -
         assert (work.premiere_date, work.premiere_place) == ("1741", "Dresden")
         assert silver_source is not None
         assert work.premiere_source_id == silver_source
+
+
+# ---------------------------------------------------------------------------
+# Genres: the subclass_of hierarchy survives curation (#349)
+# ---------------------------------------------------------------------------
+
+_WALTZ_ID = entity_uuid("genre", "wikidata:Q215")
+_DANCE_ID = entity_uuid("genre", "wikidata:Q316930")
+
+
+def _seed_genres(session: Session, *tags: SourceClaim) -> None:
+    """A kept composer (two work mentions) tagged with ``tags``, and the
+    hierarchy Viennese waltz -> waltz -> dance music."""
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                genre("Q2", "Viennese waltz", ("Q215", "waltz")),
+                genre("Q215", "waltz", ("Q316930", "dance music")),
+                genre("Q316930", "dance music"),
+            ),
+            name="wikidata_genres",
+        ),
+    )
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                person("Strauss, Johann", *tags, external_id="Q1"),
+                mention("The Blue Danube", "Strauss, Johann", "m1"),
+                mention("Tales from the Vienna Woods", "Strauss, Johann", "m2"),
+            ),
+            name="wikidata",
+        ),
+    )
+    refresh_derived(session)
+
+
+def _subclass_edges(gold: Session) -> set[tuple[str, str]]:
+    labels = {e.id: e.label for e in gold.scalars(select(Entity))}
+    return {
+        (labels[c.subject_id], labels[c.object_id])
+        for c in gold.scalars(select(Claim).where(Claim.predicate == "subclass_of"))
+        if c.object_id is not None
+    }
+
+
+def test_promote_keeps_the_subclass_chain_above_a_persons_genre(session: Session, tmp_path: Path) -> None:
+    _seed_genres(session, SourceClaim("has_genre", "genre", "waltz", object_wikidata_id="Q215"))
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        genres = set(gold.scalars(select(Entity.label).where(Entity.kind == "genre")))
+        # the ancestors are kept; the subgenre nobody uses is not
+        assert genres == {"waltz", "dance music"}
+        assert _subclass_edges(gold) == {("waltz", "dance music")}
+
+
+def test_promote_keeps_the_edge_between_two_genres_a_person_both_has(
+    session: Session, tmp_path: Path
+) -> None:
+    """Both are seeded at once; the walk used to keep only the edges that
+    discovered a new entity, and so dropped this one."""
+    _seed_genres(
+        session,
+        SourceClaim("has_genre", "genre", "waltz", object_wikidata_id="Q215"),
+        SourceClaim("has_genre", "genre", "dance music", object_wikidata_id="Q316930"),
+    )
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        assert _subclass_edges(gold) == {("waltz", "dance music")}
+
+
+def test_a_legacy_label_genre_collapses_onto_its_qid_entity(session: Session, tmp_path: Path) -> None:
+    _seed_genres(session, SourceClaim("has_genre", "genre", "Waltz"))
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        strauss = gold.scalars(select(Entity).where(Entity.label == "Strauss, Johann")).one()
+        tags = gold.scalars(
+            select(Claim.object_id).where(Claim.subject_id == strauss.id, Claim.predicate == "has_genre")
+        ).all()
+        assert tags == [_WALTZ_ID]
+        assert gold.scalar(select(Entity).where(Entity.dedup_key == "waltz")) is None
+        assert {e.id for e in gold.scalars(select(Entity).where(Entity.kind == "genre"))} == {
+            _WALTZ_ID,
+            _DANCE_ID,
+        }

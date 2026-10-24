@@ -46,10 +46,9 @@ from sqlalchemy import Engine, inspect, select
 from sqlalchemy.orm import Session
 
 from .build import BuildTarget, build_target, run_build
-from .concerts import derive_concerts
+from .derived import refresh_derived
 from .ingestion import ingest_documents, new_work
 from .persons import dedupe_persons
-from .recordings import derive_recordings
 from .works import add_alias, extract_features
 
 log = logging.getLogger(__name__)
@@ -66,6 +65,7 @@ class RebuildStats:
     person_decisions_dropped: int = 0
     work_decisions_applied: int = 0
     work_decisions_dropped: int = 0
+    genres_linked: int = 0
     concerts: int = 0
     recordings: int = 0
 
@@ -258,8 +258,7 @@ def _replay(
         person_applied, person_dropped = _apply_person_decisions(session, person_decisions)
         deduped = dedupe_persons(session)
         work_applied, work_dropped = _apply_work_decisions(session, work_decisions)
-        concert_stats = derive_concerts(session)
-        recording_stats = derive_recordings(session)
+        derived = refresh_derived(session)
 
     return RebuildStats(
         sources_replayed=replayed,
@@ -271,8 +270,9 @@ def _replay(
         person_decisions_dropped=person_dropped,
         work_decisions_applied=work_applied,
         work_decisions_dropped=work_dropped,
-        concerts=concert_stats.concerts,
-        recordings=recording_stats.recordings,
+        genres_linked=derived.genres.linked,
+        concerts=derived.concerts.concerts,
+        recordings=derived.recordings.recordings,
     )
 
 

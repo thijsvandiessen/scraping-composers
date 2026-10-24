@@ -12,8 +12,9 @@ everything after that (bucket, ingest, matching) is shared.
 | `imslp` | IMSLP people API | yearly | [imslp](docs/imslp.md) |
 | `imslp_works` | IMSLP work catalogue — all of it | yearly | [imslp](docs/imslp.md) |
 | `imslp_recordings` | IMSLP's commercial recordings of the catalogue | yearly | [imslp](docs/imslp.md) |
-| `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | yearly | |
+| `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | yearly | genres (P136) and movements (P135) are claimed with their QID, which their entities are keyed on |
 | `wikidata_works` | every Wikidata work with a date of first performance (P1191) and a composer, with its premiere place (P4647) | yearly | work mentions carrying `raw["premiere"]`, which fills `Work.premiere_date` |
+| `wikidata_genres` | every genre and movement the composers are tagged with, and their `subclass of` (P279) ancestors | yearly | `subclass_of` claims make the hierarchy; parents outside music genre / art or cultural movement are dropped, and the walk stops after 15 levels |
 | `openopus` | Open Opus work catalogue | yearly | |
 | `classicalmusiconline` | classical-music-online.net composer catalogue and works | yearly | two levels: 26 index pages, then ~11.6k composer pages (a couple of hours); `--max-pages` caps the composer pages |
 | `classicfm` | composer and artist name lists from classicfm.com | yearly | |
@@ -157,6 +158,7 @@ Most sources are tested in three layers, one file each:
 | `wienerphil` | `test_wienerphil.py`, `test_wienerphil_details.py` | ✓ | ✓ |
 | `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror | | |
 | `wikidata_works` | `test_wikidata_works.py` covers all three | | |
+| `wikidata_genres` | `test_wikidata_genres.py` covers all three: seeds, paging, cycles, the class filter, the depth cap, `max_pages`, the mirror | | |
 
 `test_base.py` covers what every source shares: the session carries the
 adapter's manners, the mirror's lifetime follows the cadence, and every

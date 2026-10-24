@@ -111,12 +111,43 @@ a row number, so a new concert doesn't move the others and
 takes the key of its fullest member, so its id moves only if a fuller page for
 the same release turns up later.
 
+## Genres and movements
+
+Genres and movements are vocabulary terms, and Wikidata names nearly all of
+them, so an entity of either kind with a QID is keyed on `wikidata:QID` rather
+than its label (`entity_key` in `composer-models`): a renamed label stays one
+entity. The `wikidata` source tags composers by QID, and `wikidata_genres`
+supplies each genre's label, English aliases and `subclass_of` claims to its
+P279 parents — the hierarchy that lets "dance music" find a composer tagged
+only with "waltz".
+
+Some genre entities still carry a label key: a genre a non-Wikidata source
+names, and every one an older `wikidata` run minted before the query asked for
+the QID (a rebuild replays those runs too). `link_label_genres` (`genres.py`,
+`composer-ingest link-genres`) points each at the QID-keyed entity of the same
+kind whose label or alias it carries, through `canonical_entity_id`, so gold
+collapses them onto one. It starts from scratch each run, so the result
+doesn't depend on ingest order; a label two QIDs share links nothing.
+
+`composer-ingest genres` reports how far the hierarchy reaches (`genre_report`):
+QID-keyed vs label-only entities, how many have a parent, the top-level QIDs
+(`composer_models.genres`) missing from silver, and the **orphans** — entities
+with no `subclass_of` path to a top-level genre — ranked by how many persons
+they tag.
+
+## Derived state
+
+`refresh_derived` (`derived.py`) runs every pass that recomputes silver state
+from silver itself: genre linking, then concerts, then recordings. It is what
+`rebuild-silver`, `composer-ingest promote` and the admin API's Promote call,
+so a pass added there reaches all three.
+
 ## Rebuilding silver
 
 Interpretation (entity resolution, work matching) is applied when a record is
 first loaded — improving the heuristics doesn't fix rows already in the
 database. `rebuild-silver` closes that gap by replaying the bucket into a fresh
-database with the current code, then re-running dedupe and concert derivation:
+database with the current code, then re-running dedupe and the derived passes:
 
 ```sh
 uv run composer-ingest rebuild-silver   # bucket → composers.db (atomic swap)
@@ -194,7 +225,8 @@ factories) come from `composer_warehouse.testing`.
 | `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, re-running, and ids derived from source + key that a new concert sorting first doesn't move. |
 | `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, and ids derived from source + key. |
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |
-| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
+| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
+| `test_genres.py` | Genres and movements keyed on their QID across label changes, the record and claim paths meeting on one entity, label keys without a QID, linking label-only genres by label or alias (and not when ambiguous), relinking from scratch, the same genre set for any ingest order, and the orphan report's counts and ranking. |
 | `test_postgres_target.py` | Postgres only: the schema swap, readers across it, the manifest table, and the locks that keep a rebuild and a reader apart. |
 
 `ingestion/runner.py`'s `create_run` has no test here; the admin API, its only

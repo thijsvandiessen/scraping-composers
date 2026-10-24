@@ -11,9 +11,15 @@ uv run uvicorn composer_api:silver_app --port 8003   # staging
 
 - `GET /v1/composers` / `/v1/soloists` / `/v1/conductors` (+ `/{id}`) — searchable, paginated
   people; `?sort=concerts` orders by concert count (each item carries `concert_count`) and
-  `?source=` filters by source. Soloists and conductors are picked by profession claim; composers
+  `?source=` filters by source; `?genre=<id>` keeps people tagged with that genre or movement
+  or anything below it (see `/v1/genres`). Soloists and conductors are picked by profession claim; composers
   by having at least three works (the `composer` profession claim is too loose — Wikidata gives
   it to pop stars and conductors)
+- `GET /v1/genres?kind=genre|movement` — the top-level genres (or movements) as facets, each with
+  the number of persons tagged with it or any genre below it. `GET /v1/genres/{id}` adds its
+  Wikidata QID, direct parents and children; `GET /v1/genres/{id}/people` lists the persons.
+  Everything rolls up the `subclass_of` hierarchy (a recursive CTE that stops on cycles), and a
+  label-only genre linked to its QID one counts as that one
 - `GET /v1/composers/{id}/works` — a composer's works, with the concerts and catalogues that prove each
 - `GET /v1/people/{id}/concerts` / `/v1/people/{id}/recordings` — the concerts a person took part
   in and the recordings they are credited on
@@ -55,4 +61,5 @@ SQLite file, and into Postgres when `COMPOSER_TEST_POSTGRES_URL` is set.
 | Entities and stats | Search across kinds, the kind filter, random sampling, linked claim objects, incoming claims, 404s, and dataset counts. |
 | Works and mentions | Works with aliases and mention counts, search by composer, the source filter, work detail with proof and its premiere date and place, the review queue with its candidate, and a composer's works with concert and catalogue proof. |
 | Concerts and recordings | Lists newest first with summaries, search by participant and source, details with participants, programme and works, and a person's concerts and recordings. |
+| Genres (`test_genres.py`) | Roll-up through `subclass_of` in silver, gold on SQLite and gold on Postgres: a person tagged only with "waltz" found under "dance music" (by the genre's people and by `/v1/composers?genre=`), a legacy label-only tag counting, facet person counts per kind, parents and children, a cycle terminating, and 404s for an unknown genre or a person id. |
 | Gold curation | Gold hiding people without performance evidence, keeping works with their mention counts, and stats reflecting curation. |
