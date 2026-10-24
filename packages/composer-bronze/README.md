@@ -36,5 +36,5 @@ Everything runs against a `tmp_path` bucket.
 
 | File | Covers |
 | --- | --- |
-| `test_bucket.py` | `LocalBucket` IO: record round-trips (Unicode, blank and malformed trailing lines), the manifest state machine, listing runs, sources and snapshots (size, kind, legacy snapshots without a manifest), which runs count as loadable documents, and rejecting path-traversal source and run ids. |
+| `test_bucket.py` | `LocalBucket` IO: record round-trips (Unicode, blank and malformed trailing lines), the manifest state machine (and reading one with keys it doesn't define), listing runs, sources and snapshots (size, kind, legacy snapshots without a manifest), which runs count as loadable documents, and rejecting path-traversal source and run ids. |
 | `test_scraper.py` | The fetch workflow: snapshot ids, writing records with a completed manifest, `max_pages` and explicit run ids, a failing source leaving a failed manifest, and reading typed documents back from one or all runs. |
