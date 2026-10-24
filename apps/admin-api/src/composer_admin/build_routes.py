@@ -18,6 +18,7 @@ from composer_gold import (
 )
 from composer_warehouse.build import BuildTarget
 from composer_warehouse.concerts import derive_concerts
+from composer_warehouse.places import link_places
 from composer_warehouse.rebuild import rebuild_silver, silver_target
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.works.links import link_works
@@ -39,9 +40,10 @@ def _promote_in_background(gold_url: str, config: PromoteConfig) -> None:
     """Rebuild the gold database; status lives in the gold manifest."""
     with session_scope() as session:
         try:
-            # Work links, concerts and recordings are silver-derived state the gold build
-            # copies; refresh them first so the Promote button never publishes
+            # Place links, work links, concerts and recordings are silver-derived state the
+            # gold build reads; refresh them first so the Promote button never publishes
             # stale derivations.
+            link_places(session)
             link_works(session)
             derive_concerts(session)
             derive_recordings(session)
