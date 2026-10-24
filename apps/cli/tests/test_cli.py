@@ -13,9 +13,22 @@ import pytest
 from composer_cli import _log_level, main
 from composer_cli.export_cmds import cmd_export_kumu
 from composer_cli.genre_cmds import cmd_genres, cmd_link_genres
-from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
+from composer_cli.ingest_cmds import (
+    cmd_anchor_ensembles,
+    cmd_derive_concerts,
+    cmd_fetch,
+    cmd_process,
+    cmd_rebuild_silver,
+)
 from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_eval, cmd_person_review, cmd_person_train
-from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
+from composer_cli.query_cmds import (
+    ClaimFilters,
+    cmd_claims,
+    cmd_ensembles,
+    cmd_runs,
+    cmd_stats,
+    entity_claims,
+)
 from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
 from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work
 from composer_models.db import get_engine, init_db
@@ -25,7 +38,15 @@ from composer_warehouse.persons import AUTO_THRESHOLD, training
 from composer_warehouse.persons.evaluation import read_dataset
 from composer_warehouse.persons.fellegi_sunter import LinkageModel
 from composer_warehouse.persons.training import sample_non_match_levels
-from composer_warehouse.testing import FakeSource, genre, ingest_source, mention, perf_mention, person
+from composer_warehouse.testing import (
+    FakeSource,
+    ensemble,
+    genre,
+    ingest_source,
+    mention,
+    perf_mention,
+    person,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -519,6 +540,72 @@ def test_main_routes_to_genres_for_both_kinds(
     out = capsys.readouterr().out
     assert "genres: 4" in out
     assert "movements: 0" in out
+
+
+# ---------------------------------------------------------------------------
+# cmd_anchor_ensembles / cmd_ensembles
+# ---------------------------------------------------------------------------
+
+
+def _seed_ensembles(db_url: str) -> None:
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    ensemble(
+                        "Vienna Philharmonic",
+                        SourceClaim("also_known_as", value="Wiener Philharmoniker"),
+                        external_id="Q900001",
+                        url="https://www.wikidata.org/wiki/Q900001",
+                    ),
+                ),
+                name="wikidata_ensembles",
+            ),
+        )
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    ensemble("Wiener Philharmoniker", external_id="r:1"),
+                    ensemble("Junge Philharmonie Wien", external_id="r:2"),
+                ),
+                name="imslp_recordings",
+            ),
+        )
+
+
+def test_cmd_anchor_ensembles_prints_its_stats(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _seed_ensembles(db_url)
+
+    assert cmd_anchor_ensembles(_ns(database_url=db_url)) == 0
+    out = capsys.readouterr().out
+    assert "anchored 1 ensemble spellings onto 1 Wikidata ensembles" in out
+    assert "unanchored                     1" in out
+
+    with init_db(get_engine(db_url))() as session:
+        spelling = session.scalars(select(Entity).where(Entity.label == "Wiener Philharmoniker")).one()
+        assert spelling.canonical_entity_id is not None
+
+
+def test_cmd_ensembles_lists_the_unanchored(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _seed_ensembles(db_url)
+    cmd_anchor_ensembles(_ns(database_url=db_url))
+    capsys.readouterr()
+
+    assert cmd_ensembles(_ns(database_url=db_url, unanchored=True, limit=10)) == 0
+    out = capsys.readouterr().out
+    assert "Junge Philharmonie Wien  [unanchored]" in out
+    assert "Wiener Philharmoniker" not in out
+    assert "1 ensemble(s) unanchored" in out
+
+    assert cmd_ensembles(_ns(database_url=db_url, unanchored=False, limit=10)) == 0
+    out = capsys.readouterr().out
+    assert "Wiener Philharmoniker  [→ Vienna Philharmonic]" in out
+    assert "Vienna Philharmonic  [Q900001]" in out
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 from composer_models import Concert, ConcertParticipant, ConcertWork, Entity, Source
 from composer_models.normalize import event_uuid
+from composer_schema import SourceClaim
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.testing import FakeSource, ensemble, ingest_source, perf_mention, person
 from sqlalchemy import func, select
@@ -424,3 +425,38 @@ def test_work_profile_mentions_derive_no_concert(session: Session) -> None:
 
     assert session.scalars(select(Concert)).all() == []
     assert stats.concerts == 0
+
+
+def test_a_credit_nobody_minted_resolves_to_the_ensemble_anchor(session: Session) -> None:
+    """An anchor is keyed on its QID, so a credit spelling one of its names has
+    no entity of the same key; the alias index is what resolves it (#350)."""
+    wikidata = FakeSource(
+        records=(
+            ensemble(
+                "Vienna Philharmonic",
+                SourceClaim("also_known_as", value="Wiener Philharmoniker"),
+                external_id="Q900001",
+                url="https://www.wikidata.org/wiki/Q900001",
+            ),
+        ),
+        name="wikidata_ensembles",
+    )
+    berlinphil = FakeSource(
+        records=(
+            perf_mention(
+                "perf:1",
+                "Symphony No. 9",
+                "Beethoven, Ludwig van",
+                {"concert_id": "1", "date": "2020-01-01", "ensembles": ["Wiener Philharmoniker"]},
+            ),
+        ),
+        name="berlinphil",
+    )
+    ingest_source(session, wikidata)
+    ingest_source(session, berlinphil)
+
+    derive_concerts(session)
+
+    anchor = session.scalars(select(Entity).where(Entity.dedup_key == "wikidata:Q900001")).one()
+    participant = session.scalars(select(ConcertParticipant)).one()
+    assert participant.entity_id == anchor.id

@@ -19,6 +19,7 @@ from composer_warehouse.persons import AUTO_THRESHOLD, MODEL_PATH
 from .export_cmds import cmd_export_kumu, cmd_export_neo4j
 from .genre_cmds import cmd_genres, cmd_link_genres
 from .ingest_cmds import (
+    cmd_anchor_ensembles,
     cmd_derive_concerts,
     cmd_derive_recordings,
     cmd_fetch,
@@ -32,7 +33,7 @@ from .person_cmds import (
     cmd_person_review,
     cmd_person_train,
 )
-from .query_cmds import cmd_claims, cmd_runs, cmd_stats
+from .query_cmds import cmd_claims, cmd_ensembles, cmd_runs, cmd_stats
 from .work_cmds import cmd_rematch, cmd_review, cmd_works
 
 if TYPE_CHECKING:
@@ -54,6 +55,13 @@ def _add_query_parsers(sub: _SubParsers) -> None:
     p_claims.add_argument("--source", help="restrict to one source (e.g. wikidata)")
     p_claims.add_argument("--limit", type=int, default=10, help="max matching entities to show")
     p_claims.set_defaults(func=cmd_claims)
+
+    p_ensembles = sub.add_parser("ensembles", help="list ensembles, most credited first")
+    p_ensembles.add_argument(
+        "--unanchored", action="store_true", help="only those no Wikidata ensemble accounts for"
+    )
+    p_ensembles.add_argument("--limit", type=int, default=50)
+    p_ensembles.set_defaults(func=cmd_ensembles)
 
     p_runs = sub.add_parser("runs", help="show the ingest run log")
     p_runs.add_argument("--limit", type=int, default=20)
@@ -251,6 +259,11 @@ def _add_person_parsers(sub: _SubParsers) -> None:
         "--all", action="store_true", help="score the whole set, not just the held-out test split"
     )
     p_eval.set_defaults(func=cmd_person_eval)
+
+    p_anchor = sub.add_parser(
+        "anchor-ensembles", help="fold name-keyed ensembles onto the Wikidata ensembles they name"
+    )
+    p_anchor.set_defaults(func=cmd_anchor_ensembles)
 
     p_concerts = sub.add_parser(
         "derive-concerts", help="rebuild the concert tables from the work mentions' performance context"

@@ -45,6 +45,7 @@ urlpatterns = [
         admin.site.admin_view(views.entities),
         name="entities_by_kind",
     ),
+    path("admin/data/ensembles/", admin.site.admin_view(views.ensembles), name="ensembles"),
     path("admin/data/works/", admin.site.admin_view(views.works), name="works"),
     path("admin/data/gold/works/", admin.site.admin_view(views.gold_works), name="gold_works"),
     path(

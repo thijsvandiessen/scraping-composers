@@ -14,10 +14,11 @@ with one page per pipeline phase:
   with a **Load into DB** button on complete ones, plus the recent-loads log.
 - **Promote** — gold status (last rebuild, curation stats), the rule-1
   thresholds, and the button to rebuild gold from silver.
-- **Data (silver)** (Overview / Entities / Works / Review) — inspect the
+- **Data (silver)** (Overview / Entities / Ensembles / Works / Review) — inspect the
   staging data: dataset counts, a searchable entity browser (per-kind pages,
   random sampling, claims with per-source provenance, cross-linked entities),
-  a searchable works browser, and the work-mention review queue (resolving
+  the ensembles no Wikidata item accounts for (most credited first, see
+  `anchor-ensembles`), a searchable works browser, and the work-mention review queue (resolving
   stays on the CLI: `review --accept` / `--new`).
 - **Musicians (gold)** (Composers / Soloists / Conductors / Concerts /
   Recordings) — role-based people pages over gold with per-person concert counts
@@ -64,7 +65,7 @@ views against a stubbed client. No network.
 | Access | Every page requiring the admin login, and POST-only endpoints rejecting GET. |
 | Scrapers and Load | The due badge, starting a fetch (and a conflict), fetch-due, abandoning a stuck snapshot (an older one flagged, an API error shown), processing a snapshot, auto-refresh while work runs, and the error banner when the API is down. |
 | Promote | Gold status, the promote form and its options and validation, and the rule-1 config form. |
-| Data (silver) | The overview, entity pages (pagination, kind tabs, random sample, claims and links), works pages, and the review queue. |
+| Data (silver) | The overview, entity pages (pagination, kind tabs, random sample, claims and links), the unanchored-ensembles page and its client call, works pages, and the review queue. |
 | Musicians (gold) | People pages per role with concert counts and sorting, a person's concerts, concert and recording lists and details, gold work details, and entity pages surviving gold being down. |
 
 Not covered: most error-handling branches in the API clients (`scrapers/api.py`)

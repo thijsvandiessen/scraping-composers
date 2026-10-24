@@ -170,6 +170,21 @@ class DataAPI(_BaseAPI):
         params = filters.add_to({"page": page, "limit": limit, "sort": sort})
         return self._json_dict("GET", f"/v1/{role}", params=params)
 
+    def list_ensembles(
+        self,
+        filters: Filters = NO_FILTERS,
+        anchored: bool | None = None,
+        page: int = 1,
+        limit: int = 20,
+        sort: str = "label",
+    ) -> dict[str, Any]:
+        """Ensembles with type and home city; ``anchored=False`` keeps the ones
+        no Wikidata item accounts for."""
+        params = filters.add_to({"page": page, "limit": limit, "sort": sort})
+        if anchored is not None:
+            params["anchored"] = "true" if anchored else "false"
+        return self._json_dict("GET", "/v1/ensembles", params=params)
+
     def person_concerts(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
         params = {"page": page, "limit": limit}
         return self._json_dict("GET", f"/v1/people/{person_id}/concerts", params=params)

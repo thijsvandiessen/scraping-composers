@@ -67,6 +67,7 @@ class RebuildStats:
     work_decisions_dropped: int = 0
     places_linked: int = 0
     genres_linked: int = 0
+    ensembles_anchored: int = 0
     concerts: int = 0
     recordings: int = 0
 
@@ -273,6 +274,7 @@ def _replay(
         work_decisions_dropped=work_dropped,
         places_linked=derived.places.linked,
         genres_linked=derived.genres.linked,
+        ensembles_anchored=derived.ensembles.anchored,
         concerts=derived.concerts.concerts,
         recordings=derived.recordings.recordings,
     )

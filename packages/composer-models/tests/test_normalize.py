@@ -132,7 +132,7 @@ def test_qid_key() -> None:
 
 def test_genres_and_movements_with_a_qid_are_keyed_on_it_alone() -> None:
     """A renamed Wikidata label must not split the genre in two (#349)."""
-    assert QID_KEYED_KINDS == {"genre", "movement"}
+    assert QID_KEYED_KINDS == {"genre", "movement", "ensemble"}
     for kind in QID_KEYED_KINDS:
         assert entity_key(kind, "waltz", "Q215") == "wikidata:Q215"
         assert entity_key(kind, "Waltz (dance)", "Q215") == entity_key(kind, "waltz", "Q215")
@@ -153,3 +153,10 @@ def test_wikidata_id_reads_both_key_forms() -> None:
     # a label key can't spell the prefix: dedup_key strips the colon
     assert dedup_key("wikidata:Q215") == "wikidataq215"
     assert wikidata_id("wikidataq215") is None
+
+
+def test_an_ensemble_with_a_qid_is_keyed_on_the_qid_alone() -> None:
+    """One orchestra under every name it is printed (#350)."""
+    assert entity_key("ensemble", "Wiener Philharmoniker", "Q900001") == "wikidata:Q900001"
+    assert entity_key("ensemble", "Vienna Philharmonic", "Q900001") == qid_key("Q900001")
+    assert entity_key("ensemble", "The Vienna Philharmonic") == "the vienna philharmonic"

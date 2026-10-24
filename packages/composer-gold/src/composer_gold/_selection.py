@@ -300,3 +300,8 @@ class GoldBuild:
             self.all_ensembles, cfg.min_concert_appearances, cfg.min_recording_appearances
         )
         self.unevidenced_ensembles = {self.root(e) for e in self.all_ensembles} - self.kept_ensembles
+
+    def ensemble_members(self) -> set[uuid.UUID]:
+        """Name-variant ensembles folded onto a kept ensemble root: not copied
+        as entities, but their records and literal claims are, re-pointed."""
+        return {e for e in self.all_ensembles if e != self.root(e) and self.root(e) in self.kept_ensembles}

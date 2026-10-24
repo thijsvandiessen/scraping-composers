@@ -14,6 +14,7 @@ to override `LOG_LEVEL`.
 | `review`, `rematch` | the work mentions the matcher was unsure about (`--accept`, `--new`), and re-running matching | [composer-warehouse](../../packages/composer-warehouse/README.md#works) |
 | `dedupe-persons`, `person-review` | link duplicate people, and review the pairs the model was unsure about | [composer-warehouse](../../packages/composer-warehouse/README.md#people-deduplication) |
 | `person-train`, `person-eval` | refit the person linkage model, and score it on the evaluation set | [MODEL.md](../../packages/composer-warehouse/src/composer_warehouse/persons/MODEL.md) |
+| `anchor-ensembles`, `ensembles` | fold ensemble spellings onto the Wikidata ensembles they name (also run before every promote), and list ensembles most credited first (`--unanchored`, `--limit`) | [composer-warehouse](../../packages/composer-warehouse/README.md#ensembles) |
 | `derive-concerts`, `derive-recordings` | group mentions into concerts and recordings (also run before every promote) | [composer-warehouse](../../packages/composer-warehouse/README.md#concerts-and-recordings) |
 | `genres`, `link-genres` | report how far the genre/movement hierarchy reaches, orphans counted and the most-used listed (`--kind`, `--limit`); and point label-only genres at their QID entity (also run before every promote) | [composer-warehouse](../../packages/composer-warehouse/README.md#genres-and-movements) |
 | `rebuild-silver` | replay the whole bucket into a fresh silver | [composer-warehouse](../../packages/composer-warehouse/README.md#rebuilding-silver) |
@@ -31,8 +32,8 @@ uv run --directory apps/cli pytest --rootdir . --cov=composer_cli
 
 | Area | Covers |
 | --- | --- |
-| Queries | `claims` (per-source attribution, filters, record provenance, collapsing repeats, unknown names), `stats` (empty, entities, works, person dedupe counts), `runs`, `works`. |
-| Ingest | `fetch` → `process` round trip, a failing source, `process` loading every loadable run, no runs to load, `derive-concerts`, and `rebuild-silver` (every bucket source, rejecting a URL with nothing to swap). |
+| Queries | `claims` (per-source attribution, filters, record provenance, collapsing repeats, unknown names), `stats` (empty, entities, works, person dedupe counts), `runs`, `works`, `ensembles` (all, and `--unanchored`). |
+| Ingest | `fetch` → `process` round trip, a failing source, `process` loading every loadable run, no runs to load, `anchor-ensembles`, `derive-concerts`, and `rebuild-silver` (every bucket source, rejecting a URL with nothing to swap). |
 | Works | `review` listing and `--new`, `rematch`. |
 | Genres | `link-genres` linking a label-only genre, `genres` printing the counts and the orphan count for one kind, and `main` routing `genres` to both kinds. |
 | People | `dedupe-persons` (links, reviews, refused merges, `--reset`, `--recluster-only`), `person-review` accept and reject, `person-train` (model and dataset written, no dataset unless asked), `person-eval`. |

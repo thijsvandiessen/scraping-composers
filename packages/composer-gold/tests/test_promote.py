@@ -16,6 +16,7 @@ from composer_models import (
     Concert,
     ConcertParticipant,
     Entity,
+    EntityRecord,
     RawWorkMention,
     Recording,
     Work,
@@ -25,6 +26,7 @@ from composer_models.normalize import entity_uuid
 from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.derived import refresh_derived
+from composer_warehouse.ensembles import anchor_ensembles
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import (
     FakeSource,
@@ -955,6 +957,67 @@ def test_rule1_off_keeps_unevidenced_ensembles(session: Session, tmp_path: Path)
         labels = {e.label for e in gold.scalars(select(Entity))}
         assert {"Berliner Philharmoniker", "Guest Orchestra"} <= labels
     assert (stats.ensembles_kept, stats.ensembles_dropped) == (2, 0)
+
+
+def test_an_anchored_ensemble_reaches_gold_as_one_with_its_type_and_city(
+    session: Session, tmp_path: Path
+) -> None:
+    """#350: the spellings folded onto a Wikidata anchor collapse into it, and
+    the anchor's own object claims (its home city) survive the walk."""
+    wikidata = FakeSource(
+        records=(
+            ensemble(
+                "Vienna Philharmonic",
+                SourceClaim("ensemble_type", value="orchestra"),
+                SourceClaim("based_in", "place", "Vienna"),
+                SourceClaim("also_known_as", value="Wiener Philharmoniker"),
+                external_id="Q900001",
+                url="https://www.wikidata.org/wiki/Q900001",
+            ),
+        ),
+        name="wikidata_ensembles",
+    )
+    berlinphil = FakeSource(
+        records=(
+            perf_mention(
+                "perf:1",
+                "Symphony No. 9",
+                "Beethoven, Ludwig van",
+                {"concert_id": "1", "date": "2020-01-01", "ensembles": ["Wiener Philharmoniker"]},
+            ),
+            perf_mention(
+                "perf:2",
+                "Symphony No. 5",
+                "Beethoven, Ludwig van",
+                {"concert_id": "2", "date": "2021-01-01", "ensembles": ["Vienna Philharmonic"]},
+            ),
+            ensemble("Wiener Philharmoniker", external_id="bp:wph"),
+            ensemble("Vienna Philharmonic", external_id="bp:vpo"),
+        ),
+        name="berlinphil",
+    )
+    ingest_source(session, wikidata)
+    ingest_source(session, berlinphil)
+    anchor_ensembles(session)
+    derive_concerts(session)
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        (orchestra,) = gold.scalars(select(Entity).where(Entity.kind == "ensemble"))
+        assert orchestra.dedup_key == "wikidata:Q900001"
+        claims = {
+            (c.predicate, c.value, c.object_id)
+            for c in gold.scalars(select(Claim).where(Claim.subject_id == orchestra.id))
+        }
+        assert ("ensemble_type", "orchestra", None) in claims
+        vienna = gold.scalars(select(Entity).where(Entity.kind == "place", Entity.label == "Vienna")).one()
+        assert ("based_in", None, vienna.id) in claims
+        # the name variants' records survive, re-pointed at the anchor
+        records = gold.scalars(select(EntityRecord).where(EntityRecord.external_id.in_(["bp:wph", "bp:vpo"])))
+        assert {r.entity_id for r in records} == {orchestra.id}
+        participants = gold.scalars(select(ConcertParticipant).where(ConcertParticipant.role == "ensemble"))
+        assert {p.entity_id for p in participants} == {orchestra.id}
 
 
 def test_promote_writes_manifest_and_is_rerunnable(session: Session, tmp_path: Path) -> None:

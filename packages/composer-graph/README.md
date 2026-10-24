@@ -19,12 +19,13 @@ properties. Works, concerts and recordings are nodes too, linked by `COMPOSED_BY
 (`BORN_IN`, `HAS_GENRE`, …) that carry the sources asserting them. That includes
 the Wikidata person ↔ person relations: `STUDENT_OF`, `TEACHER_OF`,
 `INFLUENCED_BY`, and the family links, and the genre and movement hierarchy as
-`SUBCLASS_OF`, so `(:Genre)<-[:SUBCLASS_OF*0..]-(:Genre)` is a genre and
+`SUBCLASS_OF`, and an ensemble's `BASED_IN` (its home city) and `PART_OF`, so `(:Genre)<-[:SUBCLASS_OF*0..]-(:Genre)` is a genre and
 everything below it. A node whose entity carries a Wikidata QID has it as
-`wikidata_id`, the stable handle to match on. Nothing is pre-aggregated: how strongly
+`wikidata_id`, the stable handle to match on, and ensembles their
+`ensemble_type` (`orchestra`, `choir`, …). Nothing is pre-aggregated: how strongly
 two entities are connected is a count over paths. [`queries.cypher`](queries.cypher)
 has starter queries for that: performer → composer, composers programmed
-together (raw and normalised), co-performers, shared birthplaces, genre roll-up and orphans, and Graph Data
+together (raw and normalised), co-performers, shared birthplaces, genre roll-up and orphans, orchestras by home city, and Graph Data
 Science similarity and community detection. The compose service ships the GDS
 plugin.
 
@@ -43,7 +44,7 @@ uv run --directory packages/composer-graph pytest --rootdir . --cov=composer_gra
 
 | File | Covers |
 | --- | --- |
-| `test_rows.py` | Reading gold as graph rows: labelled entity nodes with literal claims as properties, concert and work nodes, `COMPOSED_BY`, `PERFORMED_IN` with the role, `PROGRAMMED`, object claims as typed relationships, `SUBCLASS_OF` between genres, and the `wikidata_id` node property. |
+| `test_rows.py` | Reading gold as graph rows: labelled entity nodes with literal claims as properties, concert and work nodes, `COMPOSED_BY`, `PERFORMED_IN` with the role, `PROGRAMMED`, object claims as typed relationships, `SUBCLASS_OF` between genres, the `wikidata_id` node property, and an anchored ensemble's `ensemble_type` and `BASED_IN`. |
 | `test_load.py` | Loading into a real Neo4j: the event graph, performer → composer strength as a path count, composers connected by shared programmes, and a second load replacing the first. |
 
 `test_load.py` is skipped unless `COMPOSER_TEST_NEO4J_URL` points at a server

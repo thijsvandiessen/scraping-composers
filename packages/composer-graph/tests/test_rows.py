@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import Any
 
+from composer_gold import promote
 from composer_graph.rows import (
     RelGroup,
     Skipped,
@@ -14,7 +15,12 @@ from composer_graph.rows import (
     programmed,
     work_nodes,
 )
+from composer_models.db import init_db
+from composer_schema import SourceClaim
+from composer_warehouse.concerts import derive_concerts
+from composer_warehouse.testing import FakeSource, ensemble, ingest_source, perf_mention
 from graph_fixture import gold_session
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 
@@ -113,3 +119,46 @@ def test_object_claims_become_typed_relationships(session: Session, tmp_path: Pa
     assert (subclass.start, subclass.end) == ("Genre", "Genre")
     born_in = next(row for group, row in rels if group.type == "BORN_IN")
     assert born_in["props"]["sources"] == ["archive"]
+
+
+def test_an_ensemble_carries_its_type_qid_and_home_city(session: Session, tmp_path: Path) -> None:
+    """#350: ensemble type as a property, the Wikidata id on the node, and
+    BASED_IN to the home city."""
+    wikidata = FakeSource(
+        records=(
+            ensemble(
+                "Vienna Philharmonic",
+                SourceClaim("ensemble_type", value="orchestra"),
+                SourceClaim("based_in", "place", "Vienna"),
+                SourceClaim("also_known_as", value="Wiener Philharmoniker"),
+                external_id="Q900001",
+                url="https://www.wikidata.org/wiki/Q900001",
+            ),
+        ),
+        name="wikidata_ensembles",
+    )
+    berlinphil = FakeSource(
+        records=tuple(
+            perf_mention(
+                f"perf:{i}",
+                "Symphony No. 9",
+                "Beethoven, Ludwig van",
+                {"concert_id": str(i), "date": f"202{i}-01-01", "ensembles": ["Wiener Philharmoniker"]},
+            )
+            for i in range(2)
+        ),
+        name="berlinphil",
+    )
+    ingest_source(session, wikidata)
+    ingest_source(session, berlinphil)
+    derive_concerts(session)
+    promote(session, f"sqlite:///{tmp_path / 'gold.db'}")
+    gold = init_db(create_engine(f"sqlite:///{tmp_path / 'gold.db'}"))()
+
+    nodes = {row["label"]: (label, row) for label, row in entity_nodes(gold)}
+    label, orchestra = nodes["Vienna Philharmonic"]
+    assert label == "Ensemble"
+    assert (orchestra["ensemble_type"], orchestra["wikidata_id"]) == ("orchestra", "Q900001")
+    assert "wikidata_id" not in nodes["Vienna"][1]
+    edges = _named(gold, list(claim_relationships(gold, Skipped())))
+    assert ("Vienna Philharmonic", "BASED_IN", "Vienna") in edges
