@@ -44,3 +44,21 @@ class Filters:
 
 
 FilterQuery = Annotated[Filters, Depends()]
+
+
+@dataclass(frozen=True)
+class EnsembleFilters:
+    """The ensemble list's own query parameters.
+
+    ``anchored`` keeps ensembles that are (true) or are not (false) tied to a
+    Wikidata item, either keyed on one or, in silver, folded onto one.
+    ``type`` matches the Wikidata type claim; ``sort`` is ``label`` or
+    ``appearances`` (concerts + recordings, most first).
+    """
+
+    anchored: bool | None = None
+    type: str | None = None
+    sort: Annotated[str, Query(pattern="^(label|appearances)$")] = "label"
+
+
+EnsembleQuery = Annotated[EnsembleFilters, Depends()]

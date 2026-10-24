@@ -14,6 +14,7 @@ everything after that (bucket, ingest, matching) is shared.
 | `imslp_recordings` | IMSLP's commercial recordings of the catalogue | yearly | [imslp](docs/imslp.md) |
 | `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | yearly | |
 | `wikidata_works` | every Wikidata work with a date of first performance (P1191) and a composer, with its premiere place (P4647) | yearly | work mentions carrying `raw["premiere"]`, which fills `Work.premiere_date` |
+| `wikidata_ensembles` | every Wikidata orchestra (Q42998) and choir (Q131186), subclasses included, with their names in the sources' languages, headquarters city, MusicBrainz id and the groups they are part of | yearly | the anchors `anchor-ensembles` folds name-keyed ensembles onto; see below |
 | `openopus` | Open Opus work catalogue | yearly | |
 | `classicalmusiconline` | classical-music-online.net composer catalogue and works | yearly | two levels: 26 index pages, then ~11.6k composer pages (a couple of hours); `--max-pages` caps the composer pages |
 | `classicfm` | composer and artist name lists from classicfm.com | yearly | |
@@ -33,6 +34,18 @@ everything after that (bucket, ingest, matching) is shared.
 The cadence decides when a source is *due* again in the admin API and how long
 its page mirror serves a page (see below). `static` is for archives of things
 already given: scraped once, re-run on demand.
+
+`wikidata_ensembles` is paged like `wikidata`: one live id query, then a
+mirrored detail query and a mirrored multi-valued query per 500 items, the
+detail page checked for coverage. Each ensemble record carries an
+`ensemble_type` (from its class: choir over orchestra; else from name cues such
+as `Quartet` or `Chor`; else `other`), a `based_in` city (the headquarters if it
+is a settlement, else the headquarters' P131) as a place by label with the
+city's QID kept in `raw["based_in"]`, an `also_known_as` per label and alias in
+English, `mul`, German, French, Italian, Dutch, Spanish, Czech, Swedish, Danish,
+Polish and Hungarian, and `part_of` only towards another ensemble in the
+population. Chamber ensembles and opera companies are not population classes
+yet: their QIDs still need pinning against live Wikidata.
 
 ## Adding a source
 
@@ -157,6 +170,7 @@ Most sources are tested in three layers, one file each:
 | `wienerphil` | `test_wienerphil.py`, `test_wienerphil_details.py` | ✓ | ✓ |
 | `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror | | |
 | `wikidata_works` | `test_wikidata_works.py` covers all three | | |
+| `wikidata_ensembles` | `test_wikidata_ensembles.py` covers all three, including the mirror | | |
 
 `test_base.py` covers what every source shares: the session carries the
 adapter's manners, the mirror's lifetime follows the cadence, and every

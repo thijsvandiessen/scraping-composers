@@ -47,6 +47,15 @@ def event_uuid(kind: str, source_name: str, external_key: str) -> uuid.UUID:
 # A dedup key's wikidata suffix. The base is punctuation-stripped, so the pipe
 # can only be the separator this module wrote.
 _WIKIDATA_SUFFIX = re.compile(r"\|(Q\d+)$")
+# A key that is nothing but the QID (see ``qid_key``). The colon is stripped
+# from every name-derived key, so this cannot collide with one.
+_QID_KEY = re.compile(r"^wikidata:(Q\d+)$")
+
+#: Kinds whose entities are keyed on their Wikidata item alone when they have
+#: one. A person keeps its name in the key — the dedupe pass reads it — but an
+#: orchestra with a QID is that item under whatever name it is printed, and a
+#: name in the key would mint a second entity the day Wikidata relabels it.
+QID_KEYED_KINDS = frozenset({"ensemble"})
 
 
 def dedup_key(name: str, wikidata_id: str | None = None) -> str:
@@ -65,6 +74,18 @@ def dedup_key(name: str, wikidata_id: str | None = None) -> str:
     return base
 
 
+def qid_key(qid: str) -> str:
+    """The dedup key of an entity identified by its Wikidata item alone."""
+    return f"wikidata:{qid}"
+
+
+def entity_key(kind: str, label: str, wikidata_id: str | None = None) -> str:
+    """The dedup key an entity of *kind* labelled *label* is stored under."""
+    if wikidata_id and kind in QID_KEYED_KINDS:
+        return qid_key(wikidata_id)
+    return dedup_key(label, wikidata_id)
+
+
 def wikidata_id(key: str) -> str | None:
     """The QID :func:`dedup_key` folded into ``key``, if it carried one.
 
@@ -73,5 +94,5 @@ def wikidata_id(key: str) -> str | None:
     that — the dedupe pass, which treats two QIDs as two people — should not
     have to re-derive the encoding.
     """
-    found = _WIKIDATA_SUFFIX.search(key)
+    found = _WIKIDATA_SUFFIX.search(key) or _QID_KEY.match(key)
     return found.group(1) if found else None

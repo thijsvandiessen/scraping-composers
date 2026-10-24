@@ -6,12 +6,14 @@ from fastapi import APIRouter, Query
 from .crud import (
     composer_works,
     get_concert,
+    get_ensemble,
     get_entity,
     get_person,
     get_recording,
     get_stats,
     get_work,
     list_concerts,
+    list_ensembles,
     list_entities,
     list_mentions,
     list_people,
@@ -20,7 +22,7 @@ from .crud import (
     person_concerts,
     person_recordings,
 )
-from .deps import DbSession, FilterQuery, PageQuery
+from .deps import DbSession, EnsembleQuery, FilterQuery, PageQuery
 from .schemas import (
     ComposerDetail,
     ComposerPage,
@@ -28,6 +30,8 @@ from .schemas import (
     ConcertDetail,
     ConcertListPage,
     ConcertPage,
+    EnsembleDetail,
+    EnsemblePage,
     EntityDetail,
     EntityPage,
     MentionPage,
@@ -61,6 +65,24 @@ def entities(
 @v1.get("/entities/{entity_id}", response_model=EntityDetail)
 def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
     return get_entity(db, entity_id)
+
+
+@v1.get("/ensembles", response_model=EnsemblePage)
+def ensembles(
+    db: DbSession, pager: PageQuery, filters: FilterQuery, ensemble_filters: EnsembleQuery
+) -> EnsemblePage:
+    """Orchestras, choirs and other groups, with their type and home city.
+
+    ``anchored=false`` lists the ones no Wikidata item accounts for; with
+    ``sort=appearances`` the most-credited come first.
+    """
+    return list_ensembles(db, filters, pager, ensemble_filters)
+
+
+@v1.get("/ensembles/{ensemble_id}", response_model=EnsembleDetail)
+def ensemble_detail(ensemble_id: uuid.UUID, db: DbSession) -> EnsembleDetail:
+    """One ensemble: its other names, the groups it is part of, and its claims."""
+    return get_ensemble(db, ensemble_id)
 
 
 @v1.get("/works", response_model=WorkPage)

@@ -9,6 +9,7 @@ from composer_gold import PromoteConfig, Rule1Config, gold_target, promote
 from composer_models.db import get_engine, init_db
 from composer_scrapers import REGISTRY
 from composer_warehouse.concerts import derive_concerts
+from composer_warehouse.ensembles import anchor_ensembles
 from composer_warehouse.ingestion import ingest_documents
 from composer_warehouse.rebuild import rebuild_silver
 from composer_warehouse.recordings import derive_recordings
@@ -41,6 +42,18 @@ def cmd_derive_concerts(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_anchor_ensembles(args: argparse.Namespace) -> int:
+    engine = get_engine(args.database_url)
+    session_factory = init_db(engine)
+    with session_factory() as session:
+        stats = anchor_ensembles(session)
+    print(f"anchored {stats.anchored} ensemble spellings onto {stats.anchors} Wikidata ensembles")
+    for key, value in asdict(stats).items():
+        if key not in ("anchors", "anchored"):
+            print(f"  {key.replace('_', ' '):<30} {value}")
+    return 0
+
+
 def cmd_derive_recordings(args: argparse.Namespace) -> int:
     engine = get_engine(args.database_url)
     session_factory = init_db(engine)
@@ -58,9 +71,10 @@ def cmd_promote(args: argparse.Namespace) -> int:
     session_factory = init_db(engine)
     with session_factory() as session:
         try:
-            # Concerts and recordings are silver-derived state the gold build
-            # copies; refresh them first so promote-after-load never publishes
-            # stale derivations.
+            # Ensemble anchors, concerts and recordings are silver-derived state
+            # the gold build copies; refresh them first so promote-after-load
+            # never publishes stale derivations.
+            anchor_ensembles(session)
             derive_concerts(session)
             derive_recordings(session)
             config = PromoteConfig(

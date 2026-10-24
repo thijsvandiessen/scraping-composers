@@ -308,3 +308,39 @@ class RecordingDetail(BaseModel):
     url: str | None
     participants: list[RecordingParticipantOut]
     works: list[RecordingWorkOut]
+
+
+class EntityRef(BaseModel):
+    id: uuid.UUID
+    label: str
+
+
+class EnsembleSummary(BaseModel):
+    id: uuid.UUID
+    label: str
+    # The Wikidata item the ensemble is keyed on; None for a name-keyed one.
+    wikidata_id: str | None
+    # orchestra, choir, chamber_ensemble, opera_company, band or other: the
+    # Wikidata type where there is one (in silver, the anchor's), else read
+    # from the name; None when neither says.
+    ensemble_type: str | None
+    home_city: EntityRef | None
+    # Silver only: the Wikidata ensemble this spelling was folded onto.
+    canonical_entity_id: uuid.UUID | None
+    concert_count: int = 0
+    recording_count: int = 0
+
+
+class EnsemblePage(BaseModel):
+    items: list[EnsembleSummary]
+    total: int
+    page: int
+    limit: int
+
+
+class EnsembleDetail(EnsembleSummary):
+    # Other names: Wikidata's aliases, plus (in silver) the spellings folded onto it.
+    aliases: list[str]
+    musicbrainz_id: str | None
+    part_of: list[EntityRef]
+    claims: list[ClaimOut]

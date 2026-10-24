@@ -1,7 +1,15 @@
 import uuid
 
 import pytest
-from composer_models.normalize import MAX_KEY_CHARS, dedup_key, entity_uuid, event_uuid, wikidata_id
+from composer_models.normalize import (
+    MAX_KEY_CHARS,
+    dedup_key,
+    entity_key,
+    entity_uuid,
+    event_uuid,
+    qid_key,
+    wikidata_id,
+)
 
 
 @pytest.mark.parametrize(
@@ -115,3 +123,18 @@ def test_wikidata_id_ignores_a_pipe_that_is_not_an_id() -> None:
     # this module wrote — but a caller may hand over any string.
     assert wikidata_id("johann strauss|junior") is None
     assert wikidata_id("johann strauss") is None
+
+
+def test_an_ensemble_with_a_qid_is_keyed_on_the_qid_alone() -> None:
+    assert entity_key("ensemble", "Wiener Philharmoniker", "Q900001") == "wikidata:Q900001"
+    assert entity_key("ensemble", "Vienna Philharmonic", "Q900001") == qid_key("Q900001")
+
+
+def test_other_kinds_and_qidless_ensembles_keep_the_name_key() -> None:
+    assert entity_key("person", "Beethoven, Ludwig van", "Q255") == "ludwig van beethoven|Q255"
+    assert entity_key("ensemble", "The Vienna Philharmonic") == "the vienna philharmonic"
+
+
+def test_wikidata_id_reads_a_qid_key() -> None:
+    assert wikidata_id(qid_key("Q900001")) == "Q900001"
+    assert wikidata_id("wikidata:junk") is None

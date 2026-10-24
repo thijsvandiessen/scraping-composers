@@ -4,7 +4,9 @@ Fetches every item with occupation "composer" (Q36834) from the Wikidata Query
 Service. ``query`` holds the SPARQL access (id-list query + per-batch detail
 and metrics queries); ``parse`` folds the result rows into one SourceRecord per
 composer and formats birth/death dates to their recorded precision. ``works``
-is a second adapter over the same service: works with a recorded premiere.
+is a second adapter over the same service: works with a recorded premiere;
+``ensembles`` a third: orchestras and choirs, the anchors name-keyed ensembles
+are folded onto.
 """
 
 from __future__ import annotations
@@ -16,13 +18,14 @@ from datetime import UTC, datetime
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence
+from .ensembles import WikidataEnsemblesAdapter
 from .parse import BASE_URL, _records_from_rows
 from .query import PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _fetch_metrics, _fetch_page, _fetch_qids
 from .works import WikidataWorksAdapter
 
 log = logging.getLogger(__name__)
 
-__all__ = ["BASE_URL", "WikidataAdapter", "WikidataWorksAdapter"]
+__all__ = ["BASE_URL", "WikidataAdapter", "WikidataEnsemblesAdapter", "WikidataWorksAdapter"]
 
 
 class WikidataAdapter(HttpSourceAdapter[EntityDocument]):

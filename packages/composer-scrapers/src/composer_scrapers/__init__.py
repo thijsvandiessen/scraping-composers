@@ -88,7 +88,7 @@ from .openopus import OpenOpusAdapter  # noqa: E402
 from .rco import RcoAdapter  # noqa: E402
 from .roh import RohAdapter  # noqa: E402
 from .wienerphil import WienerPhilAdapter  # noqa: E402
-from .wikidata import WikidataAdapter, WikidataWorksAdapter  # noqa: E402
+from .wikidata import WikidataAdapter, WikidataEnsemblesAdapter, WikidataWorksAdapter  # noqa: E402
 
 REGISTRY: dict[str, SourceAdapter] = {
     "imslp": ImslpAdapter(),
@@ -96,6 +96,7 @@ REGISTRY: dict[str, SourceAdapter] = {
     "imslp_recordings": ImslpRecordingsAdapter(),
     "wikidata": WikidataAdapter(),
     "wikidata_works": WikidataWorksAdapter(),
+    "wikidata_ensembles": WikidataEnsemblesAdapter(),
     "concertgebouw_archive": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),
     "berlinphil": BerlinPhilAdapter(),

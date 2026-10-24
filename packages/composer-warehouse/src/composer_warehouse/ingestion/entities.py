@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from composer_models import Entity, Source
-from composer_models.normalize import dedup_key, entity_uuid
+from composer_models.normalize import entity_key, entity_uuid
 from composer_schema import resolve_entity_kind
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -34,7 +34,7 @@ def get_or_create_entity(
     kind is baked into the entity's uuid (see #174).
     """
     kind = resolve_entity_kind(kind, label)
-    key = dedup_key(label, wikidata_id)
+    key = entity_key(kind, label, wikidata_id)
     entity_id = cache.get((kind, key))
     if entity_id is None:
         entity_id = entity_uuid(kind, key)

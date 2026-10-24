@@ -96,7 +96,7 @@ provides the Postgres fixtures the other members use.
 
 | File | Covers |
 | --- | --- |
-| `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, stable concert/recording UUIDs per kind, source and key, and reading a QID back out of a key. |
+| `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, stable concert/recording UUIDs per kind, source and key, reading a QID back out of a key, and ensembles keyed on their QID alone (`entity_key`). |
 | `test_db.py` | `init_db` creating every table, an entity round-trip, unbounded scraper-sourced columns, unique key columns, and rejecting a schema name that cannot be escaped. |
 | `test_migrations.py` | The tree having a single head (no database needed). Postgres only: `upgrade head` creating the schema from nothing, and head matching the models. |
 

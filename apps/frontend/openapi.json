@@ -741,6 +741,227 @@
         "title": "ConcertWorkOut",
         "type": "object"
       },
+      "EnsembleDetail": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "canonical_entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Entity Id"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimOut"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "concert_count": {
+            "default": 0,
+            "title": "Concert Count",
+            "type": "integer"
+          },
+          "ensemble_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ensemble Type"
+          },
+          "home_city": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "musicbrainz_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Musicbrainz Id"
+          },
+          "part_of": {
+            "items": {
+              "$ref": "#/components/schemas/EntityRef"
+            },
+            "title": "Part Of",
+            "type": "array"
+          },
+          "recording_count": {
+            "default": 0,
+            "title": "Recording Count",
+            "type": "integer"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "wikidata_id",
+          "ensemble_type",
+          "home_city",
+          "canonical_entity_id",
+          "aliases",
+          "musicbrainz_id",
+          "part_of",
+          "claims"
+        ],
+        "title": "EnsembleDetail",
+        "type": "object"
+      },
+      "EnsemblePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EnsembleSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "EnsemblePage",
+        "type": "object"
+      },
+      "EnsembleSummary": {
+        "properties": {
+          "canonical_entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Entity Id"
+          },
+          "concert_count": {
+            "default": 0,
+            "title": "Concert Count",
+            "type": "integer"
+          },
+          "ensemble_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ensemble Type"
+          },
+          "home_city": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "recording_count": {
+            "default": 0,
+            "title": "Recording Count",
+            "type": "integer"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "wikidata_id",
+          "ensemble_type",
+          "home_city",
+          "canonical_entity_id"
+        ],
+        "title": "EnsembleSummary",
+        "type": "object"
+      },
       "EntityDetail": {
         "properties": {
           "canonical_entity_id": {
@@ -834,6 +1055,25 @@
           "limit"
         ],
         "title": "EntityPage",
+        "type": "object"
+      },
+      "EntityRef": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "EntityRef",
         "type": "object"
       },
       "EntitySummary": {
@@ -1726,6 +1966,17 @@
             ],
             "title": "Premiere Date"
           },
+          "premiere_place": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premiere Place"
+          },
           "proof": {
             "items": {
               "$ref": "#/components/schemas/WorkProofOut"
@@ -2451,6 +2702,176 @@
           }
         },
         "summary": "Get Conductor"
+      }
+    },
+    "/v1/ensembles": {
+      "get": {
+        "description": "Orchestras, choirs and other groups, with their type and home city.\n\n``anchored=false`` lists the ones no Wikidata item accounts for; with\n``sort=appearances`` the most-credited come first.",
+        "operationId": "ensembles_v1_ensembles_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "anchored",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Anchored"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "label",
+              "pattern": "^(label|appearances)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnsemblePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ensembles"
+      }
+    },
+    "/v1/ensembles/{ensemble_id}": {
+      "get": {
+        "description": "One ensemble: its other names, the groups it is part of, and its claims.",
+        "operationId": "ensemble_detail_v1_ensembles__ensemble_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ensemble_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ensemble Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnsembleDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ensemble Detail"
       }
     },
     "/v1/entities": {
