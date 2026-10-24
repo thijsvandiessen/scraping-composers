@@ -56,7 +56,11 @@ const metricGroups = groupByPredicate(metrics);
 <Base title={`${composer.label} — Composers`}>
   <p class="back-link"><a href="/composers">← All composers</a></p>
   <h1>{composer.label}</h1>
-  <p class="meta">In the dataset since {composer.created_at.slice(0, 10)}.</p>
+  <p class="meta">
+    In the dataset since {composer.created_at.slice(0, 10)}. <a href={`/connections/${composer.id}`}>
+      Explore connections →
+    </a>
+  </p>
 
   {facts.length === 0 && <p class="empty">No facts recorded for this composer yet.</p>}
 

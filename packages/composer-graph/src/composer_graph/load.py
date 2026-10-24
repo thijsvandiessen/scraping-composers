@@ -19,6 +19,7 @@ from neo4j import Driver, ManagedTransaction
 from sqlalchemy.orm import Session
 
 from .rows import (
+    CLAIM_TYPES,
     NODE_LABELS,
     RelGroup,
     Row,
@@ -127,6 +128,42 @@ def _create_relationships(
             stats.relationships[group.type] += len(group_rows)
 
 
+# How far each node reaches, one property per relation family. They stay
+# separate because they count different things: a composer who also performs
+# has a times_performed in the thousands and a handful of appearances, and
+# ranking a performed edge against the appearances is how the first
+# connections read path came to promote Beethoven rather than demote him.
+#
+# times_performed  performances of the node's music (PROGRAMMED.times summed)
+# performances     performances the node took part in, of anyone's music
+# appearances      distinct events the node is billed at
+# claim_degree     distinct entities linked to it by a claim, has_profession
+#                  excepted (the hub that would make the count meaningless)
+_REACH_QUERIES: tuple[LiteralString, ...] = (
+    "MATCH (c)<-[:COMPOSED_BY]-(:Work)<-[r:PROGRAMMED]-() "
+    "WITH c, sum(r.times) AS n SET c.times_performed = n",
+    "MATCH (p)-[:PERFORMED_IN]->(e) WITH DISTINCT p, e "
+    "MATCH (e)-[r:PROGRAMMED]->(:Work) WITH p, sum(r.times) AS n SET p.performances = n",
+    "MATCH (p)-[:PERFORMED_IN]->(e) WITH p, count(DISTINCT e) AS n SET p.appearances = n",
+)
+
+
+def claim_pattern() -> LiteralString:
+    """The claim relationship types as a Cypher type union, has_profession left out."""
+    return _cypher("|".join(rel for predicate, rel in CLAIM_TYPES.items() if predicate != "has_profession"))
+
+
+def _annotate_reach(driver: Driver, database: str | None) -> None:
+    """Store each node's reach: the denominators the connections ranking uses."""
+    claim_degree = _cypher(
+        f"MATCH (n)-[:{claim_pattern()}]-(other) WITH n, count(DISTINCT other) AS n_other "
+        "SET n.claim_degree = n_other"
+    )
+    with driver.session(database=database) as session:
+        for query in (*_REACH_QUERIES, claim_degree):
+            session.run(query).consume()
+
+
 def load_graph(
     session: Session, driver: Driver, *, database: str | None = None, batch_size: int = DEFAULT_BATCH_SIZE
 ) -> GraphStats:
@@ -147,4 +184,7 @@ def load_graph(
     for relationships in (composed_by, performed_in, programmed, claim_relationships):
         _create_relationships(driver, database, relationships(session, stats.skipped), stats, batch_size)
     log.info("neo4j: relationships %s", dict(stats.relationships))
+
+    _annotate_reach(driver, database)
+    log.info("neo4j: reach annotated")
     return stats

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Query
+from neo4j import Driver
 from sqlalchemy.orm import Session
 
 
@@ -14,6 +15,16 @@ def get_db() -> Generator[Session, None, None]:
 
 
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+def get_graph() -> Driver | None:
+    """The Neo4j driver the connections read from; ``create_app`` overrides
+    this. ``None`` is an app with no graph (silver), which the route turns into
+    a 503 only after the entity itself has been found."""
+    return None
+
+
+GraphDriver = Annotated[Driver | None, Depends(get_graph)]
 
 
 @dataclass(frozen=True)
@@ -44,3 +55,25 @@ class Filters:
 
 
 FilterQuery = Annotated[Filters, Depends()]
+
+
+@dataclass(frozen=True)
+class GraphBudget:
+    """The caps that turn a raw neighbourhood into a drawable one.
+
+    Grouped for the same reason as ``Pagination`` and ``Filters``: the whole
+    set travels together on every connections request, and passing them
+    individually puts both the route and its crud function over the argument
+    cap. See ``crud.connections`` for what each one is for.
+    """
+
+    limit: Annotated[int, Query(ge=1, le=100)] = 24
+    # Unset, each relation is guaranteed six and the rest of ``limit`` is
+    # shared out by rank; set, it is a hard cap per relation.
+    per_relation: Annotated[int | None, Query(ge=1, le=50)] = None
+    min_weight: Annotated[int, Query(ge=1)] = 1
+    rank: Annotated[str, Query(pattern="^(affinity|weight)$")] = "affinity"
+    relation: str | None = None
+
+
+GraphQuery = Annotated[GraphBudget, Depends()]
