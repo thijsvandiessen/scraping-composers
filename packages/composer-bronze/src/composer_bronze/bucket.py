@@ -19,7 +19,7 @@ import json
 import logging
 import os
 from collections.abc import Iterable, Iterator
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -208,7 +208,11 @@ class LocalBucket:
         path = self._run_dir(source, run_id) / MANIFEST_FILENAME
         if not path.exists():
             return None
-        return SnapshotManifest(**json.loads(path.read_text(encoding="utf-8")))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        # Keys this version doesn't define (a newer or uncommitted writer's) are
+        # dropped: one such manifest must not fail every listing of the bucket.
+        known = {f.name for f in fields(SnapshotManifest)}
+        return SnapshotManifest(**{k: v for k, v in data.items() if k in known})
 
     def _fallback_manifest(self, source: str, run_id: str) -> SnapshotManifest:
         """Synthesize a manifest for a legacy snapshot dir written before manifests."""
