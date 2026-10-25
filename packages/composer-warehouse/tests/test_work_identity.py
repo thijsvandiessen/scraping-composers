@@ -160,6 +160,52 @@ def test_wikidata_catalogue_ids_are_stored_and_normalised(session: Session) -> N
     }
 
 
+def test_wikidata_codes_are_read_by_their_catalogue_item(session: Session) -> None:
+    """Terry 238/3 has no short name to read it by, and a Rinaldi catalogue
+    code keeps the catalogue item as its scheme (#361)."""
+    jc_bach = "Johann Christian Bach"
+    codes = [
+        {
+            "catalogue_item": "Q139766427",
+            "code": "238/3",
+            "catalogue": "Terry-Verzeichnis",
+            "catalogue_short": None,
+        },
+        {
+            "catalogue_item": "Q112328324",
+            "code": "R. op. 243",
+            "catalogue": "Rinaldi",
+            "catalogue_short": None,
+        },
+    ]
+    ingest(
+        session,
+        "wikidata_catalogue",
+        perf_mention("Q3:Q1", "Quintet", jc_bach, wikidata("Q3", catalogue_codes=codes)),
+    )
+    ingest(
+        session,
+        "imslp_works",
+        perf_mention("w1", "Quintet in D", jc_bach, {"opus_catalogue_number": "Ty 238/3"}),
+    )
+
+    stored = set(session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)).tuples())
+    assert {("Ty", "238/3"), ("wd:Q112328324", "r. op. 243")} <= stored
+    assert len(session.scalars(select(Work)).all()) == 1
+
+
+def test_two_wikidata_items_meet_on_a_code_in_an_unmapped_catalogue(session: Session) -> None:
+    code = [{"catalogue_item": "Q16749680", "code": "C 48", "catalogue": "Chomiński catalog"}]
+    chopin = "Chopin, Frédéric"
+    ingest(
+        session,
+        "wikidata_catalogue",
+        perf_mention("Q4:Q1268", "Piano Concerto No. 2", chopin, wikidata("Q4", catalogue_codes=code)),
+        perf_mention("Q5:Q1268", "Klavierkonzert f-Moll", chopin, wikidata("Q5", catalogue_codes=code)),
+    )
+    assert len(session.scalars(select(Work)).all()) == 1
+
+
 def test_wikidata_part_of_links_a_movement_to_its_work(session: Session) -> None:
     ingest(
         session,

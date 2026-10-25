@@ -188,26 +188,32 @@ def _find_key(text: str, spans: list[tuple[int, int]]) -> str | None:
 
 
 def extract_features(
-    raw_title: str, *, composer: str | None = None, structured: Iterable[str] = ()
+    raw_title: str,
+    *,
+    composer: str | None = None,
+    structured: Iterable[str] = (),
+    stated: Iterable[tuple[str, str]] = (),
 ) -> WorkFeatures:
     """The features of a title by ``composer`` (whose catalogues decide what a
     bare ``K``/``D``/``S`` means), plus the catalogue numbers a source states
-    in ``structured`` fields of its own (IMSLP's "Opus/Catalogue Number")."""
+    in ``structured`` fields of its own (IMSLP's "Opus/Catalogue Number") or
+    has already normalised into ``stated`` pairs (Wikidata's codes, read by
+    their catalogue item)."""
     text = _strip_diacritics(raw_title).lower()
     spans: list[tuple[int, int]] = []
 
     catalogues = _find_catalogue(text, composer, spans)
     opus_number, number = _find_opus_and_number(text, spans)
-    for field in structured:
-        for scheme, value in sorted(parse_catalogue(field, composer)):
-            if scheme == OPUS:
-                # an opus stays on the opus rule (see match._identifier_score)
-                if opus_number is None:
-                    opus_number, _, within = value.partition("/")
-                    if within and number is None:
-                        number = int(within)
-            elif (scheme, value) not in catalogues:
-                catalogues.append((scheme, value))
+    pairs = [pair for field in structured for pair in sorted(parse_catalogue(field, composer))]
+    for scheme, value in [*pairs, *stated]:
+        if scheme == OPUS:
+            # an opus stays on the opus rule (see match._identifier_score)
+            if opus_number is None:
+                opus_number, _, within = value.partition("/")
+                if within and number is None:
+                    number = int(within)
+        elif (scheme, value) not in catalogues:
+            catalogues.append((scheme, value))
     catalogues = _without_enclosing_sets(catalogues)
     musical_key = _find_key(text, spans)
     derivation = derivation_of(raw_title)

@@ -32,6 +32,12 @@ a value holding ``-`` or ``,`` is always a set (:func:`is_catalogue_set`, with
 year) is not one, and only its first number is read; a list stops at a number
 too small to be a sibling (``BWV 57, 8`` is a cantata and its movement).
 
+Wikidata states a code with the catalogue item it belongs to (P972), and
+:func:`normalize_wikidata_code` reads it by that item: an item in
+:data:`WIKIDATA_CATALOGUES` names the scheme whatever the code's spelling or
+the composer, and a code in any other catalogue keeps the item as its scheme
+(``wd:Q51796663``), so two Wikidata items still meet on it.
+
 Opus numbers are read as well (scheme ``op``, value ``27/2`` for "Op. 27
 No. 2"), but they are less trustworthy than a catalogue -- publishers
 reassigned them -- so the work matcher keeps them on their own rule.
@@ -43,6 +49,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 
 #: Scheme of an opus number.
@@ -63,14 +70,16 @@ class ComposerCatalogues:
     """The catalogues only one composer's prefixes mean.
 
     A composer label matches when one of its words is ``surname`` (or one of
-    ``names``, other spellings of it) and none is in ``exclude_given`` -- the
-    given names of a relative with a catalogue of their own (Leopold and
-    Franz Xaver Mozart, Michael Haydn).
+    ``names``, other spellings of it), one is in ``given`` when that is set
+    -- the Bach sons share their father's surname, Michael Haydn his
+    brother's -- and none is in ``exclude_given``, the given names of a
+    relative with a catalogue of their own (Leopold and Franz Xaver Mozart).
     """
 
     surname: str
     schemes: tuple[CatalogueScheme, ...]
     names: tuple[str, ...] = ()
+    given: frozenset[str] = frozenset()
     exclude_given: frozenset[str] = frozenset()
 
 
@@ -124,13 +133,127 @@ COMPOSERS: tuple[ComposerCatalogues, ...] = (
     ),
     ComposerCatalogues(surname="honegger", schemes=(CatalogueScheme("H", ("h",)),)),
     ComposerCatalogues(surname="martinu", schemes=(CatalogueScheme("H", ("h",)),)),
+    ComposerCatalogues(
+        surname="bach",
+        given=frozenset({"emanuel"}),
+        # Wotquenne, Helm and the Bach-Repertorium, whose sections run A to H:
+        # BR-CPEB H 35 is not Helm 35.
+        schemes=(
+            CatalogueScheme("Wq", ("wq",)),
+            CatalogueScheme("H", ("h",)),
+            CatalogueScheme("BR-CPEB", ("br cpeb",)),
+        ),
+    ),
+    ComposerCatalogues(
+        surname="bach",
+        given=frozenset({"christian"}),
+        schemes=(CatalogueScheme("Warb", ("warb",)), CatalogueScheme("Ty", ("ty",))),
+    ),
+    ComposerCatalogues(
+        surname="bach",
+        given=frozenset({"friedemann"}),
+        schemes=(CatalogueScheme("F", ("f", "fk")), CatalogueScheme("BR-WFB", ("br wfb",))),
+    ),
+    ComposerCatalogues(
+        surname="purcell",
+        schemes=(CatalogueScheme("Z", ("z",)),),
+        exclude_given=frozenset({"daniel"}),
+    ),
+    ComposerCatalogues(surname="graupner", schemes=(CatalogueScheme("GWV", ("gwv",)),)),
+    ComposerCatalogues(
+        surname="lassus",
+        names=("lasso",),
+        schemes=(CatalogueScheme("LV Anh", ("lv anh",)), CatalogueScheme("LV", ("lv",))),
+        exclude_given=frozenset({"rudolph", "ferdinand"}),
+    ),
+    ComposerCatalogues(
+        surname="chopin",
+        # Brown, and Kobylańska's sections ("KK IVa/15") with their appendix.
+        schemes=(
+            CatalogueScheme("B", ("b",)),
+            CatalogueScheme("KK Anh", ("kk anh",)),
+            CatalogueScheme("KK", ("kk",)),
+        ),
+    ),
+    ComposerCatalogues(
+        surname="strauss",
+        given=frozenset({"richard"}),
+        schemes=(CatalogueScheme("TrV", ("trv",)), CatalogueScheme("AV", ("av",))),
+    ),
+    ComposerCatalogues(
+        surname="wagner", given=frozenset({"richard"}), schemes=(CatalogueScheme("WWV", ("wwv",)),)
+    ),
+    ComposerCatalogues(
+        surname="bartok", schemes=(CatalogueScheme("BB", ("bb",)), CatalogueScheme("Sz", ("sz",)))
+    ),
+    ComposerCatalogues(surname="bruckner", schemes=(CatalogueScheme("WAB", ("wab",)),)),
+    ComposerCatalogues(
+        surname="nielsen", given=frozenset({"carl"}), schemes=(CatalogueScheme("CNW", ("cnw",)),)
+    ),
+    ComposerCatalogues(surname="zelenka", schemes=(CatalogueScheme("ZWV", ("zwv",)),)),
+    ComposerCatalogues(
+        surname="haydn", given=frozenset({"michael"}), schemes=(CatalogueScheme("MH", ("mh",)),)
+    ),
+    ComposerCatalogues(surname="poulenc", schemes=(CatalogueScheme("FP", ("fp",)),)),
+    ComposerCatalogues(surname="janacek", schemes=(CatalogueScheme("JW", ("jw",)),)),
 )
+
+#: Wikidata's catalogue items (the P972 qualifier of a P528 code) and the
+#: scheme their codes are numbers in, checked against WDQS on 2026-10-25. The
+#: Köchel editions all read as ``KV``, which files a lettered number under
+#: ``KV6`` and a plain one as ``KV``: the 1st edition has plain numbers only,
+#: and the editions from the 3rd on, which introduced the letters, kept the
+#: original number of every work they did not move. A list article counts
+#: where Wikidata uses it as the catalogue (Purcell's for Z numbers). The
+#: prefixes are the spellings a code may still carry ("TrV 176").
+WIKIDATA_CATALOGUES: dict[str, CatalogueScheme] = {
+    "Q162478": CatalogueScheme("KV", ("kv", "k")),  # Köchel catalogue
+    "Q22338962": CatalogueScheme("KV", ("kv", "k")),  # Köchel catalogue (1st edition)
+    "Q66069477": CatalogueScheme("KV", ("kv", "k")),  # Köchel catalogue (3rd edition)
+    "Q22340538": CatalogueScheme("KV", ("kv", "k")),  # Köchel catalogue (6th edition)
+    "Q214203": CatalogueScheme("BWV", ("bwv",)),
+    "Q847730": CatalogueScheme("HWV", ("hwv",)),
+    "Q164058": CatalogueScheme("TWV", ("twv", "tvwv")),
+    "Q739093": CatalogueScheme("Hob", ("hob", "h")),
+    "Q65965844": CatalogueScheme("Kk", ("kk", "k")),  # Kirkpatrick (D. Scarlatti)
+    "Q71107575": CatalogueScheme("L", ("l",)),  # Longo (D. Scarlatti)
+    "Q29054076": CatalogueScheme("L", ("l",)),  # Lesure (Debussy)
+    "Q141568820": CatalogueScheme("H", ("h",)),  # Imogen Holst's thematic catalogue
+    "Q2594282": CatalogueScheme("Wq", ("wq",)),  # Wotquenne (C.P.E. Bach)
+    "Q138770768": CatalogueScheme("H", ("h",)),  # Helm (C.P.E. Bach)
+    "Q139309403": CatalogueScheme("BR-CPEB", ("br cpeb",)),
+    "Q139743120": CatalogueScheme("Warb", ("warb",)),  # Warburton (J.C. Bach)
+    "Q139766427": CatalogueScheme("Ty", ("ty",)),  # Terry (J.C. Bach)
+    "Q139592007": CatalogueScheme("F", ("f", "fk")),  # Falck (W.F. Bach)
+    "Q139592021": CatalogueScheme("BR-WFB", ("br wfb",)),
+    "Q16749676": CatalogueScheme("B", ("b",)),  # Brown (Chopin)
+    "Q16747642": CatalogueScheme("KK", ("kk",)),  # Kobylańska (Chopin)
+    "Q26160369": CatalogueScheme("TrV", ("trv",)),  # Trenner (R. Strauss)
+    "Q26160336": CatalogueScheme("AV", ("av",)),  # Asow (R. Strauss)
+    "Q1848070": CatalogueScheme("WWV", ("wwv",)),
+    "Q1676654": CatalogueScheme("Sz", ("sz",)),  # Szőllősy (Bartók)
+    "Q105605621": CatalogueScheme("WAB", ("wab",)),
+    "Q264345": CatalogueScheme("WAB", ("wab",)),  # list of compositions by Anton Bruckner
+    "Q60040706": CatalogueScheme("CNW", ("cnw",)),
+    "Q203664": CatalogueScheme("Z", ("z",)),  # list of compositions by Henry Purcell
+    "Q896235": CatalogueScheme("SWV", ("swv",)),  # list of compositions by Heinrich Schütz
+    "Q61718181": CatalogueScheme("FP", ("fp",)),  # The Music of Francis Poulenc
+    "Q28441364": CatalogueScheme("FP", ("fp",)),
+    "Q136745429": CatalogueScheme("JW", ("jw",)),  # Janáček's thematic catalogue
+}
+
+#: The scheme of a Wikidata code in a catalogue with no known scheme is this
+#: plus the catalogue's QID.
+WIKIDATA_SCHEME_PREFIX = "wd:"
+#: Wikidata's "opus" item: the one catalogue whose codes are opus numbers.
+WIKIDATA_OPUS = "Q385271"
 
 _ROMAN = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
 
 
 def _ascii_words(text: str) -> list[str]:
     folded = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
+    folded = folded.replace("ß", "ss")
     return re.findall(r"[a-z]+", folded.lower())
 
 
@@ -140,13 +263,22 @@ def composer_catalogues(composer_label: str | None) -> ComposerCatalogues | None
         return None
     words = set(_ascii_words(composer_label))
     for entry in COMPOSERS:
-        if (entry.surname in words or words & set(entry.names)) and not words & entry.exclude_given:
+        if (
+            (entry.surname in words or words & set(entry.names))
+            and (not entry.given or words & entry.given)
+            and not words & entry.exclude_given
+        ):
             return entry
     return None
 
 
+def _prefix_key(prefix: str) -> str:
+    """``br cpeb`` for ``BR-CPEB``, ``kv anh`` for ``KV Anh.``."""
+    return re.sub(r"[\s.\-\u2010\u2011]+", " ", prefix.lower()).strip()
+
+
 def _scheme_for(prefix: str, composer: ComposerCatalogues | None) -> str | None:
-    key = re.sub(r"[\s.]+", " ", prefix.lower()).strip()
+    key = _prefix_key(prefix)
     if composer is not None:
         for scheme in composer.schemes:
             if key in scheme.prefixes:
@@ -196,23 +328,77 @@ def _hoboken(number: str) -> str | None:
     return f"{group.upper()}{m.group('suffix').lower()}:{m.group('number').lower()}"
 
 
-def _single_values(scheme: str, number: str) -> tuple[tuple[str, str], ...]:
-    if scheme == "Hob":
-        value = _hoboken(number)
-        return ((scheme, value),) if value else ()
+_SECTIONED = re.compile(r"[a-z]{1,3}\d+[a-z]?(?:\.\d+)?", re.I)
+_SECTION_SLASH = re.compile(r"^(?P<group>[ivxlc]+|\d+)(?P<suffix>[a-z]?)\s*/\s*(?P<number>\d+[a-z]?)$", re.I)
+_WQ = re.compile(r"(?P<n>\d+[a-z]?)(?:[:./](?P<sub>[a-z]?\d+[a-z]?))?", re.I)
+#: Lettered sections: the Bach-Repertoria ("C 48.1") and Warburton ("YB 40").
+SECTIONED_SCHEMES = frozenset({"BR-CPEB", "BR-WFB", "Warb"})
+#: Roman sections before a slash: Kobylańska ("IVa/15") and Janáček ("VI/18").
+SECTION_SLASH_SCHEMES = frozenset({"KK", "KK Anh", "JW"})
+#: Schemes whose numbers have a dotted part of their own ("H 542.5", Helm).
+DOTTED_SCHEMES = frozenset({"H"})
+
+
+def _section_slash(number: str) -> str | None:
+    """``IVa/15`` from ``iva / 15``, ``VII/13`` from ``7/13``."""
+    m = _SECTION_SLASH.match(number.strip())
+    if m is None:
+        return None
+    group = m.group("group")
+    if group.isdigit():
+        group = _int_to_roman(int(group))
+    elif _roman_to_int(group) is None:
+        return None
+    return f"{group.upper()}{m.group('suffix').lower()}/{m.group('number').lower()}"
+
+
+def _sectioned(number: str) -> str | None:
+    """``c48.1`` from ``C 48.1``, ``yb40`` from ``YB 40``."""
     number = re.sub(r"\s+", "", number)
-    if scheme == "KV":
-        pairs = [("KV6" if _KV6.match(part) else "KV", part.lower()) for part in number.split("/")]
-        return tuple(dict.fromkeys(pair for pair in pairs if _PLAIN.match(pair[1])))
+    return number.lower() if _SECTIONED.fullmatch(number) else None
+
+
+def _wotquenne(number: str) -> str | None:
+    """``117/39`` from ``117:39``, ``118/6`` or ``117.39``: Wq numbers within a
+    collection, spelled every way."""
+    m = _WQ.fullmatch(re.sub(r"\s+", "", number))
+    if m is None:
+        return None
+    return (m.group("n") + (f"/{m.group('sub')}" if m.group("sub") else "")).lower()
+
+
+def _plain(scheme: str, number: str) -> str | None:
+    number = re.sub(r"\s+", "", number)
+    if scheme not in DOTTED_SCHEMES:
+        number = re.sub(r"(?<=\d)\.\d+[a-z]?$", "", number, flags=re.I)  # BWV 846.2: a part of BWV 846
     if scheme == "TWV" and re.fullmatch(r"\d+:(?:[a-z]+\d*|\d+[a-z]?)", number, re.I):
         # Telemann: genre, then key and number ("55:e1") or a number ("40:2").
-        return ((scheme, number.lower()),)
+        return number.lower()
     if scheme == "LW" and re.fullmatch(r"[a-z]\d+[a-z]?", number, re.I):
         # The Liszt-Werkverzeichnis numbers within lettered sections.
-        return ((scheme, number.lower()),)
-    if re.fullmatch(r"\d+[a-z]{0,3}(?:/\d+[a-z]{0,3})?", number, re.I):
-        return ((scheme, number.lower()),)
-    return ()
+        return number.lower()
+    if re.fullmatch(r"\d+[a-z]{0,3}(?:[/.]\d+[a-z]{0,3})?", number, re.I):
+        return number.lower()
+    return None
+
+
+#: The schemes whose numbers are not plain ones, and how each is read.
+_READERS: dict[str, Callable[[str], str | None]] = {
+    "Hob": _hoboken,
+    "Wq": _wotquenne,
+    **dict.fromkeys(SECTION_SLASH_SCHEMES, _section_slash),
+    **dict.fromkeys(SECTIONED_SCHEMES, _sectioned),
+}
+
+
+def _single_values(scheme: str, number: str) -> tuple[tuple[str, str], ...]:
+    if scheme == "KV":
+        number = re.sub(r"(?<=\d)\.\d+[a-z]?$", "", re.sub(r"\s+", "", number), flags=re.I)
+        pairs = [("KV6" if _KV6.match(part) else "KV", part.lower()) for part in number.split("/")]
+        return tuple(dict.fromkeys(pair for pair in pairs if _PLAIN.match(pair[1])))
+    reader = _READERS.get(scheme)
+    value = reader(number) if reader is not None else _plain(scheme, number)
+    return ((scheme, value),) if value else ()
 
 
 #: How far a range may run before its end reads as something else (a year).
@@ -220,7 +406,7 @@ MAX_RANGE = 500
 #: The longest set value kept: ``works.catalogue_number`` holds 50 characters.
 MAX_SET_CHARS = 50
 
-_RANGE_SEP = r"\s*[-\u2013\u2014]\s*|\s+(?:to|bis)\s+"
+_RANGE_SEP = r"\s*[-\u2010\u2011\u2013\u2014]\s*|\s+(?:to|bis)\s+"
 _LIST_SEP = r"\s*,\s+|\s*&\s*|\s+(?:and|und|et)\s+"
 _ITEM = re.compile(rf"(?P<start>.+?)(?:(?:{_RANGE_SEP})(?P<end>\d+))?$", re.I | re.S)
 _LIST_SPLIT = re.compile(rf"(?:{_LIST_SEP})(?=\d)", re.I)
@@ -340,20 +526,32 @@ def normalize_catalogue(
 
 
 # Longest prefixes first so "bwv anh" is not read as "bwv", "buxwv" not as
-# "b", "kv" not as "k". The lookbehind makes a prefix start a word, so the
-# "l" of "kl.t." (Dutch for minor) is never Lesure.
-_PREFIXES = r"bwv\.?\s*anh|kv\.?\s*anh|k\.?\s*anh|buxwv|bwv|hwv|twv|swv|rv|hob|woo|anh|kv|kk|lw|k|d|s|b|l|h"
+# "b", "kv" not as "k", "zwv" not as "z" with a section "wv". The lookbehind
+# makes a prefix start a word, so the "l" of "kl.t." (Dutch for minor) is
+# never Lesure.
+_PREFIXES = (
+    r"bwv\.?\s*anh|kv\.?\s*anh|kk\.?\s*anh|lv\.?\s*anh|k\.?\s*anh"
+    r"|br[\s\-\u2010\u2011]?cpeb|br[\s\-\u2010\u2011]?wfb"
+    r"|buxwv|bwv|hwv|twv|swv|gwv|zwv|wwv|warb|wab|wq|trv|cnw|rv|hob|woo|anh|av|bb|sz|fk|fp|mh|jw|ty|kv|kk|lv|lw"
+    r"|k|d|s|b|l|h|f|z"
+)
+_NUMBER = (
+    r"(?:(?:[a-z]{1,3}\s?\d+[a-z]?\.\d+)"  # BR-CPEB C 48.1, before "C 48" reads as roman
+    r"|(?:[ivxlc]+[a-z]?(?:\s*[:./]\s*|\s+)\d+[a-z]?)"  # Hob. XVI:52
+    r"|(?:\d+\s*:\s*[a-z]{1,3}\d*)"  # TWV 55:e1
+    r"|(?:\d+\.\d+[a-z]?)"  # H 542.5, Wq 89.3
+    r"|(?:\d+[a-z]{0,3}(?:\s*[:/]\s*\d+[a-z]{0,3})?)"
+    r"|(?:[a-z]{1,3}\s?\d+[a-z]?))"  # LW A179, Warb YB 40
+    rf"(?:(?:{_RANGE_SEP})\d+)?"  # BWV 1046-1051
+    rf"(?:(?:{_LIST_SEP})\d+[a-z]{{0,3}}(?:(?:{_RANGE_SEP})\d+)?)*"  # BWV 1046, 1047
+)
 _CATALOGUE = re.compile(
     rf"(?<![\w.])(?P<prefix>{_PREFIXES})\.?\s*"
-    r"(?P<number>(?:(?:[ivxlc]+[a-z]?(?:\s*[:./]\s*|\s+)\d+[a-z]?)"  # Hob. XVI:52
-    r"|(?:\d+\s*:\s*[a-z]{1,3}\d*)"  # TWV 55:e1
-    r"|(?:\d+[a-z]{0,3}(?:\s*[:/]\s*\d+[a-z]{0,3})?)"
-    r"|(?:[a-z]\s?\d+[a-z]?))"  # LW A179
-    rf"(?:(?:{_RANGE_SEP})\d+)?"  # BWV 1046-1051
-    rf"(?:(?:{_LIST_SEP})\d+[a-z]{{0,3}}(?:(?:{_RANGE_SEP})\d+)?)*)"  # BWV 1046, 1047
+    rf"(?P<number>{_NUMBER})"
     r"(?![\w])",
     re.I,
 )
+_LEADING_NUMBER = re.compile(rf"(?P<number>{_NUMBER})(?![\w])", re.I)
 _OPUS = re.compile(r"\bop(?:us|\.)?\s*(\d+)[a-z]?\s*,?\s*(?:(?:no|nr|n°|n)\.?\s*(\d+))?", re.I)
 
 
@@ -376,11 +574,19 @@ def find_catalogues(text: str, composer_label: str | None = None) -> list[Catalo
     nothing for Beethoven.
     """
     refs: list[CatalogueRef] = []
-    for m in _CATALOGUE.finditer(text):
+    pos = 0
+    while (m := _CATALOGUE.search(text, pos)) is not None:
         prefix, number = m.group("prefix"), m.group("number")
-        if not any(c.isdigit() for c in number):
+        found = (
+            normalize_catalogue(prefix, number, composer_label) if any(c.isdigit() for c in number) else ()
+        )
+        if not found:
+            # not a reference ("in F KV 158" is no Falck number for Mozart):
+            # what it seemed to hold may still be one
+            pos = m.start() + 1
             continue
-        for scheme, value in normalize_catalogue(prefix, number, composer_label):
+        pos = m.end()
+        for scheme, value in found:
             span, written = m.span(), number
             if not is_catalogue_set(value) and (first := _ITEM.match(_LIST_SPLIT.split(number)[0])):
                 # a tail that was no range or list ("BWV 57, 8") stays in the text
@@ -407,3 +613,62 @@ def parse_catalogue(text: str, composer_label: str | None = None) -> frozenset[t
         number, within, _span = opus
         pairs.add((OPUS, f"{number}/{within}" if within is not None else number))
     return frozenset(pairs)
+
+
+def _without_prefix(code: str, prefixes: tuple[str, ...]) -> str:
+    """The code past a leading spelling of its own catalogue: ``176`` from
+    ``TrV. 176``, ``A 27`` from ``BR-CPEB A 27``."""
+    for prefix in sorted(prefixes, key=len, reverse=True):
+        spelled = r"[\s\-]*".join(re.escape(word) for word in prefix.split())
+        if m := re.match(rf"{spelled}(?:\.\s*|\s+|(?=\d))", code, re.I):
+            return code[m.end() :]
+    return code
+
+
+def _fallback_value(code: str) -> str | None:
+    """A code's value in the ``wd:`` scheme of its catalogue item: a range of
+    plain numbers is the set it reads as (``12-14``), anything else the code
+    itself, folded, with the characters that would make it read as a set
+    (``960602-001``) turned into spaces."""
+    if re.fullmatch(rf"\d+(?:{_RANGE_SEP})\d+", code, re.I):
+        pairs = _values(WIKIDATA_SCHEME_PREFIX, code)
+        if pairs and is_catalogue_set(pairs[0][1]):
+            return pairs[0][1]
+    value = re.sub(r"[\s,\-–—]+", " ", code.lower()).strip()
+    return value if len(value) <= MAX_SET_CHARS else None
+
+
+def normalize_wikidata_code(
+    code: str,
+    catalogue_qid: str | None = None,
+    catalogue_short: str | None = None,
+    composer_label: str | None = None,
+) -> tuple[tuple[str, str], ...]:
+    """The ``(scheme, value)`` pairs one Wikidata catalogue code (P528) stands
+    for, given its catalogue item (P972) and that item's short name (P1813).
+
+    A catalogue in :data:`WIKIDATA_CATALOGUES` decides the scheme, with or
+    without the code's own prefix: ``238/3`` in the Terry catalogue is Ty
+    238/3 for any composer. Otherwise the code is read as a title would be,
+    prefixed with the short name when it is a bare number ("550", short name
+    "KV"), which also catches a code stated in another catalogue than its item
+    ("TrV 209" in AV's). A code still unread falls back to its catalogue
+    item's own scheme, ``wd:<QID>``, if it holds a digit -- "deest" (not in
+    the catalogue) is no number to match on.
+    """
+    code = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", code).replace("‐", "-")).strip()
+    known = WIKIDATA_CATALOGUES.get(catalogue_qid) if catalogue_qid else None
+    if known is not None:
+        m = _LEADING_NUMBER.match(_without_prefix(code, known.prefixes))
+        if m is not None and (pairs := _values(known.code, m.group("number"))):
+            return pairs
+    written = f"{catalogue_short} {code}" if catalogue_short and re.match(r"[\dIVXLC]", code) else code
+    pairs = parse_catalogue(written, composer_label)
+    if catalogue_qid not in (None, WIKIDATA_OPUS):
+        # Rinaldi's "R. op. 243" is a catalogue number, not Vivaldi's opus 243
+        pairs = frozenset(pair for pair in pairs if pair[0] != OPUS)
+    if pairs:
+        return tuple(sorted(pairs))
+    if catalogue_qid and any(c.isdigit() for c in code) and (value := _fallback_value(code)):
+        return ((f"{WIKIDATA_SCHEME_PREFIX}{catalogue_qid}", value),)
+    return ()

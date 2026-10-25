@@ -48,6 +48,12 @@ def test_structured_fields_add_catalogue_numbers_and_an_opus() -> None:
     assert f.identifiers == {("KV", "550")}
 
 
+def test_stated_pairs_join_the_titles_own_numbers() -> None:
+    f = extract_features("Quintet, Op. 11 No. 6", stated=[("Ty", "238/3"), ("op", "99")])
+    assert f.identifiers == {("Ty", "238/3")}
+    assert f.opus_number == "11"  # the title's opus wins, as with a structured field
+
+
 def test_an_imslp_internal_number_is_not_a_catalogue() -> None:
     assert extract_features("Sonata", structured=["ILB 193"]).identifiers == frozenset()
 
