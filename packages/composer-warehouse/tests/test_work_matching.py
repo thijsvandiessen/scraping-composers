@@ -1,10 +1,21 @@
 """Tests for scoring work candidates and deciding match/review/create."""
 
+import random
 import uuid
 from dataclasses import replace
+from difflib import SequenceMatcher
 
-from composer_warehouse.works.extract import extract_features
-from composer_warehouse.works.match import AUTO_THRESHOLD, REVIEW_THRESHOLD, Candidate, resolve, score
+import pytest
+from composer_warehouse.works import match
+from composer_warehouse.works.extract import WorkFeatures, extract_features
+from composer_warehouse.works.match import (
+    AUTO_THRESHOLD,
+    REVIEW_THRESHOLD,
+    Candidate,
+    best_match,
+    resolve,
+    score,
+)
 
 
 def _candidate(title: str) -> Candidate:
@@ -144,3 +155,88 @@ def test_a_structured_range_conflicts_with_the_first_piece() -> None:
     collection = extract_features("12 Concerti Grossi, Op.6", structured=["Op.6 ; HWV 319-330"])
     piece = extract_features("Concerto grosso in G major HWV 319")
     assert score(collection, piece)[1] == "catalogue_conflict"
+
+
+def _score_every_candidate(
+    features: WorkFeatures, candidates: list[Candidate]
+) -> tuple[float, str, uuid.UUID | None]:
+    """What ``best_match`` must return: ``score`` against each candidate in
+    turn, the first of equal best scores winning."""
+    best: tuple[float, str, uuid.UUID | None] = (0.0, "new", None)
+    for cand in candidates:
+        value, method = score(features, cand.features)
+        if value > best[0]:
+            best = (value, method, cand.work_id)
+    return best
+
+
+_WORDS = (
+    "Walzer",
+    "Polka",
+    "Symphony",
+    "Sonata",
+    "Ouverture",
+    "Rosen",
+    "aus",
+    "dem",
+    "Süden",
+    "Wiener",
+    "Blut",
+)
+_DECORATIONS = (
+    "",
+    " No. 2",
+    " No. 5",
+    " in A major",
+    " in c-moll",
+    ", Op. 92",
+    ", Op. 314",
+    ", K. 550",
+    ", BWV 1048",
+    ", BWV 1046",
+    ", BWV 1046-1051",
+    ", BWV 1046, 1047",
+)
+
+
+def _title(rng: random.Random) -> str:
+    words = " ".join(rng.choice(_WORDS) for _ in range(rng.randint(1, 4)))
+    title = words + rng.choice(_DECORATIONS)
+    return f"Allegro (from {title})" if rng.random() < 0.1 else title
+
+
+def test_best_match_is_scoring_every_candidate() -> None:
+    # The pruned search (#366) must give exactly what the plain scan gives, ties
+    # included: repeated titles score equal, and the first of them must win.
+    rng = random.Random(366)
+    candidates = [
+        Candidate(uuid.uuid4(), extract_features(_title(rng), composer=rng.choice((MOZART, BACH))))
+        for _ in range(400)
+    ]
+    candidates.append(Candidate(uuid.uuid4(), extract_features("", composer=MOZART)))
+    for _ in range(300):
+        features = extract_features(_title(rng), composer=rng.choice((MOZART, BACH)))
+        if rng.random() < 0.1:
+            features = replace(
+                features, identifiers=features.identifiers | {("wikidata", f"Q{rng.randint(1, 3)}")}
+            )
+        assert best_match(features, candidates) == _score_every_candidate(features, candidates)
+
+
+def test_best_match_compares_few_titles_against_a_large_catalogue(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A prolific composer has thousands of works; comparing a mention with each
+    # of them made re-ingesting the Vienna Philharmonic take 44 minutes (#366).
+    compared: list[str] = []
+
+    def counting(junk: None, a: str, b: str) -> SequenceMatcher[str]:
+        compared.append(b)
+        return SequenceMatcher(junk, a, b)
+
+    monkeypatch.setattr(match, "SequenceMatcher", counting)
+    rng = random.Random(44)
+    titles = {" ".join(rng.choice(_WORDS) for _ in range(rng.randint(1, 6))) for _ in range(5000)}
+    candidates = [Candidate(uuid.uuid4(), extract_features(title)) for title in sorted(titles)]
+    target = candidates[len(candidates) // 2]
+
+    assert best_match(target.features, candidates) == (1.0, "title_fuzzy", target.work_id)
+    assert len(compared) < len(candidates) // 20
