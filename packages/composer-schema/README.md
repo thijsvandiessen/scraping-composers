@@ -27,8 +27,10 @@ or the scraper stack.
   `KV6`), `K` as Kirkpatrick for Domenico Scarlatti, Hoboken separators unified,
   `BWV`/`HWV`/`TWV`/`BuxWV`/`SWV`/`RV` for anyone, `WoO` and the appendices
   (`Anh.`, `BWV Anh.`, `KV Anh.`) as schemes of their own, and the bare letters
-  (`D`, `S`, `LW`, `B`, `L`, `H`) only for the composer who uses them. The
-  warehouse's work matcher keys on these.
+  (`D`, `S`, `LW`, `B`, `L`, `H`) only for the composer who uses them. A range
+  or list (`BWV 1046-1051`, `TWV 40:2-13`, `BWV 1046, 1047`) is one pair whose
+  value is the set in canonical form (`1046-1051`), never its first number;
+  `catalogue_members` expands it. The warehouse's work matcher keys on these.
 - `testing.py` — `person()`, `genre()`, `mention()`, `FakeSource` and friends, which every
   other member's tests use (the warehouse re-exports them).
 
@@ -42,7 +44,7 @@ uv run --directory packages/composer-schema pytest --rootdir . --cov=composer_sc
 | --- | --- |
 | `test_schema.py` | Refresh-cadence staleness (static never due, never-run always due, naive timestamps as UTC), the document factories and `FakeSource`, and serialization round-trips. |
 | `test_premiere.py` | The `raw["premiere"]` convention: ISO dates at year, month or day precision (BCE too), anything else ignored rather than guessed, and the precedence rule (earliest date wins, a full date refines a bare year). |
-| `test_catalogues.py` | Catalogue normalisation: K/KV as one Köchel number, sixth-edition KV6 numbers (both from `K. 183/173dB`), Scarlatti's Kirkpatrick and Longo, relatives excluded, Hoboken separators, bare letters with and without the matching composer, Liszt's S vs LW, universal catalogues, appendices, WoO, and structured fields with an opus. |
+| `test_catalogues.py` | Catalogue normalisation: K/KV as one Köchel number, sixth-edition KV6 numbers (both from `K. 183/173dB`), Scarlatti's Kirkpatrick and Longo, relatives excluded, Hoboken separators, bare letters with and without the matching composer, Liszt's S vs LW, universal catalogues, appendices, WoO, structured fields with an opus, and ranges and lists (#358): `-`/`–`/`—`/`to` alike, the same form across BWV, HWV, TWV and Hob, never the first piece, list and range agreeing, what only looks like one (a movement `BWV 825-4`, a year, `BWV 57, 8`) keeping its first number, and `catalogue_members`. |
 | `test_kinds.py` | The ensemble guard (#174): ensemble labels recognised, musicians left alone, and only `person` second-guessed. |
 | `test_instrumentation.py` | Scoring categories: combinations yield their parts, ensembles list their members apart, unrecognised scoring yields nothing, and the category tables are consistent. |
 | `test_shorthand.py` | Real catalogue entries in both dialects: desks, doublings, percussion, string parts, score order, German abbreviations, and refusing what is not shorthand. |

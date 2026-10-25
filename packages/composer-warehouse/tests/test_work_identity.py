@@ -189,3 +189,47 @@ def test_link_works_rebuilds_rather_than_accumulates(session: Session) -> None:
     link_works(session)
     link_works(session)
     assert len(session.scalars(select(WorkLink)).all()) == 1
+
+
+def test_pieces_link_to_their_range_instead_of_merging_into_it(session: Session) -> None:
+    ingest(
+        session,
+        "a",
+        mention("15 Inventions, BWV 772-786", BACH, "a1"),
+        mention("Invention No. 1 in C major, BWV 772", BACH, "a2"),
+        mention("Invention No. 15 in B minor, BWV 786", BACH, "a3"),
+        mention("Sinfonia No. 1 in C major, BWV 787", BACH, "a4"),
+    )
+    assert len(session.scalars(select(Work)).all()) == 4
+
+    stats = link_works(session)
+    assert stats.by_range == 2
+    assert links(session) == {
+        ("Invention No. 1 in C major, BWV 772", "part_of", "15 Inventions, BWV 772-786", "catalogue_range"),
+        ("Invention No. 15 in B minor, BWV 786", "part_of", "15 Inventions, BWV 772-786", "catalogue_range"),
+    }
+
+
+def test_imslps_structured_range_keeps_the_set_apart(session: Session) -> None:
+    handel = "Handel, George Frideric"
+    raw = {"opus_catalogue_number": "Op.6 ; HWV 319-330"}
+    ingest(session, "imslp_works", perf_mention("w1", "12 Concerti Grossi, Op.6", handel, raw))
+    ingest(session, "roh", mention("Concerto grosso in G major HWV 319", handel, "r1"))
+
+    assert len(session.scalars(select(Work)).all()) == 2
+    link_works(session)
+    assert links(session) == {
+        ("Concerto grosso in G major HWV 319", "part_of", "12 Concerti Grossi, Op.6", "catalogue_range")
+    }
+
+
+def test_a_number_inside_two_sets_links_to_neither(session: Session) -> None:
+    ingest(
+        session,
+        "a",
+        mention("Inventions and Sinfonias BWV 772\u2013801", BACH, "a1"),
+        mention("15 Inventions, BWV 772-786", BACH, "a2"),
+        mention("Invention No. 1 in C major, BWV 772", BACH, "a3"),
+    )
+    stats = link_works(session)
+    assert (stats.by_range, stats.ambiguous) == (0, 1)

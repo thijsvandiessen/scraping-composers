@@ -115,3 +115,32 @@ def test_two_parts_of_one_parent_are_told_apart_by_title() -> None:
     s, method = score(a, b)
     assert method == "title_fuzzy"
     assert s < AUTO_THRESHOLD
+
+
+BACH = "Bach, Johann Sebastian"
+
+
+def test_a_range_and_a_piece_inside_it_conflict() -> None:
+    collection = extract_features("6 Brandenburg Concertos, BWV 1046-1051", composer=BACH)
+    piece = extract_features("Brandenburg Concerto No.1, BWV 1046", composer=BACH)
+    assert score(collection, piece) == (0.05, "catalogue_conflict")
+    result = resolve(piece, [Candidate(uuid.uuid4(), collection)])
+    assert result.status == "created"
+
+
+def test_a_list_and_its_first_piece_conflict() -> None:
+    pair = extract_features("Brandenburg Concertos, BWV 1046, 1047", composer=BACH)
+    piece = extract_features("Brandenburg Concerto No.1, BWV 1046", composer=BACH)
+    assert score(pair, piece) == (0.05, "catalogue_conflict")
+
+
+def test_the_same_range_however_spelled_matches() -> None:
+    a = extract_features("15 Inventions, BWV 772-786", composer=BACH)
+    b = extract_features("Fifteen Two-Part Inventions BWV 772\u2013786", composer=BACH)
+    assert score(a, b) == (0.97, "catalogue")
+
+
+def test_a_structured_range_conflicts_with_the_first_piece() -> None:
+    collection = extract_features("12 Concerti Grossi, Op.6", structured=["Op.6 ; HWV 319-330"])
+    piece = extract_features("Concerto grosso in G major HWV 319")
+    assert score(collection, piece)[1] == "catalogue_conflict"

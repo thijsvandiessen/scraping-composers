@@ -20,6 +20,18 @@ Köchel numbers (``KV``) and the sixth edition's lettered ones (``KV6``, such
 as ``173dB``), so ``K. 183/173dB`` yields both. An appendix (``Anh.``) is a
 scheme of its own, as is a catalogue's appendix (``BWV Anh.``, ``KV Anh.``).
 
+A **range** or a **list** of numbers names a set of works, not its first
+piece: ``BWV 1046-1051`` (also with an en or em dash, "to" or "bis"), ``TWV
+40:2-13`` and ``BWV 1046, 1047`` are one reference each, with a value that
+lists the set (``1046-1051``, ``40:2-13``, ``1046-1047``) rather than
+``1046``. The value is canonical -- members sorted, consecutive ones joined
+into a run -- so ``HWV 259, 258, 260 und 261`` and ``HWV 258-261`` agree, and
+a value holding ``-`` or ``,`` is always a set (:func:`is_catalogue_set`, with
+:func:`catalogue_members` for what it holds). A range that runs backwards
+(``BWV 825-4``, a movement number) or improbably far (``D 960 - 1828``, a
+year) is not one, and only its first number is read; a list stops at a number
+too small to be a sibling (``BWV 57, 8`` is a cantata and its movement).
+
 Opus numbers are read as well (scheme ``op``, value ``27/2`` for "Op. 27
 No. 2"), but they are less trustworthy than a catalogue -- publishers
 reassigned them -- so the work matcher keeps them on their own rule.
@@ -184,7 +196,7 @@ def _hoboken(number: str) -> str | None:
     return f"{group.upper()}{m.group('suffix').lower()}:{m.group('number').lower()}"
 
 
-def _values(scheme: str, number: str) -> tuple[tuple[str, str], ...]:
+def _single_values(scheme: str, number: str) -> tuple[tuple[str, str], ...]:
     if scheme == "Hob":
         value = _hoboken(number)
         return ((scheme, value),) if value else ()
@@ -192,8 +204,8 @@ def _values(scheme: str, number: str) -> tuple[tuple[str, str], ...]:
     if scheme == "KV":
         pairs = [("KV6" if _KV6.match(part) else "KV", part.lower()) for part in number.split("/")]
         return tuple(dict.fromkeys(pair for pair in pairs if _PLAIN.match(pair[1])))
-    if scheme == "TWV" and re.fullmatch(r"\d+:[a-z]+\d*", number, re.I):
-        # Telemann: genre, then key and number ("55:e1").
+    if scheme == "TWV" and re.fullmatch(r"\d+:(?:[a-z]+\d*|\d+[a-z]?)", number, re.I):
+        # Telemann: genre, then key and number ("55:e1") or a number ("40:2").
         return ((scheme, number.lower()),)
     if scheme == "LW" and re.fullmatch(r"[a-z]\d+[a-z]?", number, re.I):
         # The Liszt-Werkverzeichnis numbers within lettered sections.
@@ -201,6 +213,114 @@ def _values(scheme: str, number: str) -> tuple[tuple[str, str], ...]:
     if re.fullmatch(r"\d+[a-z]{0,3}(?:/\d+[a-z]{0,3})?", number, re.I):
         return ((scheme, number.lower()),)
     return ()
+
+
+#: How far a range may run before its end reads as something else (a year).
+MAX_RANGE = 500
+#: The longest set value kept: ``works.catalogue_number`` holds 50 characters.
+MAX_SET_CHARS = 50
+
+_RANGE_SEP = r"\s*[-\u2013\u2014]\s*|\s+(?:to|bis)\s+"
+_LIST_SEP = r"\s*,\s+|\s*&\s*|\s+(?:and|und|et)\s+"
+_ITEM = re.compile(rf"(?P<start>.+?)(?:(?:{_RANGE_SEP})(?P<end>\d+))?$", re.I | re.S)
+_LIST_SPLIT = re.compile(rf"(?:{_LIST_SEP})(?=\d)", re.I)
+_MEMBER = re.compile(r"^(?P<head>.*?)(?P<n>\d+)(?P<suffix>[a-z]*)$")
+_RUN = re.compile(r"^(?P<head>.*?)(?P<start>\d+)-(?P<end>\d+)$")
+_YEAR = re.compile(r"^(?:1[5-9]|20)\d\d$")
+
+
+def _range_members(value: str, end: str) -> list[str] | None:
+    """``40:2`` .. ``40:13`` for ``40:2`` to ``13``; None unless it runs forward,
+    and not too far, from a value ending in a plain number."""
+    m = re.fullmatch(r"(?P<head>.*?)(?P<n>\d+)", value)
+    if m is None:
+        return None
+    start, stop = int(m.group("n")), int(end)
+    if not start < stop <= start + MAX_RANGE:
+        return None
+    return [f"{m.group('head')}{n}" for n in range(start, stop + 1)]
+
+
+def _canonical(members: list[str]) -> str:
+    """Members sorted, with each run of consecutive plain numbers joined."""
+
+    def key(member: str) -> tuple[str, int, str]:
+        m = _MEMBER.match(member)
+        return (m.group("head"), int(m.group("n")), m.group("suffix")) if m else (member, -1, "")
+
+    parts: list[str] = []
+    run: list[tuple[str, int]] = []
+
+    def flush() -> None:
+        if run:
+            head, first = run[0]
+            parts.append(f"{head}{first}" if len(run) == 1 else f"{head}{first}-{run[-1][1]}")
+            run.clear()
+
+    for member in sorted(set(members), key=key):
+        head, n, suffix = key(member)
+        if suffix or n < 0:
+            flush()
+            parts.append(member)
+        elif run and run[-1] == (head, n - 1):
+            run.append((head, n))
+        else:
+            flush()
+            run.append((head, n))
+    flush()
+    return ",".join(parts)
+
+
+def _sibling(item: str, first: str) -> bool:
+    """Whether a listed number can be another work beside ``first``: not a
+    movement within it (``BWV 57, 8``) nor a year (``BWV 140, 1731``)."""
+    n, base = int(re.sub(r"\D+$", "", item)), int(re.sub(r"\D+$", "", first))
+    return 2 * n > base and not (_YEAR.match(item) and base < 1000)
+
+
+def _values(scheme: str, number: str) -> tuple[tuple[str, str], ...]:
+    items = [_ITEM.match(item.strip()) for item in _LIST_SPLIT.split(number)]
+    first = items[0]
+    if first is None:
+        return ()
+    head = _single_values(scheme, first.group("start"))
+    if len(head) != 1 or (first.group("end") is None and len(items) == 1):
+        return head
+    scheme, value = head[0]
+    members = [value] if first.group("end") is None else _range_members(value, first.group("end"))
+    if members is None:
+        return head  # not a range ("BWV 825-4"): the first number stands
+    if _PLAIN.match(value):
+        for item in items[1:]:
+            if item is None or not _PLAIN.match(start := item.group("start").lower()):
+                break
+            if not _sibling(start, value):
+                break
+            more = [start] if item.group("end") is None else _range_members(start, item.group("end"))
+            if more is None:
+                break
+            members += more
+    canonical = _canonical(members)
+    return ((scheme, canonical),) if len(canonical) <= MAX_SET_CHARS else ()
+
+
+def is_catalogue_set(value: str) -> bool:
+    """Whether a catalogue value names a set of works (a range or a list)."""
+    return "-" in value or "," in value
+
+
+def catalogue_members(value: str) -> frozenset[str]:
+    """The single values a catalogue value holds: ``{"40:2", ..., "40:13"}``
+    for ``40:2-13``, ``{value}`` for a single number."""
+    members: set[str] = set()
+    for item in value.split(","):
+        m = _RUN.match(item)
+        if m is None:
+            members.add(item)
+        else:
+            head = m.group("head")
+            members.update(f"{head}{n}" for n in range(int(m.group("start")), int(m.group("end")) + 1))
+    return frozenset(members)
 
 
 def normalize_catalogue(
@@ -211,7 +331,9 @@ def normalize_catalogue(
     Usually one pair, none when the prefix is not a catalogue (or is a bare
     letter the composer does not use), and two for a Köchel reference that
     gives both numberings (``K. 183/173dB``). Values are lowercased except a
-    Hoboken group's roman numeral.
+    Hoboken group's roman numeral. ``number`` may be a range or a list
+    (``1046-1051``, ``1046, 1047``), which gives one pair whose value is the
+    set.
     """
     scheme = _scheme_for(prefix, composer_catalogues(composer_label))
     return _values(scheme, number) if scheme is not None else ()
@@ -223,10 +345,12 @@ def normalize_catalogue(
 _PREFIXES = r"bwv\.?\s*anh|kv\.?\s*anh|k\.?\s*anh|buxwv|bwv|hwv|twv|swv|rv|hob|woo|anh|kv|kk|lw|k|d|s|b|l|h"
 _CATALOGUE = re.compile(
     rf"(?<![\w.])(?P<prefix>{_PREFIXES})\.?\s*"
-    r"(?P<number>(?:[ivxlc]+[a-z]?(?:\s*[:./]\s*|\s+)\d+[a-z]?)"  # Hob. XVI:52
+    r"(?P<number>(?:(?:[ivxlc]+[a-z]?(?:\s*[:./]\s*|\s+)\d+[a-z]?)"  # Hob. XVI:52
     r"|(?:\d+\s*:\s*[a-z]{1,3}\d*)"  # TWV 55:e1
     r"|(?:\d+[a-z]{0,3}(?:\s*[:/]\s*\d+[a-z]{0,3})?)"
     r"|(?:[a-z]\s?\d+[a-z]?))"  # LW A179
+    rf"(?:(?:{_RANGE_SEP})\d+)?"  # BWV 1046-1051
+    rf"(?:(?:{_LIST_SEP})\d+[a-z]{{0,3}}(?:(?:{_RANGE_SEP})\d+)?)*)"  # BWV 1046, 1047
     r"(?![\w])",
     re.I,
 )
@@ -257,7 +381,12 @@ def find_catalogues(text: str, composer_label: str | None = None) -> list[Catalo
         if not any(c.isdigit() for c in number):
             continue
         for scheme, value in normalize_catalogue(prefix, number, composer_label):
-            refs.append(CatalogueRef(scheme, value, m.span(), prefix, number))
+            span, written = m.span(), number
+            if not is_catalogue_set(value) and (first := _ITEM.match(_LIST_SPLIT.split(number)[0])):
+                # a tail that was no range or list ("BWV 57, 8") stays in the text
+                written = first.group("start")
+                span = (span[0], m.start("number") + len(written))
+            refs.append(CatalogueRef(scheme, value, span, prefix, written))
     return refs
 
 

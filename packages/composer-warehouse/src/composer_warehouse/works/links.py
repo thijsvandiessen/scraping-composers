@@ -9,6 +9,10 @@ counts can roll up to the parent:
 - **catalogue** -- a derived work points at the one non-derived work by the
   same composer that holds one of its parent catalogue numbers. Two candidates
   is ambiguous and links neither.
+- **catalogue_range** -- a work with a single number points (``part_of``) at
+  the one work by the same composer whose range or list holds it: *Invention
+  No. 1, BWV 772* at *15 Inventions, BWV 772-786*. A number inside two such
+  sets (a collection and a sub-collection of it) is ambiguous and links neither.
 - **wikidata** -- a Wikidata work that is *part of* (P361) another item points
   at the work carrying that item's QID.
 
@@ -25,10 +29,11 @@ from collections import Counter
 from dataclasses import dataclass
 
 from composer_models import RawWorkMention, Source, WorkIdentifier, WorkLink
+from composer_schema.catalogues import catalogue_members, is_catalogue_set
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from . import load_candidates
+from . import Candidate, load_candidates
 from .sources import part_of
 
 WIKIDATA_PART_SOURCE = "wikidata_catalogue"
@@ -38,8 +43,10 @@ WIKIDATA_PART_SOURCE = "wikidata_catalogue"
 class LinkStats:
     links: int = 0
     by_catalogue: int = 0
+    by_range: int = 0
     by_wikidata: int = 0
-    # derived works whose parent number fits more than one work
+    # derived works whose parent number fits more than one work, and works
+    # whose number falls inside more than one set
     ambiguous: int = 0
 
 
@@ -64,7 +71,35 @@ def _catalogue_links(session: Session) -> tuple[dict[tuple[uuid.UUID, str, uuid.
                 links[(cand.work_id, f"{cand.features.derivation}_of", targets.pop())] = "catalogue"
             elif targets:
                 ambiguous += 1
+        ambiguous += _range_links(candidates, links)
     return links, ambiguous
+
+
+def _range_links(candidates: list[Candidate], links: dict[tuple[uuid.UUID, str, uuid.UUID], str]) -> int:
+    """Add a ``part_of`` link from each of one composer's single-numbered
+    works to the one set work holding its number; the count left ambiguous."""
+    sets: dict[tuple[str, str], set[uuid.UUID]] = {}
+    for cand in candidates:
+        if cand.features.derivation is None:
+            for scheme, value in cand.features.identifiers:
+                if is_catalogue_set(value):
+                    for member in catalogue_members(value):
+                        sets.setdefault((scheme, member), set()).add(cand.work_id)
+    ambiguous = 0
+    for cand in candidates:
+        if cand.features.derivation is not None:
+            continue
+        targets = {
+            work_id
+            for scheme, value in cand.features.identifiers
+            if not is_catalogue_set(value)
+            for work_id in sets.get((scheme, value), ())
+        } - {cand.work_id}
+        if len(targets) == 1:
+            links[(cand.work_id, "part_of", targets.pop())] = "catalogue_range"
+        elif targets:
+            ambiguous += 1
+    return ambiguous
 
 
 def _wikidata_links(session: Session) -> dict[tuple[uuid.UUID, str, uuid.UUID], str]:
@@ -104,6 +139,7 @@ def link_works(session: Session) -> LinkStats:
     return LinkStats(
         links=len(links),
         by_catalogue=methods["catalogue"],
+        by_range=methods["catalogue_range"],
         by_wikidata=methods["wikidata"],
         ambiguous=ambiguous,
     )

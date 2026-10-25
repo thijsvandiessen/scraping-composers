@@ -10,9 +10,10 @@ the type) used for the fuzzy tie-break.
 
 Catalogue numbers are read per composer (see :mod:`composer_schema.catalogues`):
 ``K. 550`` and ``KV 550`` are one Köchel number for Mozart, and a bare ``D 960``
-only counts for Schubert. ``identifiers`` holds every ``(scheme, value)`` the
-title and the source's structured fields state -- the strong keys the matcher
-tries before any title comparison.
+only counts for Schubert. A range or list (``BWV 1046-1051``) is one number
+whose value is the set, never its first piece. ``identifiers`` holds every
+``(scheme, value)`` the title and the source's structured fields state -- the
+strong keys the matcher tries before any title comparison.
 
 A title that names a part, an arrangement or a version of another work ("Allegro
 (from Brandenburg Concerto No. 3, BWV 1048)", "... (arr. for wind quintet)",
@@ -30,7 +31,13 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from composer_models.normalize import MAX_KEY_CHARS
-from composer_schema.catalogues import OPUS, find_catalogues, parse_catalogue
+from composer_schema.catalogues import (
+    OPUS,
+    catalogue_members,
+    find_catalogues,
+    is_catalogue_set,
+    parse_catalogue,
+)
 
 #: What a derived work is of its parent; the ``work_links`` relation is
 #: ``f"{derivation}_of"``.
@@ -133,6 +140,18 @@ def _find_catalogue(text: str, composer: str | None, spans: list[tuple[int, int]
     return found
 
 
+def _without_enclosing_sets(catalogues: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Drop a range or list that holds one of the title's own numbers: "Suite 6,
+    BWV 817 (Französische Suiten BWV 812-817)" is BWV 817, and sharing the set's
+    value would match it to the set."""
+    singles = {pair for pair in catalogues if not is_catalogue_set(pair[1])}
+    return [
+        (scheme, value)
+        for scheme, value in catalogues
+        if not is_catalogue_set(value) or not any((scheme, m) in singles for m in catalogue_members(value))
+    ]
+
+
 def derivation_of(raw_title: str) -> str | None:
     """part | arrangement | version when the title says it is one, else None."""
     return next((name for name, cue in _DERIVATION_CUES if cue.search(raw_title)), None)
@@ -189,6 +208,7 @@ def extract_features(
                         number = int(within)
             elif (scheme, value) not in catalogues:
                 catalogues.append((scheme, value))
+    catalogues = _without_enclosing_sets(catalogues)
     musical_key = _find_key(text, spans)
     derivation = derivation_of(raw_title)
     if derivation == "part" and (parent := _PART.search(text)) is not None:
