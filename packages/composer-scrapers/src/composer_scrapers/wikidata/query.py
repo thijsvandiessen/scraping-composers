@@ -42,7 +42,8 @@ from .parse import METRICS, RELATIONS, _literal
 SPARQL_URL = "https://query.wikidata.org/sparql"
 PAGE_SIZE = 500
 REQUEST_DELAY_S = 1.0
-#: A 500-item detail query is slow to build server-side.
+#: A 500-item detail query is slow to build server-side. This bounds the whole
+#: request (``new_client`` makes it a total deadline), not just each read.
 TIMEOUT_S = 90.0
 # 5 attempts back off 2+4+8+16s — long enough to ride out a laptop
 # sleep/wake network blip, not just a WDQS hiccup
