@@ -181,6 +181,11 @@ Most sources are tested in three layers, one file each:
 adapter's manners, the mirror's lifetime follows the cadence, and every
 `REGISTRY` entry has the same shape.
 
+`test_wikidata_query_shapes.py` guards the SPARQL text of every Wikidata
+adapter, which the fake WDQS above never runs: no id query walks
+`?item wdt:P31/wdt:P279* ?class` with `?item` unbound (it times out live), and
+no `UNION` branch holds a `|` property path (Blazegraph fails it with a 500).
+
 A — marks a layer with no test file. For `berlinphil`, `nyphil` and `rco` that
 means nothing exercises `scrape()` end to end, nor `rco`'s concert-detail
 paging; `concertgebouw_archive`'s adapter is covered only through its fetch

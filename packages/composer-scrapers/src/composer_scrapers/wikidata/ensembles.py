@@ -60,11 +60,20 @@ NAME_LANGUAGES = ("en", "mul", "de", "fr", "it", "nl", "es", "cs", "sv", "da", "
 
 _CLASS_VALUES = _values(list(ENSEMBLE_CLASSES))
 
-# Cheap like the composer id query: no labels, no OPTIONALs, no ORDER BY.
-ENSEMBLE_ID_QUERY = (
-    f"SELECT DISTINCT ?item WHERE {{ VALUES ?class {{ {_CLASS_VALUES} }} "
-    "?item wdt:P31/wdt:P279* ?class . }\n"
-)
+# Cheap like the composer id query: no labels, no OPTIONALs, no ORDER BY. The
+# subclasses are walked first and their instances read after, in that order:
+# ``?item wdt:P31/wdt:P279* ?class`` with ``?item`` unbound makes WDQS start
+# from every instance of anything and times out (504) at 60 s, and its
+# optimizer reorders the two patterns back into that plan unless switched off
+# (#359). This way it answers in about a second.
+ENSEMBLE_ID_QUERY = f"""\
+SELECT DISTINCT ?item WHERE {{
+  hint:Query hint:optimizer "None" .
+  VALUES ?class {{ {_CLASS_VALUES} }}
+  ?sub wdt:P279* ?class .
+  ?item wdt:P31 ?sub .
+}}
+"""
 
 # The single-valued fields. Every pattern besides VALUES is OPTIONAL, so each
 # bound item comes back at least once and the page is checked for coverage.
@@ -85,13 +94,16 @@ WHERE {{
 
 # The multi-valued fields, one per row via UNION (see MULTI_QUERY in ``query``
 # for why not OPTIONALs): the population classes the item falls under, its
-# names, and the groups it is part of.
+# names, and the groups it is part of. Labels and aliases take a branch each:
+# an ``rdfs:label|skos:altLabel`` alternation inside a UNION branch crashes
+# Blazegraph with a 500 (#359).
 ENSEMBLE_MULTI_QUERY = """\
 SELECT ?item ?root ?name ?partOf ?partOfLabel
 WHERE {{
   VALUES ?item {{ {values} }}
   {{ VALUES ?root {{ {classes} }} ?item wdt:P31/wdt:P279* ?root . }}
-  UNION {{ ?item rdfs:label|skos:altLabel ?name . FILTER(LANG(?name) IN ({name_languages})) }}
+  UNION {{ ?item rdfs:label ?name . FILTER(LANG(?name) IN ({name_languages})) }}
+  UNION {{ ?item skos:altLabel ?name . FILTER(LANG(?name) IN ({name_languages})) }}
   UNION {{ ?item wdt:P361 ?partOf . }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
 }}
