@@ -165,6 +165,27 @@ def test_max_pages_caps_the_batches(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(list(WikidataCatalogueAdapter().fetch(max_pages=1))) == 500
 
 
+def test_a_code_with_no_value_is_left_out_of_the_population(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Q135914504 (#360): a P528 statement qualified by P972 but with no value
+    (novalue/somevalue). The detail query needs ``ps:P528 ?code``, so the work
+    returns no rows; unless the id query needs the value too, the page fails
+    its coverage check every run. This fake answers the id query the way WDQS
+    does: the work is in it unless the query asks for ``ps:P528``."""
+    novalue = "Q135914504"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = urllib.parse.parse_qs(request.read().decode())["query"][0]
+        if "VALUES" not in query:
+            population = ["Q1", "Q2"] + ([] if "ps:P528" in query else [novalue])
+            return httpx.Response(200, json={"results": {"bindings": [{"item": uri(q)} for q in population]}})
+        qids = re.findall(r"wd:(Q\d+)", query.split("VALUES", 1)[1].split("}", 1)[0])
+        rows = [row(qid, f"Work {qid}", code=qid.removeprefix("Q")) for qid in qids if qid != novalue]
+        return httpx.Response(200, json={"results": {"bindings": rows}})
+
+    monkeypatch.setattr(WikidataCatalogueAdapter, "open_session", lambda self: mock_session(handler))
+    assert [mention.id for mention in WikidataCatalogueAdapter().fetch()] == ["Q1:Q254", "Q2:Q254"]
+
+
 def test_fetch_refuses_an_empty_population(monkeypatch: pytest.MonkeyPatch) -> None:
     _fake_wdqs(monkeypatch, [])
     with pytest.raises(RuntimeError, match="no works with a catalogue code"):
