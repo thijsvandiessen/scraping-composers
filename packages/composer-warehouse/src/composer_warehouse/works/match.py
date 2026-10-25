@@ -3,10 +3,12 @@
 Hard identifiers dominate: a shared external id (a Wikidata item, a
 MusicBrainz work, an ISWC), a shared catalogue number (BWV/KV/D/...) or an
 opus number is near-certain identity, and a *conflicting* one is near-certain
-non-identity. A part, arrangement or version never matches the work it derives
-from, though they share its number; between two derived works the title
-decides. Absent those, the work type, number and key sharpen a fuzzy ``difflib``
-comparison of the residual title. Thresholds split the score into
+non-identity. A range or list (``BWV 1046-1051``) is a value of its own, so a
+set and a piece inside it conflict like two different numbers. A part,
+arrangement or version never matches the work it derives from, though they
+share its number; between two derived works the title decides. Absent those,
+the work type, number and key sharpen a fuzzy ``difflib`` comparison of the
+residual title. Thresholds split the score into
 auto-match / needs-review / create-new; they are deliberately simple constants
 so they can be tuned and re-applied via ``rematch``.
 """

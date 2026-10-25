@@ -114,3 +114,15 @@ def test_plain_title_has_no_features() -> None:
     assert f.musical_key is None
     assert f.number is None
     assert f.normalized_title == "clair de lune"
+
+
+def test_a_range_is_one_identifier_not_its_first_number() -> None:
+    f = extract_features("6 Brandenburg Concertos, BWV 1046-1051")
+    assert f.identifiers == {("BWV", "1046-1051")}
+    assert (f.catalogue_prefix, f.catalogue_number) == ("BWV", "1046-1051")
+    assert "1051" not in f.core_title
+
+
+def test_a_set_holding_the_titles_own_number_is_dropped() -> None:
+    f = extract_features("Suite 6 E-dur, BWV 817 Franzoesische Suiten BWV 812-817")
+    assert f.identifiers == {("BWV", "817")}

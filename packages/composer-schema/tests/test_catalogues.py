@@ -2,14 +2,18 @@
 
 import pytest
 from composer_schema.catalogues import (
+    catalogue_members,
     composer_catalogues,
     find_catalogues,
+    is_catalogue_set,
     normalize_catalogue,
     parse_catalogue,
 )
 
 MOZART = "Mozart, Wolfgang Amadeus"
 SCARLATTI = "Scarlatti, Domenico"
+BACH = "Bach, Johann Sebastian"
+TELEMANN = "Telemann, Georg Philipp"
 
 
 def pairs(text: str, composer: str | None = None) -> list[tuple[str, str]]:
@@ -118,3 +122,103 @@ def test_parse_catalogue_reads_a_structured_field_with_its_opus() -> None:
     assert parse_catalogue("Op.27 No.2 ; K.331", MOZART) == {("KV", "331"), ("op", "27/2")}
     assert parse_catalogue("Op.67") == {("op", "67")}
     assert parse_catalogue("ILB 193") == frozenset()
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("6 Brandenburg Concertos, BWV 1046-1051", ("BWV", "1046-1051")),
+        ("6 Brandenburg Concertos, BWV 1046\u20131051", ("BWV", "1046-1051")),
+        ("6 Brandenburg Concertos, BWV 1046 \u2014 1051", ("BWV", "1046-1051")),
+        ("6 Brandenburg Concertos, BWV 1046 to 1051", ("BWV", "1046-1051")),
+        ("12 Concerti Grossi, Op.6, HWV 319-330", ("HWV", "319-330")),
+        ("12 Fantasias, TWV 40:2-13", ("TWV", "40:2-13")),
+        ("Twelve Fantasias for Viola da Gamba TWV 40: 26\u201337", ("TWV", "40:26-37")),
+        ("Six Sonatas, Hob. XVI:1-6", ("Hob", "XVI:1-6")),
+    ],
+)
+def test_a_range_is_one_reference_to_the_whole_set(title: str, expected: tuple[str, str]) -> None:
+    assert pairs(title, BACH) == [expected]
+
+
+@pytest.mark.parametrize(
+    ("field", "composer", "first"),
+    [
+        ("BWV 1046-1051", BACH, ("BWV", "1046")),
+        ("BWV 1046\u20131051", BACH, ("BWV", "1046")),
+        ("TWV 40:2-13", TELEMANN, ("TWV", "40:2")),
+        ("HWV 319-330", None, ("HWV", "319")),
+        ("Z.802-811", "Purcell, Henry", ("Z", "802")),
+        ("BWV 1046, 1047", BACH, ("BWV", "1046")),
+    ],
+)
+def test_a_range_or_list_never_stands_for_its_first_piece(
+    field: str, composer: str | None, first: tuple[str, str]
+) -> None:
+    assert first not in parse_catalogue(field, composer)
+
+
+def test_ranges_read_alike_across_schemes() -> None:
+    assert parse_catalogue("BWV 1046-1051", BACH) == {("BWV", "1046-1051")}
+    assert parse_catalogue("TWV 40:2-13", TELEMANN) == {("TWV", "40:2-13")}
+    assert parse_catalogue("TWV 40:2", TELEMANN) == {("TWV", "40:2")}
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Brandenburg Concertos, BWV 1046, 1047", ("BWV", "1046-1047")),
+        ("12 Minuets, K.599, 601, 604", ("KV", "599,601,604")),
+        ("Coronation Anthems HWV 259, 258, 260 und 261", ("HWV", "258-261")),
+        ("Concerto for Oboe (from BWV 105 & 170)", ("BWV", "105,170")),
+        (
+            "Fantasies, Preludes, Fugues. BWV 917, 918, 921, 894-896, 903a",
+            ("BWV", "894-896,903a,917-918,921"),
+        ),
+    ],
+)
+def test_a_list_is_one_canonical_set(title: str, expected: tuple[str, str]) -> None:
+    assert pairs(title, MOZART) == [expected]
+
+
+def test_a_list_and_a_range_of_the_same_works_agree() -> None:
+    assert parse_catalogue("HWV 258-261") == parse_catalogue("HWV 259, 258, 260 und 261")
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Partita 1, Sarabande, BWV 825-4", ("BWV", "825")),  # a movement number
+        ("Sonata in B-flat, D 960 - 1828", ("D", "960")),  # a year
+        ("Lobe den Herren BWV 57, 8", ("BWV", "57")),  # a cantata's movement
+        ("Aria, BWV 988,1", ("BWV", "988")),
+        ("Cantata BWV 140, 1731", ("BWV", "140")),
+        ("Brandenburg Concerto No. 5, BWV 1050, 1st movement", ("BWV", "1050")),
+    ],
+)
+def test_what_only_looks_like_a_range_or_list_keeps_its_first_number(
+    title: str, expected: tuple[str, str]
+) -> None:
+    assert pairs(title, "Schubert, Franz") == [expected]
+
+
+def test_a_tail_that_is_no_set_stays_in_the_text() -> None:
+    (ref,) = find_catalogues("Lobe den Herren BWV 57, 8")
+    assert (ref.number, ref.span) == ("57", (16, 22))
+
+
+def test_separate_ranges_stay_separate_references() -> None:
+    assert pairs("11 Praeludien BWV 846-851, BWV 853-857") == [("BWV", "846-851"), ("BWV", "853-857")]
+
+
+def test_an_overlong_set_is_dropped_rather_than_cut() -> None:
+    field = "BWV " + ", ".join(str(n) for n in range(1000, 1040, 2))
+    assert parse_catalogue(field) == frozenset()
+
+
+def test_catalogue_members_expand_a_set() -> None:
+    assert catalogue_members("40:2-4") == {"40:2", "40:3", "40:4"}
+    assert catalogue_members("894-896,903a") == {"894", "895", "896", "903a"}
+    assert catalogue_members("1046") == {"1046"}
+    assert is_catalogue_set("1046-1051") and is_catalogue_set("818,819a")
+    assert not is_catalogue_set("XVI:52") and not is_catalogue_set("173db")
