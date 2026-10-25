@@ -15,7 +15,7 @@ everything after that (bucket, ingest, matching) is shared.
 | `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | yearly | genres (P136) and movements (P135) are claimed with their QID, which their entities are keyed on |
 | `wikidata_places` | every place a Wikidata composer was born, died or held citizenship in, then the places containing those | yearly | place records with `place_type`, `located_in`, `in_country`, coordinates, GeoNames id and ISO 3166 code; see [`composer-warehouse`](../composer-warehouse/README.md#places) |
 | `wikidata_works` | every Wikidata work with a date of first performance (P1191) and a composer, with its premiere place (P4647) | yearly | work mentions carrying `raw["premiere"]`, which fills `Work.premiere_date` |
-| `wikidata_genres` | every genre and movement the composers are tagged with, and their `subclass of` (P279) ancestors | yearly | `subclass_of` claims make the hierarchy; parents outside music genre / art or cultural movement are dropped, and the walk stops after 15 levels |
+| `wikidata_genres` | every genre and movement the composers are tagged with, and their `subclass of` (P279) ancestors | yearly | `subclass_of` claims make the hierarchy; parents outside music genre / art or cultural movement are dropped, and the walk stops after 15 levels; a seed left with no parent climbs through its same-named `different from` (P1889) music item instead (the dance "waltz" → the genre "waltz"), and a musical form (P31 musical form / type of composition) gets a `genre_type` claim |
 | `wikidata_ensembles` | every Wikidata orchestra (Q42998) and choir (Q131186), subclasses included, with their names in the sources' languages, headquarters city, MusicBrainz id and the groups they are part of | yearly | the anchors `anchor-ensembles` folds name-keyed ensembles onto; see below |
 | `wikidata_catalogue` | every Wikidata work with a composer and a catalogue code (a P528 value qualified by P972), with its MusicBrainz work ids (P435), ISWCs (P1827) and the works it is part of (P361) | yearly | work mentions the warehouse matches on their QID and catalogue numbers; P361 becomes a `part_of` work link |
 | `openopus` | Open Opus work catalogue | yearly | |
@@ -173,7 +173,7 @@ Most sources are tested in three layers, one file each:
 | `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror and QID-pinned place claims | | |
 | `wikidata_places` | `test_wikidata_places.py` covers all three: type precedence, parent rounds, coordinates | | |
 | `wikidata_works` | `test_wikidata_works.py` covers all three | | |
-| `wikidata_genres` | `test_wikidata_genres.py` covers all three: seeds, paging, cycles, the class filter, the depth cap, `max_pages`, the mirror | | |
+| `wikidata_genres` | `test_wikidata_genres.py` covers all three: seeds, paging, cycles, the class filter, the depth cap, `max_pages`, the mirror, counterparts for stranded seeds (same name or name + "music", of the kind, already kept or fetched, a classless kept parent still stranding a seed, asked only for stranded seeds), the musical-form claim | | |
 | `wikidata_ensembles` | `test_wikidata_ensembles.py` covers all three, including the mirror | | |
 | `wikidata_catalogue` | `test_wikidata_catalogue.py` covers all three, including a P528 statement with no value | | |
 

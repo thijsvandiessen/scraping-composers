@@ -17,7 +17,7 @@ to override `LOG_LEVEL`.
 | `person-train`, `person-eval` | refit the person linkage model, and score it on the evaluation set | [MODEL.md](../../packages/composer-warehouse/src/composer_warehouse/persons/MODEL.md) |
 | `anchor-ensembles`, `ensembles` | fold ensemble spellings onto the Wikidata ensembles they name (also run before every promote), and list ensembles most credited first (`--unanchored`, `--limit`) | [composer-warehouse](../../packages/composer-warehouse/README.md#ensembles) |
 | `derive-concerts`, `derive-recordings` | group mentions into concerts and recordings (also run before every promote) | [composer-warehouse](../../packages/composer-warehouse/README.md#concerts-and-recordings) |
-| `genres`, `link-genres` | report how far the genre/movement hierarchy reaches, orphans counted and the most-used listed (`--kind`, `--limit`); and point label-only genres at their QID entity (also run before every promote) | [composer-warehouse](../../packages/composer-warehouse/README.md#genres-and-movements) |
+| `genres`, `link-genres` | report how far the genre/movement hierarchy reaches: the share of person tags reached, orphans and musical forms counted and the most-used of each listed (`--kind`, `--limit`); and point label-only genres at their QID entity (also run before every promote) | [composer-warehouse](../../packages/composer-warehouse/README.md#genres-and-movements) |
 | `rebuild-silver` | replay the whole bucket into a fresh silver | [composer-warehouse](../../packages/composer-warehouse/README.md#rebuilding-silver) |
 | `promote` | rebuild gold from silver (work links, concerts and recordings are re-derived first) | [composer-gold](../../packages/composer-gold/README.md) |
 | `export-kumu`, `export-neo4j` | export gold to a Kumu blueprint or a Neo4j graph | [composer-gold](../../packages/composer-gold/README.md#mapping-gold-in-kumu), [composer-graph](../../packages/composer-graph/README.md) |
@@ -36,7 +36,7 @@ uv run --directory apps/cli pytest --rootdir . --cov=composer_cli
 | Queries | `claims` (per-source attribution, filters, record provenance, collapsing repeats, unknown names), `stats` (empty, entities, works, person dedupe counts), `runs`, `works`, `ensembles` (all, and `--unanchored`). |
 | Ingest | `fetch` → `process` round trip, a failing source, `process` loading every loadable run, no runs to load, `anchor-ensembles`, `derive-concerts`, and `rebuild-silver` (every bucket source, rejecting a URL with nothing to swap). |
 | Works | `review` listing and `--new`, `rematch` (including a source's structured catalogue field), `work-identity` shares per source. |
-| Genres | `link-genres` linking a label-only genre, `genres` printing the counts and the orphan count for one kind, and `main` routing `genres` to both kinds. |
+| Genres | `link-genres` linking a label-only genre, `genres` printing the counts, the orphan and musical-form counts and the share of tags reached for one kind, and `main` routing `genres` to both kinds. |
 | People | `dedupe-persons` (links, reviews, refused merges, `--reset`, `--recluster-only`), `person-review` accept and reject, `person-train` (model and dataset written, no dataset unless asked), `person-eval`. |
 | Gold | `promote` passing thresholds, `export-kumu` (blueprint written, no gold database). |
 | Entry point | Routing to subcommands, no subcommand, `-v` and `--log-level`, a bad `LOG_LEVEL`, `DATABASE_URL`. |

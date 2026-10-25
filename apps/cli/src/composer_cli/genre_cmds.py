@@ -2,7 +2,7 @@ import argparse
 
 from composer_models.db import get_engine, init_db
 from composer_models.genres import GENRE_KINDS, TOP_LEVEL
-from composer_warehouse.genres import GenreReport, genre_report, link_label_genres
+from composer_warehouse.genres import GenreReport, OrphanGenre, genre_report, link_label_genres
 
 
 def _print_report(report: GenreReport) -> None:
@@ -11,11 +11,18 @@ def _print_report(report: GenreReport) -> None:
     print(f"  label only             {report.label_only} ({report.legacy_linked} linked to a QID one)")
     print(f"  with a parent          {report.with_parent}")
     print(f"  orphans                {report.orphans} (no subclass_of path to a top-level {report.kind})")
+    print(f"  musical forms          {report.forms} (no path either, counted apart from the orphans)")
+    print(f"  person tags reached    {report.tags_reached} of {report.tags} ({report.reach:.0%})")
     if report.missing_top_level:
         print(f"  top-level not in silver: {', '.join(report.missing_top_level)}")
-    if report.top_orphans:
-        print("  most-used orphans:")
-        for orphan in report.top_orphans:
+    _print_ranked("most-used orphans", report.top_orphans)
+    _print_ranked("most-used musical forms", report.top_forms)
+
+
+def _print_ranked(title: str, ranked: list[OrphanGenre]) -> None:
+    if ranked:
+        print(f"  {title}:")
+        for orphan in ranked:
             qid = f" ({orphan.wikidata_id})" if orphan.wikidata_id else ""
             print(f"    {orphan.persons:>6}  {orphan.label}{qid}")
 

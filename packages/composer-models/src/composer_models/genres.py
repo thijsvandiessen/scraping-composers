@@ -29,9 +29,12 @@ TOP_LEVEL_GENRES: dict[str, str] = {
     "Q492264": "film score",
 }
 
-#: Top-level movements: the periods of Western art music, plus the two broad
-#: movements composers' P135 most often names outright.
+#: Top-level movements: the periods of Western art music, plus the broad
+#: movements composers' P135 most often names outright. "classical music" is
+#: one of them: it is the movement Wikidata tags most composers with, and it is
+#: a top-level genre as well (#364).
 TOP_LEVEL_MOVEMENTS: dict[str, str] = {
+    "Q9730": "classical music",
     "Q163775": "medieval music",
     "Q201405": "Renaissance music",
     "Q8361": "Baroque music",
@@ -44,6 +47,11 @@ TOP_LEVEL_MOVEMENTS: dict[str, str] = {
 }
 
 TOP_LEVEL: dict[str, dict[str, str]] = {"genre": TOP_LEVEL_GENRES, "movement": TOP_LEVEL_MOVEMENTS}
+
+#: The ``genre_type`` claim value ``wikidata_genres`` gives a musical form
+#: ("symphony", "concerto"). Forms are an axis of their own, not a genre that
+#: failed to reach the top level, so the orphan report counts them apart.
+MUSICAL_FORM = "musical form"
 
 #: The predicate that tags a person with an entity of each kind.
 MEMBERSHIP_PREDICATES: dict[str, str] = {"genre": "has_genre", "movement": "in_movement"}
