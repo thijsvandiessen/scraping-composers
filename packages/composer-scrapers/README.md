@@ -16,7 +16,7 @@ everything after that (bucket, ingest, matching) is shared.
 | `wikidata_places` | every place a Wikidata composer was born, died or held citizenship in, then the places containing those | yearly | place records with `place_type`, `located_in`, `in_country`, coordinates, GeoNames id and ISO 3166 code; see [`composer-warehouse`](../composer-warehouse/README.md#places) |
 | `wikidata_works` | every Wikidata work with a date of first performance (P1191) and a composer, with its premiere place (P4647) | yearly | work mentions carrying `raw["premiere"]`, which fills `Work.premiere_date` |
 | `wikidata_genres` | every genre and movement the composers are tagged with, and their `subclass of` (P279) ancestors | yearly | `subclass_of` claims make the hierarchy; parents outside music genre / art or cultural movement are dropped, and the walk stops after 15 levels; a seed left with no parent climbs through its same-named `different from` (P1889) music item instead (the dance "waltz" → the genre "waltz"), and a musical form (P31 musical form / type of composition) gets a `genre_type` claim |
-| `wikidata_ensembles` | every Wikidata orchestra (Q42998) and choir (Q131186), subclasses included, with their names in the sources' languages, headquarters city, MusicBrainz id and the groups they are part of | yearly | the anchors `anchor-ensembles` folds name-keyed ensembles onto; see below |
+| `wikidata_ensembles` | every Wikidata orchestra (Q42998), choir (Q131186), string quartet (Q207338), chamber ensemble (Q9390516, Q19191604) and opera company (Q20819922), subclasses included, plus the plain musical groups (Q215380, Q2088357) with a classical genre or name, with their names in the sources' languages, headquarters city, MusicBrainz id and the groups they are part of | yearly | the anchors `anchor-ensembles` folds name-keyed ensembles onto; see below |
 | `wikidata_catalogue` | every Wikidata work with a composer and a catalogue code (a P528 value qualified by P972), with its MusicBrainz work ids (P435), ISWCs (P1827) and the works it is part of (P361) | yearly | work mentions the warehouse matches on their QID and catalogue numbers; P361 becomes a `part_of` work link |
 | `openopus` | Open Opus work catalogue | yearly | |
 | `classicalmusiconline` | classical-music-online.net composer catalogue and works | yearly | two levels: 26 index pages, then ~11.6k composer pages (a couple of hours); `--max-pages` caps the composer pages |
@@ -38,16 +38,26 @@ The cadence decides when a source is *due* again in the admin API and how long
 its page mirror serves a page (see below). `static` is for archives of things
 already given: scraped once, re-run on demand.
 
-`wikidata_ensembles` is paged like `wikidata`: one live id query, then a
+`wikidata_ensembles` is paged like `wikidata`: three live id queries, then a
 mirrored detail query and a mirrored multi-valued query per 500 items, the
-detail page checked for coverage. Each ensemble record carries an
-`ensemble_type` (from its class: choir over orchestra; else from name cues such
-as `Quartet` or `Chor`; else `other`), a `based_in` city (the headquarters if it
-is a settlement, else the headquarters' P131) pinned to the city's QID, an `also_known_as` per label and alias in
-English, `mul`, German, French, Italian, Dutch, Spanish, Czech, Swedish, Danish,
-Polish and Hungarian, and `part_of` only towards another ensemble in the
-population. Chamber ensembles and opera companies are not population classes
-yet: their QIDs still need pinning against live Wikidata.
+detail page checked for coverage. The id queries are the population classes'
+instances (about 10,700), the direct instances of musical group or musical
+ensemble with a genre under classical music or opera (about 550: the London
+and Royal Philharmonic, the Budapest Symphony are typed only that way), and
+the genre-less ones whose label or alias carries a name cue such as
+`Orchestra`, `Philharmoniker`, `Chor` or `Quartet` (about 1,500, found through
+the search index: a label scan over all 115,000 musical groups times out).
+A musical group with only non-classical genres, and every subclass of musical
+group (rock band, boy band, ...), stays out. Each ensemble record carries an
+`ensemble_type` (from its class: chamber ensemble over choir over orchestra
+over opera company; else from name cues such as `Quartet` or `Chor`; else
+`other`), a `based_in` city (the headquarters if it is a settlement, else the
+headquarters' P131) pinned to the city's QID, an `also_known_as` per label and
+alias in English, `mul`, German, French, Italian, Dutch, Spanish, Czech,
+Swedish, Danish, Polish and Hungarian, and `part_of` only towards another
+ensemble in the population. An item with no English or `mul` label is named by
+its label in the first of those languages it has one in; only an item with no
+label in any of them is skipped.
 
 ## Adding a source
 
@@ -174,7 +184,7 @@ Most sources are tested in three layers, one file each:
 | `wikidata_places` | `test_wikidata_places.py` covers all three: type precedence, parent rounds, coordinates | | |
 | `wikidata_works` | `test_wikidata_works.py` covers all three | | |
 | `wikidata_genres` | `test_wikidata_genres.py` covers all three: seeds, paging, cycles, the class filter, the depth cap, `max_pages`, the mirror, counterparts for stranded seeds (same name or name + "music", of the kind, already kept or fetched, a classless kept parent still stranding a seed, asked only for stranded seeds), the musical-form claim | | |
-| `wikidata_ensembles` | `test_wikidata_ensembles.py` covers all three, including the mirror | | |
+| `wikidata_ensembles` | `test_wikidata_ensembles.py` covers all three, including the mirror, the union of the three id queries, the musical-group signals and the label fallback for items with no English label | | |
 | `wikidata_catalogue` | `test_wikidata_catalogue.py` covers all three, including a P528 statement with no value | | |
 
 `test_base.py` covers what every source shares: the session carries the

@@ -12,9 +12,14 @@ from composer_http.testing import mock_session
 from composer_scrapers import REGISTRY, SourceClaim
 from composer_scrapers.wikidata import WikidataEnsemblesAdapter
 from composer_scrapers.wikidata.ensembles import (
+    CLASSICAL_GENRES,
     ENSEMBLE_ID_QUERY,
     ENSEMBLE_MULTI_QUERY,
     ENSEMBLE_QUERY,
+    GENRE_GROUP_ID_QUERY,
+    MUSICAL_GROUPS,
+    NAME_CUES,
+    NAME_GROUP_ID_QUERY,
     _documents_from_rows,
     _fetch_ensemble_page,
     _fetch_ensemble_qids,
@@ -138,20 +143,91 @@ def test_an_unlabelled_item_is_skipped() -> None:
     assert _documents_from_rows([row("Q1", "Q1")], {"Q1"}, NOW) == []
 
 
+def label(qid: str, name: str, lang: str) -> dict[str, Any]:
+    return {"item": uri(qid), "name": lit(name), "nameLang": lit(lang)}
+
+
+def test_an_item_without_an_english_label_takes_the_first_name_language_label() -> None:
+    rows = [
+        row("Q1", "Q1"),
+        label("Q1", "Orchestre de Budapest", "fr"),
+        label("Q1", "Budapester Sinfonieorchester", "de"),
+        {"item": uri("Q1"), "name": lit("BSO")},  # an alias: never the display name
+    ]
+    (document,) = _documents_from_rows(rows, {"Q1"}, NOW)
+    assert document.name == "Budapester Sinfonieorchester"  # de before fr in NAME_LANGUAGES
+    assert SourceClaim("ensemble_type", value="orchestra") in document.claims
+    aliases = [c.value for c in document.claims if c.predicate == "also_known_as"]
+    assert aliases == ["BSO", "Orchestre de Budapest"]
+
+
+def test_an_english_label_wins_over_the_fallback() -> None:
+    rows = [row("Q1", "Budapest Symphony Orchestra"), label("Q1", "Budapester Sinfonieorchester", "de")]
+    (document,) = _documents_from_rows(rows, {"Q1"}, NOW)
+    assert document.name == "Budapest Symphony Orchestra"
+
+
+def test_an_item_with_only_aliases_is_still_skipped() -> None:
+    rows = [row("Q1", "Q1"), {"item": uri("Q1"), "name": lit("BSO")}]
+    assert _documents_from_rows(rows, {"Q1"}, NOW) == []
+
+
+@pytest.mark.parametrize(
+    ("cls", "expected"),
+    [
+        ("Q207338", "chamber_ensemble"),  # string quartet
+        ("Q9390516", "chamber_ensemble"),
+        ("Q19191604", "chamber_ensemble"),
+        ("Q20819922", "opera_company"),
+    ],
+)
+def test_the_widened_classes_type_their_instances(cls: str, expected: str) -> None:
+    assert ensemble_type({cls}, "Kodály") == expected
+
+
+def test_a_musical_group_is_typed_from_its_name() -> None:
+    assert ensemble_type(set(), "London Philharmonic Orchestra") == "orchestra"
+
+
 def test_the_queries_ask_for_the_anchoring_properties() -> None:
     assert f"wd:{ORCHESTRA}" in ENSEMBLE_ID_QUERY and f"wd:{CHOIR}" in ENSEMBLE_ID_QUERY
+    assert "wd:Q207338" in ENSEMBLE_ID_QUERY and "wd:Q20819922" in ENSEMBLE_ID_QUERY
     assert "wdt:P159" in ENSEMBLE_QUERY and "wdt:P131" in ENSEMBLE_QUERY and "wdt:P434" in ENSEMBLE_QUERY
     assert "skos:altLabel" in ENSEMBLE_MULTI_QUERY and "wdt:P361" in ENSEMBLE_MULTI_QUERY
+    assert "?nameLang" in ENSEMBLE_MULTI_QUERY
 
 
-def test_fetch_ensemble_qids_orders_numerically() -> None:
+def test_the_musical_group_queries_need_a_classical_signal() -> None:
+    for group in MUSICAL_GROUPS:
+        assert f"wd:{group}" in GENRE_GROUP_ID_QUERY and f'"{group}"' in NAME_GROUP_ID_QUERY
+    # only direct instances: the subclass tree is every rock band
+    assert "?item wdt:P31 ?group" in GENRE_GROUP_ID_QUERY and "P279* ?group" not in GENRE_GROUP_ID_QUERY
+    assert all(f"wd:{genre}" in GENRE_GROUP_ID_QUERY for genre in CLASSICAL_GENRES)
+    assert "?genre wdt:P279* ?genreRoot" in GENRE_GROUP_ID_QUERY
+    assert all(f'"{cue}"' in NAME_GROUP_ID_QUERY for cue in NAME_CUES)
+    assert "haswbstatement:P31=" in NAME_GROUP_ID_QUERY and "inlabel:" in NAME_GROUP_ID_QUERY
+    assert "FILTER NOT EXISTS { ?item wdt:P136 ?genre . }" in NAME_GROUP_ID_QUERY
+    assert {"orchestra", "philharmonic", "choir", "chor", "quartet"} <= set(NAME_CUES)
+    assert "trio" not in NAME_CUES
+
+
+def test_fetch_ensemble_qids_unions_the_id_queries_and_orders_numerically() -> None:
+    answers = {
+        ENSEMBLE_ID_QUERY: ("Q100", "Q20", "Q3"),
+        GENRE_GROUP_ID_QUERY: ("Q863397", "Q20"),
+        NAME_GROUP_ID_QUERY: ("Q4",),
+    }
+    asked: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
-        assert urllib.parse.parse_qs(request.read().decode())["query"][0] == ENSEMBLE_ID_QUERY
-        bindings = [{"item": uri(q)} for q in ("Q100", "Q20", "Q3")]
+        query = urllib.parse.parse_qs(request.read().decode())["query"][0]
+        asked.append(query)
+        bindings = [{"item": uri(q)} for q in answers[query]]
         return httpx.Response(200, json={"results": {"bindings": bindings}})
 
     with mock_session(handler) as session:
-        assert _fetch_ensemble_qids(session) == ["Q3", "Q20", "Q100"]
+        assert _fetch_ensemble_qids(session) == ["Q3", "Q4", "Q20", "Q100", "Q863397"]
+    assert asked == list(answers)
 
 
 def test_a_short_page_fails_the_run_and_is_not_mirrored(
