@@ -370,10 +370,11 @@ def test_wikidata_codes_are_read_by_their_catalogue_item(
     ("code", "item", "expected"),
     [
         ("C 48", "Q16749680", (("wd:Q16749680", "c 48"),)),  # Chomiński
-        ("9978452411", "Q51796663", (("wd:Q51796663", "9978452411"),)),  # SACEM
+        ("P 86", "Q71108028", (("wd:Q71108028", "p 86"),)),  # Pestelli
         ("54-59", "Q1", (("wd:Q1", "54-59"),)),  # a range stays a set
-        ("960602-001", "Q54959446", (("wd:Q54959446", "960602 001"),)),  # but this is no range
+        ("960602-001", "Q1", (("wd:Q1", "960602 001"),)),  # but this is no range
         ("R. op. 243", "Q112328324", (("wd:Q112328324", "r. op. 243"),)),  # Rinaldi, not an opus
+        ("op. 239", "Q112328324", (("wd:Q112328324", "op. 239"),)),  # nor without his initial
         ("P. deest", "Q112328398", ()),  # not in the catalogue: nothing to match on
         ("Op. 32", WIKIDATA_OPUS, (("op", "32"),)),
         ("deest", None, ()),
@@ -390,3 +391,128 @@ def test_the_wikidata_map_names_only_schemes_the_parser_knows() -> None:
         scheme.code for entry in COMPOSERS for scheme in entry.schemes
     }
     assert {scheme.code for scheme in WIKIDATA_CATALOGUES.values()} <= known
+
+
+def test_the_wikidata_map_reuses_the_parsers_schemes() -> None:
+    # the very objects, so a prefix or rule added to one is the other's too
+    parser = [*UNIVERSAL, *(scheme for entry in COMPOSERS for scheme in entry.schemes)]
+    for qid, scheme in WIKIDATA_CATALOGUES.items():
+        assert any(scheme is other for other in parser), qid
+
+
+@pytest.mark.parametrize(
+    ("code", "item", "short", "composer", "expected"),
+    [
+        # a code in a sibling or universal catalogue is a number there
+        ("Wq 117", "Q139309403", "BR-CPEB", CPE_BACH, (("Wq", "117"),)),
+        ("Ty 238", "Q139743120", "Warb", JC_BACH, (("Ty", "238"),)),
+        ("Ty 238", "Q139743120", "Warb", "Gioacchino Cocchi", (("Ty", "238"),)),
+        ("BWVAnh. 12", "Q739093", None, BACH, (("BWV Anh", "12"),)),
+        # but a section that only looks like a prefix stays a section
+        ("Fp 12", "Q139309403", "BR-CPEB", CPE_BACH, (("BR-CPEB", "fp12"),)),
+    ],
+)
+def test_a_wikidata_code_stated_in_another_catalogue_is_read_in_that_one(
+    code: str, item: str, short: str, composer: str, expected: tuple[tuple[str, str], ...]
+) -> None:
+    assert normalize_wikidata_code(code, item, short, composer) == expected
+
+
+@pytest.mark.parametrize("code", ["KV6 173dB", "KV⁶ 173dB", "K6 173dB", "K.6 173dB"])
+def test_a_koechel_edition_marker_is_no_number(code: str) -> None:
+    assert normalize_wikidata_code(code, "Q22340538", None, MOZART) == (("KV6", "173db"),)
+
+
+def test_a_prefix_run_into_its_number_is_still_stripped() -> None:
+    assert normalize_wikidata_code("KV65", "Q162478", None, MOZART) == (("KV", "65"),)
+    assert normalize_wikidata_code("K6", "Q162478", None, MOZART) == (("KV", "6"),)
+
+
+@pytest.mark.parametrize(
+    ("code", "item", "expected"),
+    [
+        ("Anh. 229", "Q162478", (("KV Anh", "229"),)),
+        ("K Anh. 12", "Q162478", (("KV Anh", "12"),)),
+        ("Anh. 159", "Q214203", (("BWV Anh", "159"),)),
+        ("Anh 159", "Q214203", (("BWV Anh", "159"),)),
+        # the sixth edition's lettered appendix numbers anew, as KV6 does
+        ("Anh. C 27.06", "Q22340538", (("KV6 Anh", "c27.06"),)),
+        ("Anh. C.27.09", "Q162478", (("KV6 Anh", "c27.09"),)),
+        ("KK Anh.II/1", "Q16747642", (("KK Anh", "II/1"),)),
+    ],
+)
+def test_a_bare_appendix_in_a_catalogue_item_is_that_catalogues_appendix(
+    code: str, item: str, expected: tuple[tuple[str, str], ...]
+) -> None:
+    assert normalize_wikidata_code(code, item, None, MOZART) == expected
+
+
+def test_the_koechel_appendix_reads_alike_in_a_title() -> None:
+    assert pairs("Fugue, KV Anh. C 27.06", MOZART) == [("KV6 Anh", "c27.06")]
+    assert parse_catalogue("K.Anh.226 (196e; K.Anh.C.17.01)", MOZART) == {
+        ("KV Anh", "226"),
+        ("KV6 Anh", "c17.01"),
+    }
+    assert pairs("Fugue, K. Anh. 229", MOZART) == [("KV Anh", "229")]
+
+
+def test_a_code_written_as_an_opus_keeps_its_opus_in_any_catalogue() -> None:
+    assert normalize_wikidata_code("Op. 64 No. 1", "Q16749676", "B", CHOPIN) == (("op", "64/1"),)
+    assert normalize_wikidata_code("Opus 28", "Q16749676", "B", CHOPIN) == (("op", "28"),)
+
+
+@pytest.mark.parametrize(
+    ("code", "item"),
+    [
+        ("9978452411", "Q51796663"),  # SACEM
+        ("71200675600", "Q64029229"),  # SIAE
+        ("960602-001", "Q54959446"),  # GEMA
+        ("HCD-2018", "Q107212725"),  # a record label's release, holding many works
+        ("22072077", "Q104828762"),  # a library's holding
+    ],
+)
+def test_a_code_in_no_composers_work_catalogue_is_no_work_number(code: str, item: str) -> None:
+    assert normalize_wikidata_code(code, item, None, "Thelonious Monk") == ()
+
+
+def test_hoboken_drops_the_part_of_a_work() -> None:
+    assert parse_catalogue("Hob. I 104.2", "Haydn") == {("Hob", "I:104")}
+    assert parse_catalogue("Hob. XVI:52.3", "Haydn") == {("Hob", "XVI:52")}
+    assert parse_catalogue("Hob 16.52", "Haydn") == {("Hob", "XVI:52")}
+
+
+@pytest.mark.parametrize("composer", ["Martinu", "Holst, Gustav", "Arthur Honegger"])
+def test_only_helm_numbers_have_a_dotted_part_of_their_own(composer: str) -> None:
+    assert parse_catalogue("Quartet, H. 103.2", composer) == {("H", "103")}
+    assert parse_catalogue("Quartet, H. 103.2", CPE_BACH) == {("H", "103.2")}
+    assert normalize_wikidata_code("103.2", "Q141568820", None, composer) == (("H", "103"),)
+    assert normalize_wikidata_code("542.5", "Q138770768", None, composer) == (("H", "542.5"),)
+
+
+@pytest.mark.parametrize(
+    ("composer", "expected"),
+    [
+        ("C.P.E. Bach", "Wq"),
+        ("Bach, C. P. E.", "Wq"),
+        ("C.Ph.E. Bach", "Wq"),
+        ("Bach, J.C.", "Warb"),
+        ("W.F. Bach", "F"),
+        ("Strauss, R.", "TrV"),
+        ("R. Wagner", "WWV"),
+        ("M. Haydn", "MH"),
+        # initials count only in full, and only the right ones
+        ("J.S. Bach", None),
+        ("J.C.F. Bach", None),
+        ("J. Strauss", None),
+        ("Strauss, J.", None),
+        ("S. Wagner", None),
+    ],
+)
+def test_initials_stand_for_the_given_names(composer: str, expected: str | None) -> None:
+    entry = composer_catalogues(composer)
+    assert (entry.schemes[0].code if entry else None) == expected
+
+
+def test_initials_unlock_the_composers_catalogues() -> None:
+    assert pairs("Sonata, Wq. 49/1", "C.P.E. Bach") == [("Wq", "49/1")]
+    assert pairs("Polka, TrV 12", "J. Strauss") == []
