@@ -16,6 +16,7 @@ from composer_models import (
     Recording,
     Source,
     Work,
+    WorkIdentifier,
     WorkLink,
     WorkTitle,
 )
@@ -388,6 +389,38 @@ def test_rebuild_links_parts_to_their_parent_work(tmp_path: Path) -> None:
         parent = silver.get(Work, link.target_work_id)
         assert parent is not None and parent.canonical_title.startswith("Brandenburg")
         assert link.relation == "part_of"
+
+
+def test_rebuild_matches_works_across_a_composers_duplicate_entities(tmp_path: Path) -> None:
+    """#362: the replay matches per composer entity, before any person is
+    linked; the dedupe links the surname-only "Mozart" on the Köchel numbers it
+    shares, and the derivations fold its K. 550 (and a composerless one) into
+    Wolfgang Amadeus's."""
+    bucket = LocalBucket(tmp_path / "bucket")
+    wolfgang = "Mozart, Wolfgang Amadeus"
+    catalogue = FakeSource(
+        records=(
+            mention("Symphony no. 40 in G minor K. 550", wolfgang, "c1"),
+            mention("Symphony no. 41 in C major K. 551", wolfgang, "c2"),
+            mention("Sinfonie in g KV 550 (1. Fassung)", wolfgang, "c3"),
+            mention("Symphony No. 40 (K.550)", "Mozart", "c4"),
+            mention("Symfonie nr. 40 in g kl.t., KV 550", None, "c5"),
+        ),
+        name="catalogue",
+    )
+    Scraper(catalogue).fetch_to_bucket(bucket)
+    db_path = tmp_path / "silver.db"
+
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
+
+    assert (stats.persons_auto_linked, stats.works_merged, stats.work_links) == (1, 2, 1)
+    with _session(db_path) as silver:
+        kv_550 = silver.scalars(
+            select(WorkIdentifier.work_id).where(WorkIdentifier.scheme == "KV", WorkIdentifier.value == "550")
+        ).all()
+        assert len(set(kv_550)) == 1
+        link = silver.scalars(select(WorkLink)).one()
+        assert (link.relation, link.target_work_id) == ("version_of", kv_550[0])
 
 
 def test_rebuild_keeps_recordings_from_a_crawl_derived_source(tmp_path: Path) -> None:

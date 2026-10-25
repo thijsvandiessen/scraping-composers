@@ -12,8 +12,8 @@ versions at the work they derive from.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable
-from dataclasses import replace
+from collections.abc import Iterable, Iterator
+from dataclasses import dataclass, field, replace
 
 from composer_models import Entity, Work, WorkIdentifier, WorkTitle
 from composer_models.normalize import MAX_KEY_CHARS
@@ -85,8 +85,51 @@ def refresh_candidate(
             return
 
 
-def load_candidates(session: Session) -> dict[uuid.UUID | None, list[Candidate]]:
-    """Every work as a match candidate, keyed by composer.
+def composer_canonicals(session: Session) -> dict[uuid.UUID, uuid.UUID]:
+    """Every person linked as a duplicate, mapped to its cluster canonical.
+
+    ``dedupe_persons`` keeps the links a partition, one hop to a root, so the
+    mapping needs no walking.
+    """
+    return {
+        entity_id: canonical_id
+        for entity_id, canonical_id in session.execute(
+            select(Entity.id, Entity.canonical_entity_id).where(
+                Entity.kind == "person", Entity.canonical_entity_id.is_not(None)
+            )
+        ).tuples()
+        if canonical_id is not None
+    }
+
+
+@dataclass
+class WorkCandidates:
+    """Every work as a match candidate, grouped by *canonical* composer.
+
+    A composer filed twice ("Wolfgang Amadeus Mozart" and the surname-only
+    "Mozart", linked by ``dedupe_persons``) is one catalogue, so a mention by
+    either is matched against the works of both (#362). ``canonical`` maps a
+    duplicate person to its cluster canonical; a composer missing from it is
+    its own group.
+    """
+
+    groups: dict[uuid.UUID | None, list[Candidate]] = field(
+        default_factory=dict[uuid.UUID | None, list[Candidate]]
+    )
+    canonical: dict[uuid.UUID, uuid.UUID] = field(default_factory=dict[uuid.UUID, uuid.UUID])
+
+    def key(self, composer_id: uuid.UUID | None) -> uuid.UUID | None:
+        """The group a composer's works are matched in."""
+        return None if composer_id is None else self.canonical.get(composer_id, composer_id)
+
+    def of(self, composer_id: uuid.UUID | None) -> list[Candidate]:
+        """The candidates for a mention by ``composer_id`` (a live list: append
+        a work created for it, and the next mention sees it)."""
+        return self.groups.setdefault(self.key(composer_id), [])
+
+
+def candidate_rows(session: Session) -> Iterator[tuple[uuid.UUID, uuid.UUID | None, WorkFeatures]]:
+    """Every work as ``(work id, composer id, features)``.
 
     The features are re-read from the canonical title *for its composer* (so a
     bare ``K. 550`` is Köchel again) and carry every identifier stored for the
@@ -99,14 +142,24 @@ def load_candidates(session: Session) -> dict[uuid.UUID | None, list[Candidate]]
     ).tuples():
         stored.setdefault(work_id, set()).add((scheme, value))
 
-    candidates: dict[uuid.UUID | None, list[Candidate]] = {}
     for work_id, composer_id, title, composer in session.execute(
         select(Work.id, Work.composer_entity_id, Work.canonical_title, Entity.label).outerjoin(
             Entity, Entity.id == Work.composer_entity_id
         )
     ).tuples():
-        features = with_identifiers(extract_features(title, composer=composer), stored.get(work_id, ()))
-        candidates.setdefault(composer_id, []).append(Candidate(work_id, features))
+        yield (
+            work_id,
+            composer_id,
+            with_identifiers(extract_features(title, composer=composer), stored.get(work_id, ())),
+        )
+
+
+def load_candidates(session: Session) -> WorkCandidates:
+    """Every work as a match candidate, grouped by canonical composer (see
+    :class:`WorkCandidates` and :func:`candidate_rows`)."""
+    candidates = WorkCandidates(canonical=composer_canonicals(session))
+    for work_id, composer_id, features in candidate_rows(session):
+        candidates.of(composer_id).append(Candidate(work_id, features))
     return candidates
 
 
@@ -117,11 +170,14 @@ __all__ = [
     "REVIEW_THRESHOLD",
     "Candidate",
     "MatchResult",
+    "WorkCandidates",
     "WorkFeatures",
     "add_alias",
     "add_identifiers",
     "best_match",
+    "candidate_rows",
     "classify",
+    "composer_canonicals",
     "external_ids",
     "extract_features",
     "has_catalogue",

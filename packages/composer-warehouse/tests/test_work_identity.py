@@ -2,13 +2,15 @@
 ingest resolves on the strong keys and stores them, and the link pass points
 parts, arrangements and versions at their parent."""
 
+import uuid
+from dataclasses import replace
 from typing import Any
 
 from composer_models import RawWorkMention, Source, Work, WorkIdentifier, WorkLink
 from composer_warehouse.ingestion import new_work
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
-from composer_warehouse.works import extract_features
-from composer_warehouse.works.links import link_works
+from composer_warehouse.works import Candidate, extract_features
+from composer_warehouse.works.links import _range_links, link_works  # pyright: ignore[reportPrivateUsage]
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -269,13 +271,53 @@ def test_imslps_structured_range_keeps_the_set_apart(session: Session) -> None:
     }
 
 
-def test_a_number_inside_two_sets_links_to_neither(session: Session) -> None:
+def test_a_number_inside_nested_sets_links_to_the_smallest(session: Session) -> None:
+    """*15 Inventions* sits inside *Inventions and Sinfonias*: the invention is
+    part of the smaller set, and a sinfonia (only in the bigger one) of that."""
     ingest(
         session,
         "a",
         mention("Inventions and Sinfonias BWV 772\u2013801", BACH, "a1"),
         mention("15 Inventions, BWV 772-786", BACH, "a2"),
         mention("Invention No. 1 in C major, BWV 772", BACH, "a3"),
+        mention("Sinfonia No. 1 in C major, BWV 787", BACH, "a4"),
     )
     stats = link_works(session)
-    assert (stats.by_range, stats.ambiguous) == (0, 1)
+    assert (stats.by_range, stats.ambiguous) == (2, 0)
+    assert links(session) == {
+        ("Invention No. 1 in C major, BWV 772", "part_of", "15 Inventions, BWV 772-786", "catalogue_range"),
+        (
+            "Sinfonia No. 1 in C major, BWV 787",
+            "part_of",
+            "Inventions and Sinfonias BWV 772\u2013801",
+            "catalogue_range",
+        ),
+    }
+
+
+def test_a_number_inside_overlapping_sets_links_to_neither(session: Session) -> None:
+    ingest(
+        session,
+        "a",
+        mention("Inventions BWV 772-786", BACH, "a1"),
+        mention("Keyboard pieces BWV 780-801", BACH, "a2"),
+        mention("Invention No. 9 in F minor, BWV 780", BACH, "a3"),
+        mention("Invention No. 1 in C major, BWV 772", BACH, "a4"),
+    )
+    stats = link_works(session)
+    assert (stats.by_range, stats.ambiguous) == (1, 1)
+    assert links(session) == {
+        ("Invention No. 1 in C major, BWV 772", "part_of", "Inventions BWV 772-786", "catalogue_range")
+    }
+
+
+def test_an_external_id_with_hyphens_is_no_range() -> None:
+    """A MusicBrainz id reads like ``...-799131026480``; taken as a range it
+    would enumerate billions of members (seen on the 2026-10-25 silver)."""
+    mbid = ("musicbrainz", "4dad1f72-5f8d-3a63-ae31-799131026480")
+    holder = Candidate(uuid.uuid4(), replace(extract_features("Symphony"), identifiers=frozenset({mbid})))
+    single = frozenset({("musicbrainz", "799131026470")})
+    piece = Candidate(uuid.uuid4(), replace(extract_features("Piece"), identifiers=single))
+    found: dict[tuple[uuid.UUID, str, uuid.UUID], str] = {}
+    assert _range_links([holder, piece], found) == 0
+    assert found == {}
