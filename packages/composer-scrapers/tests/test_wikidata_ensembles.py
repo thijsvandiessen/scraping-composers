@@ -1,6 +1,7 @@
 """Tests for the Wikidata ensembles adapter: orchestras and choirs, the anchors of #350."""
 
 import urllib.parse
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -9,8 +10,9 @@ import httpx
 import pytest
 from composer_http import PageCache
 from composer_http.testing import mock_session
+from composer_schema import CLASSICAL_NAME_CUES
 from composer_scrapers import REGISTRY, SourceClaim
-from composer_scrapers.wikidata import WikidataEnsemblesAdapter
+from composer_scrapers.wikidata import WikidataEnsemblesAdapter, ensembles
 from composer_scrapers.wikidata.ensembles import (
     CLASSICAL_GENRES,
     ENSEMBLE_ID_QUERY,
@@ -98,6 +100,30 @@ def test_an_orchestra_becomes_a_qid_pinned_ensemble_document() -> None:
 )
 def test_the_type_comes_from_the_classes_then_the_name(classes: set[str], label: str, expected: str) -> None:
     assert ensemble_type(classes, label) == expected
+
+
+@pytest.mark.parametrize(
+    ("label", "names", "expected"),
+    [
+        # the cue is only in an alias, or in a word only the cue list knows
+        ("Concentus Hungaricus", {"Concentus Hungaricus Kamarazenekar"}, "orchestra"),
+        ("Staatskapelle Weimar", set(), "orchestra"),
+        ("Magyar Rádió Kórusa", {"Magyar Rádió Kórus"}, "choir"),
+        ("Panocha", {"Panochovo kvarteto", "Panocha Kvartet"}, "chamber_ensemble"),
+        # the label's own type wins over an alias's
+        ("Arnold Schoenberg Chor", {"Arnold Schoenberg Quartet"}, "choir"),
+        # the most specific alias type, whatever order the names come in
+        ("RIAS", {"RIAS Orchestra", "RIAS Kammerchor"}, "choir"),
+        ("Collegium Vocale Gent", {"CVG"}, "other"),
+    ],
+)
+def test_a_musical_group_is_typed_from_all_its_names(label: str, names: set[str], expected: str) -> None:
+    assert ensemble_type(set(), label, names) == expected
+
+
+def test_the_type_reads_the_aliases_when_the_label_has_no_cue() -> None:
+    rows = [row("Q1", "Kodály"), {"item": uri("Q1"), "name": lit("Kodály Quartet")}]
+    assert SourceClaim("ensemble_type", value="chamber_ensemble") in claims_of(rows)
 
 
 def test_a_headquarters_that_is_a_settlement_is_the_home_city() -> None:
@@ -206,28 +232,106 @@ def test_the_musical_group_queries_need_a_classical_signal() -> None:
     assert "?genre wdt:P279* ?genreRoot" in GENRE_GROUP_ID_QUERY
     assert all(f'"{cue}"' in NAME_GROUP_ID_QUERY for cue in NAME_CUES)
     assert "haswbstatement:P31=" in NAME_GROUP_ID_QUERY and "inlabel:" in NAME_GROUP_ID_QUERY
-    assert "FILTER NOT EXISTS { ?item wdt:P136 ?genre . }" in NAME_GROUP_ID_QUERY
+    # each search reports its own hit count, so a short one is caught
+    assert "/api/query/searchinfo/@totalhits" in NAME_GROUP_ID_QUERY
+    # a genre outside the classical trees binds ?otherGenre; art music does not
+    assert "?item wdt:P136 ?otherGenre" in NAME_GROUP_ID_QUERY
+    assert all(f"wd:{genre}" in NAME_GROUP_ID_QUERY for genre in CLASSICAL_GENRES)
+    assert "?otherGenre != wd:Q1583807" in NAME_GROUP_ID_QUERY
     assert {"orchestra", "philharmonic", "choir", "chor", "quartet"} <= set(NAME_CUES)
     assert "trio" not in NAME_CUES
 
 
-def test_fetch_ensemble_qids_unions_the_id_queries_and_orders_numerically() -> None:
-    answers = {
-        ENSEMBLE_ID_QUERY: ("Q100", "Q20", "Q3"),
-        GENRE_GROUP_ID_QUERY: ("Q863397", "Q20"),
-        NAME_GROUP_ID_QUERY: ("Q4",),
-    }
-    asked: list[str] = []
+def test_the_name_cues_are_the_typer_s_word_list() -> None:
+    assert NAME_CUES == tuple(CLASSICAL_NAME_CUES)
+
+
+def hit(qid: str, search: str, total: int, other_genre: str | None = None) -> dict[str, Any]:
+    """A NAME_GROUP_ID_QUERY row: one search's title and the hits it reported."""
+    bindings: dict[str, Any] = {"item": uri(qid), "search": lit(search), "total": lit(str(total))}
+    if other_genre is not None:
+        bindings["otherGenre"] = uri(other_genre)
+    return bindings
+
+
+def id_handler(
+    answers: dict[str, list[list[dict[str, Any]]]], asked: list[str]
+) -> Callable[[httpx.Request], httpx.Response]:
+    """Serve each id query its next answer in turn."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         query = urllib.parse.parse_qs(request.read().decode())["query"][0]
         asked.append(query)
-        bindings = [{"item": uri(q)} for q in answers[query]]
-        return httpx.Response(200, json={"results": {"bindings": bindings}})
+        return httpx.Response(200, json={"results": {"bindings": answers[query].pop(0)}})
 
-    with mock_session(handler) as session:
+    return handler
+
+
+@pytest.fixture
+def low_floors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ensembles, "MIN_IDS", {"class": 1, "genre": 1, "name": 1})
+
+
+def ids(*qids: str) -> list[dict[str, Any]]:
+    return [{"item": uri(q)} for q in qids]
+
+
+@pytest.mark.usefixtures("low_floors")
+def test_fetch_ensemble_qids_unions_the_id_queries_and_orders_numerically() -> None:
+    answers = {
+        ENSEMBLE_ID_QUERY: [ids("Q100", "Q20", "Q3")],
+        GENRE_GROUP_ID_QUERY: [ids("Q863397", "Q20")],
+        # a name-cued group with a non-classical genre (Q8341, jazz) is dropped
+        NAME_GROUP_ID_QUERY: [[hit("Q4", "a", 2), hit("Q5", "a", 2, other_genre="Q8341"), hit("Q4", "b", 1)]],
+    }
+    asked: list[str] = []
+    with mock_session(id_handler(answers, asked)) as session:
         assert _fetch_ensemble_qids(session) == ["Q3", "Q4", "Q20", "Q100", "Q863397"]
-    assert asked == list(answers)
+    assert asked == [ENSEMBLE_ID_QUERY, GENRE_GROUP_ID_QUERY, NAME_GROUP_ID_QUERY]
+
+
+@pytest.mark.parametrize("short", ["class", "genre", "name"])
+def test_an_id_query_short_of_its_floor_fails_the_run(monkeypatch: pytest.MonkeyPatch, short: str) -> None:
+    monkeypatch.setattr(ensembles, "MIN_IDS", {"class": 2, "genre": 2, "name": 2} | {short: 3})
+    answers = {
+        ENSEMBLE_ID_QUERY: [ids("Q1", "Q2")],
+        GENRE_GROUP_ID_QUERY: [ids("Q3", "Q4")],
+        NAME_GROUP_ID_QUERY: [[hit("Q5", "a", 1), hit("Q6", "b", 1)]],
+    }
+    with (
+        mock_session(id_handler(answers, [])) as session,
+        pytest.raises(RuntimeError, match="fewer than the 3"),
+    ):
+        _fetch_ensemble_qids(session)
+
+
+@pytest.mark.usefixtures("low_floors")
+def test_a_search_short_of_its_hits_is_asked_again() -> None:
+    answers = {
+        ENSEMBLE_ID_QUERY: [ids("Q1")],
+        GENRE_GROUP_ID_QUERY: [ids("Q2")],
+        NAME_GROUP_ID_QUERY: [[hit("Q3", "a", 2)], [hit("Q3", "a", 2), hit("Q4", "a", 2)]],
+    }
+    asked: list[str] = []
+    with mock_session(id_handler(answers, asked)) as session:
+        assert _fetch_ensemble_qids(session) == ["Q1", "Q2", "Q3", "Q4"]
+    assert asked.count(NAME_GROUP_ID_QUERY) == 2
+
+
+@pytest.mark.usefixtures("low_floors")
+def test_a_search_that_stays_short_fails_the_run() -> None:
+    answers = {
+        ENSEMBLE_ID_QUERY: [ids("Q1")],
+        GENRE_GROUP_ID_QUERY: [ids("Q2")],
+        NAME_GROUP_ID_QUERY: [[hit("Q3", "a", 2)] for _ in range(ensembles.NAME_QUERY_ATTEMPTS)],
+    }
+    asked: list[str] = []
+    with (
+        mock_session(id_handler(answers, asked)) as session,
+        pytest.raises(RuntimeError, match="stayed short"),
+    ):
+        _fetch_ensemble_qids(session)
+    assert asked.count(NAME_GROUP_ID_QUERY) == ensembles.NAME_QUERY_ATTEMPTS
 
 
 def test_a_short_page_fails_the_run_and_is_not_mirrored(
@@ -260,11 +364,14 @@ def test_a_complete_page_is_mirrored(tmp_path: Path) -> None:
     assert len(asked) == 2  # detail + multi, once each
 
 
+@pytest.mark.usefixtures("low_floors")
 def test_fetch_pages_through_the_population(monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         query = urllib.parse.parse_qs(request.read().decode())["query"][0]
-        if query == ENSEMBLE_ID_QUERY:
+        if query in (ENSEMBLE_ID_QUERY, GENRE_GROUP_ID_QUERY):
             return httpx.Response(200, json={"results": {"bindings": [{"item": uri("Q1")}]}})
+        if query == NAME_GROUP_ID_QUERY:
+            return httpx.Response(200, json={"results": {"bindings": [hit("Q1", "a", 1)]}})
         if "?root" in query:
             return httpx.Response(200, json={"results": {"bindings": [root("Q1", CHOIR)]}})
         return httpx.Response(200, json={"results": {"bindings": [row("Q1", "Arnold Schoenberg Chor")]}})
@@ -279,7 +386,7 @@ def test_fetch_refuses_an_empty_population(monkeypatch: pytest.MonkeyPatch) -> N
         return httpx.Response(200, json={"results": {"bindings": []}})
 
     monkeypatch.setattr(WikidataEnsemblesAdapter, "open_session", lambda self: mock_session(handler))
-    with pytest.raises(RuntimeError, match="no ensemble ids"):
+    with pytest.raises(RuntimeError, match="ensemble id list returned 0 ids"):
         list(WikidataEnsemblesAdapter().fetch())
 
 

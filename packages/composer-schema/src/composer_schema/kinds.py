@@ -189,11 +189,56 @@ _CHAMBER_WORDS = frozenset(
 )
 _CHAMBER_HEADS = ("quartett", "kwartet", "quintett")
 
-_ORCHESTRA_HEADS = ("orchester", "orchestra", "orchestre", "orkest")
+_ORCHESTRA_HEADS = ("orchester", "orchestra", "orchestre", "orkest", "zenekar")
 
 _OPERA_WORDS = frozenset({"opera", "oper", "opern", "opernhaus", "staatsoper"})
 
 _BAND_WORDS = frozenset({"band", "bigband"})
+
+#: Words that mark a Wikidata musical group with no genre as a classical
+#: ensemble, and the type each one names (None: an ensemble, but of no
+#: particular kind). The ``wikidata_ensembles`` source searches for exactly
+#: these, one whole word each (#363), and :func:`ensemble_type_from_name`
+#: reads every typed one, so a group can never be admitted for a word the
+#: typer does not know (#374). Written as the search index wants them: whole
+#: words, accents kept, German compounds whole. Not "trio" or "quintet": on a
+#: group with no genre those are mostly jazz combos. Typing-only: these do not
+#: widen :func:`looks_like_ensemble`, which re-kinds persons.
+CLASSICAL_NAME_CUES: dict[str, str | None] = {
+    **dict.fromkeys(
+        (
+            "orchestra", "orchester", "orchestre", "orquesta", "orkest", "orkiestra", "orkestr", "orchestr",
+            "zenekar", "philharmonic", "philharmoniker", "philharmonie", "filharmonie", "filharmonia",
+            "filarmonica", "sinfonieorchester", "symphonieorchester", "kammerorchester",
+            "staatsopernorchester", "staatskapelle", "symphony", "sinfonia", "sinfonietta",
+        ),
+        "orchestra",
+    ),
+    **dict.fromkeys(
+        (
+            "choir", "chor", "chorus", "chœur", "choeur", "coro", "koor", "kórus", "kammerchor",
+            "rundfunkchor", "knabenchor",
+        ),
+        "choir",
+    ),
+    **dict.fromkeys(
+        ("quartet", "quartett", "quatuor", "quartetto", "cuarteto", "kvartet", "kwartet", "kvartett"),
+        "chamber_ensemble",
+    ),
+    **dict.fromkeys(("consort", "collegium", "cappella", "capella"), None),
+}  # fmt: skip
+
+
+def _cue_tokens(kind: str) -> frozenset[str]:
+    """The cues naming *kind*, folded the way :func:`_tokens` folds a label."""
+    return frozenset(
+        token for cue, typ in CLASSICAL_NAME_CUES.items() if typ == kind for token in _tokens(cue)
+    )
+
+
+_CHAMBER_CUES = _cue_tokens("chamber_ensemble")
+_CHOIR_CUES = _cue_tokens("choir")
+_ORCHESTRA_CUES = _cue_tokens("orchestra")
 
 
 def _compound(token: str, heads: tuple[str, ...]) -> bool:
@@ -210,11 +255,14 @@ def ensemble_type_from_name(label: str) -> str | None:
     opera company itself.
     """
     tokens = _tokens(label)
-    if any(t in _CHAMBER_WORDS or _compound(t, _CHAMBER_HEADS) for t in tokens):
+    if any(t in _CHAMBER_WORDS or t in _CHAMBER_CUES or _compound(t, _CHAMBER_HEADS) for t in tokens):
         return "chamber_ensemble"
-    if any(t in _CHOIR_WORDS or _compound(t, _CHOIR_HEADS) for t in tokens):
+    if any(t in _CHOIR_WORDS or t in _CHOIR_CUES or _compound(t, _CHOIR_HEADS) for t in tokens):
         return "choir"
-    if any(t.startswith(_ENSEMBLE_PREFIXES) or _compound(t, _ORCHESTRA_HEADS) for t in tokens):
+    if any(
+        t.startswith(_ENSEMBLE_PREFIXES) or t in _ORCHESTRA_CUES or _compound(t, _ORCHESTRA_HEADS)
+        for t in tokens
+    ):
         return "orchestra"
     if any(t in _OPERA_WORDS for t in tokens):
         return "opera_company"
