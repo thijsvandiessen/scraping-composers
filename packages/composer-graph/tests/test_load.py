@@ -93,8 +93,8 @@ def test_load_stores_each_family_of_reach_separately(
     session: Session, tmp_path: Path, driver: Driver
 ) -> None:
     """Beethoven is played at c1 and c3, Schumann at c1 and c2; Beinum conducts
-    c1 (two works) and c2 (one), and is linked by claims to Arnhem and his
-    teacher Mengelberg. Each count stays in its own property."""
+    c1 (two works) and c2 (one), and is linked by claims to Arnhem, his teacher
+    Mengelberg and the waltz genre. Each count stays in its own property."""
     with gold_session(session, tmp_path) as gold:
         load_graph(gold, driver)
 
@@ -111,7 +111,7 @@ def test_load_stores_each_family_of_reach_separately(
         "times_performed": None,
         "performances": 3,
         "appearances": 2,
-        "claim_degree": 2,
+        "claim_degree": 3,
     }
     assert by_label["Zimmermann, Louis"]["performances"] == 1
     assert by_label["Arnhem"]["claim_degree"] == 1
