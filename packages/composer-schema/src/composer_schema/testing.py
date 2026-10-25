@@ -63,17 +63,44 @@ def person(
     )
 
 
-def ensemble(name: str, *claims: SourceClaim, external_id: str | None = None) -> EntityDocument:
-    """A group (orchestra, choir) — the ``ensemble`` entity kind."""
+def ensemble(
+    name: str, *claims: SourceClaim, external_id: str | None = None, url: str | None = None
+) -> EntityDocument:
+    """A group (orchestra, choir) — the ``ensemble`` entity kind. A
+    ``wikidata.org/wiki/Q...`` ``url`` keys the ensemble on its QID."""
     return EntityDocument(
         id=external_id or f"Category:{name}",
-        url=None,
+        url=url,
         source_name="fake",
         ingested_at=_INGESTED_AT,
         name=name,
         kind="ensemble",
         raw={"id": name},
         claims=claims,
+    )
+
+
+def genre(
+    qid: str,
+    label: str,
+    *parents: tuple[str, str],
+    kind: str = "genre",
+    aliases: tuple[str, ...] = (),
+) -> EntityDocument:
+    """A genre (or, with ``kind="movement"``, a movement) document as the
+    ``wikidata_genres`` source emits it: pinned to ``qid`` by its URL, with a
+    ``subclass_of`` claim per ``(parent QID, parent label)``."""
+    claims = [SourceClaim("subclass_of", kind, plabel, object_wikidata_id=pqid) for pqid, plabel in parents]
+    claims += [SourceClaim("also_known_as", value=alias) for alias in aliases]
+    return EntityDocument(
+        id=f"{kind}:{qid}",
+        url=f"https://www.wikidata.org/wiki/{qid}",
+        source_name="wikidata_genres",
+        ingested_at=_INGESTED_AT,
+        name=label,
+        kind=kind,
+        raw={"item": qid},
+        claims=tuple(claims),
     )
 
 

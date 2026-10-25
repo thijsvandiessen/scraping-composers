@@ -22,7 +22,7 @@
     {% if work.catalogue %}cat={{ work.catalogue }} {% endif %}
     {% if work.musical_key %}key={{ work.musical_key }} {% endif %}
     {% if work.number is not None %}no={{ work.number }} {% endif %}
-    {% if work.premiere_date %}premiere={{ work.premiere_date }}{% endif %}
+    {% if work.premiere_date %}premiere={{ work.premiere_date }}{% if work.premiere_place %} ({{ work.premiere_place }}){% endif %}{% endif %}
   </div>
 
   {% if work.aliases %}

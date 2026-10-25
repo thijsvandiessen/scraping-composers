@@ -52,7 +52,7 @@ export const zComposerPage = z.object({
  */
 export const zConcertOut = z.object({
     date: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     role: z.string(),
     season: z.string().nullable(),
     source: z.string(),
@@ -90,7 +90,7 @@ export const zConcertSummary = z.object({
     conductors: z.array(z.string()),
     date: z.string().nullable(),
     event_type: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     season: z.string().nullable(),
     soloist_count: z.int(),
     source: z.string(),
@@ -123,7 +123,7 @@ export const zConcertWorkOut = z.object({
 export const zConcertDetail = z.object({
     date: z.string().nullable(),
     event_type: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     participants: z.array(zConcertParticipantOut),
     season: z.string().nullable(),
     source: z.string(),
@@ -164,6 +164,56 @@ export const zConnectionsOut = z.object({
 });
 
 /**
+ * EntityRef
+ */
+export const zEntityRef = z.object({
+    id: z.uuid(),
+    label: z.string()
+});
+
+/**
+ * EnsembleDetail
+ */
+export const zEnsembleDetail = z.object({
+    aliases: z.array(z.string()),
+    canonical_entity_id: z.uuid().nullable(),
+    claims: z.array(zClaimOut),
+    concert_count: z.int().optional().default(0),
+    ensemble_type: z.string().nullable(),
+    home_city: zEntityRef.nullable(),
+    id: z.uuid(),
+    label: z.string(),
+    musicbrainz_id: z.string().nullable(),
+    part_of: z.array(zEntityRef),
+    recording_count: z.int().optional().default(0),
+    wikidata_id: z.string().nullable()
+});
+
+/**
+ * EnsembleSummary
+ */
+export const zEnsembleSummary = z.object({
+    canonical_entity_id: z.uuid().nullable(),
+    concert_count: z.int().optional().default(0),
+    ensemble_type: z.string().nullable(),
+    home_city: zEntityRef.nullable(),
+    id: z.uuid(),
+    label: z.string(),
+    recording_count: z.int().optional().default(0),
+    wikidata_id: z.string().nullable()
+});
+
+/**
+ * EnsemblePage
+ */
+export const zEnsemblePage = z.object({
+    items: z.array(zEnsembleSummary),
+    limit: z.int(),
+    page: z.int(),
+    total: z.int()
+});
+
+/**
  * EntitySummary
  */
 export const zEntitySummary = z.object({
@@ -181,6 +231,48 @@ export const zEntityPage = z.object({
     limit: z.int(),
     page: z.int(),
     total: z.int()
+});
+
+/**
+ * GenrePeoplePage
+ */
+export const zGenrePeoplePage = z.object({
+    items: z.array(zEntitySummary),
+    limit: z.int(),
+    page: z.int(),
+    total: z.int()
+});
+
+/**
+ * GenreRef
+ */
+export const zGenreRef = z.object({
+    id: z.uuid(),
+    label: z.string()
+});
+
+/**
+ * GenreDetail
+ */
+export const zGenreDetail = z.object({
+    children: z.array(zGenreRef),
+    id: z.uuid(),
+    kind: z.string(),
+    label: z.string(),
+    parents: z.array(zGenreRef),
+    person_count: z.int(),
+    wikidata_id: z.string().nullable()
+});
+
+/**
+ * GenreSummary
+ */
+export const zGenreSummary = z.object({
+    id: z.uuid(),
+    kind: z.string(),
+    label: z.string(),
+    person_count: z.int(),
+    wikidata_id: z.string().nullable()
 });
 
 /**
@@ -240,7 +332,7 @@ export const zMentionPage = z.object({
 export const zRecordingOut = z.object({
     catalogue_number: z.string().nullable(),
     format: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     label: z.string().nullable(),
     release_date: z.string().nullable(),
     role: z.string(),
@@ -279,7 +371,7 @@ export const zRecordingSummary = z.object({
     catalogue_number: z.string().nullable(),
     conductors: z.array(z.string()),
     format: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     label: z.string().nullable(),
     performer_count: z.int(),
     release_date: z.string().nullable(),
@@ -313,7 +405,7 @@ export const zRecordingWorkOut = z.object({
 export const zRecordingDetail = z.object({
     catalogue_number: z.string().nullable(),
     format: z.string().nullable(),
-    id: z.int(),
+    id: z.uuid(),
     label: z.string().nullable(),
     participants: z.array(zRecordingParticipantOut),
     release_date: z.string().nullable(),
@@ -359,6 +451,29 @@ export const zHttpValidationError = z.object({
 });
 
 /**
+ * WorkIdentifierOut
+ *
+ * A strong key for a work: a catalogue number (scheme ``BWV``, ``KV``,
+ * ``Hob``...) or an external id (``wikidata``, ``musicbrainz``, ``iswc``).
+ */
+export const zWorkIdentifierOut = z.object({
+    scheme: z.string(),
+    value: z.string()
+});
+
+/**
+ * WorkLinkOut
+ *
+ * A part/arrangement/version relation: ``relation`` is ``part_of``,
+ * ``arrangement_of`` or ``version_of``, read from the derived work.
+ */
+export const zWorkLinkOut = z.object({
+    relation: z.string(),
+    title: z.string(),
+    work_id: z.uuid()
+});
+
+/**
  * WorkProofOut
  */
 export const zWorkProofOut = z.object({
@@ -375,12 +490,14 @@ export const zComposerWorkOut = z.object({
     canonical_title: z.string(),
     catalogue: z.string().nullable(),
     id: z.uuid(),
+    identifiers: z.array(zWorkIdentifierOut).optional().default([]),
     mention_count: z.int(),
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
     premiere_date: z.string().nullable(),
     proof: z.array(zWorkProofOut),
+    wikidata_id: z.string().nullish(),
     work_type: z.string().nullable()
 });
 
@@ -405,13 +522,18 @@ export const zWorkDetail = z.object({
     catalogue: z.string().nullable(),
     composer_id: z.uuid().nullable(),
     composer_label: z.string().nullable(),
+    derived: z.array(zWorkLinkOut).optional().default([]),
     id: z.uuid(),
+    identifiers: z.array(zWorkIdentifierOut).optional().default([]),
+    links: z.array(zWorkLinkOut).optional().default([]),
     mention_count: z.int(),
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
     premiere_date: z.string().nullable(),
+    premiere_place: z.string().nullish(),
     proof: z.array(zWorkProofOut),
+    wikidata_id: z.string().nullish(),
     work_type: z.string().nullable()
 });
 
@@ -425,11 +547,13 @@ export const zWorkSummary = z.object({
     composer_id: z.uuid().nullable(),
     composer_label: z.string().nullable(),
     id: z.uuid(),
+    identifiers: z.array(zWorkIdentifierOut).optional().default([]),
     mention_count: z.int(),
     musical_key: z.string().nullable(),
     number: z.int().nullable(),
     opus_number: z.string().nullable(),
     premiere_date: z.string().nullable(),
+    wikidata_id: z.string().nullish(),
     work_type: z.string().nullable()
 });
 
@@ -448,7 +572,8 @@ export const zListComposersV1ComposersGetQuery = z.object({
     page: z.int().gte(1).optional().default(1),
     limit: z.int().gte(1).lte(100).optional().default(20),
     q: z.string().nullish(),
-    source: z.string().nullish()
+    source: z.string().nullish(),
+    genre: z.uuid().nullish()
 });
 
 /**
@@ -493,7 +618,7 @@ export const zConcertsV1ConcertsGetQuery = z.object({
 export const zConcertsV1ConcertsGetResponse = zConcertListPage;
 
 export const zConcertDetailV1ConcertsConcertIdGetPath = z.object({
-    concert_id: z.int()
+    concert_id: z.uuid()
 });
 
 /**
@@ -506,7 +631,8 @@ export const zListConductorsV1ConductorsGetQuery = z.object({
     page: z.int().gte(1).optional().default(1),
     limit: z.int().gte(1).lte(100).optional().default(20),
     q: z.string().nullish(),
-    source: z.string().nullish()
+    source: z.string().nullish(),
+    genre: z.uuid().nullish()
 });
 
 /**
@@ -522,6 +648,30 @@ export const zGetConductorV1ConductorsConductorIdGetPath = z.object({
  * Successful Response
  */
 export const zGetConductorV1ConductorsConductorIdGetResponse = zComposerDetail;
+
+export const zEnsemblesV1EnsemblesGetQuery = z.object({
+    page: z.int().gte(1).optional().default(1),
+    limit: z.int().gte(1).lte(100).optional().default(20),
+    q: z.string().nullish(),
+    source: z.string().nullish(),
+    anchored: z.boolean().nullish(),
+    type: z.string().nullish(),
+    sort: z.string().regex(/^(label|appearances)$/).optional().default('label')
+});
+
+/**
+ * Successful Response
+ */
+export const zEnsemblesV1EnsemblesGetResponse = zEnsemblePage;
+
+export const zEnsembleDetailV1EnsemblesEnsembleIdGetPath = z.object({
+    ensemble_id: z.uuid()
+});
+
+/**
+ * Successful Response
+ */
+export const zEnsembleDetailV1EnsemblesEnsembleIdGetResponse = zEnsembleDetail;
 
 export const zEntitiesV1EntitiesGetQuery = z.object({
     q: z.string().nullish(),
@@ -561,6 +711,40 @@ export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetQuery = z.ob
  * Successful Response
  */
 export const zEntityConnectionsRouteV1EntitiesEntityIdConnectionsGetResponse = zConnectionsOut;
+
+export const zGenresV1GenresGetQuery = z.object({
+    kind: z.string().regex(/^(genre|movement)$/).optional().default('genre')
+});
+
+/**
+ * Response Genres V1 Genres Get
+ *
+ * Successful Response
+ */
+export const zGenresV1GenresGetResponse = z.array(zGenreSummary);
+
+export const zGenreDetailV1GenresGenreIdGetPath = z.object({
+    genre_id: z.uuid()
+});
+
+/**
+ * Successful Response
+ */
+export const zGenreDetailV1GenresGenreIdGetResponse = zGenreDetail;
+
+export const zGetGenrePeopleV1GenresGenreIdPeopleGetPath = z.object({
+    genre_id: z.uuid()
+});
+
+export const zGetGenrePeopleV1GenresGenreIdPeopleGetQuery = z.object({
+    page: z.int().gte(1).optional().default(1),
+    limit: z.int().gte(1).lte(100).optional().default(20)
+});
+
+/**
+ * Successful Response
+ */
+export const zGetGenrePeopleV1GenresGenreIdPeopleGetResponse = zGenrePeoplePage;
 
 export const zMentionsV1MentionsGetQuery = z.object({
     status: z.string().nullish(),
@@ -614,7 +798,7 @@ export const zRecordingsV1RecordingsGetQuery = z.object({
 export const zRecordingsV1RecordingsGetResponse = zRecordingListPage;
 
 export const zRecordingDetailV1RecordingsRecordingIdGetPath = z.object({
-    recording_id: z.int()
+    recording_id: z.uuid()
 });
 
 /**
@@ -627,7 +811,8 @@ export const zListSoloistsV1SoloistsGetQuery = z.object({
     page: z.int().gte(1).optional().default(1),
     limit: z.int().gte(1).lte(100).optional().default(20),
     q: z.string().nullish(),
-    source: z.string().nullish()
+    source: z.string().nullish(),
+    genre: z.uuid().nullish()
 });
 
 /**

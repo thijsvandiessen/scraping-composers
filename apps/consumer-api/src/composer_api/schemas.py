@@ -89,6 +89,23 @@ class EntityDetail(BaseModel):
     incoming: list[IncomingClaimOut]
 
 
+class WorkIdentifierOut(BaseModel):
+    """A strong key for a work: a catalogue number (scheme ``BWV``, ``KV``,
+    ``Hob``...) or an external id (``wikidata``, ``musicbrainz``, ``iswc``)."""
+
+    scheme: str
+    value: str
+
+
+class WorkLinkOut(BaseModel):
+    """A part/arrangement/version relation: ``relation`` is ``part_of``,
+    ``arrangement_of`` or ``version_of``, read from the derived work."""
+
+    relation: str
+    work_id: uuid.UUID
+    title: str
+
+
 class WorkSummary(BaseModel):
     id: uuid.UUID
     canonical_title: str
@@ -97,6 +114,8 @@ class WorkSummary(BaseModel):
     work_type: str | None
     opus_number: str | None
     catalogue: str | None
+    identifiers: list[WorkIdentifierOut] = []
+    wikidata_id: str | None = None
     musical_key: str | None
     number: int | None
     premiere_date: str | None
@@ -126,12 +145,19 @@ class WorkDetail(BaseModel):
     work_type: str | None
     opus_number: str | None
     catalogue: str | None
+    identifiers: list[WorkIdentifierOut] = []
+    wikidata_id: str | None = None
     musical_key: str | None
     number: int | None
     premiere_date: str | None
+    premiere_place: str | None = None
     mention_count: int
     aliases: list[str]
     proof: list[WorkProofOut]
+    # the works this one is a part/arrangement/version of
+    links: list[WorkLinkOut] = []
+    # the parts, arrangements and versions of this one
+    derived: list[WorkLinkOut] = []
 
 
 class ComposerWorkOut(BaseModel):
@@ -140,6 +166,8 @@ class ComposerWorkOut(BaseModel):
     work_type: str | None
     opus_number: str | None
     catalogue: str | None
+    identifiers: list[WorkIdentifierOut] = []
+    wikidata_id: str | None = None
     musical_key: str | None
     number: int | None
     premiere_date: str | None
@@ -178,7 +206,7 @@ class MentionPage(BaseModel):
 
 
 class ConcertOut(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     date: str | None
     venue: str | None
@@ -198,7 +226,7 @@ class ConcertPage(BaseModel):
 
 
 class ConcertSummary(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     date: str | None
     venue: str | None
@@ -230,7 +258,7 @@ class ConcertWorkOut(BaseModel):
 
 
 class ConcertDetail(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     date: str | None
     venue: str | None
@@ -242,7 +270,7 @@ class ConcertDetail(BaseModel):
 
 
 class RecordingOut(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     title: str | None
     release_date: str | None
@@ -264,7 +292,7 @@ class RecordingPage(BaseModel):
 
 
 class RecordingSummary(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     title: str | None
     release_date: str | None
@@ -297,7 +325,7 @@ class RecordingWorkOut(BaseModel):
 
 
 class RecordingDetail(BaseModel):
-    id: int
+    id: uuid.UUID
     source: str
     title: str | None
     release_date: str | None
@@ -335,3 +363,65 @@ class ConnectionsOut(BaseModel):
     total: int  # edges above min_weight, before the per-relation and overall budgets
     limit: int
     rank: str
+
+
+class EntityRef(BaseModel):
+    id: uuid.UUID
+    label: str
+
+
+class GenreRef(BaseModel):
+    id: uuid.UUID
+    label: str
+
+
+class EnsembleSummary(BaseModel):
+    id: uuid.UUID
+    label: str
+    # The Wikidata item the ensemble is keyed on; None for a name-keyed one.
+    wikidata_id: str | None
+    # orchestra, choir, chamber_ensemble, opera_company, band or other: the
+    # Wikidata type where there is one (in silver, the anchor's), else read
+    # from the name; None when neither says.
+    ensemble_type: str | None
+    home_city: EntityRef | None
+    # Silver only: the Wikidata ensemble this spelling was folded onto.
+    canonical_entity_id: uuid.UUID | None
+    concert_count: int = 0
+    recording_count: int = 0
+
+
+class EnsemblePage(BaseModel):
+    items: list[EnsembleSummary]
+    total: int
+    page: int
+    limit: int
+
+
+class EnsembleDetail(EnsembleSummary):
+    # Other names: Wikidata's aliases, plus (in silver) the spellings folded onto it.
+    aliases: list[str]
+    musicbrainz_id: str | None
+    part_of: list[EntityRef]
+    claims: list[ClaimOut]
+
+
+class GenreSummary(BaseModel):
+    id: uuid.UUID
+    label: str
+    kind: str  # genre | movement
+    wikidata_id: str | None
+    # distinct persons tagged with this genre or any genre below it
+    person_count: int
+
+
+class GenreDetail(GenreSummary):
+    parents: list[GenreRef]
+    children: list[GenreRef]
+
+
+class GenrePeoplePage(BaseModel):
+    items: list[EntitySummary]
+    total: int
+    page: int
+    limit: int

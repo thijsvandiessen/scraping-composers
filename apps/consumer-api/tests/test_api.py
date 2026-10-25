@@ -22,6 +22,7 @@ from composer_schema import EntityDocument, SourceAdapter, SourceClaim, WorkMent
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
+from composer_warehouse.works.links import link_works
 from fastapi.testclient import TestClient
 from neo4j import Driver, GraphDatabase
 from sqlalchemy import Engine, create_engine
@@ -616,9 +617,78 @@ def test_work_detail_returns_metadata_aliases_and_proof(client: TestClient) -> N
     assert work["opus_number"] == "67"
     assert work["mention_count"] == 2
     assert work["aliases"] == ["Sinfonie Nr. 5, op. 67"]
-    assert work["premiere_date"] is None  # nothing populates it yet — see #244
+    assert work["premiere_date"] is None  # no fixture mention carries raw["premiere"]
+    assert work["premiere_place"] is None
     assert [p["source"] for p in work["proof"]] == ["programmes"]
     assert work["proof"][0]["source_url"] == "https://programmes.example"
+
+
+def test_gold_work_detail_carries_the_premiere(promote_gold: PromoteGold) -> None:
+    factory = _seeded_factory()
+    with factory() as s:
+        ingest_source(
+            s,
+            FakeSource(
+                records=(
+                    perf_mention(
+                        "Q1:Q255",
+                        "Symphony No. 5, Op. 67",
+                        "Beethoven, Ludwig van",
+                        {"premiere": {"date": "1808-12-22", "place": "Theater an der Wien"}},
+                    ),
+                ),
+                name="wikidata_works",
+            ),
+        )
+        gold_factory = promote_gold(s)
+    gold = TestClient(create_app("test-gold", lambda: gold_factory))
+
+    work_id = gold.get("/v1/works").json()["items"][0]["id"]
+    work = gold.get(f"/v1/works/{work_id}").json()
+    assert (work["premiere_date"], work["premiere_place"]) == ("1808-12-22", "Theater an der Wien")
+
+
+def test_gold_work_carries_identifiers_links_and_derived_works(promote_gold: PromoteGold) -> None:
+    bach = "Bach, Johann Sebastian"
+    concerto = "Brandenburg Concerto No. 3, BWV 1048"
+    movement = "Allegro (from Brandenburg Concerto No. 3, BWV 1048)"
+    factory = _seeded_factory()
+    with factory() as s:
+        ingest_source(
+            s,
+            FakeSource(
+                records=(
+                    perf_mention("Q1:Q1339", concerto, bach, {"item": "http://www.wikidata.org/entity/Q1"}),
+                    mention(movement, bach, "m2"),
+                ),
+                name="wikidata_works",
+            ),
+        )
+        link_works(s)
+        gold_factory = promote_gold(s)
+    gold = TestClient(create_app("test-gold", lambda: gold_factory))
+
+    by_title = {
+        w["canonical_title"]: w for w in gold.get("/v1/works", params={"q": "Brandenburg"}).json()["items"]
+    }
+    listed = by_title[concerto]
+    assert listed["identifiers"] == [
+        {"scheme": "BWV", "value": "1048"},
+        {"scheme": "wikidata", "value": "Q1"},
+    ]
+    assert listed["wikidata_id"] == "Q1"
+
+    parent = gold.get(f"/v1/works/{listed['id']}").json()
+    part_id = by_title[movement]["id"]
+    assert parent["derived"] == [{"relation": "part_of", "work_id": part_id, "title": movement}]
+    assert parent["links"] == []
+    part = gold.get(f"/v1/works/{part_id}").json()
+    assert part["links"] == [{"relation": "part_of", "work_id": listed["id"], "title": concerto}]
+    assert part["identifiers"] == []  # BWV 1048 is its parent's number, not its own
+
+    composer_id = parent["composer_id"]
+    composer_works = gold.get(f"/v1/composers/{composer_id}/works").json()["items"]
+    assert {w["wikidata_id"] for w in composer_works} == {"Q1", None}
 
 
 def test_work_detail_unknown_id_is_404(client: TestClient) -> None:
@@ -755,7 +825,9 @@ def test_concert_detail_has_participants_and_programme(concerts_client: TestClie
 
 
 def test_concert_detail_404(concerts_client: TestClient) -> None:
-    assert concerts_client.get("/v1/concerts/999").status_code == 404
+    assert concerts_client.get(f"/v1/concerts/{uuid.uuid4()}").status_code == 404
+    # ids are uuids; the old integer form is rejected rather than looked up
+    assert concerts_client.get("/v1/concerts/999").status_code == 422
 
 
 def test_person_concerts_404_and_invalid_sort(concerts_client: TestClient) -> None:
@@ -965,7 +1037,9 @@ def test_recording_detail_has_artists_and_works(recordings_client: TestClient) -
 
 
 def test_recording_detail_404(recordings_client: TestClient) -> None:
-    assert recordings_client.get("/v1/recordings/999").status_code == 404
+    assert recordings_client.get(f"/v1/recordings/{uuid.uuid4()}").status_code == 404
+    # ids are uuids; the old integer form is rejected rather than looked up
+    assert recordings_client.get("/v1/recordings/999").status_code == 422
 
 
 def test_person_recordings_lists_credits(recordings_client: TestClient) -> None:

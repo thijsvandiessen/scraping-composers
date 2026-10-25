@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import logging
 import sys
@@ -11,16 +12,42 @@ from pathlib import Path
 import pytest
 from composer_cli import _log_level, main
 from composer_cli.export_cmds import cmd_export_kumu
-from composer_cli.ingest_cmds import cmd_derive_concerts, cmd_fetch, cmd_process, cmd_rebuild_silver
-from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_eval, cmd_person_review
-from composer_cli.query_cmds import ClaimFilters, cmd_claims, cmd_runs, cmd_stats, entity_claims
-from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_works
-from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work
+from composer_cli.genre_cmds import cmd_genres, cmd_link_genres
+from composer_cli.ingest_cmds import (
+    cmd_anchor_ensembles,
+    cmd_derive_concerts,
+    cmd_fetch,
+    cmd_process,
+    cmd_rebuild_silver,
+)
+from composer_cli.person_cmds import cmd_dedupe_persons, cmd_person_eval, cmd_person_review, cmd_person_train
+from composer_cli.query_cmds import (
+    ClaimFilters,
+    cmd_claims,
+    cmd_ensembles,
+    cmd_runs,
+    cmd_stats,
+    entity_claims,
+)
+from composer_cli.work_cmds import cmd_rematch, cmd_review, cmd_work_identity, cmd_works, work_identity
+from composer_models import Concert, Entity, EntityRecord, PersonMatch, RawWorkMention, Work, WorkIdentifier
 from composer_models.db import get_engine, init_db
 from composer_schema import SourceClaim
 from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.persons import AUTO_THRESHOLD
-from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention, person
+from composer_warehouse.persons import AUTO_THRESHOLD, training
+from composer_warehouse.persons.evaluation import read_dataset
+from composer_warehouse.persons.fellegi_sunter import LinkageModel
+from composer_warehouse.persons.training import sample_non_match_levels
+from composer_warehouse.testing import (
+    FakeSource,
+    ensemble,
+    genre,
+    ingest_source,
+    mention,
+    perf_mention,
+    person,
+)
+from composer_warehouse.works.links import link_works
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -246,6 +273,84 @@ def test_cmd_rematch_processes_pending_mentions(tmp_path: Path, capsys: pytest.C
     assert "re-matched" in capsys.readouterr().out
 
 
+def test_cmd_rematch_reads_structured_catalogue_fields(tmp_path: Path) -> None:
+    """A pending mention is re-read with its source's structured fields, so
+    an IMSLP page's "K.550" matches a work carrying KV 550."""
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    mozart = "Mozart, Wolfgang Amadeus"
+    _ingest(db_url, mention("Symphony No. 40 in G minor, KV 550", mozart, "m1"))
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(perf_mention("w1", "Sinfonie g-Moll", mozart, {"opus_catalogue_number": "K.550"}),),
+                name="imslp_works",
+            ),
+        )
+        pending = session.scalars(select(RawWorkMention).where(RawWorkMention.external_id == "w1")).one()
+        # undo the ingest's decision so rematch has something to do
+        pending.match_status, pending.work_id = "unmatched", None
+        session.commit()
+
+    assert cmd_rematch(_ns(database_url=db_url)) == 0
+
+    with factory() as session:
+        rematched = session.scalars(select(RawWorkMention).where(RawWorkMention.external_id == "w1")).one()
+        assert (rematched.match_status, rematched.match_method) == ("auto_matched", "catalogue")
+        assert session.scalar(select(func.count(Work.id))) == 1
+        assert ("KV", "550") in set(
+            session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)).tuples()
+        )
+
+
+def test_work_identity_reports_the_share_of_anchored_works(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    bach = "Bach, Johann Sebastian"
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    mention("Brandenburg Concerto No. 3, BWV 1048", bach, "a1"),
+                    mention("Allegro (from Brandenburg Concerto No. 3, BWV 1048)", bach, "a2"),
+                    mention("Air on the G String", bach, "a3"),
+                    mention("Sheep May Safely Graze", bach, "a4"),
+                ),
+                name="catalogue",
+            ),
+        )
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    perf_mention(
+                        "Q1:Q1339", "Mass in B minor", bach, {"item": "https://www.wikidata.org/entity/Q1"}
+                    ),
+                ),
+                name="wikidata_works",
+            ),
+        )
+        link_works(session)
+        rows = {row.source: row for row in work_identity(session)}
+
+    catalogue = rows["catalogue"]
+    assert (catalogue.mentions, catalogue.works) == (4, 4)
+    assert (catalogue.with_catalogue, catalogue.with_external, catalogue.derived_links) == (1, 0, 1)
+    assert rows["wikidata_works"].with_external == 1
+    overall = rows["(all)"]
+    assert (overall.works, overall.with_either) == (5, 2)
+    # the issue's baseline: 2.4% of works had a catalogue number
+    assert overall.share(overall.with_either) > 2.4
+
+    assert cmd_work_identity(_ns(database_url=db_url)) == 0
+    out = capsys.readouterr().out
+    assert "catalogue" in out and "wikidata_works" in out and "40.0%" in out
+
+
 # ---------------------------------------------------------------------------
 # dedupe-persons / person-review
 # ---------------------------------------------------------------------------
@@ -342,6 +447,67 @@ def test_cmd_dedupe_persons_reset_lets_the_pass_re_decide(
     assert "auto-linked 1" in out
 
 
+def _ingest_labellable_people(db_url: str) -> None:
+    """People the automatic labeller can judge: J.S. Bach's dates are backed by
+    two sources (a match), and J.C. Bach was born a generation later (not)."""
+    dates = (SourceClaim("born_on", value="1685"), SourceClaim("died_on", value="1750"))
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    person("Bach, J.S.", *dates),
+                    person("Bach, Johann Sebastian", *dates),
+                    person("Bach, Johann Christian", SourceClaim("born_on", value="1735")),
+                    *(person(f"Smith, Filler{i}") for i in range(10)),
+                ),
+                name="first",
+            ),
+        )
+        ingest_source(session, FakeSource(records=(person("Bach, J.S.", *dates),), name="second"))
+
+
+@pytest.fixture
+def small_u_sample(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The shipped three-million-pair sample is sized for the real corpus.
+    monkeypatch.setattr(
+        training, "sample_non_match_levels", functools.partial(sample_non_match_levels, pairs=5_000)
+    )
+
+
+@pytest.mark.usefixtures("small_u_sample")
+def test_cmd_person_train_writes_the_model_and_the_dataset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_labellable_people(db_url)
+    model_path, dataset_path = tmp_path / "model.json", tmp_path / "pairs.jsonl.gz"
+
+    args = _ns(database_url=db_url, model_out=str(model_path), dataset_out=str(dataset_path))
+    assert cmd_person_train(args) == 0
+
+    model = LinkageModel.load(model_path)
+    assert 0.0 < model.prior <= 0.5
+    rows = read_dataset(dataset_path)
+    assert {row.provenance for row in rows} == {"dates_corroborated", "year_conflict"}
+    out = capsys.readouterr().out
+    assert f"wrote {model_path} (prior {model.prior:.5f})" in out
+    assert f"wrote {dataset_path} ({len(rows)} labelled pairs)" in out
+    assert "given:" in out
+
+
+@pytest.mark.usefixtures("small_u_sample")
+def test_cmd_person_train_writes_no_dataset_unless_asked(tmp_path: Path) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _ingest_labellable_people(db_url)
+
+    assert (
+        cmd_person_train(_ns(database_url=db_url, model_out=str(tmp_path / "m.json"), dataset_out=None)) == 0
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["m.json", "test.db"]
+
+
 def test_cmd_person_eval_reports_the_model_against_the_baseline(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -391,6 +557,134 @@ def test_cmd_person_review_reject(tmp_path: Path) -> None:
         assert (
             session.scalar(select(func.count(Entity.id)).where(Entity.canonical_entity_id.is_not(None))) == 1
         )  # only the auto-linked Bach pair, not the rejected one
+
+
+# ---------------------------------------------------------------------------
+# genres / link-genres
+# ---------------------------------------------------------------------------
+
+
+def _seed_genres(db_url: str) -> None:
+    with init_db(get_engine(db_url))() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    genre("Q215", "waltz", ("Q316930", "dance music")),
+                    genre("Q316930", "dance music"),
+                    genre("Q50", "sardana"),
+                ),
+                name="wikidata_genres",
+            ),
+        )
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    person(
+                        "Serra, Joaquim",
+                        SourceClaim("has_genre", "genre", "sardana", object_wikidata_id="Q50"),
+                        SourceClaim("has_genre", "genre", "Waltz"),
+                    ),
+                )
+            ),
+        )
+
+
+def test_cmd_genres_reports_the_orphan_count(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _seed_genres(db_url)
+
+    assert cmd_link_genres(_ns(database_url=db_url)) == 0
+    assert "linked 1 label-only" in capsys.readouterr().out
+
+    assert cmd_genres(_ns(database_url=db_url, kind="genre", limit=5)) == 0
+    out = capsys.readouterr().out
+    assert "genres: 4" in out
+    assert "label only             1 (1 linked to a QID one)" in out
+    assert "orphans                1 (no subclass_of path to a top-level genre)" in out
+    assert "1  sardana (Q50)" in out
+    assert "movements" not in out
+
+
+def test_main_routes_to_genres_for_both_kinds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _seed_genres(db_url)
+    monkeypatch.setattr(sys, "argv", ["composer-ingest", "--database-url", db_url, "genres"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "genres: 4" in out
+    assert "movements: 0" in out
+
+
+# ---------------------------------------------------------------------------
+# cmd_anchor_ensembles / cmd_ensembles
+# ---------------------------------------------------------------------------
+
+
+def _seed_ensembles(db_url: str) -> None:
+    factory = init_db(get_engine(db_url))
+    with factory() as session:
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    ensemble(
+                        "Vienna Philharmonic",
+                        SourceClaim("also_known_as", value="Wiener Philharmoniker"),
+                        external_id="Q900001",
+                        url="https://www.wikidata.org/wiki/Q900001",
+                    ),
+                ),
+                name="wikidata_ensembles",
+            ),
+        )
+        ingest_source(
+            session,
+            FakeSource(
+                records=(
+                    ensemble("Wiener Philharmoniker", external_id="r:1"),
+                    ensemble("Junge Philharmonie Wien", external_id="r:2"),
+                ),
+                name="imslp_recordings",
+            ),
+        )
+
+
+def test_cmd_anchor_ensembles_prints_its_stats(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _seed_ensembles(db_url)
+
+    assert cmd_anchor_ensembles(_ns(database_url=db_url)) == 0
+    out = capsys.readouterr().out
+    assert "anchored 1 ensemble spellings onto 1 Wikidata ensembles" in out
+    assert "unanchored                     1" in out
+
+    with init_db(get_engine(db_url))() as session:
+        spelling = session.scalars(select(Entity).where(Entity.label == "Wiener Philharmoniker")).one()
+        assert spelling.canonical_entity_id is not None
+
+
+def test_cmd_ensembles_lists_the_unanchored(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    _seed_ensembles(db_url)
+    cmd_anchor_ensembles(_ns(database_url=db_url))
+    capsys.readouterr()
+
+    assert cmd_ensembles(_ns(database_url=db_url, unanchored=True, limit=10)) == 0
+    out = capsys.readouterr().out
+    assert "Junge Philharmonie Wien  [unanchored]" in out
+    assert "Wiener Philharmoniker" not in out
+    assert "1 ensemble(s) unanchored" in out
+
+    assert cmd_ensembles(_ns(database_url=db_url, unanchored=False, limit=10)) == 0
+    out = capsys.readouterr().out
+    assert "Wiener Philharmoniker  [→ Vienna Philharmonic]" in out
+    assert "Vienna Philharmonic  [Q900001]" in out
 
 
 # ---------------------------------------------------------------------------

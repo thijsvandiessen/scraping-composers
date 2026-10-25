@@ -25,6 +25,13 @@ others):
 uv run --directory <member> pytest --rootdir . --cov=<import_name> --cov-report=term-missing
 ```
 
+The `--cov` name is the import package, which isn't always the member's name:
+`consumer-api` → `composer_api`, `admin-api` → `composer_admin`, `cli` →
+`composer_cli`, `dashboard` → `scrapers` and `config` (no `src/` layout),
+`tests/e2e` → `composer_e2e`. The e2e figure only measures its harness and
+synthetic sources, because the CLI runs in subprocesses; it says nothing about
+product-code coverage.
+
 Coverage is report-only (no `--cov-fail-under` yet) — a coverage drop won't
 fail CI, but a failing test will. Run the full matrix before opening a PR:
 
@@ -35,6 +42,29 @@ for m in packages/composer-schema packages/composer-models packages/composer-htt
   uv run --directory "$m" pytest --rootdir . -q
 done
 ```
+
+## Docs follow the tests
+
+Domain docs live with the code: each member has a `README.md` whose **Tests**
+section lists its test files and what they cover. The root `README.md` stays a
+short overview that links to them. When a PR adds, removes or renames a test
+file, or changes what one covers, update that member's Tests section in the
+same PR. The same goes for behaviour a README describes.
+
+Check that each Tests section still names every test file:
+
+```
+for m in $(ls -d packages/* | grep -v composer-scrapers) \
+         apps/consumer-api apps/admin-api apps/cli apps/dashboard tests/e2e; do
+  for t in "$m"/tests/test_*.py; do
+    grep -q "$(basename "$t")" "$m/README.md" || echo "undocumented: $t"
+  done
+done
+```
+
+`composer-scrapers` is left out because its table marks the standard
+`test_<source>.py` / `_adapter` / `_fetch` files with ✓ rather than naming
+them. Check its table by eye when adding a source.
 
 ## Postgres-backed tests
 
@@ -53,6 +83,13 @@ for m in packages/composer-models packages/composer-warehouse packages/composer-
   uv run --directory "$m" pytest --rootdir . -q
 done
 ```
+
+No Docker? Any Postgres 16 listening on 5433, with a `composers` database
+owned by a `composers` role, works the same way. With the server binaries
+installed (on Debian they sit in `/usr/lib/postgresql/16/bin`, not on `PATH`),
+run as the `postgres` user: `initdb -U composers --auth=trust -D <dir>`, then
+`pg_ctl -D <dir> -o '-p 5433' start`, then `createdb -h localhost -p 5433 -U
+composers composers`.
 
 The tests put silver and gold in separate schemas on this one server. In real
 use gold has a server of its own (`docker compose up -d postgres-gold`, port
@@ -114,6 +151,12 @@ uvx pip-audit --disable-pip --no-deps -r requirements.txt
 rm requirements.txt   # generated file, don't commit it
 ```
 
+This job can turn red with no code change: a newly published advisory fails
+it on `main` and on every open PR at once. Bump just the affected package with
+`uv lock --upgrade-package <name>`, re-run the audit, and land it as its own
+`build(deps): ...` PR. If another PR is blocked meanwhile, cherry-pick the same
+lock change into it; the cherry-pick adds nothing once the fix is on `main`.
+
 ## Frontend (only if `apps/frontend` changed)
 
 ```
@@ -124,6 +167,29 @@ npm run format:check
 npm run check
 npm run build
 ```
+
+`format:check` (oxfmt) covers the Markdown files under `apps/frontend` too, so
+editing `apps/frontend/README.md` counts as a frontend change. CI's frontend job
+runs on every PR whatever it touches.
+
+## Test-writing gotchas
+
+- **Person-model training samples 3,000,000 random pairs.** Anything that calls
+  `train()` or `estimate_prior()` (including `composer-ingest person-train`)
+  takes a minute or more on a test corpus. Patching `U_SAMPLE_PAIRS` does
+  nothing, because it is bound as a default argument when the module loads.
+  Swap the function instead, so the real code still runs on a smaller sample:
+  `monkeypatch.setattr(training, "sample_non_match_levels",
+  functools.partial(sample_non_match_levels, pairs=20_000))`.
+- **The automatic person labels need specific record shapes.**
+  - `year_conflict` reads the `birth_years`/`death_years` sets, not
+    `birth_year`, so a hand-built `PersonRecord` needs both.
+  - `dates_corroborated` needs birth and death years backed by at least two
+    distinct sources. Ingest the same name from two `FakeSource`s with different
+    `name=`.
+  - `alias_identity` compares normalized names, which keep word order. The
+    alias "Louis van Beethoven" matches an entity labelled exactly that, not
+    "Beethoven, Louis".
 
 ## Commit messages and PR title
 

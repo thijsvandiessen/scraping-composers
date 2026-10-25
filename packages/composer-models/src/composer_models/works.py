@@ -34,7 +34,11 @@ class Work(Base):
     catalogue_number: Mapped[str | None] = mapped_column(String(50))
     musical_key: Mapped[str | None] = mapped_column(String(50))
     number: Mapped[int | None] = mapped_column(Integer)
+    # The world premiere, from whichever source states the earliest date (see
+    # composer_schema.premiere); the source that won is kept alongside it.
     premiere_date: Mapped[str | None] = mapped_column(String(50))
+    premiere_place: Mapped[str | None] = mapped_column(Text)
+    premiere_source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     first_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -101,3 +105,50 @@ class RawWorkMention(Base):
     work: Mapped[Work | None] = relationship(foreign_keys=[work_id])
     candidate_work: Mapped[Work | None] = relationship(foreign_keys=[candidate_work_id])
     composer: Mapped[Entity | None] = relationship()
+
+
+class WorkIdentifier(Base):
+    """A strong key for a work, as one source stated it: a catalogue number
+    (scheme ``BWV``, ``KV``, ``Hob``... -- see ``composer_schema.catalogues``)
+    or an external id (``wikidata``, ``musicbrainz``, ``iswc``). The matcher
+    tries these before comparing titles."""
+
+    __tablename__ = "work_identifiers"
+    __table_args__ = (
+        UniqueConstraint("work_id", "scheme", "value", "source_id", name="uq_work_identifier"),
+        Index("ix_work_identifiers_scheme_value", "scheme", "value"),
+        Index("ix_work_identifiers_work", "work_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("works.id"))
+    scheme: Mapped[str] = mapped_column(String(30))
+    # Unbounded in the schema; the writer bounds it to MAX_KEY_CHARS because
+    # it sits in the uq_work_identifier btree index.
+    value: Mapped[str] = mapped_column(Text)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
+
+    work: Mapped[Work] = relationship()
+    source: Mapped[Source] = relationship()
+
+
+class WorkLink(Base):
+    """A derived work pointing at the work it derives from: ``part_of``,
+    ``arrangement_of`` or ``version_of``. Rebuilt wholesale by
+    ``composer_warehouse.works.links.link_works``."""
+
+    __tablename__ = "work_links"
+    __table_args__ = (
+        UniqueConstraint("work_id", "relation", "target_work_id", name="uq_work_link"),
+        Index("ix_work_links_target", "target_work_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("works.id"))
+    relation: Mapped[str] = mapped_column(String(20))
+    target_work_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("works.id"))
+    # catalogue | wikidata: what tied the two together
+    method: Mapped[str] = mapped_column(String(50))
+
+    work: Mapped[Work] = relationship(foreign_keys=[work_id])
+    target: Mapped[Work] = relationship(foreign_keys=[target_work_id])

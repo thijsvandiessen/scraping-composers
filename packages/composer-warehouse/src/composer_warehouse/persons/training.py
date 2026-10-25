@@ -97,7 +97,8 @@ def sample_non_match_levels(
     counts: list[dict[str, float]] = [dict.fromkeys(c.informative_levels(), 0.0) for c in comparisons]
     rng = random.Random(seed)
     size = len(records)
-    for _ in range(pairs):
+    # An empty warehouse has nothing to draw from; every column stays at zero.
+    for _ in range(pairs if size else 0):
         a, b = records[rng.randrange(size)], records[rng.randrange(size)]
         if a.entity_id == b.entity_id:
             continue

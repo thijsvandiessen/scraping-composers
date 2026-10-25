@@ -41,8 +41,8 @@ def _appearance_counts(
     which is exactly the noise this drives out of gold. Concerts and recordings
     are tracked separately so rule 1 can hold each to its own threshold.
     """
-    concert_events: dict[uuid.UUID, set[int]] = {}
-    recording_events: dict[uuid.UUID, set[int]] = {}
+    concert_events: dict[uuid.UUID, set[uuid.UUID]] = {}
+    recording_events: dict[uuid.UUID, set[uuid.UUID]] = {}
     for entity_id, concert_id in silver.execute(
         select(ConcertParticipant.entity_id, ConcertParticipant.concert_id).where(
             ConcertParticipant.entity_id.is_not(None)
@@ -85,7 +85,7 @@ def _composer_reach(
     spaces, so they are tagged before being pooled into one programme count.
     """
     works: dict[uuid.UUID, set[str]] = {}
-    programmes: dict[uuid.UUID, set[tuple[str, int]]] = {}
+    programmes: dict[uuid.UUID, set[tuple[str, uuid.UUID]]] = {}
     for composer_id, work_id, title in silver.execute(
         select(
             RawWorkMention.composer_entity_id, RawWorkMention.work_id, func.lower(RawWorkMention.raw_title)
@@ -300,3 +300,8 @@ class GoldBuild:
             self.all_ensembles, cfg.min_concert_appearances, cfg.min_recording_appearances
         )
         self.unevidenced_ensembles = {self.root(e) for e in self.all_ensembles} - self.kept_ensembles
+
+    def ensemble_members(self) -> set[uuid.UUID]:
+        """Name-variant ensembles folded onto a kept ensemble root: not copied
+        as entities, but their records and literal claims are, re-pointed."""
+        return {e for e in self.all_ensembles if e != self.root(e) and self.root(e) in self.kept_ensembles}

@@ -16,15 +16,18 @@ from composer_models import (
     Recording,
     Source,
     Work,
+    WorkLink,
     WorkTitle,
 )
-from composer_models.db import get_engine
+from composer_models.db import get_engine, init_db
+from composer_models.normalize import event_uuid
 from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
 from composer_models.testing import requires_postgres
 from composer_schema import SourceClaim
 from composer_warehouse.build import read_build_manifest
+from composer_warehouse.derived import refresh_derived
 from composer_warehouse.rebuild import rebuild_silver, replayable_sources, silver_target
-from composer_warehouse.testing import FakeSource, mention, perf_mention, person
+from composer_warehouse.testing import FakeSource, genre, ingest_source, mention, perf_mention, person
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
@@ -314,6 +317,79 @@ def test_rebuild_replays_every_bucket_source_and_every_document_run(tmp_path: Pa
         assert {"Gardiner, John Eliot", "Hogwood, Christopher"} <= labels
 
 
+def test_rebuild_produces_the_genre_set_live_ingest_does(tmp_path: Path) -> None:
+    """#349's "done when": every genre keyed on its QID, and a rebuild from
+    bronze — which replays the old label-only ``wikidata`` runs too — lands on
+    the same genre entities and links as ingesting live did."""
+    old = FakeSource(
+        records=(person("Strauss, Johann", SourceClaim("has_genre", "genre", "waltz"), external_id="Q1"),),
+        name="wikidata",
+    )
+    new = FakeSource(
+        records=(
+            person(
+                "Strauss, Johann",
+                SourceClaim("has_genre", "genre", "Waltz", object_wikidata_id="Q215"),
+                external_id="Q1",
+            ),
+        ),
+        name="wikidata",
+    )
+    hierarchy = FakeSource(
+        records=(genre("Q215", "waltz", ("Q316930", "dance music")), genre("Q316930", "dance music")),
+        name="wikidata_genres",
+    )
+    bucket = LocalBucket(tmp_path / "bucket")
+    Scraper(old).fetch_to_bucket(bucket, run_id="2025-old")
+    Scraper(new).fetch_to_bucket(bucket, run_id="2026-new")
+    Scraper(hierarchy).fetch_to_bucket(bucket)
+
+    def genres(session: Session) -> set[tuple[uuid.UUID, str, uuid.UUID | None]]:
+        return {
+            (e.id, e.dedup_key, e.canonical_entity_id)
+            for e in session.scalars(select(Entity).where(Entity.kind == "genre"))
+        }
+
+    with init_db(get_engine("sqlite://"))() as session:
+        for source in (old, new, hierarchy):
+            ingest_source(session, source)
+        refresh_derived(session)
+        expected = genres(session)
+
+    db_path = tmp_path / "silver.db"
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
+
+    with _session(db_path) as silver:
+        assert genres(silver) == expected
+        keys = {key for _, key, _ in expected}
+        assert keys == {"wikidata:Q215", "wikidata:Q316930", "waltz"}
+    assert stats.genres_linked == 1
+
+
+def test_rebuild_links_parts_to_their_parent_work(tmp_path: Path) -> None:
+    """Work links are derived state: the rebuild recreates them against the
+    new (randomly numbered) works rather than carrying the old rows over."""
+    bucket = LocalBucket(tmp_path / "bucket")
+    catalogue = FakeSource(
+        records=(
+            mention("Brandenburg Concerto No. 3 in G major, BWV 1048", "Bach, Johann Sebastian", "c1"),
+            mention("Allegro (From Brandenburg Concerto No. 3, BWV 1048)", "Bach, Johann Sebastian", "c2"),
+        ),
+        name="catalogue",
+    )
+    Scraper(catalogue).fetch_to_bucket(bucket)
+    db_path = tmp_path / "silver.db"
+
+    for _ in range(2):
+        stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
+        assert stats.work_links == 1
+    with _session(db_path) as silver:
+        link = silver.scalars(select(WorkLink)).one()
+        parent = silver.get(Work, link.target_work_id)
+        assert parent is not None and parent.canonical_title.startswith("Brandenburg")
+        assert link.relation == "part_of"
+
+
 def test_rebuild_keeps_recordings_from_a_crawl_derived_source(tmp_path: Path) -> None:
     """The headline #182 symptom: a rebuild used to take recordings to zero.
 
@@ -395,9 +471,10 @@ def test_rebuild_replays_bucket_into_postgres(tmp_path: Path, pg_url: str) -> No
             version = silver.execute(text("SELECT version_num FROM alembic_version")).scalar()
             assert version is not None
 
-            # And the derivations' explicit ids left the sequence usable.
-            silver.add(Concert(source_id=1, external_key="manual"))
-            silver.commit()
+            # The concert's id is derived from its source and key, so a
+            # rebuild hands out the same one the live silver had.
+            concert = silver.scalars(select(Concert)).one()
+            assert concert.id == event_uuid("concert", concert.source.name, concert.external_key)
     finally:
         engine.dispose()
 

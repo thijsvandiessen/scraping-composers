@@ -7,15 +7,34 @@ Pulling these out lets the matcher compare works on stable identifiers rather
 than on fuzzy title text alone. ``core_title`` is what remains once the
 structured spans are stripped — the residual (a nickname like "Eroica", or just
 the type) used for the fuzzy tie-break.
+
+Catalogue numbers are read per composer (see :mod:`composer_schema.catalogues`):
+``K. 550`` and ``KV 550`` are one Köchel number for Mozart, and a bare ``D 960``
+only counts for Schubert. ``identifiers`` holds every ``(scheme, value)`` the
+title and the source's structured fields state -- the strong keys the matcher
+tries before any title comparison.
+
+A title that names a part, an arrangement or a version of another work ("Allegro
+(from Brandenburg Concerto No. 3, BWV 1048)", "... (arr. for wind quintet)",
+"Sinfonie KV 550 (1. Fassung)") shares that work's number without being it. Its
+``derivation`` says which, and its catalogue references are the parent's: they
+go into ``parent_identifiers`` instead, for the link pass
+(:mod:`composer_warehouse.works.links`) to point it at its parent.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from composer_models.normalize import MAX_KEY_CHARS
+from composer_schema.catalogues import OPUS, find_catalogues, parse_catalogue
+
+#: What a derived work is of its parent; the ``work_links`` relation is
+#: ``f"{derivation}_of"``.
+DERIVATIONS = ("arrangement", "part", "version")
 
 
 @dataclass(frozen=True)
@@ -28,13 +47,30 @@ class WorkFeatures:
     catalogue_number: str | None = None
     musical_key: str | None = None
     number: int | None = None
+    # Strong keys: (scheme, value) catalogue numbers and external ids.
+    identifiers: frozenset[tuple[str, str]] = frozenset()
+    # part | arrangement | version, when the title names one of another work
+    derivation: str | None = None
+    # The parent work's catalogue numbers, for a derived work.
+    parent_identifiers: frozenset[tuple[str, str]] = frozenset()
 
 
-# Catalogue prefixes (lowercased); single letters are kept but the number that
-# follows must contain a digit, so "in d minor" never reads as catalogue "d".
-_CATALOGUE = re.compile(
-    r"\b(bwv|kv|k|hob|rv|woo|anh|d|s|b|h)\.?\s*([ivxlcdm\d]+(?:[:./-][ivxlcdm\d]+)*)",
-    re.I,
+# A part names its parent in a parenthesis: "(from ...)", "(aus ...)".
+_PART = re.compile(r"\((?:from|aus|extraits?\s+de)\s[^)]*\)?", re.I)
+_DERIVATION_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "arrangement",
+        re.compile(r"\b(?:arr(?:\.|\b)|arranged|bearb\.|bearbeitung|transcr|orchestrated)", re.I),
+    ),
+    ("part", _PART),
+    (
+        "version",
+        re.compile(
+            r"\b(?:\d+\.\s*fassung|(?:erste|zweite|dritte)\s+fassung|urfassung"
+            r"|(?:first|original|revised|\d{4})\s+version)\b",
+            re.I,
+        ),
+    ),
 )
 _OPUS = re.compile(r"\bop(?:us|\.)?\s*(\d+)\s*(?:(?:no|nr|n°|n)\.?\s*(\d+))?", re.I)
 _NUMBER = re.compile(r"(?:no|nr|n°)\.?\s*(\d+)", re.I)
@@ -87,12 +123,19 @@ def _normalize_key(letter: str, accidental: str | None, mode: str) -> str:
     return " ".join(parts)
 
 
-def _find_catalogue(text: str, spans: list[tuple[int, int]]) -> tuple[str | None, str | None]:
-    for cat_m in _CATALOGUE.finditer(text):
-        if any(c.isdigit() for c in cat_m.group(2)):
-            spans.append(cat_m.span())
-            return cat_m.group(1).upper(), cat_m.group(2).upper()
-    return None, None
+def _find_catalogue(text: str, composer: str | None, spans: list[tuple[int, int]]) -> list[tuple[str, str]]:
+    """Every catalogue reference in the title, normalised, first first."""
+    found: list[tuple[str, str]] = []
+    for ref in find_catalogues(text, composer):
+        spans.append(ref.span)
+        if (ref.scheme, ref.value) not in found:
+            found.append((ref.scheme, ref.value))
+    return found
+
+
+def derivation_of(raw_title: str) -> str | None:
+    """part | arrangement | version when the title says it is one, else None."""
+    return next((name for name, cue in _DERIVATION_CUES if cue.search(raw_title)), None)
 
 
 def _find_opus_and_number(text: str, spans: list[tuple[int, int]]) -> tuple[str | None, int | None]:
@@ -125,13 +168,33 @@ def _find_key(text: str, spans: list[tuple[int, int]]) -> str | None:
     return None
 
 
-def extract_features(raw_title: str) -> WorkFeatures:
+def extract_features(
+    raw_title: str, *, composer: str | None = None, structured: Iterable[str] = ()
+) -> WorkFeatures:
+    """The features of a title by ``composer`` (whose catalogues decide what a
+    bare ``K``/``D``/``S`` means), plus the catalogue numbers a source states
+    in ``structured`` fields of its own (IMSLP's "Opus/Catalogue Number")."""
     text = _strip_diacritics(raw_title).lower()
     spans: list[tuple[int, int]] = []
 
-    catalogue_prefix, catalogue_number = _find_catalogue(text, spans)
+    catalogues = _find_catalogue(text, composer, spans)
     opus_number, number = _find_opus_and_number(text, spans)
+    for field in structured:
+        for scheme, value in sorted(parse_catalogue(field, composer)):
+            if scheme == OPUS:
+                # an opus stays on the opus rule (see match._identifier_score)
+                if opus_number is None:
+                    opus_number, _, within = value.partition("/")
+                    if within and number is None:
+                        number = int(within)
+            elif (scheme, value) not in catalogues:
+                catalogues.append((scheme, value))
     musical_key = _find_key(text, spans)
+    derivation = derivation_of(raw_title)
+    if derivation == "part" and (parent := _PART.search(text)) is not None:
+        # "Allegro (from Brandenburg Concerto No. 3, BWV 1048)": the clause
+        # names the parent, so two movements of it would look alike by title.
+        spans.append(parent.span())
 
     normalized = normalize_title(raw_title)
     work_type = next((canon for canon, kws in _TYPES if any(kw in normalized for kw in kws)), None)
@@ -144,6 +207,8 @@ def extract_features(raw_title: str) -> WorkFeatures:
             chars[i] = " "
     core_title = normalize_title("".join(chars))
 
+    refs = frozenset(catalogues)
+    catalogue_prefix, catalogue_number = catalogues[0] if catalogues else (None, None)
     return WorkFeatures(
         normalized_title=normalized,
         core_title=core_title,
@@ -153,4 +218,7 @@ def extract_features(raw_title: str) -> WorkFeatures:
         catalogue_number=catalogue_number,
         musical_key=musical_key,
         number=number,
+        identifiers=frozenset() if derivation else refs,
+        derivation=derivation,
+        parent_identifiers=refs if derivation else frozenset(),
     )

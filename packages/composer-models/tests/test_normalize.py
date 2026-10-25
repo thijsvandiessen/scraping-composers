@@ -1,7 +1,16 @@
 import uuid
 
 import pytest
-from composer_models.normalize import MAX_KEY_CHARS, dedup_key, entity_uuid, wikidata_id
+from composer_models.normalize import (
+    MAX_KEY_CHARS,
+    QID_KEYED_KINDS,
+    dedup_key,
+    entity_key,
+    entity_uuid,
+    event_uuid,
+    qid_key,
+    wikidata_id,
+)
 
 
 @pytest.mark.parametrize(
@@ -38,6 +47,27 @@ def test_entity_uuid_differs_by_kind() -> None:
 
 def test_entity_uuid_differs_by_key() -> None:
     assert entity_uuid("person", "ludwig van beethoven") != entity_uuid("person", "wolfgang amadeus mozart")
+
+
+def test_event_uuid_is_stable() -> None:
+    # The public API serves this in /concerts/{id}; it must not drift between derives.
+    assert event_uuid("concert", "nyphil", "1|1989-10-31") == event_uuid("concert", "nyphil", "1|1989-10-31")
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        ("recording", "nyphil", "1|1989-10-31"),  # kind
+        ("concert", "berlinphil", "1|1989-10-31"),  # source
+        ("concert", "nyphil", "2|1989-10-31"),  # key
+    ],
+)
+def test_event_uuid_differs(other: tuple[str, str, str]) -> None:
+    assert event_uuid("concert", "nyphil", "1|1989-10-31") != event_uuid(*other)
+
+
+def test_event_uuid_is_apart_from_entity_uuid() -> None:
+    assert event_uuid("concert", "nyphil", "x") != entity_uuid("concert", "nyphil:x")
 
 
 def test_dedup_key_empty_string() -> None:
@@ -94,3 +124,39 @@ def test_wikidata_id_ignores_a_pipe_that_is_not_an_id() -> None:
     # this module wrote — but a caller may hand over any string.
     assert wikidata_id("johann strauss|junior") is None
     assert wikidata_id("johann strauss") is None
+
+
+def test_qid_key() -> None:
+    assert qid_key("Q215") == "wikidata:Q215"
+
+
+def test_genres_and_movements_with_a_qid_are_keyed_on_it_alone() -> None:
+    """A renamed Wikidata label must not split the genre in two (#349)."""
+    assert QID_KEYED_KINDS == {"genre", "movement", "ensemble"}
+    for kind in QID_KEYED_KINDS:
+        assert entity_key(kind, "waltz", "Q215") == "wikidata:Q215"
+        assert entity_key(kind, "Waltz (dance)", "Q215") == entity_key(kind, "waltz", "Q215")
+
+
+def test_entity_key_falls_back_to_the_label_key() -> None:
+    # a genre without a QID (a non-Wikidata source) keeps the label key
+    assert entity_key("genre", "Symphonic Poem") == dedup_key("Symphonic Poem")
+    # every other kind keeps dedup_key's label|QID form, which seeds person ids
+    assert entity_key("person", "Beethoven, Ludwig van", "Q255") == "ludwig van beethoven|Q255"
+    assert entity_key("place", "Bonn") == "bonn"
+
+
+def test_wikidata_id_reads_both_key_forms() -> None:
+    assert wikidata_id(qid_key("Q215")) == "Q215"
+    assert wikidata_id(entity_key("genre", "waltz", "Q215")) == "Q215"
+    assert wikidata_id(entity_key("person", "Beethoven, Ludwig van", "Q255")) == "Q255"
+    # a label key can't spell the prefix: dedup_key strips the colon
+    assert dedup_key("wikidata:Q215") == "wikidataq215"
+    assert wikidata_id("wikidataq215") is None
+
+
+def test_an_ensemble_with_a_qid_is_keyed_on_the_qid_alone() -> None:
+    """One orchestra under every name it is printed (#350)."""
+    assert entity_key("ensemble", "Wiener Philharmoniker", "Q900001") == "wikidata:Q900001"
+    assert entity_key("ensemble", "Vienna Philharmonic", "Q900001") == qid_key("Q900001")
+    assert entity_key("ensemble", "The Vienna Philharmonic") == "the vienna philharmonic"

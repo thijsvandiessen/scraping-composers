@@ -29,7 +29,10 @@ from composer_models import (
     RecordingWork,
     Source,
     Work,
+    WorkIdentifier,
+    WorkLink,
 )
+from composer_models.normalize import wikidata_id
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -64,6 +67,10 @@ CLAIM_TYPES: dict[str, str] = {
     "in_movement": "IN_MOVEMENT",
     "has_profession": "HAS_PROFESSION",
     "associated_period": "ASSOCIATED_PERIOD",
+    # Genre → genre and movement → movement, from Wikidata's P279: (a)-[:SUBCLASS_OF]->(b)
+    # means a is a kind of b, so a genre and everything below it is
+    # (g)<-[:SUBCLASS_OF*0..]-(sub).
+    "subclass_of": "SUBCLASS_OF",
     # Person ↔ person, from Wikidata. Read as subject → object: (a)-[:STUDENT_OF]->(b)
     # means a studied with b; (a)-[:CHILD_OF]->(b) means b is a's parent.
     "student_of": "STUDENT_OF",
@@ -73,13 +80,16 @@ CLAIM_TYPES: dict[str, str] = {
     "parent_of": "PARENT_OF",
     "spouse_of": "SPOUSE_OF",
     "sibling_of": "SIBLING_OF",
+    # Ensemble → home city and ensemble → the larger group it belongs to.
+    "based_in": "BASED_IN",
+    "part_of": "PART_OF",
 }
 
 # Literal claims carried onto entity nodes. Single-valued ones take the value
 # the most sources back; counts become integers so Cypher can order by them;
 # list-valued ones keep every distinct value. Bookkeeping claims
 # (statement_count, mentioned_in, ...) are left out.
-_LITERAL_SINGLE = ("born_on", "died_on", "first_season", "last_season", "musicbrainz_id")
+_LITERAL_SINGLE = ("born_on", "died_on", "first_season", "last_season", "musicbrainz_id", "ensemble_type")
 _LITERAL_COUNTS = ("sitelink_count", "work_count", "program_count")
 _LITERAL_LISTS = ("also_known_as", "performs_as", "has_function")
 
@@ -111,7 +121,7 @@ def _clean(row: Row) -> Row:
     return {key: value for key, value in row.items() if value is not None and value != []}
 
 
-def _rel(start: str | int, end: str | int, **props: Any) -> Row:
+def _rel(start: str, end: str, **props: Any) -> Row:
     """A relationship row: the endpoint ids, and the properties to set on it."""
     return {"from": start, "to": end, "props": _clean(props)}
 
@@ -145,11 +155,17 @@ def _literal_properties(literals: dict[str, list[str]]) -> Row:
 
 
 def entity_nodes(session: Session) -> Iterator[tuple[str, Row]]:
-    """(label, row) for every gold entity of a kind the graph models."""
+    """(label, row) for every gold entity of a kind the graph models.
+
+    ``wikidata_id`` is the QID the entity's dedup key carries, when it carries
+    one: the stable handle to match a node on, since labels follow Wikidata's
+    renames."""
     literals = literal_claims(session, (*_LITERAL_SINGLE, *_LITERAL_COUNTS, *_LITERAL_LISTS))
     provenance = entity_sources(session)
-    rows = session.execute(select(Entity.id, Entity.kind, Entity.label).order_by(Entity.kind, Entity.id))
-    for entity_id, kind, label in rows:
+    rows = session.execute(
+        select(Entity.id, Entity.kind, Entity.label, Entity.dedup_key).order_by(Entity.kind, Entity.id)
+    )
+    for entity_id, kind, label, key in rows:
         node_label = ENTITY_LABELS.get(kind)
         if node_label is None:
             continue
@@ -160,6 +176,7 @@ def entity_nodes(session: Session) -> Iterator[tuple[str, Row]]:
                 {
                     "id": str(entity_id),
                     "label": label,
+                    "wikidata_id": wikidata_id(key),
                     "sources": sources,
                     "url": url,
                     **_literal_properties(literals.get(entity_id, {})),
@@ -168,7 +185,20 @@ def entity_nodes(session: Session) -> Iterator[tuple[str, Row]]:
         )
 
 
+def _work_identifiers(session: Session) -> dict[Any, list[tuple[str, str]]]:
+    found: dict[Any, set[tuple[str, str]]] = {}
+    for work_id, scheme, value in session.execute(
+        select(WorkIdentifier.work_id, WorkIdentifier.scheme, WorkIdentifier.value)
+    ):
+        found.setdefault(work_id, set()).add((scheme, value))
+    return {work_id: sorted(pairs) for work_id, pairs in found.items()}
+
+
 def work_nodes(session: Session) -> Iterator[Row]:
+    """Work nodes. ``identifiers`` is a list of "scheme value" strings ("BWV
+    1048", "wikidata Q1") -- Neo4j properties can't hold maps -- with the
+    Wikidata id also on ``wikidata_id`` for lookups."""
+    identifiers = _work_identifiers(session)
     rows = session.execute(
         select(
             Work.id,
@@ -185,6 +215,7 @@ def work_nodes(session: Session) -> Iterator[Row]:
         .execution_options(yield_per=_YIELD_PER)
     )
     for work_id, title, work_type, opus, cat_prefix, cat_number, key, number, premiere in rows:
+        pairs = identifiers.get(work_id, [])
         yield _clean(
             {
                 "id": str(work_id),
@@ -196,6 +227,8 @@ def work_nodes(session: Session) -> Iterator[Row]:
                 "musical_key": key,
                 "number": number,
                 "premiere_date": premiere,
+                "wikidata_id": next((value for scheme, value in pairs if scheme == "wikidata"), None),
+                "identifiers": [f"{scheme} {value}" for scheme, value in pairs],
             }
         )
 
@@ -218,7 +251,7 @@ def concert_nodes(session: Session) -> Iterator[Row]:
     for concert_id, date, season, event_type, venue, url, source in rows:
         yield _clean(
             {
-                "id": concert_id,
+                "id": str(concert_id),
                 "date": date,
                 "season": season,
                 "event_type": event_type,
@@ -248,7 +281,7 @@ def recording_nodes(session: Session) -> Iterator[Row]:
     for recording_id, title, release_date, label, catalogue_number, format_, url, source in rows:
         yield _clean(
             {
-                "id": recording_id,
+                "id": str(recording_id),
                 "title": title,
                 "release_date": release_date,
                 "label": label,
@@ -291,6 +324,18 @@ def composed_by(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, 
         yield RelGroup("COMPOSED_BY", "Work", label), _rel(str(work_id), str(composer_id))
 
 
+def work_links(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, Row]]:
+    """(Work)-[:PART_OF|ARRANGEMENT_OF|VERSION_OF {method}]->(Work): a part,
+    arrangement or version pointing at the work it derives from."""
+    rows = session.execute(
+        select(WorkLink.work_id, WorkLink.relation, WorkLink.target_work_id, WorkLink.method)
+        .order_by(WorkLink.work_id, WorkLink.relation, WorkLink.target_work_id)
+        .execution_options(yield_per=_YIELD_PER)
+    )
+    for work_id, relation, target_id, method in rows:
+        yield RelGroup(relation.upper(), "Work", "Work"), _rel(str(work_id), str(target_id), method=method)
+
+
 def performed_in(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, Row]]:
     """(Person|Ensemble)-[:PERFORMED_IN {role, discipline}]->(Concert|Recording).
 
@@ -314,7 +359,7 @@ def performed_in(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup,
                 continue
             yield (
                 RelGroup("PERFORMED_IN", label, event_label),
-                _rel(str(entity_id), event_id, role=role, discipline=discipline),
+                _rel(str(entity_id), str(event_id), role=role, discipline=discipline),
             )
 
 
@@ -348,7 +393,7 @@ def programmed(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, R
         )
         for event_id, work_id, times in rows:
             assert work_id is not None  # guarded by the WHERE above
-            yield RelGroup("PROGRAMMED", event_label, "Work"), _rel(event_id, str(work_id), times=times)
+            yield RelGroup("PROGRAMMED", event_label, "Work"), _rel(str(event_id), str(work_id), times=times)
 
 
 def claim_relationships(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, Row]]:

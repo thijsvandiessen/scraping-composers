@@ -153,3 +153,71 @@ def resolve_entity_kind(kind: str, label: str) -> str:
     if kind == PERSON_KIND and looks_like_ensemble(label):
         return ENSEMBLE_KIND
     return kind
+
+
+#: What kind of group an ensemble is. Wikidata's class decides where it has
+#: one (see the ``wikidata_ensembles`` source); the name decides otherwise.
+ENSEMBLE_TYPES = ("orchestra", "choir", "chamber_ensemble", "opera_company", "band", "other")
+
+#: Words that make a group a choir — the voices half of ``_ENSEMBLE_WORDS``.
+_CHOIR_WORDS = frozenset(
+    {"choir", "chorale", "chorus", "chor", "choeur", "chœur", "coro", "koor", "cantorei", "singers", "voices"}
+)
+_CHOIR_HEADS = ("chor", "koor")
+
+#: Groups named by how many play in them: a chamber ensemble.
+_CHAMBER_WORDS = frozenset(
+    {
+        "duo",
+        "trio",
+        "quartet",
+        "quartett",
+        "quartetto",
+        "quatuor",
+        "kwartet",
+        "cuarteto",
+        "quintet",
+        "quintett",
+        "quintetto",
+        "quintette",
+        "sextet",
+        "sextett",
+        "septet",
+        "octet",
+        "nonet",
+    }
+)
+_CHAMBER_HEADS = ("quartett", "kwartet", "quintett")
+
+_ORCHESTRA_HEADS = ("orchester", "orchestra", "orchestre", "orkest")
+
+_OPERA_WORDS = frozenset({"opera", "oper", "opern", "opernhaus", "staatsoper"})
+
+_BAND_WORDS = frozenset({"band", "bigband"})
+
+
+def _compound(token: str, heads: tuple[str, ...]) -> bool:
+    return any(token.endswith(head) and len(token) - len(head) >= _MIN_COMPOUND_STEM for head in heads)
+
+
+def ensemble_type_from_name(label: str) -> str | None:
+    """The :data:`ENSEMBLE_TYPES` entry *label*'s words name, or None.
+
+    The fallback for a group no external item types. Checked from the most
+    specific kind down, so "Wiener Philharmoniker Streichquartett" is a chamber
+    ensemble rather than an orchestra, "Vienna Philharmonia Chorus" a choir,
+    and "Orchestra of the Royal Opera House" an orchestra rather than the
+    opera company itself.
+    """
+    tokens = _tokens(label)
+    if any(t in _CHAMBER_WORDS or _compound(t, _CHAMBER_HEADS) for t in tokens):
+        return "chamber_ensemble"
+    if any(t in _CHOIR_WORDS or _compound(t, _CHOIR_HEADS) for t in tokens):
+        return "choir"
+    if any(t.startswith(_ENSEMBLE_PREFIXES) or _compound(t, _ORCHESTRA_HEADS) for t in tokens):
+        return "orchestra"
+    if any(t in _OPERA_WORDS for t in tokens):
+        return "opera_company"
+    if any(t in _BAND_WORDS for t in tokens):
+        return "band"
+    return None

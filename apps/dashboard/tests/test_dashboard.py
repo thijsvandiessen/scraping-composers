@@ -3,6 +3,7 @@ views against a stubbed client — no network access."""
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import httpx
@@ -34,6 +35,7 @@ SCRAPERS_PAYLOAD = [
         "cadence": "monthly",
         "due": True,
         "last_snapshot": None,
+        "running_snapshots": [],
     },
     {
         "name": "wikidata",
@@ -41,6 +43,7 @@ SCRAPERS_PAYLOAD = [
         "cadence": "monthly",
         "due": False,
         "last_snapshot": SNAPSHOT_PAYLOAD,
+        "running_snapshots": [],
     },
 ]
 
@@ -63,6 +66,14 @@ def test_client_fetch_scraper_posts_to_named_scraper() -> None:
         return httpx.Response(202, json={"source": "imslp", "snapshot_id": "snap-1", "status": "running"})
 
     assert _api(handler).fetch_scraper("imslp")["snapshot_id"] == "snap-1"
+
+
+def test_client_abandon_snapshot_posts_to_the_snapshot() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert (request.method, request.url.path) == ("POST", "/admin/v1/snapshots/imslp/snap-1/abandon")
+        return httpx.Response(200, json={**SNAPSHOT_PAYLOAD, "source": "imslp", "status": "failed"})
+
+    assert _api(handler).abandon_snapshot("imslp", "snap-1")["status"] == "failed"
 
 
 def test_client_snapshots_process_and_runs() -> None:
@@ -171,6 +182,16 @@ class StubAPI:
         self._maybe_fail()
         return {"run_id": 12, "source": source, "status": "running"}
 
+    def abandon_snapshot(self, source: str, snapshot_id: str) -> dict[str, Any]:
+        self._maybe_fail()
+        return {
+            **SNAPSHOT_PAYLOAD,
+            "source": source,
+            "id": snapshot_id,
+            "status": "failed",
+            "record_count": 7,
+        }
+
     def gold_status(self) -> dict[str, Any]:
         self._maybe_fail()
         return {
@@ -257,6 +278,43 @@ def test_index_auto_refreshes_while_a_fetch_is_active(
     assert '<meta http-equiv="refresh" content="5">' in page
 
 
+def test_index_offers_abandon_for_a_stuck_snapshot_older_than_the_last(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    stuck = {**SNAPSHOT_PAYLOAD, "id": "2026-06-01T08:00:00-dead0000", "status": "running"}
+    scrapers = [{**SCRAPERS_PAYLOAD[1], "running_snapshots": [stuck]}]
+    _install(monkeypatch, StubAPI(scrapers=scrapers))
+    page = staff_client.get("/admin/scrapers/").content.decode()
+    assert "older snapshot 2026-06-01T08:00:00-dead0000 still marked running" in page
+    assert 'action="/admin/scrapers/wikidata/2026-06-01T08:00:00-dead0000/abandon"' in page
+
+
+def test_index_offers_abandon_for_a_running_last_snapshot(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    running = {**SNAPSHOT_PAYLOAD, "status": "running"}
+    scrapers = [{**SCRAPERS_PAYLOAD[1], "last_snapshot": running, "running_snapshots": [running]}]
+    _install(monkeypatch, StubAPI(scrapers=scrapers))
+    page = staff_client.get("/admin/scrapers/").content.decode()
+    assert "older snapshot" not in page  # the last one is already shown as running
+    assert f'action="/admin/scrapers/wikidata/{SNAPSHOT_PAYLOAD["id"]}/abandon"' in page
+
+
+def test_abandon_snapshot_redirects_with_message(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install(monkeypatch, StubAPI())
+    response = staff_client.post("/admin/scrapers/imslp/snap-9/abandon", follow=True)
+    assert response.redirect_chain[0] == ("/admin/scrapers/", 302)
+    assert "abandoned snapshot imslp/snap-9: 7 record(s) kept on disk" in response.content.decode()
+
+
+def test_abandon_snapshot_surfaces_api_error(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    _install(monkeypatch, StubAPI(error="API returned 409: snapshot imslp/snap-9 is not running"))
+    response = staff_client.post("/admin/scrapers/imslp/snap-9/abandon", follow=True)
+    assert "is not running" in response.content.decode()
+
+
 def test_start_fetch_redirects_with_message(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     _install(monkeypatch, StubAPI())
     response = staff_client.post("/admin/scrapers/imslp/fetch", follow=True)
@@ -321,6 +379,7 @@ def test_post_endpoints_reject_get(monkeypatch: pytest.MonkeyPatch, staff_client
     assert staff_client.get("/admin/scrapers/imslp/fetch").status_code == 405
     assert staff_client.get("/admin/scrapers/fetch-due").status_code == 405
     assert staff_client.get("/admin/load/wikidata/snap-1/process").status_code == 405
+    assert staff_client.get("/admin/scrapers/imslp/snap-1/abandon").status_code == 405
 
 
 # ---------------------------------------------------------------------------
@@ -401,6 +460,11 @@ WORKS_PAYLOAD: dict[str, Any] = {
 }
 
 WORK_ID = "7f9d3c1e-0000-0000-0000-000000000004"
+CONCERT_1 = "c0dce47a-0000-0000-0000-000000000001"
+CONCERT_2 = "c0dce47a-0000-0000-0000-000000000002"
+CONCERT_7 = "c0dce47a-0000-0000-0000-000000000007"
+RECORDING_1 = "4ec0d1a6-0000-0000-0000-000000000001"
+RECORDING_3 = "4ec0d1a6-0000-0000-0000-000000000003"
 
 WORK_DETAIL_PAYLOAD: dict[str, Any] = {
     "id": WORK_ID,
@@ -499,6 +563,30 @@ class StubDataAPI:
         self._maybe_fail()
         return ENTITY_DETAIL_PAYLOAD
 
+    def list_ensembles(
+        self,
+        filters: Filters = NO_FILTERS,
+        anchored: bool | None = None,
+        page: int = 1,
+        limit: int = 20,
+        sort: str = "label",
+    ) -> dict[str, Any]:
+        self._maybe_fail()
+        assert (anchored, sort) == (False, "appearances")
+        items = [
+            {
+                "id": ENTITY_ID,
+                "label": "Junge Philharmonie Wien",
+                "wikidata_id": None,
+                "ensemble_type": "orchestra",
+                "home_city": None,
+                "canonical_entity_id": None,
+                "concert_count": 4,
+                "recording_count": 1,
+            }
+        ]
+        return {"items": items, "total": 21, "page": page, "limit": limit}
+
     def list_people(
         self, role: str, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20, sort: str = "label"
     ) -> dict[str, Any]:
@@ -518,7 +606,7 @@ class StubDataAPI:
         self._maybe_fail()
         items = [
             {
-                "id": 1,
+                "id": CONCERT_1,
                 "source": "berlinphil",
                 "date": "1985-03-01",
                 "venue": None,
@@ -527,7 +615,7 @@ class StubDataAPI:
                 "works": ["Ein Heldenleben"],
             },
             {
-                "id": 2,
+                "id": CONCERT_2,
                 "source": "concertgebouw_archive",
                 "date": "1929-06-30",
                 "venue": "Amsterdam",
@@ -564,7 +652,7 @@ class StubDataAPI:
         self._maybe_fail()
         items = [
             {
-                "id": 7,
+                "id": CONCERT_7,
                 "source": "nyphil",
                 "date": "1989-10-31",
                 "venue": "Avery Fisher Hall, Manhattan, NY",
@@ -578,10 +666,10 @@ class StubDataAPI:
         ]
         return {"items": items, "total": 1, "page": page, "limit": limit}
 
-    def get_concert(self, concert_id: int) -> dict[str, Any]:
+    def get_concert(self, concert_id: uuid.UUID) -> dict[str, Any]:
         self._maybe_fail()
         return {
-            "id": concert_id,
+            "id": str(concert_id),
             "source": "nyphil",
             "date": "1989-10-31",
             "venue": "Avery Fisher Hall, Manhattan, NY",
@@ -604,7 +692,7 @@ class StubDataAPI:
         self._maybe_fail()
         items = [
             {
-                "id": 1,
+                "id": RECORDING_1,
                 "source": "deutschegrammophon",
                 "title": "Beethoven: Symphony No. 9",
                 "release_date": "2024-03-15",
@@ -631,7 +719,7 @@ class StubDataAPI:
         self._maybe_fail()
         items = [
             {
-                "id": 3,
+                "id": RECORDING_3,
                 "source": "deutschegrammophon",
                 "title": "Beethoven: Symphony No. 9",
                 "release_date": "2024-03-15",
@@ -646,10 +734,10 @@ class StubDataAPI:
         ]
         return {"items": items, "total": 1, "page": page, "limit": limit}
 
-    def get_recording(self, recording_id: int) -> dict[str, Any]:
+    def get_recording(self, recording_id: uuid.UUID) -> dict[str, Any]:
         self._maybe_fail()
         return {
-            "id": recording_id,
+            "id": str(recording_id),
             "source": "deutschegrammophon",
             "title": "Beethoven: Symphony No. 9",
             "release_date": "2024-03-15",
@@ -698,6 +786,7 @@ def _install_data(monkeypatch: pytest.MonkeyPatch, stub: StubDataAPI) -> None:
 def test_data_pages_require_admin_login() -> None:
     for url in (
         "/admin/data/",
+        "/admin/data/ensembles/",
         "/admin/data/entities/",
         f"/admin/data/entities/{ENTITY_ID}/",
         "/admin/data/works/",
@@ -728,6 +817,39 @@ def test_entities_page_renders_rows_and_pagination(
     # arrow keys page through results: the handler targets the prev/next links
     assert 'id="sc-prev"' in page and 'id="sc-next"' in page
     assert "ArrowRight" in page and "ArrowLeft" in page
+
+
+def test_ensembles_page_lists_the_unanchored_with_entity_links(
+    monkeypatch: pytest.MonkeyPatch, staff_client: Client
+) -> None:
+    _install_data(monkeypatch, StubDataAPI())
+    page = staff_client.get("/admin/data/ensembles/?q=wien").content.decode()
+    assert "Junge Philharmonie Wien" in page
+    assert f"/admin/data/entities/{ENTITY_ID}/" in page
+    assert "orchestra" in page
+    assert "21 unanchored" in page and "page 1 of 2" in page
+    assert "q=wien" in page  # the next link keeps the search
+
+
+def test_ensembles_page_shows_an_api_error(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
+    _install_data(monkeypatch, StubDataAPI(error="API unreachable"))
+    assert "API unreachable" in staff_client.get("/admin/data/ensembles/").content.decode()
+
+
+def test_data_client_lists_ensembles() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/ensembles"
+        assert dict(request.url.params) == {
+            "page": "1",
+            "limit": "20",
+            "sort": "appearances",
+            "q": "wien",
+            "anchored": "false",
+        }
+        return httpx.Response(200, json={"items": [], "total": 0, "page": 1, "limit": 20})
+
+    api = _data_api(handler)
+    assert api.list_ensembles(Filters(q="wien"), anchored=False, sort="appearances")["total"] == 0
 
 
 def test_entities_page_tolerates_junk_page_param(
@@ -973,12 +1095,12 @@ def test_concerts_list_page_renders(monkeypatch: pytest.MonkeyPatch, staff_clien
     page = staff_client.get("/admin/data/concerts/").content.decode()
     assert "1989-10-31" in page and "Avery Fisher Hall" in page
     assert "Bernstein, Leonard" in page
-    assert "/admin/data/concerts/7/" in page  # row links to detail
+    assert f"/admin/data/concerts/{CONCERT_7}/" in page  # row links to detail
 
 
 def test_concert_detail_page_renders(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     _install_data(monkeypatch, StubDataAPI())
-    page = staff_client.get("/admin/data/concerts/7/").content.decode()
+    page = staff_client.get(f"/admin/data/concerts/{CONCERT_7}/").content.decode()
     assert "Avery Fisher Hall" in page and "1989-90" in page
     assert f"/admin/data/entities/{ENTITY_ID}/" in page  # resolved participant links to entity
     assert "Pavarotti, Luciano" in page and "Tenor" in page  # unresolved shown as plain text
@@ -987,7 +1109,7 @@ def test_concert_detail_page_renders(monkeypatch: pytest.MonkeyPatch, staff_clie
 
 @pytest.mark.django_db
 def test_concert_pages_require_login() -> None:
-    for url in ("/admin/data/concerts/", "/admin/data/concerts/7/"):
+    for url in ("/admin/data/concerts/", f"/admin/data/concerts/{CONCERT_7}/"):
         response = Client().get(url)
         assert response.status_code == 302
         assert response["Location"].startswith("/admin/login/")
@@ -998,12 +1120,12 @@ def test_recordings_list_page_renders(monkeypatch: pytest.MonkeyPatch, staff_cli
     page = staff_client.get("/admin/data/recordings/").content.decode()
     assert "Beethoven: Symphony No. 9" in page and "Deutsche Grammophon" in page
     assert "486 1234" in page and "Rattle, Simon" in page
-    assert "/admin/data/recordings/3/" in page  # row links to detail
+    assert f"/admin/data/recordings/{RECORDING_3}/" in page  # row links to detail
 
 
 def test_recording_detail_page_renders(monkeypatch: pytest.MonkeyPatch, staff_client: Client) -> None:
     _install_data(monkeypatch, StubDataAPI())
-    page = staff_client.get("/admin/data/recordings/3/").content.decode()
+    page = staff_client.get(f"/admin/data/recordings/{RECORDING_3}/").content.decode()
     assert "Beethoven: Symphony No. 9" in page and "CD" in page
     assert f"/admin/data/entities/{ENTITY_ID}/" in page  # resolved artist links to entity
     assert "Jansen, Janine" in page and "violin" in page  # unresolved shown as plain text
@@ -1012,7 +1134,7 @@ def test_recording_detail_page_renders(monkeypatch: pytest.MonkeyPatch, staff_cl
 
 @pytest.mark.django_db
 def test_recording_pages_require_login() -> None:
-    for url in ("/admin/data/recordings/", "/admin/data/recordings/3/"):
+    for url in ("/admin/data/recordings/", f"/admin/data/recordings/{RECORDING_3}/"):
         response = Client().get(url)
         assert response.status_code == 302
         assert response["Location"].startswith("/admin/login/")

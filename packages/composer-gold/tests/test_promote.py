@@ -16,22 +16,30 @@ from composer_models import (
     Concert,
     ConcertParticipant,
     Entity,
+    EntityRecord,
     RawWorkMention,
     Recording,
     Work,
+    WorkIdentifier,
+    WorkLink,
 )
 from composer_models.db import init_db
+from composer_models.normalize import entity_uuid
 from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 from composer_warehouse.concerts import derive_concerts
+from composer_warehouse.derived import refresh_derived
+from composer_warehouse.ensembles import anchor_ensembles
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import (
     FakeSource,
     ensemble,
+    genre,
     ingest_source,
     mention,
     perf_mention,
     person,
 )
+from composer_warehouse.works.links import link_works
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
@@ -601,6 +609,40 @@ def _seed_referrers_silver(session: Session) -> None:
     derive_concerts(session)
 
 
+def test_rule3_keeps_claims_between_entities_already_kept(session: Session, tmp_path: Path) -> None:
+    """Austria is kept through Mahler's citizen_of before the walk reaches
+    Vienna; Vienna's in_country still has to come along, or the place
+    hierarchy is lost."""
+    _seed_silver(session)
+    places = FakeSource(
+        records=(
+            person("Mahler, Gustav", SourceClaim("citizen_of", "place", "Austria"), external_id="p:mahler"),
+            EntityDocument(
+                id="p:vienna",
+                url=None,
+                source_name="places",
+                ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
+                name="Vienna",
+                kind="place",
+                claims=(SourceClaim("in_country", "place", "Austria"),),
+            ),
+        ),
+        name="places",
+    )
+    ingest_source(session, places)
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        vienna = gold.scalars(select(Entity).where(Entity.label == "Vienna")).one()
+        austria = gold.scalars(select(Entity).where(Entity.label == "Austria")).one()
+        assert gold.scalar(
+            select(Claim.id).where(
+                Claim.subject_id == vienna.id, Claim.predicate == "in_country", Claim.object_id == austria.id
+            )
+        )
+
+
 def test_min_referrers_default_keeps_single_referrer(session: Session, tmp_path: Path) -> None:
     _seed_referrers_silver(session)
     gold_path = tmp_path / "gold.db"
@@ -920,6 +962,67 @@ def test_rule1_off_keeps_unevidenced_ensembles(session: Session, tmp_path: Path)
     assert (stats.ensembles_kept, stats.ensembles_dropped) == (2, 0)
 
 
+def test_an_anchored_ensemble_reaches_gold_as_one_with_its_type_and_city(
+    session: Session, tmp_path: Path
+) -> None:
+    """#350: the spellings folded onto a Wikidata anchor collapse into it, and
+    the anchor's own object claims (its home city) survive the walk."""
+    wikidata = FakeSource(
+        records=(
+            ensemble(
+                "Vienna Philharmonic",
+                SourceClaim("ensemble_type", value="orchestra"),
+                SourceClaim("based_in", "place", "Vienna"),
+                SourceClaim("also_known_as", value="Wiener Philharmoniker"),
+                external_id="Q900001",
+                url="https://www.wikidata.org/wiki/Q900001",
+            ),
+        ),
+        name="wikidata_ensembles",
+    )
+    berlinphil = FakeSource(
+        records=(
+            perf_mention(
+                "perf:1",
+                "Symphony No. 9",
+                "Beethoven, Ludwig van",
+                {"concert_id": "1", "date": "2020-01-01", "ensembles": ["Wiener Philharmoniker"]},
+            ),
+            perf_mention(
+                "perf:2",
+                "Symphony No. 5",
+                "Beethoven, Ludwig van",
+                {"concert_id": "2", "date": "2021-01-01", "ensembles": ["Vienna Philharmonic"]},
+            ),
+            ensemble("Wiener Philharmoniker", external_id="bp:wph"),
+            ensemble("Vienna Philharmonic", external_id="bp:vpo"),
+        ),
+        name="berlinphil",
+    )
+    ingest_source(session, wikidata)
+    ingest_source(session, berlinphil)
+    anchor_ensembles(session)
+    derive_concerts(session)
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        (orchestra,) = gold.scalars(select(Entity).where(Entity.kind == "ensemble"))
+        assert orchestra.dedup_key == "wikidata:Q900001"
+        claims = {
+            (c.predicate, c.value, c.object_id)
+            for c in gold.scalars(select(Claim).where(Claim.subject_id == orchestra.id))
+        }
+        assert ("ensemble_type", "orchestra", None) in claims
+        vienna = gold.scalars(select(Entity).where(Entity.kind == "place", Entity.label == "Vienna")).one()
+        assert ("based_in", None, vienna.id) in claims
+        # the name variants' records survive, re-pointed at the anchor
+        records = gold.scalars(select(EntityRecord).where(EntityRecord.external_id.in_(["bp:wph", "bp:vpo"])))
+        assert {r.entity_id for r in records} == {orchestra.id}
+        participants = gold.scalars(select(ConcertParticipant).where(ConcertParticipant.role == "ensemble"))
+        assert {p.entity_id for p in participants} == {orchestra.id}
+
+
 def test_promote_writes_manifest_and_is_rerunnable(session: Session, tmp_path: Path) -> None:
     _seed_silver(session)
     gold_path = tmp_path / "gold.db"
@@ -1111,3 +1214,155 @@ def test_kept_composer_keeps_the_link_on_their_works(session: Session, tmp_path:
         works = list(gold.scalars(select(Work)))
         assert works
         assert all(w.composer_entity_id == bach.id for w in works)
+
+
+def test_a_works_premiere_survives_promotion(session: Session, tmp_path: Path) -> None:
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                perf_mention(
+                    "w1",
+                    "Goldberg Variations, BWV 988",
+                    "Bach, Johann Sebastian",
+                    {"premiere": {"date": "1741", "place": "Dresden"}},
+                ),
+            ),
+            name="wikidata_works",
+        ),
+    )
+    silver_source = session.scalars(select(Work.premiere_source_id)).one()
+    gold_path = tmp_path / "gold.db"
+
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        work = gold.scalars(select(Work)).one()
+        assert (work.premiere_date, work.premiere_place) == ("1741", "Dresden")
+        assert silver_source is not None
+        assert work.premiere_source_id == silver_source
+
+
+def test_work_identifiers_and_links_survive_promotion(session: Session, tmp_path: Path) -> None:
+    bach = "Bach, Johann Sebastian"
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                mention("Brandenburg Concerto No. 3, BWV 1048", bach, "a1"),
+                mention("Allegro (from Brandenburg Concerto No. 3, BWV 1048)", bach, "a2"),
+            ),
+            name="a",
+        ),
+    )
+    link_works(session)
+    silver_link = session.scalars(select(WorkLink)).one()
+    gold_path = tmp_path / "gold.db"
+
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        link = gold.scalars(select(WorkLink)).one()
+        assert (link.work_id, link.relation, link.target_work_id) == (
+            silver_link.work_id,
+            "part_of",
+            silver_link.target_work_id,
+        )
+        identifier = gold.scalars(select(WorkIdentifier)).one()
+        assert (identifier.work_id, identifier.scheme, identifier.value) == (
+            link.target_work_id,
+            "BWV",
+            "1048",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Genres: the subclass_of hierarchy survives curation (#349)
+# ---------------------------------------------------------------------------
+
+_WALTZ_ID = entity_uuid("genre", "wikidata:Q215")
+_DANCE_ID = entity_uuid("genre", "wikidata:Q316930")
+
+
+def _seed_genres(session: Session, *tags: SourceClaim) -> None:
+    """A kept composer (two work mentions) tagged with ``tags``, and the
+    hierarchy Viennese waltz -> waltz -> dance music."""
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                genre("Q2", "Viennese waltz", ("Q215", "waltz")),
+                genre("Q215", "waltz", ("Q316930", "dance music")),
+                genre("Q316930", "dance music"),
+            ),
+            name="wikidata_genres",
+        ),
+    )
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                person("Strauss, Johann", *tags, external_id="Q1"),
+                mention("The Blue Danube", "Strauss, Johann", "m1"),
+                mention("Tales from the Vienna Woods", "Strauss, Johann", "m2"),
+            ),
+            name="wikidata",
+        ),
+    )
+    refresh_derived(session)
+
+
+def _subclass_edges(gold: Session) -> set[tuple[str, str]]:
+    labels = {e.id: e.label for e in gold.scalars(select(Entity))}
+    return {
+        (labels[c.subject_id], labels[c.object_id])
+        for c in gold.scalars(select(Claim).where(Claim.predicate == "subclass_of"))
+        if c.object_id is not None
+    }
+
+
+def test_promote_keeps_the_subclass_chain_above_a_persons_genre(session: Session, tmp_path: Path) -> None:
+    _seed_genres(session, SourceClaim("has_genre", "genre", "waltz", object_wikidata_id="Q215"))
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        genres = set(gold.scalars(select(Entity.label).where(Entity.kind == "genre")))
+        # the ancestors are kept; the subgenre nobody uses is not
+        assert genres == {"waltz", "dance music"}
+        assert _subclass_edges(gold) == {("waltz", "dance music")}
+
+
+def test_promote_keeps_the_edge_between_two_genres_a_person_both_has(
+    session: Session, tmp_path: Path
+) -> None:
+    """Both are seeded at once; the walk used to keep only the edges that
+    discovered a new entity, and so dropped this one."""
+    _seed_genres(
+        session,
+        SourceClaim("has_genre", "genre", "waltz", object_wikidata_id="Q215"),
+        SourceClaim("has_genre", "genre", "dance music", object_wikidata_id="Q316930"),
+    )
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        assert _subclass_edges(gold) == {("waltz", "dance music")}
+
+
+def test_a_legacy_label_genre_collapses_onto_its_qid_entity(session: Session, tmp_path: Path) -> None:
+    _seed_genres(session, SourceClaim("has_genre", "genre", "Waltz"))
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        strauss = gold.scalars(select(Entity).where(Entity.label == "Strauss, Johann")).one()
+        tags = gold.scalars(
+            select(Claim.object_id).where(Claim.subject_id == strauss.id, Claim.predicate == "has_genre")
+        ).all()
+        assert tags == [_WALTZ_ID]
+        assert gold.scalar(select(Entity).where(Entity.dedup_key == "waltz")) is None
+        assert {e.id for e in gold.scalars(select(Entity).where(Entity.kind == "genre"))} == {
+            _WALTZ_ID,
+            _DANCE_ID,
+        }

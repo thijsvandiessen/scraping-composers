@@ -31,6 +31,7 @@ from .rows import (
     performed_in,
     programmed,
     recording_nodes,
+    work_links,
     work_nodes,
 )
 
@@ -181,7 +182,7 @@ def load_graph(
         _create_nodes(driver, database, ((label, row) for row in rows), stats, batch_size)
     log.info("neo4j: nodes %s", dict(stats.nodes))
 
-    for relationships in (composed_by, performed_in, programmed, claim_relationships):
+    for relationships in (composed_by, work_links, performed_in, programmed, claim_relationships):
         _create_relationships(driver, database, relationships(session, stats.skipped), stats, batch_size)
     log.info("neo4j: relationships %s", dict(stats.relationships))
 

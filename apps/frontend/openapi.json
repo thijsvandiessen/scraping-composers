@@ -204,6 +204,14 @@
             "title": "Id",
             "type": "string"
           },
+          "identifiers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkIdentifierOut"
+            },
+            "title": "Identifiers",
+            "type": "array"
+          },
           "mention_count": {
             "title": "Mention Count",
             "type": "integer"
@@ -258,6 +266,17 @@
             },
             "title": "Proof",
             "type": "array"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
           },
           "work_type": {
             "anyOf": [
@@ -353,8 +372,9 @@
             "title": "Event Type"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "participants": {
             "items": {
@@ -467,8 +487,9 @@
             "title": "Date"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "role": {
             "title": "Role",
@@ -649,8 +670,9 @@
             "title": "Event Type"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "season": {
             "anyOf": [
@@ -854,6 +876,227 @@
         "title": "ConnectionsOut",
         "type": "object"
       },
+      "EnsembleDetail": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Aliases",
+            "type": "array"
+          },
+          "canonical_entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Entity Id"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/ClaimOut"
+            },
+            "title": "Claims",
+            "type": "array"
+          },
+          "concert_count": {
+            "default": 0,
+            "title": "Concert Count",
+            "type": "integer"
+          },
+          "ensemble_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ensemble Type"
+          },
+          "home_city": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "musicbrainz_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Musicbrainz Id"
+          },
+          "part_of": {
+            "items": {
+              "$ref": "#/components/schemas/EntityRef"
+            },
+            "title": "Part Of",
+            "type": "array"
+          },
+          "recording_count": {
+            "default": 0,
+            "title": "Recording Count",
+            "type": "integer"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "wikidata_id",
+          "ensemble_type",
+          "home_city",
+          "canonical_entity_id",
+          "aliases",
+          "musicbrainz_id",
+          "part_of",
+          "claims"
+        ],
+        "title": "EnsembleDetail",
+        "type": "object"
+      },
+      "EnsemblePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EnsembleSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "EnsemblePage",
+        "type": "object"
+      },
+      "EnsembleSummary": {
+        "properties": {
+          "canonical_entity_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonical Entity Id"
+          },
+          "concert_count": {
+            "default": 0,
+            "title": "Concert Count",
+            "type": "integer"
+          },
+          "ensemble_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ensemble Type"
+          },
+          "home_city": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntityRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "recording_count": {
+            "default": 0,
+            "title": "Recording Count",
+            "type": "integer"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "wikidata_id",
+          "ensemble_type",
+          "home_city",
+          "canonical_entity_id"
+        ],
+        "title": "EnsembleSummary",
+        "type": "object"
+      },
       "EntityDetail": {
         "properties": {
           "canonical_entity_id": {
@@ -949,6 +1192,25 @@
         "title": "EntityPage",
         "type": "object"
       },
+      "EntityRef": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "EntityRef",
+        "type": "object"
+      },
       "EntitySummary": {
         "properties": {
           "created_at": {
@@ -977,6 +1239,154 @@
           "created_at"
         ],
         "title": "EntitySummary",
+        "type": "object"
+      },
+      "GenreDetail": {
+        "properties": {
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/GenreRef"
+            },
+            "title": "Children",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "parents": {
+            "items": {
+              "$ref": "#/components/schemas/GenreRef"
+            },
+            "title": "Parents",
+            "type": "array"
+          },
+          "person_count": {
+            "title": "Person Count",
+            "type": "integer"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "wikidata_id",
+          "person_count",
+          "parents",
+          "children"
+        ],
+        "title": "GenreDetail",
+        "type": "object"
+      },
+      "GenrePeoplePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EntitySummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "title": "GenrePeoplePage",
+        "type": "object"
+      },
+      "GenreRef": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "title": "GenreRef",
+        "type": "object"
+      },
+      "GenreSummary": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "person_count": {
+            "title": "Person Count",
+            "type": "integer"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "wikidata_id",
+          "person_count"
+        ],
+        "title": "GenreSummary",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -1191,8 +1601,9 @@
             "title": "Format"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "label": {
             "anyOf": [
@@ -1328,8 +1739,9 @@
             "title": "Format"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "label": {
             "anyOf": [
@@ -1523,8 +1935,9 @@
             "title": "Format"
           },
           "id": {
+            "format": "uuid",
             "title": "Id",
-            "type": "integer"
+            "type": "string"
           },
           "label": {
             "anyOf": [
@@ -1783,10 +2196,34 @@
             ],
             "title": "Composer Label"
           },
+          "derived": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkLinkOut"
+            },
+            "title": "Derived",
+            "type": "array"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "identifiers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkIdentifierOut"
+            },
+            "title": "Identifiers",
+            "type": "array"
+          },
+          "links": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkLinkOut"
+            },
+            "title": "Links",
+            "type": "array"
           },
           "mention_count": {
             "title": "Mention Count",
@@ -1836,12 +2273,34 @@
             ],
             "title": "Premiere Date"
           },
+          "premiere_place": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Premiere Place"
+          },
           "proof": {
             "items": {
               "$ref": "#/components/schemas/WorkProofOut"
             },
             "title": "Proof",
             "type": "array"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
           },
           "work_type": {
             "anyOf": [
@@ -1871,6 +2330,50 @@
           "proof"
         ],
         "title": "WorkDetail",
+        "type": "object"
+      },
+      "WorkIdentifierOut": {
+        "description": "A strong key for a work: a catalogue number (scheme ``BWV``, ``KV``,\n``Hob``...) or an external id (``wikidata``, ``musicbrainz``, ``iswc``).",
+        "properties": {
+          "scheme": {
+            "title": "Scheme",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scheme",
+          "value"
+        ],
+        "title": "WorkIdentifierOut",
+        "type": "object"
+      },
+      "WorkLinkOut": {
+        "description": "A part/arrangement/version relation: ``relation`` is ``part_of``,\n``arrangement_of`` or ``version_of``, read from the derived work.",
+        "properties": {
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "work_id": {
+            "format": "uuid",
+            "title": "Work Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "relation",
+          "work_id",
+          "title"
+        ],
+        "title": "WorkLinkOut",
         "type": "object"
       },
       "WorkPage": {
@@ -2003,6 +2506,14 @@
             "title": "Id",
             "type": "string"
           },
+          "identifiers": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WorkIdentifierOut"
+            },
+            "title": "Identifiers",
+            "type": "array"
+          },
           "mention_count": {
             "title": "Mention Count",
             "type": "integer"
@@ -2050,6 +2561,17 @@
               }
             ],
             "title": "Premiere Date"
+          },
+          "wikidata_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wikidata Id"
           },
           "work_type": {
             "anyOf": [
@@ -2157,6 +2679,23 @@
                 }
               ],
               "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "genre",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Genre"
             }
           }
         ],
@@ -2396,8 +2935,9 @@
             "name": "concert_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Concert Id",
-              "type": "integer"
+              "type": "string"
             }
           }
         ],
@@ -2495,6 +3035,23 @@
               ],
               "title": "Source"
             }
+          },
+          {
+            "in": "query",
+            "name": "genre",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Genre"
+            }
           }
         ],
         "responses": {
@@ -2560,6 +3117,176 @@
           }
         },
         "summary": "Get Conductor"
+      }
+    },
+    "/v1/ensembles": {
+      "get": {
+        "description": "Orchestras, choirs and other groups, with their type and home city.\n\n``anchored=false`` lists the ones no Wikidata item accounts for; with\n``sort=appearances`` the most-credited come first.",
+        "operationId": "ensembles_v1_ensembles_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "anchored",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Anchored"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "label",
+              "pattern": "^(label|appearances)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnsemblePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ensembles"
+      }
+    },
+    "/v1/ensembles/{ensemble_id}": {
+      "get": {
+        "description": "One ensemble: its other names, the groups it is part of, and its claims.",
+        "operationId": "ensemble_detail_v1_ensembles__ensemble_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ensemble_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Ensemble Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnsembleDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ensemble Detail"
       }
     },
     "/v1/entities": {
@@ -2805,6 +3532,157 @@
           }
         },
         "summary": "Entity Connections Route"
+      }
+    },
+    "/v1/genres": {
+      "get": {
+        "description": "The top-level genres (or movements) as facets, each counting the persons\ntagged with it or with any genre below it.",
+        "operationId": "genres_v1_genres_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "genre",
+              "pattern": "^(genre|movement)$",
+              "title": "Kind",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GenreSummary"
+                  },
+                  "title": "Response Genres V1 Genres Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Genres"
+      }
+    },
+    "/v1/genres/{genre_id}": {
+      "get": {
+        "description": "One genre or movement with its direct parents and children.",
+        "operationId": "genre_detail_v1_genres__genre_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "genre_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Genre Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenreDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Genre Detail"
+      }
+    },
+    "/v1/genres/{genre_id}/people": {
+      "get": {
+        "description": "Persons tagged with the genre or any genre below it.",
+        "operationId": "get_genre_people_v1_genres__genre_id__people_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "genre_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Genre Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenrePeoplePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Genre People"
       }
     },
     "/v1/mentions": {
@@ -3100,8 +3978,9 @@
             "name": "recording_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Recording Id",
-              "type": "integer"
+              "type": "string"
             }
           }
         ],
@@ -3198,6 +4077,23 @@
                 }
               ],
               "title": "Source"
+            }
+          },
+          {
+            "in": "query",
+            "name": "genre",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Genre"
             }
           }
         ],

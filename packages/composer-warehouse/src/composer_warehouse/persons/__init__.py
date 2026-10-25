@@ -10,8 +10,8 @@ The pipeline is four layers, each testable on its own:
     names agree, how the years agree — and nothing more.
 ``fellegi_sunter``
     turns a comparison vector into a posterior probability, using m/u
-    parameters fitted by unsupervised EM plus a term-frequency adjustment so a
-    shared rare surname outweighs a shared common one.
+    parameters fitted on automatically labelled pairs plus a term-frequency
+    adjustment so a shared rare surname outweighs a shared common one.
 ``dedupe``
     drives all of that over the warehouse and records the decisions.
 ``cluster``

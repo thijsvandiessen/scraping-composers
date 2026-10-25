@@ -67,8 +67,8 @@ def init_db(engine: Engine) -> sessionmaker[Session]:
 def resync_pk_sequence(session: Session | Connection, table: str, column: str = "id") -> None:
     """Move a serial primary key's sequence past the largest id in the table.
 
-    Bulk inserts that assign integer ids explicitly (the concert and recording
-    derivations number their rows) bypass the sequence, which on Postgres stays
+    Bulk inserts that assign integer ids explicitly (the gold promote copies
+    silver's ids) bypass the sequence, which on Postgres stays
     at 1 — so the next ORM insert collides on the primary key. SQLite has no
     sequences and no such problem, so this is a no-op there.
     """
