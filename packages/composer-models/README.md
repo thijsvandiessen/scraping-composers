@@ -50,6 +50,14 @@ passes over it; curation happens when it is promoted into gold.
   today `wikidata_works` and the ROH's operas). The earliest date wins, a full
   date refines a bare year of the same premiere, and `premiere_source_id` names
   the source that won. House and production premieres never land here.
+- **`work_identifiers`** — a work's strong keys as each source stated them:
+  catalogue numbers (scheme `BWV`, `KV`, `KV6`, `Hob`, `D`...) and external ids
+  (`wikidata`, `musicbrainz`, `iswc`), unique per `(work, scheme, value,
+  source)` and indexed on `(scheme, value)`. `works.catalogue_prefix`/
+  `catalogue_number` keep the title's first one, for display.
+- **`work_links`** — a part, arrangement or version pointing at the work it
+  derives from (`relation` `part_of`/`arrangement_of`/`version_of`, `method`
+  `catalogue`/`wikidata`). Derived state, rebuilt by `link_works`.
 - **`person_matches`** — scored person pairs and review decisions from
   `dedupe-persons`.
 - **`concerts`** and **`recordings`** (with their participants and
@@ -103,7 +111,7 @@ provides the Postgres fixtures the other members use.
 | File | Covers |
 | --- | --- |
 | `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, stable concert/recording UUIDs per kind, source and key, reading a QID back out of a key in either form, and `entity_key` keying genres, movements and ensembles on the QID alone. |
-| `test_db.py` | `init_db` creating every table, an entity round-trip, unbounded scraper-sourced columns, unique key columns, and rejecting a schema name that cannot be escaped. |
+| `test_db.py` | `init_db` creating every table, an entity round-trip, unbounded scraper-sourced columns (`work_identifiers.value` among them), unique key columns, and rejecting a schema name that cannot be escaped. |
 | `test_migrations.py` | The tree having a single head (no database needed). Postgres only: `upgrade head` creating the schema from nothing, and head matching the models. |
 
 This package's tests don't reach `stamp_head` in `alembic_support.py` or the

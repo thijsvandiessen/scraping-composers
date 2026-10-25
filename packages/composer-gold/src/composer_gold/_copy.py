@@ -19,6 +19,8 @@ from composer_models import (
     RecordingWork,
     Source,
     Work,
+    WorkIdentifier,
+    WorkLink,
     WorkTitle,
 )
 from sqlalchemy import Connection, insert, select
@@ -128,8 +130,9 @@ def _gold_composer(
 
 
 def copy_works_titles_mentions(build: GoldBuild, gold: Connection) -> None:
-    """Works, titles, mentions — composer ids remapped, and dropped when the
-    composer didn't survive curation."""
+    """Works, titles, identifiers, links, mentions — composer ids remapped,
+    and dropped when the composer didn't survive curation. Gold keeps every
+    work under its silver id, so identifiers and links copy as they are."""
     gold_entities = build.kept_roots | build.kept_other
     work_rows = [
         {
@@ -170,6 +173,26 @@ def copy_works_titles_mentions(build: GoldBuild, gold: Connection) -> None:
     for i in range(0, len(title_rows), INSERT_BATCH):
         gold.execute(insert(WorkTitle), title_rows[i : i + INSERT_BATCH])
     build.title_count = len(title_rows)
+
+    identifier_rows = [
+        {"id": i.id, "work_id": i.work_id, "scheme": i.scheme, "value": i.value, "source_id": i.source_id}
+        for i in build.silver.execute(select(WorkIdentifier)).scalars()
+    ]
+    for i in range(0, len(identifier_rows), INSERT_BATCH):
+        gold.execute(insert(WorkIdentifier), identifier_rows[i : i + INSERT_BATCH])
+
+    link_rows = [
+        {
+            "id": link.id,
+            "work_id": link.work_id,
+            "relation": link.relation,
+            "target_work_id": link.target_work_id,
+            "method": link.method,
+        }
+        for link in build.silver.execute(select(WorkLink)).scalars()
+    ]
+    for i in range(0, len(link_rows), INSERT_BATCH):
+        gold.execute(insert(WorkLink), link_rows[i : i + INSERT_BATCH])
 
     mention_rows = [
         {

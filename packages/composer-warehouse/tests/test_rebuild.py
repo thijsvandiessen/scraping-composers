@@ -16,6 +16,7 @@ from composer_models import (
     Recording,
     Source,
     Work,
+    WorkLink,
     WorkTitle,
 )
 from composer_models.db import get_engine, init_db
@@ -363,6 +364,30 @@ def test_rebuild_produces_the_genre_set_live_ingest_does(tmp_path: Path) -> None
         keys = {key for _, key, _ in expected}
         assert keys == {"wikidata:Q215", "wikidata:Q316930", "waltz"}
     assert stats.genres_linked == 1
+
+
+def test_rebuild_links_parts_to_their_parent_work(tmp_path: Path) -> None:
+    """Work links are derived state: the rebuild recreates them against the
+    new (randomly numbered) works rather than carrying the old rows over."""
+    bucket = LocalBucket(tmp_path / "bucket")
+    catalogue = FakeSource(
+        records=(
+            mention("Brandenburg Concerto No. 3 in G major, BWV 1048", "Bach, Johann Sebastian", "c1"),
+            mention("Allegro (From Brandenburg Concerto No. 3, BWV 1048)", "Bach, Johann Sebastian", "c2"),
+        ),
+        name="catalogue",
+    )
+    Scraper(catalogue).fetch_to_bucket(bucket)
+    db_path = tmp_path / "silver.db"
+
+    for _ in range(2):
+        stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
+        assert stats.work_links == 1
+    with _session(db_path) as silver:
+        link = silver.scalars(select(WorkLink)).one()
+        parent = silver.get(Work, link.target_work_id)
+        assert parent is not None and parent.canonical_title.startswith("Brandenburg")
+        assert link.relation == "part_of"
 
 
 def test_rebuild_keeps_recordings_from_a_crawl_derived_source(tmp_path: Path) -> None:

@@ -29,6 +29,8 @@ from composer_models import (
     RecordingWork,
     Source,
     Work,
+    WorkIdentifier,
+    WorkLink,
 )
 from composer_models.normalize import wikidata_id
 from sqlalchemy import func, select
@@ -183,7 +185,20 @@ def entity_nodes(session: Session) -> Iterator[tuple[str, Row]]:
         )
 
 
+def _work_identifiers(session: Session) -> dict[Any, list[tuple[str, str]]]:
+    found: dict[Any, set[tuple[str, str]]] = {}
+    for work_id, scheme, value in session.execute(
+        select(WorkIdentifier.work_id, WorkIdentifier.scheme, WorkIdentifier.value)
+    ):
+        found.setdefault(work_id, set()).add((scheme, value))
+    return {work_id: sorted(pairs) for work_id, pairs in found.items()}
+
+
 def work_nodes(session: Session) -> Iterator[Row]:
+    """Work nodes. ``identifiers`` is a list of "scheme value" strings ("BWV
+    1048", "wikidata Q1") -- Neo4j properties can't hold maps -- with the
+    Wikidata id also on ``wikidata_id`` for lookups."""
+    identifiers = _work_identifiers(session)
     rows = session.execute(
         select(
             Work.id,
@@ -200,6 +215,7 @@ def work_nodes(session: Session) -> Iterator[Row]:
         .execution_options(yield_per=_YIELD_PER)
     )
     for work_id, title, work_type, opus, cat_prefix, cat_number, key, number, premiere in rows:
+        pairs = identifiers.get(work_id, [])
         yield _clean(
             {
                 "id": str(work_id),
@@ -211,6 +227,8 @@ def work_nodes(session: Session) -> Iterator[Row]:
                 "musical_key": key,
                 "number": number,
                 "premiere_date": premiere,
+                "wikidata_id": next((value for scheme, value in pairs if scheme == "wikidata"), None),
+                "identifiers": [f"{scheme} {value}" for scheme, value in pairs],
             }
         )
 
@@ -304,6 +322,18 @@ def composed_by(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, 
             skipped.add(f"composer of kind {kind}")
             continue
         yield RelGroup("COMPOSED_BY", "Work", label), _rel(str(work_id), str(composer_id))
+
+
+def work_links(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, Row]]:
+    """(Work)-[:PART_OF|ARRANGEMENT_OF|VERSION_OF {method}]->(Work): a part,
+    arrangement or version pointing at the work it derives from."""
+    rows = session.execute(
+        select(WorkLink.work_id, WorkLink.relation, WorkLink.target_work_id, WorkLink.method)
+        .order_by(WorkLink.work_id, WorkLink.relation, WorkLink.target_work_id)
+        .execution_options(yield_per=_YIELD_PER)
+    )
+    for work_id, relation, target_id, method in rows:
+        yield RelGroup(relation.upper(), "Work", "Work"), _rel(str(work_id), str(target_id), method=method)
 
 
 def performed_in(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, Row]]:

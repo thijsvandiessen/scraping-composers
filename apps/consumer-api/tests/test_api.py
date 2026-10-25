@@ -18,6 +18,7 @@ from composer_schema import EntityDocument, SourceAdapter, SourceClaim
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
+from composer_warehouse.works.links import link_works
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -640,6 +641,49 @@ def test_gold_work_detail_carries_the_premiere(promote_gold: PromoteGold) -> Non
     work_id = gold.get("/v1/works").json()["items"][0]["id"]
     work = gold.get(f"/v1/works/{work_id}").json()
     assert (work["premiere_date"], work["premiere_place"]) == ("1808-12-22", "Theater an der Wien")
+
+
+def test_gold_work_carries_identifiers_links_and_derived_works(promote_gold: PromoteGold) -> None:
+    bach = "Bach, Johann Sebastian"
+    concerto = "Brandenburg Concerto No. 3, BWV 1048"
+    movement = "Allegro (from Brandenburg Concerto No. 3, BWV 1048)"
+    factory = _seeded_factory()
+    with factory() as s:
+        ingest_source(
+            s,
+            FakeSource(
+                records=(
+                    perf_mention("Q1:Q1339", concerto, bach, {"item": "http://www.wikidata.org/entity/Q1"}),
+                    mention(movement, bach, "m2"),
+                ),
+                name="wikidata_works",
+            ),
+        )
+        link_works(s)
+        gold_factory = promote_gold(s)
+    gold = TestClient(create_app("test-gold", lambda: gold_factory))
+
+    by_title = {
+        w["canonical_title"]: w for w in gold.get("/v1/works", params={"q": "Brandenburg"}).json()["items"]
+    }
+    listed = by_title[concerto]
+    assert listed["identifiers"] == [
+        {"scheme": "BWV", "value": "1048"},
+        {"scheme": "wikidata", "value": "Q1"},
+    ]
+    assert listed["wikidata_id"] == "Q1"
+
+    parent = gold.get(f"/v1/works/{listed['id']}").json()
+    part_id = by_title[movement]["id"]
+    assert parent["derived"] == [{"relation": "part_of", "work_id": part_id, "title": movement}]
+    assert parent["links"] == []
+    part = gold.get(f"/v1/works/{part_id}").json()
+    assert part["links"] == [{"relation": "part_of", "work_id": listed["id"], "title": concerto}]
+    assert part["identifiers"] == []  # BWV 1048 is its parent's number, not its own
+
+    composer_id = parent["composer_id"]
+    composer_works = gold.get(f"/v1/composers/{composer_id}/works").json()["items"]
+    assert {w["wikidata_id"] for w in composer_works} == {"Q1", None}
 
 
 def test_work_detail_unknown_id_is_404(client: TestClient) -> None:

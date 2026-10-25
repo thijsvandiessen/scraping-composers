@@ -9,6 +9,8 @@ from composer_models import (
     RecordingWork,
     Source,
     Work,
+    WorkIdentifier,
+    WorkLink,
     WorkTitle,
 )
 from sqlalchemy import ColumnElement, func, or_, select
@@ -22,11 +24,33 @@ from ..schemas import (
     MentionOut,
     MentionPage,
     WorkDetail,
+    WorkIdentifierOut,
+    WorkLinkOut,
     WorkPage,
     WorkProofOut,
     WorkSummary,
 )
 from .common import WORK_PROOF_CAP, mention_url
+
+
+def identifiers_by_work(db: Session, work_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[WorkIdentifierOut]]:
+    """Each work's distinct identifiers (across sources), sorted."""
+    found: dict[uuid.UUID, set[tuple[str, str]]] = {}
+    if work_ids:
+        for work_id, scheme, value in db.execute(
+            select(WorkIdentifier.work_id, WorkIdentifier.scheme, WorkIdentifier.value).where(
+                WorkIdentifier.work_id.in_(work_ids)
+            )
+        ):
+            found.setdefault(work_id, set()).add((scheme, value))
+    return {
+        work_id: [WorkIdentifierOut(scheme=scheme, value=value) for scheme, value in sorted(pairs)]
+        for work_id, pairs in found.items()
+    }
+
+
+def wikidata_id(identifiers: list[WorkIdentifierOut]) -> str | None:
+    return next((i.value for i in identifiers if i.scheme == "wikidata"), None)
 
 
 def source_filter(source: str) -> ColumnElement[bool]:
@@ -140,10 +164,12 @@ def list_works(
         ):
             titles_by_work.setdefault(work_id, []).append(title)
 
+    identifiers = identifiers_by_work(db, work_ids)
     items = []
     for work, composer_label, mention_count in rows:
         aliases = [title for title in titles_by_work.get(work.id, []) if title != work.canonical_title]
         catalogue = f"{work.catalogue_prefix or ''} {work.catalogue_number or ''}".strip() or None
+        work_identifiers = identifiers.get(work.id, [])
         items.append(
             WorkSummary(
                 id=work.id,
@@ -153,6 +179,8 @@ def list_works(
                 work_type=work.work_type,
                 opus_number=work.opus_number,
                 catalogue=catalogue,
+                identifiers=work_identifiers,
+                wikidata_id=wikidata_id(work_identifiers),
                 musical_key=work.musical_key,
                 number=work.number,
                 premiere_date=work.premiere_date,
@@ -249,6 +277,7 @@ def composer_works(
             seen.add(key)
             bucket.append(proof)
 
+    identifiers = identifiers_by_work(db, work_ids)
     items = [
         ComposerWorkOut(
             id=work.id,
@@ -256,6 +285,8 @@ def composer_works(
             work_type=work.work_type,
             opus_number=work.opus_number,
             catalogue=f"{work.catalogue_prefix or ''} {work.catalogue_number or ''}".strip() or None,
+            identifiers=identifiers.get(work.id, []),
+            wikidata_id=wikidata_id(identifiers.get(work.id, [])),
             musical_key=work.musical_key,
             number=work.number,
             premiere_date=work.premiere_date,
@@ -340,6 +371,27 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
         seen.add(key)
         proofs.append(proof)
 
+    work_identifiers = identifiers_by_work(db, [work_id]).get(work_id, [])
+    target = aliased(Work)
+    links = [
+        WorkLinkOut(relation=relation, work_id=other_id, title=title)
+        for relation, other_id, title in db.execute(
+            select(WorkLink.relation, target.id, target.canonical_title)
+            .join(target, target.id == WorkLink.target_work_id)
+            .where(WorkLink.work_id == work_id)
+            .order_by(WorkLink.relation, target.canonical_title)
+        )
+    ]
+    derived = [
+        WorkLinkOut(relation=relation, work_id=other_id, title=title)
+        for relation, other_id, title in db.execute(
+            select(WorkLink.relation, target.id, target.canonical_title)
+            .join(target, target.id == WorkLink.work_id)
+            .where(WorkLink.target_work_id == work_id)
+            .order_by(WorkLink.relation, target.canonical_title)
+        )
+    ]
+
     return WorkDetail(
         id=work.id,
         canonical_title=work.canonical_title,
@@ -348,6 +400,8 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
         work_type=work.work_type,
         opus_number=work.opus_number,
         catalogue=catalogue,
+        identifiers=work_identifiers,
+        wikidata_id=wikidata_id(work_identifiers),
         musical_key=work.musical_key,
         number=work.number,
         premiere_date=work.premiere_date,
@@ -355,4 +409,6 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
         mention_count=mention_count,
         aliases=aliases,
         proof=proofs,
+        links=links,
+        derived=derived,
     )
