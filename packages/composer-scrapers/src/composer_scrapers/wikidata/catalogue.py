@@ -43,8 +43,15 @@ log = logging.getLogger(__name__)
 
 ENTITY = "http://www.wikidata.org/entity/"
 
+# The code's value is required as well as its catalogue: a P528 statement with
+# a P972 qualifier but no value (novalue/somevalue) would put the work in the
+# population while CATALOGUE_QUERY, which needs ``ps:P528``, returns no row for
+# it, and the page would fail its coverage check on every run (#360).
 CATALOGUE_ID_QUERY = """\
-SELECT DISTINCT ?item WHERE { ?item wdt:P86 ?composer ; p:P528 ?code . ?code pq:P972 ?catalogue . }
+SELECT DISTINCT ?item WHERE {
+  ?item wdt:P86 ?composer ; p:P528 ?code .
+  ?code pq:P972 ?catalogue ; ps:P528 ?value .
+}
 """
 
 # The composer is required on every row, so each bound item returns at least
