@@ -65,7 +65,11 @@ identifier naming the set, so a collection and its first piece conflict instead
 of merging; a title giving both a piece's number and its set's keeps the piece's. Besides the title, `works/sources.py` reads
 what a source states elsewhere in the payload: IMSLP's "Opus/Catalogue Number"
 (not its internal `ILB` number), and `wikidata_works`/`wikidata_catalogue`'s
-item QID, catalogue codes, MusicBrainz ids and ISWCs. Henle and Bärenreiter
+item QID, catalogue codes, MusicBrainz ids and ISWCs. A Wikidata catalogue code
+is read by its catalogue item (`stated_catalogue`), so Terry's bare `238/3` is
+`Ty 238/3`, and a code in a catalogue with no known scheme is stored under the
+item itself (`wd:Q16749680`, `c 48`), which two Wikidata items still match on.
+Henle and Bärenreiter
 `catalogue_number`s are edition numbers and are not read. Every identifier a
 mention brings is stored in `work_identifiers` against its work, and the
 matcher's candidates carry them (`works.load_candidates`), so a work found by
@@ -288,9 +292,9 @@ factories) come from `composer_warehouse.testing`.
 
 | File | Covers |
 | --- | --- |
-| `test_work_extract.py` | Extracting catalogue numbers (BWV, K., Op.), key, type and number from titles, including German titles; numbers read for the composer (a bare `K` only for Mozart or Scarlatti), structured catalogue fields, and the part/arrangement/version cues that make a parent's number the parent's, a range as one identifier, and a set dropped when the title also gives its own number. |
+| `test_work_extract.py` | Extracting catalogue numbers (BWV, K., Op.), key, type and number from titles, including German titles; numbers read for the composer (a bare `K` only for Mozart or Scarlatti), structured catalogue fields and pairs a source already normalised (`stated`), and the part/arrangement/version cues that make a parent's number the parent's, a range as one identifier, and a set dropped when the title also gives its own number. |
 | `test_work_matching.py` | Scoring candidates and deciding auto-match, review or create; K and KV as one Köchel number, catalogue and Wikidata conflicts, old and new Köchel kept apart, derived works never matching their parent, a range or list conflicting with a piece inside it (#358), and the pruned candidate search giving exactly what scoring every candidate gives, with a fraction of the title comparisons (#366). |
-| `test_work_identity.py` | Identity end to end (#351): the four Mozart No. 40 titles resolving to one work plus a version linked to it, a Brandenburg movement and arrangement linked to BWV 1048 without merging, an ambiguous parent left unlinked, IMSLP's structured catalogue field and a shared Wikidata item as strong keys, stored identifiers matching in the next run, Wikidata ids normalised, P361 links, `link_works` rebuilding rather than accumulating, and catalogue ranges (#358): pieces linked `part_of` their range rather than merged into it, IMSLP's structured range kept apart from its first piece, and a number inside two sets left unlinked. |
+| `test_work_identity.py` | Identity end to end (#351): the four Mozart No. 40 titles resolving to one work plus a version linked to it, a Brandenburg movement and arrangement linked to BWV 1048 without merging, an ambiguous parent left unlinked, IMSLP's structured catalogue field and a shared Wikidata item as strong keys, stored identifiers matching in the next run, Wikidata ids normalised, Wikidata codes read by their catalogue item (Terry's `238/3`, a `wd:<QID>` fallback two items match on, #361), P361 links, `link_works` rebuilding rather than accumulating, and catalogue ranges (#358): pieces linked `part_of` their range rather than merged into it, IMSLP's structured range kept apart from its first piece, and a number inside two sets left unlinked. |
 
 **People**
 

@@ -2,11 +2,16 @@
 
 import pytest
 from composer_schema.catalogues import (
+    COMPOSERS,
+    UNIVERSAL,
+    WIKIDATA_CATALOGUES,
+    WIKIDATA_OPUS,
     catalogue_members,
     composer_catalogues,
     find_catalogues,
     is_catalogue_set,
     normalize_catalogue,
+    normalize_wikidata_code,
     parse_catalogue,
 )
 
@@ -222,3 +227,166 @@ def test_catalogue_members_expand_a_set() -> None:
     assert catalogue_members("1046") == {"1046"}
     assert is_catalogue_set("1046-1051") and is_catalogue_set("818,819a")
     assert not is_catalogue_set("XVI:52") and not is_catalogue_set("173db")
+
+
+CPE_BACH = "Bach, Carl Philipp Emanuel"
+WF_BACH = "Bach, Wilhelm Friedemann"
+JC_BACH = "Johann Christian Bach"
+CHOPIN = "Chopin, Frédéric"
+
+
+@pytest.mark.parametrize(
+    ("title", "composer", "expected"),
+    [
+        ("Flute Sonata in D major, H.561, Wq.131", CPE_BACH, [("H", "561"), ("Wq", "131")]),
+        ("Polonaise in E-flat minor, F.12", WF_BACH, [("F", "12")]),
+        ("Fantasia, Fk 16", "Wilhelm Friedemann Bach", [("F", "16")]),
+        ("Symphony in D, Warb C 9", JC_BACH, [("Warb", "c9")]),
+        ("Trio Sonata in C major, Z.795", "Purcell, Henry", [("Z", "795")]),
+        ("Missa, LV 1144", "Lassus, Orlande de", [("LV", "1144")]),
+        ("Ad coenam agni providi, LV Anh.1", "Orlando di Lasso", [("LV Anh", "1")]),
+        ("Pange lingua, MH 395", "Haydn, Michael", [("MH", "395")]),
+        ("Waltz in E minor, B.56", CHOPIN, [("B", "56")]),
+        ("Nocturne in C-sharp minor, KK IVa/16", CHOPIN, [("KK", "IVa/16")]),
+        ("Mazurka, KK Anh. Ia/1", CHOPIN, [("KK Anh", "Ia/1")]),
+        ("Der Rosenkavalier, suite, TrV 227d, AV 145", "Strauss, Richard", [("TrV", "227d"), ("AV", "145")]),
+        ("Metamorphosen, AV 142", "Richard Strauß", [("AV", "142")]),
+        ("Lohengrin, WWV 75", "Wagner, Richard", [("WWV", "75")]),
+        ("Piano Concerto No.2, BB 101, Sz. 95", "Béla Bartók", [("BB", "101"), ("Sz", "95")]),
+        ("Symphony No. 8 in C minor, WAB 108", "Anton Bruckner", [("WAB", "108")]),
+        ("Længsel, CNW 356", "Nielsen, Carl", [("CNW", "356")]),
+        ("Missa votiva, ZWV 18", "Zelenka, Jan Dismas", [("ZWV", "18")]),
+        ("Overture, GWV 413", "Graupner, Christoph", [("GWV", "413")]),
+        ("Cello Sonata, FP 143", "Poulenc, Francis", [("FP", "143")]),
+        ("In the Mists, JW VIII/22", "Leoš Janáček", [("JW", "VIII/22")]),
+        ("Hudba ke kroužení kužely, JW 8/13", "Janáček, Leoš", [("JW", "VIII/13")]),
+    ],
+)
+def test_composer_scoped_catalogues(title: str, composer: str, expected: list[tuple[str, str]]) -> None:
+    assert pairs(title, composer) == expected
+
+
+@pytest.mark.parametrize(
+    ("title", "composer"),
+    [
+        ("Prelude, H. 88", BACH),  # Helm is C.P.E.'s, not his father's
+        ("Toccata, F 7.32", "Frescobaldi, Girolamo"),  # Falck is W.F. Bach's
+        ("Sonata, Wq.54", "Gluck, Christoph Willibald"),  # Wotquenne catalogued Gluck too
+        ("Trio, Z 12", "Purcell, Daniel"),
+        ("Cantata, LV 16", "Zachow, Friedrich Wilhelm"),
+        ("Symphony, MH 12", "Haydn, Joseph"),
+        ("Waltz, B. 13", "Pleyel, Ignaz"),
+        ("Polka, TrV 12", "Strauss, Johann"),
+        ("Song, CNW 12", "Nielsen, Ludolf"),
+    ],
+)
+def test_composer_scoped_letters_mean_nothing_for_anyone_else(title: str, composer: str) -> None:
+    assert pairs(title, composer) == []
+
+
+def test_kk_is_kobylanska_for_chopin_and_kirkpatrick_for_scarlatti() -> None:
+    assert pairs("Sonata, KK 12", SCARLATTI) == [("Kk", "12")]
+    assert pairs("Polonaise, KK IVa/1", CHOPIN) == [("KK", "IVa/1")]
+
+
+def test_the_bach_sons_are_told_apart_by_given_name() -> None:
+    assert composer_catalogues(CPE_BACH) != composer_catalogues(WF_BACH)
+    assert composer_catalogues(JC_BACH) is not None
+    assert composer_catalogues(BACH) is None
+    assert composer_catalogues("Bach, Johann Christoph Friedrich") is None
+
+
+def test_purcells_z_range_is_one_set() -> None:
+    assert parse_catalogue("Z.802-811", "Purcell, Henry") == {("Z", "802-811")}
+    assert pairs("Fantazias, Z.732-747, 752", "Henry Purcell") == [("Z", "732-747,752")]
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("Wq 117:39", ("Wq", "117/39")),
+        ("Wq.118/6", ("Wq", "118/6")),
+        ("Wq.89.3", ("Wq", "89/3")),
+        ("Wq 202:C1", ("Wq", "202/c1")),
+        ("Wq 197:1-30", ("Wq", "197/1-30")),
+        ("H 542.5", ("H", "542.5")),
+        ("H.780.1-2", ("H", "780.1-2")),
+        ("BR-CPEB C 48.1", ("BR-CPEB", "c48.1")),
+        ("BR‑CPEB Dp 4", ("BR-CPEB", "dp4")),
+    ],
+)
+def test_cpe_bach_numbers_within_a_collection(field: str, expected: tuple[str, str]) -> None:
+    assert parse_catalogue(field, CPE_BACH) == {expected}
+
+
+def test_a_dotted_number_elsewhere_is_its_work() -> None:
+    assert pairs("Prelude, BWV 846.2") == [("BWV", "846")]
+
+
+def test_a_letter_that_is_no_reference_does_not_hide_the_one_after_it() -> None:
+    assert pairs("5. Quartett in F KV 158", MOZART) == [("KV", "158")]
+    assert pairs("Messe in F D 105", "Schubert, Franz") == [("D", "105")]
+    assert pairs("Presto, H/K WoO 5,2", "Schumann, Robert") == [("WoO", "5")]
+
+
+def test_a_range_with_a_non_breaking_hyphen_is_a_range() -> None:
+    assert parse_catalogue("BWV 1046‑1051", BACH) == {("BWV", "1046-1051")}
+
+
+@pytest.mark.parametrize(
+    ("code", "item", "short", "composer", "expected"),
+    [
+        # a catalogue item with no short name, for any composer
+        ("238/3", "Q139766427", None, JC_BACH, (("Ty", "238/3"),)),
+        ("345/1", "Q139766427", None, "Wilhelm Friedrich Ernst Bach", (("Ty", "345/1"),)),
+        ("545", "Q138770768", None, BACH, (("H", "545"),)),
+        # the Köchel editions: plain numbers are KV, lettered ones KV6
+        ("87", "Q22338962", None, MOZART, (("KV", "87"),)),
+        ("74a", "Q66069477", None, MOZART, (("KV6", "74a"),)),
+        ("173dB", "Q22340538", None, MOZART, (("KV6", "173db"),)),
+        ("K. 184/161a", "Q162478", "K.", MOZART, (("KV", "184"), ("KV6", "161a"))),
+        # the item decides over a letter the code shares with another catalogue
+        ("H 35", "Q139309403", "BR-CPEB", "Carl Philipp Emanuel Bach", (("BR-CPEB", "h35"),)),
+        ("H 88", "Q138770768", None, "Carl Philipp Emanuel Bach", (("H", "88"),)),
+        ("C 48.1", "Q139309403", "BR-CPEB", "Carl Philipp Emanuel Bach", (("BR-CPEB", "c48.1"),)),
+        ("XC 3‑5", "Q139743120", "Warb", MOZART, (("Warb", "xc3-5"),)),
+        ("KK IIb/3", "Q16747642", "KK", CHOPIN, (("KK", "IIb/3"),)),
+        ("VI/18", "Q136745429", None, "Leoš Janáček", (("JW", "VI/18"),)),
+        ("626", "Q203664", None, "Henry Purcell", (("Z", "626"),)),
+        # a code stated in another catalogue than its item is read as written
+        ("TrV 209", "Q26160336", "AV", "Richard Strauss", (("TrV", "209"),)),
+        # no item: read as a title would be
+        ("BB 101", None, None, "Béla Bartók", (("BB", "101"),)),
+        ("550", None, "KV", MOZART, (("KV", "550"),)),
+    ],
+)
+def test_wikidata_codes_are_read_by_their_catalogue_item(
+    code: str, item: str | None, short: str | None, composer: str, expected: tuple[tuple[str, str], ...]
+) -> None:
+    assert normalize_wikidata_code(code, item, short, composer) == expected
+
+
+@pytest.mark.parametrize(
+    ("code", "item", "expected"),
+    [
+        ("C 48", "Q16749680", (("wd:Q16749680", "c 48"),)),  # Chomiński
+        ("9978452411", "Q51796663", (("wd:Q51796663", "9978452411"),)),  # SACEM
+        ("54-59", "Q1", (("wd:Q1", "54-59"),)),  # a range stays a set
+        ("960602-001", "Q54959446", (("wd:Q54959446", "960602 001"),)),  # but this is no range
+        ("R. op. 243", "Q112328324", (("wd:Q112328324", "r. op. 243"),)),  # Rinaldi, not an opus
+        ("P. deest", "Q112328398", ()),  # not in the catalogue: nothing to match on
+        ("Op. 32", WIKIDATA_OPUS, (("op", "32"),)),
+        ("deest", None, ()),
+    ],
+)
+def test_a_wikidata_code_in_an_unknown_catalogue_keeps_the_item_as_its_scheme(
+    code: str, item: str | None, expected: tuple[tuple[str, str], ...]
+) -> None:
+    assert normalize_wikidata_code(code, item, None, "Antonio Vivaldi") == expected
+
+
+def test_the_wikidata_map_names_only_schemes_the_parser_knows() -> None:
+    known = {scheme.code for scheme in UNIVERSAL} | {
+        scheme.code for entry in COMPOSERS for scheme in entry.schemes
+    }
+    assert {scheme.code for scheme in WIKIDATA_CATALOGUES.values()} <= known
