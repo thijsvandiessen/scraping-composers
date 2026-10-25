@@ -1,9 +1,13 @@
-"""Orchestras and choirs, from the Wikidata Query Service.
+"""Orchestras, choirs, string quartets and opera companies, from the Wikidata
+Query Service.
 
 The population is every item that is an instance of (a subclass of) one of
-``ENSEMBLE_CLASSES``. It is paged exactly like the composer population (see
-the ``query`` module): one cheap id-list query, then VALUES batches, each
-batch's single-valued answer checked for coverage.
+``ENSEMBLE_CLASSES``, plus the plain "musical group"/"musical ensemble" items
+with a classical signal (``MUSICAL_GROUPS``): many major orchestras, the
+London and Royal Philharmonic or the Budapest Symphony, are typed only that
+way (#363). It is paged exactly like the composer population (see the
+``query`` module): cheap id-list queries, then VALUES batches, each batch's
+single-valued answer checked for coverage.
 
 What an ensemble record is for is *anchoring*: the warehouse keys an ensemble
 with a QID on that QID alone, and folds the name-keyed ensembles every concert
@@ -35,14 +39,43 @@ from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid,
 log = logging.getLogger(__name__)
 
 #: Wikidata class -> ensemble type. The population is every instance of a
-#: subclass of one of these. Deliberately not "musical group" (Q215380): that
-#: is every rock band on Wikidata, hundreds of thousands of items none of the
-#: sources credit. Chamber ensembles and opera companies are typed from their
-#: names until their classes are pinned against live Wikidata.
+#: subclass of one of these (live, 2026-10: about 5,800 orchestras, 4,100
+#: choirs, 500 string quartets, 300 opera companies and a few dozen chamber
+#: ensembles). Deliberately not "musical group" (Q215380) as a class: its
+#: subclass tree is every rock band on Wikidata, 115,000 items none of the
+#: sources credit; see ``MUSICAL_GROUPS``.
 ENSEMBLE_CLASSES: dict[str, str] = {
     "Q42998": "orchestra",
     "Q131186": "choir",
+    "Q207338": "chamber_ensemble",  # string quartet
+    "Q9390516": "chamber_ensemble",  # chamber ensemble (instrumentalists and singers)
+    "Q19191604": "chamber_ensemble",  # chamber music ensemble (instrumentalists only)
+    "Q20819922": "opera_company",
 }
+
+#: "musical group" and "musical ensemble". A *direct* instance of one is in the
+#: population only with a classical signal: a genre (P136) under
+#: ``CLASSICAL_GENRES``, or no genre at all and a name cue (``NAME_CUES``).
+#: Direct only, so the subclasses (rock band, boy band, ...) stay out. These
+#: classes give no type; the name does.
+MUSICAL_GROUPS = ("Q215380", "Q2088357")
+
+#: Classical music and opera: a musical group whose genre is one of these or a
+#: subclass of one is a classical ensemble.
+CLASSICAL_GENRES = ("Q9730", "Q1344")
+
+#: Words in a label or alias, any language, that mark a genre-less musical
+#: group as a classical ensemble. The search index matches whole words, so the
+#: German compounds are listed whole. Not "trio" or "quintet": on a group with
+#: no genre those are mostly jazz combos.
+NAME_CUES = (
+    "orchestra", "orchester", "orchestre", "orquesta", "orkest", "orkiestra", "orkestr", "orchestr",
+    "zenekar", "philharmonic", "philharmoniker", "philharmonie", "filharmonie", "filharmonia",
+    "filarmonica", "sinfonieorchester", "symphonieorchester", "kammerorchester", "staatsopernorchester",
+    "staatskapelle", "symphony", "sinfonia", "sinfonietta", "choir", "chor", "chorus", "chœur", "choeur",
+    "coro", "koor", "kórus", "kammerchor", "rundfunkchor", "knabenchor", "quartet", "quartett", "quatuor",
+    "quartetto", "cuarteto", "kvartet", "kwartet", "kvartett", "consort", "collegium", "cappella", "capella",
+)  # fmt: skip
 
 #: Which type wins when an item is an instance of several classes: a choir that
 #: is also filed as an orchestra is a choir.
@@ -75,6 +108,44 @@ SELECT DISTINCT ?item WHERE {{
 }}
 """
 
+# Musical groups with a classical genre, walked the same way round: the genre
+# subclasses first, then the items filed under them, then the class test on
+# each bound item. About 450 items in two to three seconds.
+GENRE_GROUP_ID_QUERY = f"""\
+SELECT DISTINCT ?item WHERE {{
+  hint:Query hint:optimizer "None" .
+  VALUES ?genreRoot {{ {_values(list(CLASSICAL_GENRES))} }}
+  VALUES ?group {{ {_values(list(MUSICAL_GROUPS))} }}
+  ?genre wdt:P279* ?genreRoot .
+  ?item wdt:P136 ?genre .
+  ?item wdt:P31 ?group .
+}}
+"""
+
+# Genre-less musical groups with a name cue. Scanning the labels of all
+# 115,000 musical groups (a REGEX on rdfs:label) runs past the 60 s limit, so
+# this asks the search index instead: one ``haswbstatement:P31=<group>
+# inlabel:<cue>`` search per pair, which matches labels and aliases in every
+# language. About 2,000 items in 20-25 seconds. A group with any genre is left
+# to GENRE_GROUP_ID_QUERY: one whose genres are none of the classical ones is
+# a rock or jazz band, whatever it is called.
+NAME_GROUP_ID_QUERY = f"""\
+SELECT DISTINCT ?item WHERE {{
+  VALUES ?group {{ {" ".join(f'"{group}"' for group in MUSICAL_GROUPS)} }}
+  VALUES ?cue {{ {" ".join(f'"{cue}"' for cue in NAME_CUES)} }}
+  BIND(CONCAT("haswbstatement:P31=", ?group, " inlabel:", ?cue) AS ?search)
+  SERVICE wikibase:mwapi {{
+    bd:serviceParam wikibase:endpoint "www.wikidata.org" ;
+                    wikibase:api "Search" ;
+                    mwapi:srsearch ?search ;
+                    mwapi:srlimit "max" .
+    ?title wikibase:apiOutput mwapi:title .
+  }}
+  BIND(IRI(CONCAT(STR(wd:), ?title)) AS ?item)
+  FILTER NOT EXISTS {{ ?item wdt:P136 ?genre . }}
+}}
+"""
+
 # The single-valued fields. Every pattern besides VALUES is OPTIONAL, so each
 # bound item comes back at least once and the page is checked for coverage.
 # P159 is the headquarters; when it is not itself a settlement its P131 is.
@@ -96,13 +167,18 @@ WHERE {{
 # for why not OPTIONALs): the population classes the item falls under, its
 # names, and the groups it is part of. Labels and aliases take a branch each:
 # an ``rdfs:label|skos:altLabel`` alternation inside a UNION branch crashes
-# Blazegraph with a 500 (#359).
+# Blazegraph with a 500 (#359). A label brings its language too, for the
+# display name of an item with no en/mul label.
 ENSEMBLE_MULTI_QUERY = """\
-SELECT ?item ?root ?name ?partOf ?partOfLabel
+SELECT ?item ?root ?name ?nameLang ?partOf ?partOfLabel
 WHERE {{
   VALUES ?item {{ {values} }}
   {{ VALUES ?root {{ {classes} }} ?item wdt:P31/wdt:P279* ?root . }}
-  UNION {{ ?item rdfs:label ?name . FILTER(LANG(?name) IN ({name_languages})) }}
+  UNION {{
+    ?item rdfs:label ?name .
+    FILTER(LANG(?name) IN ({name_languages}))
+    BIND(LANG(?name) AS ?nameLang)
+  }}
   UNION {{ ?item skos:altLabel ?name . FILTER(LANG(?name) IN ({name_languages})) }}
   UNION {{ ?item wdt:P361 ?partOf . }}
   SERVICE wikibase:label {{ bd:serviceParam wikibase:language "{languages}" . }}
@@ -111,8 +187,15 @@ WHERE {{
 
 
 def _fetch_ensemble_qids(session: SourceSession) -> list[str]:
-    """Every ensemble QID, numerically ordered."""
-    qids = {_qid(row) for row in _run_query(session, ENSEMBLE_ID_QUERY, "ensemble id list")}
+    """Every ensemble QID, numerically ordered: the population classes'
+    instances and the musical groups with a classical genre or name."""
+    qids: set[str] = set()
+    for query, desc in (
+        (ENSEMBLE_ID_QUERY, "ensemble id list"),
+        (GENRE_GROUP_ID_QUERY, "classical-genre musical group ids"),
+        (NAME_GROUP_ID_QUERY, "classical-name musical group ids"),
+    ):
+        qids.update(_qid(row) for row in _run_query(session, query, desc))
     return sorted(qids, key=lambda qid: (len(qid), qid))
 
 
@@ -158,8 +241,8 @@ def _named(row: dict[str, Any], var: str) -> tuple[str, str] | None:
 
 
 def _fold_ensemble_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Group rows by QID: label, class roots, names, home cities, part-of
-    targets and MusicBrainz ids."""
+    """Group rows by QID: label, class roots, names, labels by language, home
+    cities, part-of targets and MusicBrainz ids."""
     items: dict[str, dict[str, Any]] = {}
     for row in rows:
         item = items.setdefault(
@@ -168,6 +251,7 @@ def _fold_ensemble_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
                 "label": _literal(row, "itemLabel") or "",
                 "classes": set(),
                 "names": set(),
+                "labels": {},
                 "cities": set(),
                 "part_of": set(),
                 "musicbrainz": set(),
@@ -177,6 +261,8 @@ def _fold_ensemble_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
             item["classes"].add(root)
         if (name := _literal(row, "name")) is not None:
             item["names"].add(name)
+            if (lang := _literal(row, "nameLang")) is not None:
+                item["labels"][lang] = name
         if (part_of := _named(row, "partOf")) is not None:
             item["part_of"].add(part_of)
         if (musicbrainz := _literal(row, "musicbrainz")) is not None:
@@ -196,6 +282,17 @@ def ensemble_type(classes: set[str], label: str) -> str:
         if candidate in types:
             return candidate
     return ensemble_type_from_name(label) or "other"
+
+
+def _display_label(item: dict[str, Any]) -> str | None:
+    """The en/mul label the label service gave, else the label in the first of
+    ``NAME_LANGUAGES`` the item has one in (a third of the items have names
+    only in German, French, Czech, ..., #363), else None."""
+    label: str = item["label"]
+    if label and not _BARE_QID.match(label):
+        return label
+    labels: dict[str, str] = item["labels"]
+    return next((labels[lang] for lang in NAME_LANGUAGES if lang in labels), None)
 
 
 def _distinct_names(label: str, names: set[str]) -> list[str]:
@@ -218,8 +315,8 @@ def _documents_from_rows(
     ``raw``."""
     documents: list[EntityDocument] = []
     for qid, item in _fold_ensemble_rows(rows).items():
-        label: str = item["label"]
-        if not label or _BARE_QID.match(label):
+        label = _display_label(item)
+        if label is None:
             log.debug("skipping %s: no label", qid)
             continue
         kind_of = ensemble_type(item["classes"], label)
@@ -269,7 +366,8 @@ class WikidataEnsemblesAdapter(HttpSourceAdapter[EntityDocument]):
     timeout_s = TIMEOUT_S
 
     def scrape(self, session: SourceSession, max_pages: int | None = None) -> Iterator[EntityDocument]:
-        """Yield every orchestra and choir on Wikidata. ``max_pages`` caps the
+        """Yield every orchestra, choir, string quartet and opera company on
+        Wikidata, and the musical groups with a classical genre or name. ``max_pages`` caps the
         number of batches, for test runs."""
         qids = _fetch_ensemble_qids(session)
         if not qids:
