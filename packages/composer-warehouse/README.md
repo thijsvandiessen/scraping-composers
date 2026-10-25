@@ -211,7 +211,12 @@ doesn't depend on ingest order; a label two QIDs share links nothing.
 QID-keyed vs label-only entities, how many have a parent, the top-level QIDs
 (`composer_models.genres`) missing from silver, and the **orphans** — entities
 with no `subclass_of` path to a top-level genre — ranked by how many persons
-they tag.
+they tag. Musical forms (a `genre_type` claim of `musical form`: "symphony",
+"concerto", "song") have no such path either, because Wikidata files them
+under "composed musical work" rather than a genre; they are a separate axis,
+not a gap, so the report counts and ranks them apart from the orphans. It also
+gives the **reach**: the share of distinct person tags on an entity with a
+path to a top level.
 
 ## Derived state
 
@@ -312,7 +317,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, and ids derived from source + key. |
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |
 | `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, work links recreated on every rebuild, and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
-| `test_genres.py` | Genres and movements keyed on their QID across label changes, the record and claim paths meeting on one entity, label keys without a QID, linking label-only genres by label or alias (and not when ambiguous), relinking from scratch, the same genre set for any ingest order, and the orphan report's counts and ranking. |
+| `test_genres.py` | Genres and movements keyed on their QID across label changes, the record and claim paths meeting on one entity, label keys without a QID, linking label-only genres by label or alias (and not when ambiguous), relinking from scratch, the same genre set for any ingest order, and the orphan report's counts and ranking, musical forms counted apart from the orphans, and the share of person tags reached. |
 | `test_postgres_target.py` | Postgres only: the schema swap, readers across it, the manifest table, and the locks that keep a rebuild and a reader apart. |
 
 `ingestion/runner.py`'s `create_run` has no test here; the admin API, its only
