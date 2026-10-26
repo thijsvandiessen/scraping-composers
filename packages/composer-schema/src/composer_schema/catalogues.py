@@ -198,6 +198,15 @@ COMPOSERS: tuple[ComposerCatalogues, ...] = (
     ComposerCatalogues(surname="janacek", schemes=(CatalogueScheme("JW", ("jw",)),)),
 )
 
+#: Every catalogue scheme :func:`normalize_catalogue` can produce: the
+#: universal and composer-specific catalogues, plus ``KV6`` for sixth-edition
+#: Köchel numbers.
+CATALOGUE_SCHEMES: frozenset[str] = frozenset(
+    {"KV6"}
+    | {scheme.code for scheme in UNIVERSAL}
+    | {scheme.code for entry in COMPOSERS for scheme in entry.schemes}
+)
+
 #: Wikidata's catalogue items (the P972 qualifier of a P528 code) and the
 #: scheme their codes are numbers in, checked against WDQS on 2026-10-25. The
 #: Köchel editions all read as ``KV``, which files a lettered number under
@@ -411,7 +420,7 @@ _LIST_SEP = r"\s*,\s+|\s*&\s*|\s+(?:and|und|et)\s+"
 _ITEM = re.compile(rf"(?P<start>.+?)(?:(?:{_RANGE_SEP})(?P<end>\d+))?$", re.I | re.S)
 _LIST_SPLIT = re.compile(rf"(?:{_LIST_SEP})(?=\d)", re.I)
 _MEMBER = re.compile(r"^(?P<head>.*?)(?P<n>\d+)(?P<suffix>[a-z]*)$")
-_RUN = re.compile(r"^(?P<head>.*?)(?P<start>\d+)-(?P<end>\d+)$")
+_RUN = re.compile(r"^(?P<start>[^-]+)-(?P<end>\d+)$")
 _YEAR = re.compile(r"^(?:1[5-9]|20)\d\d$")
 
 
@@ -497,15 +506,16 @@ def is_catalogue_set(value: str) -> bool:
 
 def catalogue_members(value: str) -> frozenset[str]:
     """The single values a catalogue value holds: ``{"40:2", ..., "40:13"}``
-    for ``40:2-13``, ``{value}`` for a single number."""
+    for ``40:2-13``, ``{value}`` for a single number (or a range wider than
+    :data:`MAX_RANGE`)."""
     members: set[str] = set()
     for item in value.split(","):
         m = _RUN.match(item)
-        if m is None:
+        run = _range_members(m.group("start"), m.group("end")) if m is not None else None
+        if run is None:
             members.add(item)
         else:
-            head = m.group("head")
-            members.update(f"{head}{n}" for n in range(int(m.group("start")), int(m.group("end")) + 1))
+            members.update(run)
     return frozenset(members)
 
 

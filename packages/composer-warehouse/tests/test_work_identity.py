@@ -11,6 +11,7 @@ from composer_warehouse.ingestion import new_work
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
 from composer_warehouse.works import Candidate, extract_features
 from composer_warehouse.works.links import _range_links, link_works  # pyright: ignore[reportPrivateUsage]
+from composer_warehouse.works.schemes import holds_sets
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -313,10 +314,15 @@ def test_a_number_inside_overlapping_sets_links_to_neither(session: Session) -> 
 
 def test_an_external_id_with_hyphens_is_no_range() -> None:
     """A MusicBrainz id reads like ``...-799131026480``; taken as a range it
-    would enumerate billions of members (seen on the 2026-10-25 silver)."""
+    would enumerate billions of members (seen on the 2026-10-25 silver, #378)."""
+    assert holds_sets("BWV") and holds_sets("KV6") and holds_sets("WoO")
+    assert not (holds_sets("musicbrainz") or holds_sets("wd:Q1") or holds_sets("op") or holds_sets("other"))
     mbid = ("musicbrainz", "4dad1f72-5f8d-3a63-ae31-799131026480")
-    holder = Candidate(uuid.uuid4(), replace(extract_features("Symphony"), identifiers=frozenset({mbid})))
-    single = frozenset({("musicbrainz", "799131026470")})
+    oversized = ("BWV", "1-10000")
+    holder = Candidate(
+        uuid.uuid4(), replace(extract_features("Symphony"), identifiers=frozenset({mbid, oversized}))
+    )
+    single = frozenset({("musicbrainz", "799131026470"), ("BWV", "500")})
     piece = Candidate(uuid.uuid4(), replace(extract_features("Piece"), identifiers=single))
     found: dict[tuple[uuid.UUID, str, uuid.UUID], str] = {}
     assert _range_links([holder, piece], found) == 0

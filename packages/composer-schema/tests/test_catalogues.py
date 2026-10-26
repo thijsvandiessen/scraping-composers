@@ -2,7 +2,9 @@
 
 import pytest
 from composer_schema.catalogues import (
+    CATALOGUE_SCHEMES,
     COMPOSERS,
+    MAX_RANGE,
     UNIVERSAL,
     WIKIDATA_CATALOGUES,
     WIKIDATA_OPUS,
@@ -225,6 +227,11 @@ def test_catalogue_members_expand_a_set() -> None:
     assert catalogue_members("40:2-4") == {"40:2", "40:3", "40:4"}
     assert catalogue_members("894-896,903a") == {"894", "895", "896", "903a"}
     assert catalogue_members("1046") == {"1046"}
+    assert len(catalogue_members(f"1-{1 + MAX_RANGE}")) == MAX_RANGE + 1
+    assert catalogue_members(f"1-{2 + MAX_RANGE}") == {f"1-{2 + MAX_RANGE}"}
+    assert catalogue_members("825-4") == {"825-4"}
+    mbid = "4dad1f72-5f8d-3a63-ae31-799131026480"
+    assert catalogue_members(mbid) == {mbid}
     assert is_catalogue_set("1046-1051") and is_catalogue_set("818,819a")
     assert not is_catalogue_set("XVI:52") and not is_catalogue_set("173db")
 
@@ -389,4 +396,5 @@ def test_the_wikidata_map_names_only_schemes_the_parser_knows() -> None:
     known = {scheme.code for scheme in UNIVERSAL} | {
         scheme.code for entry in COMPOSERS for scheme in entry.schemes
     }
+    assert CATALOGUE_SCHEMES == known | {"KV6"}
     assert {scheme.code for scheme in WIKIDATA_CATALOGUES.values()} <= known
