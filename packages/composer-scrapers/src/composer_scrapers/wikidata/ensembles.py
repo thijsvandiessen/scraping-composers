@@ -25,12 +25,12 @@ birth places are (#352), so an orchestra's Vienna is the entity the
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from datetime import UTC, datetime
 from typing import Any
 
 from composer_http import SourceSession
-from composer_schema import ensemble_type_from_name
+from composer_schema import CLASSICAL_NAME_CUES, ensemble_type_from_name
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
 from .parse import _BARE_QID, BASE_URL, _literal
@@ -55,31 +55,44 @@ ENSEMBLE_CLASSES: dict[str, str] = {
 
 #: "musical group" and "musical ensemble". A *direct* instance of one is in the
 #: population only with a classical signal: a genre (P136) under
-#: ``CLASSICAL_GENRES``, or no genre at all and a name cue (``NAME_CUES``).
-#: Direct only, so the subclasses (rock band, boy band, ...) stay out. These
-#: classes give no type; the name does.
+#: ``CLASSICAL_GENRES``, or a name cue (``NAME_CUES``) and no genre outside
+#: them. Direct only, so the subclasses (rock band, boy band, ...) stay out.
+#: These classes give no type; the names do.
 MUSICAL_GROUPS = ("Q215380", "Q2088357")
 
-#: Classical music and opera: a musical group whose genre is one of these or a
-#: subclass of one is a classical ensemble.
-CLASSICAL_GENRES = ("Q9730", "Q1344")
+#: Classical music, opera and choral music: a musical group whose genre is one
+#: of these or a subclass of one is a classical ensemble. Early music and
+#: contemporary classical music sit under classical music already; film score
+#: does not, and its tree is anime and image songs (live, 2026-10).
+CLASSICAL_GENRES = ("Q9730", "Q1344", "Q1076513")
 
-#: Words in a label or alias, any language, that mark a genre-less musical
-#: group as a classical ensemble. The search index matches whole words, so the
-#: German compounds are listed whole. Not "trio" or "quintet": on a group with
-#: no genre those are mostly jazz combos.
-NAME_CUES = (
-    "orchestra", "orchester", "orchestre", "orquesta", "orkest", "orkiestra", "orkestr", "orchestr",
-    "zenekar", "philharmonic", "philharmoniker", "philharmonie", "filharmonie", "filharmonia",
-    "filarmonica", "sinfonieorchester", "symphonieorchester", "kammerorchester", "staatsopernorchester",
-    "staatskapelle", "symphony", "sinfonia", "sinfonietta", "choir", "chor", "chorus", "chœur", "choeur",
-    "coro", "koor", "kórus", "kammerchor", "rundfunkchor", "knabenchor", "quartet", "quartett", "quatuor",
-    "quartetto", "cuarteto", "kvartet", "kwartet", "kvartett", "consort", "collegium", "cappella", "capella",
-)  # fmt: skip
+#: "Art music": a genre that does not make a name-cued group a non-classical
+#: one. The item itself only, not its subclasses: those are gamelan, qawwali
+#: and free jazz.
+NEUTRAL_GENRE = "Q1583807"
 
-#: Which type wins when an item is an instance of several classes: a choir that
-#: is also filed as an orchestra is a choir.
+#: Words in a label or alias, any language, that mark a musical group with no
+#: other genre as a classical ensemble: composer_schema's list, so every word
+#: that admits a group also types it.
+NAME_CUES = tuple(CLASSICAL_NAME_CUES)
+
+#: Which type wins when an item is an instance of several classes. Chamber
+#: ensemble first: of the four items (live, 2026-10) also filed as an
+#: orchestra, two are string quartets and one a new-music ensemble, and no
+#: choir reaches a chamber class. A choir also filed as an orchestra is a choir.
 TYPE_PRIORITY = ("chamber_ensemble", "choir", "orchestra", "opera_company")
+
+#: The fewest ids each id query may answer: about half its live count
+#: (2026-10). Wikidata only grows these populations, so a shorter answer lost
+#: a slice on the way (#181), and anchor-ensembles would unlink every
+#: ensemble in it. The name query's floor counts its raw search hits: the
+#: search service answers a failed search with an empty 200.
+MIN_IDS = {"class": 5_000, "genre": 250, "name": 1_000}
+
+#: How often the name query is asked when a search comes back short of its own
+#: hit count: the search API's continuation is not deterministic, and a run
+#: now and then drops an item across a page boundary.
+NAME_QUERY_ATTEMPTS = 4
 
 #: Wikidata's "human settlement": a headquarters that is one is the home city
 #: itself; anything else (a concert hall, a district) is read through its P131.
@@ -110,7 +123,7 @@ SELECT DISTINCT ?item WHERE {{
 
 # Musical groups with a classical genre, walked the same way round: the genre
 # subclasses first, then the items filed under them, then the class test on
-# each bound item. About 450 items in two to three seconds.
+# each bound item. About 580 items in two to eight seconds.
 GENRE_GROUP_ID_QUERY = f"""\
 SELECT DISTINCT ?item WHERE {{
   hint:Query hint:optimizer "None" .
@@ -122,15 +135,18 @@ SELECT DISTINCT ?item WHERE {{
 }}
 """
 
-# Genre-less musical groups with a name cue. Scanning the labels of all
-# 115,000 musical groups (a REGEX on rdfs:label) runs past the 60 s limit, so
-# this asks the search index instead: one ``haswbstatement:P31=<group>
-# inlabel:<cue>`` search per pair, which matches labels and aliases in every
-# language. About 2,000 items in 20-25 seconds. A group with any genre is left
-# to GENRE_GROUP_ID_QUERY: one whose genres are none of the classical ones is
-# a rock or jazz band, whatever it is called.
+# Musical groups with a name cue. Scanning the labels of all 115,000 musical
+# groups (a REGEX on rdfs:label) runs past the 60 s limit, so this asks the
+# search index instead: one ``haswbstatement:P31=<group> inlabel:<cue>`` search
+# per pair, which matches labels and aliases in every language. About 2,200
+# hits in 15-35 seconds. Each row carries its search and that search's own hit
+# count, so a search cut short is caught (``_name_group_qids``). A group that
+# binds ``?otherGenre``, a genre outside ``CLASSICAL_GENRES`` (art music
+# aside), is a rock, jazz or folk band, whatever it is called, and is dropped.
+# (``BIND(NOT EXISTS {...})`` on the search's ``?item`` came back true for
+# every row live, so the test is an OPTIONAL read in Python.)
 NAME_GROUP_ID_QUERY = f"""\
-SELECT DISTINCT ?item WHERE {{
+SELECT ?search ?total ?item ?otherGenre WHERE {{
   VALUES ?group {{ {" ".join(f'"{group}"' for group in MUSICAL_GROUPS)} }}
   VALUES ?cue {{ {" ".join(f'"{cue}"' for cue in NAME_CUES)} }}
   BIND(CONCAT("haswbstatement:P31=", ?group, " inlabel:", ?cue) AS ?search)
@@ -140,9 +156,17 @@ SELECT DISTINCT ?item WHERE {{
                     mwapi:srsearch ?search ;
                     mwapi:srlimit "max" .
     ?title wikibase:apiOutput mwapi:title .
+    ?total wikibase:apiOutput "/api/query/searchinfo/@totalhits" .
   }}
   BIND(IRI(CONCAT(STR(wd:), ?title)) AS ?item)
-  FILTER NOT EXISTS {{ ?item wdt:P136 ?genre . }}
+  OPTIONAL {{
+    ?item wdt:P136 ?otherGenre .
+    FILTER(?otherGenre != wd:{NEUTRAL_GENRE})
+    FILTER NOT EXISTS {{
+      VALUES ?genreRoot {{ {_values(list(CLASSICAL_GENRES))} }}
+      ?otherGenre wdt:P279* ?genreRoot .
+    }}
+  }}
 }}
 """
 
@@ -186,16 +210,58 @@ WHERE {{
 """
 
 
+def _floored(qids: set[str], slice_: str, desc: str) -> set[str]:
+    """*qids*, unless they are fewer than ``MIN_IDS[slice_]``: then the run fails."""
+    if len(qids) < MIN_IDS[slice_]:
+        raise RuntimeError(
+            f"wikidata {desc} returned {len(qids)} ids, fewer than the {MIN_IDS[slice_]} expected; "
+            "refusing a population with a slice missing"
+        )
+    return qids
+
+
+def _short_searches(rows: list[dict[str, Any]]) -> dict[str, tuple[int, int]]:
+    """Search -> (titles returned, hits reported), for each search that
+    returned fewer titles than it reported hits."""
+    titles: dict[str, set[str]] = {}
+    totals: dict[str, int] = {}
+    for row in rows:
+        search: str = row["search"]["value"]
+        titles.setdefault(search, set()).add(_qid(row))
+        totals[search] = int(row["total"]["value"])
+    return {s: (len(titles[s]), totals[s]) for s in titles if len(titles[s]) < totals[s]}
+
+
+def _name_group_qids(session: SourceSession) -> set[str]:
+    """The admitted ids of NAME_GROUP_ID_QUERY, from an answer in which every
+    search returned all the hits it reported. Asked again while one comes back
+    short; a failed run if it still does."""
+    desc = "classical-name musical group ids"
+    short: dict[str, tuple[int, int]] = {}
+    for attempt in range(1, NAME_QUERY_ATTEMPTS + 1):
+        rows = _run_query(session, NAME_GROUP_ID_QUERY, desc)
+        short = _short_searches(rows)
+        if not short:
+            hits = _floored({_qid(row) for row in rows}, "name", desc)
+            return hits - {_qid(row) for row in rows if "otherGenre" in row}
+        log.warning(
+            "%s: attempt %d had %d short searches, e.g. %s", desc, attempt, len(short), min(short.items())
+        )
+    raise RuntimeError(
+        f"wikidata {desc}: {len(short)} searches stayed short of their hits, e.g. {min(short.items())}"
+    )
+
+
 def _fetch_ensemble_qids(session: SourceSession) -> list[str]:
     """Every ensemble QID, numerically ordered: the population classes'
-    instances and the musical groups with a classical genre or name."""
-    qids: set[str] = set()
-    for query, desc in (
-        (ENSEMBLE_ID_QUERY, "ensemble id list"),
-        (GENRE_GROUP_ID_QUERY, "classical-genre musical group ids"),
-        (NAME_GROUP_ID_QUERY, "classical-name musical group ids"),
-    ):
-        qids.update(_qid(row) for row in _run_query(session, query, desc))
+    instances and the musical groups with a classical genre or name. Each id
+    query is checked on its own, so one that lost its answer cannot hide in
+    the union."""
+    desc = "ensemble id list"
+    qids = _floored({_qid(row) for row in _run_query(session, ENSEMBLE_ID_QUERY, desc)}, "class", desc)
+    desc = "classical-genre musical group ids"
+    qids |= _floored({_qid(row) for row in _run_query(session, GENRE_GROUP_ID_QUERY, desc)}, "genre", desc)
+    qids |= _name_group_qids(session)
     return sorted(qids, key=lambda qid: (len(qid), qid))
 
 
@@ -275,13 +341,18 @@ def _fold_ensemble_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     return items
 
 
-def ensemble_type(classes: set[str], label: str) -> str:
-    """The type the item's classes give it, else its name's, else ``other``."""
+def ensemble_type(classes: set[str], label: str, names: Iterable[str] = ()) -> str:
+    """The type the item's classes give it, else its label's, else the most
+    specific one its other names give (the cue is as often in an alias or a
+    label in another language), else ``other``."""
     types = {ENSEMBLE_CLASSES[c] for c in classes if c in ENSEMBLE_CLASSES}
     for candidate in TYPE_PRIORITY:
         if candidate in types:
             return candidate
-    return ensemble_type_from_name(label) or "other"
+    if (from_label := ensemble_type_from_name(label)) is not None:
+        return from_label
+    from_names = {ensemble_type_from_name(name) for name in names}
+    return next((t for t in (*TYPE_PRIORITY, "band") if t in from_names), "other")
 
 
 def _display_label(item: dict[str, Any]) -> str | None:
@@ -319,7 +390,7 @@ def _documents_from_rows(
         if label is None:
             log.debug("skipping %s: no label", qid)
             continue
-        kind_of = ensemble_type(item["classes"], label)
+        kind_of = ensemble_type(item["classes"], label, item["names"])
         claims = [SourceClaim("ensemble_type", value=kind_of)]
         # several headquarters are rare; the lowest QID is the stable pick
         city = min(item["cities"], default=None, key=lambda c: (len(c[0]), c[0]))

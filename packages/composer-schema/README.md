@@ -14,7 +14,10 @@ or the scraper stack.
   word ("Symphony Orchestra", "Knabenchor", "String Quartet") is stored as an
   `ensemble` instead. The word list is deliberately narrow: re-kinding a real
   person is the worse error, so an ensemble whose name says nothing about being
-  one stays a person until the list earns another word.
+  one stays a person until the list earns another word. The same module types
+  an ensemble from its name (`ensemble_type_from_name`) and holds
+  `CLASSICAL_NAME_CUES`, the words `wikidata_ensembles` admits a genre-less
+  musical group for, each with the type the typer reads it as.
 - `instrumentation.py` — folds stated scoring ("Klavier zu vier Händen", "for
   string orchestra") onto canonical scoring categories, so "every work for
   piano" is a query rather than a `LIKE` across spellings. It refuses to guess.
@@ -55,6 +58,6 @@ uv run --directory packages/composer-schema pytest --rootdir . --cov=composer_sc
 | `test_schema.py` | Refresh-cadence staleness (static never due, never-run always due, naive timestamps as UTC), the document factories and `FakeSource`, and serialization round-trips. |
 | `test_premiere.py` | The `raw["premiere"]` convention: ISO dates at year, month or day precision (BCE too), anything else ignored rather than guessed, and the precedence rule (earliest date wins, a full date refines a bare year). |
 | `test_catalogues.py` | Catalogue normalisation: K/KV as one Köchel number, sixth-edition KV6 numbers (both from `K. 183/173dB`), Scarlatti's Kirkpatrick and Longo, relatives excluded, Hoboken separators, bare letters with and without the matching composer, Liszt's S vs LW, universal catalogues, appendices, WoO, structured fields with an opus, and ranges and lists (#358): `-`/`–`/`—`/`to` alike, the same form across BWV, HWV, TWV and Hob, never the first piece, list and range agreeing, what only looks like one (a movement `BWV 825-4`, a year, `BWV 57, 8`) keeping its first number, and `catalogue_members`; the composer-scoped catalogues of #361 with each ambiguous letter (`H`, `B`, `F`, `Z`, `LV`, `MH`, `KK`) refused for anyone else, the Bach sons told apart, Purcell's `Z.802-811` as a set, C.P.E. Bach's numbers within a collection (`Wq 117:39`, `H 542.5`, `BR-CPEB C 48.1`), a letter that is no reference not hiding the one after it, and Wikidata codes read by their catalogue item: mapped QIDs (the Köchel editions, Helm, Terry, a code in another catalogue than its item) and the `wd:<QID>` fallback (a range kept a set, a rights-society number not, Rinaldi's `R. op.` no opus, `deest` nothing). |
-| `test_kinds.py` | The ensemble guard (#174): ensemble labels recognised, musicians left alone, and only `person` second-guessed. |
+| `test_kinds.py` | The ensemble guard (#174): ensemble labels recognised, musicians left alone, and only `person` second-guessed; the name typer reads every classical name cue the way `wikidata_ensembles` admits it, without widening the guard. |
 | `test_instrumentation.py` | Scoring categories: combinations yield their parts, ensembles list their members apart, unrecognised scoring yields nothing, and the category tables are consistent. |
 | `test_shorthand.py` | Real catalogue entries in both dialects: desks, doublings, percussion, string parts, score order, German abbreviations, and refusing what is not shorthand. |
