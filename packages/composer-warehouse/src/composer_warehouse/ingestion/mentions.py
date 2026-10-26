@@ -50,14 +50,14 @@ def resolve_mention(
     ``raw_work_mentions.candidate_work_id``, a second foreign key into
     ``works``."""
     features = mention_features(state.source.name, mention.title, mention.composer, mention.raw)
-    result = resolve(features, state.work_candidates.get(composer_id, []))
+    result = resolve(features, state.work_candidates.of(composer_id))
 
     matched_work_id = result.work_id
     if result.status == "created":
         work = new_work(composer_id, mention.title, features)
         state.session.add(work)
         matched_work_id = work.id
-        state.work_candidates.setdefault(composer_id, []).append(Candidate(matched_work_id, features))
+        state.work_candidates.of(composer_id).append(Candidate(matched_work_id, features))
 
     return result, matched_work_id, features
 
@@ -93,7 +93,7 @@ def add_work_identifiers(
             )
             state.existing_work_identifiers.add(key)
 
-    refresh_candidate(state.work_candidates.get(composer_id, []), work_id, features.identifiers)
+    refresh_candidate(state.work_candidates.of(composer_id), work_id, features.identifiers)
 
 
 def apply_premiere(state: IngestState, work_id: uuid.UUID, raw: dict[str, Any]) -> None:

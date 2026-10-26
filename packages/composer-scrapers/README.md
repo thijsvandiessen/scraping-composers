@@ -42,16 +42,24 @@ already given: scraped once, re-run on demand.
 mirrored detail query and a mirrored multi-valued query per 500 items, the
 detail page checked for coverage. The id queries are the population classes'
 instances (about 10,700), the direct instances of musical group or musical
-ensemble with a genre under classical music or opera (about 550: the London
-and Royal Philharmonic, the Budapest Symphony are typed only that way), and
-the genre-less ones whose label or alias carries a name cue such as
-`Orchestra`, `Philharmoniker`, `Chor` or `Quartet` (about 1,500, found through
-the search index: a label scan over all 115,000 musical groups times out).
-A musical group with only non-classical genres, and every subclass of musical
-group (rock band, boy band, ...), stays out. Each ensemble record carries an
-`ensemble_type` (from its class: chamber ensemble over choir over orchestra
-over opera company; else from name cues such as `Quartet` or `Chor`; else
-`other`), a `based_in` city (the headquarters if it is a settlement, else the
+ensemble with a genre under classical music, opera or choral music (about
+580: the London and Royal Philharmonic, the Budapest Symphony are typed only
+that way), and the ones whose label or alias carries a name cue such as
+`Orchestra`, `Philharmoniker`, `Chor` or `Quartet` and that have no genre
+outside those trees but "art music" (about 1,600, found through the search
+index: a label scan over all 115,000 musical groups times out). A musical
+group with a non-classical genre, and every subclass of musical group (rock
+band, boy band, ...), stays out. The cues are `CLASSICAL_NAME_CUES` in
+`composer_schema.kinds`, the list the name typer reads too. Each id query must
+answer at least about half its live count, and every search in the name query
+must return as many items as it reports hits (the search service answers a
+failed search with an empty 200, and its continuation now and then drops an
+item; that query is asked up to four times); otherwise the run fails rather
+than let `anchor-ensembles` unlink a missing slice. Each ensemble record
+carries an `ensemble_type` (from its class: chamber ensemble over choir over
+orchestra over opera company; else from name cues such as `Quartet`, `Chor`
+or `Zenekar` in its label, then in its other names; else `other`), a
+`based_in` city (the headquarters if it is a settlement, else the
 headquarters' P131) pinned to the city's QID, an `also_known_as` per label and
 alias in English, `mul`, German, French, Italian, Dutch, Spanish, Czech,
 Swedish, Danish, Polish and Hungarian, and `part_of` only towards another
@@ -184,7 +192,7 @@ Most sources are tested in three layers, one file each:
 | `wikidata_places` | `test_wikidata_places.py` covers all three: type precedence, parent rounds, coordinates | | |
 | `wikidata_works` | `test_wikidata_works.py` covers all three | | |
 | `wikidata_genres` | `test_wikidata_genres.py` covers all three: seeds, paging, cycles, the class filter, the depth cap, `max_pages`, the mirror, counterparts for stranded seeds (same name or name + "music", of the kind, already kept or fetched, a classless kept parent still stranding a seed, asked only for stranded seeds), the musical-form claim | | |
-| `wikidata_ensembles` | `test_wikidata_ensembles.py` covers all three, including the mirror, the union of the three id queries, the musical-group signals and the label fallback for items with no English label | | |
+| `wikidata_ensembles` | `test_wikidata_ensembles.py` covers all three, including the mirror, the union of the three id queries and their floors, the name query's short-search retry, the musical-group signals, typing from every name and the label fallback for items with no English label | | |
 | `wikidata_catalogue` | `test_wikidata_catalogue.py` covers all three, including a P528 statement with no value | | |
 
 `test_base.py` covers what every source shares: the session carries the

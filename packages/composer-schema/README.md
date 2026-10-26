@@ -14,7 +14,10 @@ or the scraper stack.
   word ("Symphony Orchestra", "Knabenchor", "String Quartet") is stored as an
   `ensemble` instead. The word list is deliberately narrow: re-kinding a real
   person is the worse error, so an ensemble whose name says nothing about being
-  one stays a person until the list earns another word.
+  one stays a person until the list earns another word. The same module types
+  an ensemble from its name (`ensemble_type_from_name`) and holds
+  `CLASSICAL_NAME_CUES`, the words `wikidata_ensembles` admits a genre-less
+  musical group for, each with the type the typer reads it as.
 - `instrumentation.py` — folds stated scoring ("Klavier zu vier Händen", "for
   string orchestra") onto canonical scoring categories, so "every work for
   piano" is a query rather than a `LIKE` across spellings. It refuses to guess.

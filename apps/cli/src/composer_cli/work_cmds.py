@@ -142,7 +142,7 @@ def cmd_rematch(args: argparse.Namespace) -> int:
             features = mention_features(
                 mention.source.name, mention.raw_title, mention.raw_composer, json.loads(mention.raw)
             )
-            composer_candidates = candidates.setdefault(mention.composer_entity_id, [])
+            composer_candidates = candidates.of(mention.composer_entity_id)
             result = resolve(features, composer_candidates)
             if result.status == "created":
                 work = new_work(mention.composer_entity_id, mention.raw_title, features)
