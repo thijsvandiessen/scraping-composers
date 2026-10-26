@@ -118,8 +118,9 @@ def _set_holders(candidates: list[Candidate]) -> dict[tuple[str, str], dict[uuid
         for scheme, value in cand.features.identifiers:
             if holds_sets(scheme) and is_catalogue_set(value):
                 members = frozenset((scheme, member) for member in catalogue_members(value))
-                for key in members:
-                    _keep_smaller(sets.setdefault(key, {}), cand.work_id, members)
+                if len(members) > 1:
+                    for key in members:
+                        _keep_smaller(sets.setdefault(key, {}), cand.work_id, members)
     return sets
 
 
