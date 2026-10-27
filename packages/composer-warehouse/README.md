@@ -69,6 +69,8 @@ item QID, catalogue codes, MusicBrainz ids and ISWCs. A Wikidata catalogue code
 is read by its catalogue item (`stated_catalogue`), so Terry's bare `238/3` is
 `Ty 238/3`, and a code in a catalogue with no known scheme is stored under the
 item itself (`wd:Q16749680`, `c 48`), which two Wikidata items still match on.
+A rights society's, record label's or library's code (SACEM, a release number)
+is no work number and is not read.
 Henle and Bärenreiter
 `catalogue_number`s are edition numbers and are not read. Every identifier a
 mention brings is stored in `work_identifiers` against its work, and the

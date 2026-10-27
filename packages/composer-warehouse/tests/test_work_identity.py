@@ -315,7 +315,7 @@ def test_a_number_inside_overlapping_sets_links_to_neither(session: Session) -> 
 def test_an_external_id_with_hyphens_is_no_range() -> None:
     """A MusicBrainz id reads like ``...-799131026480``; taken as a range it
     would enumerate billions of members (seen on the 2026-10-25 silver, #378)."""
-    assert holds_sets("BWV") and holds_sets("KV6") and holds_sets("WoO")
+    assert holds_sets("BWV") and holds_sets("KV6") and holds_sets("KV6 Anh") and holds_sets("WoO")
     assert not (holds_sets("musicbrainz") or holds_sets("wd:Q1") or holds_sets("op") or holds_sets("other"))
     mbid = ("musicbrainz", "4dad1f72-5f8d-3a63-ae31-799131026480")
     oversized = ("BWV", "1-10000")
