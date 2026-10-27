@@ -28,6 +28,10 @@ Put it in one bucket:
 - **Stale**: no update in 30+ days.
 - **Fine**: everything else.
 
+For a failing check, read the log of the failed job itself
+(`gh api .../actions/jobs/<id>/logs`) and grep it for `##[error]`: the
+log's tail is usually checkout cleanup, not the failure.
+
 ## 2. Dependencies
 
 Dependabot handles updates (`.github/dependabot.yml`).
@@ -42,8 +46,11 @@ Dependabot handles updates (`.github/dependabot.yml`).
 
 List open issues with `gh api --paginate repos/{owner}/{repo}/issues` and
 drop entries with a `pull_request` key. Keep only number, title and
-`updated_at` first, then read each body with `gh api .../issues/<n>`; a
-listing with bodies overflows the tool output. For each open issue, read
+`updated_at` first; a listing with bodies overflows the tool output (100k+
+characters at 30 issues). With more than about ten issues, write the
+bodies to a file and hand it to a subagent to triage; otherwise read each
+with `gh api .../issues/<n>`. The cloud checkout is shallow, so run
+`git fetch --unshallow` before searching history. For each open issue, read
 it, then look for merged PRs and commits that mention it (`git log --grep`,
 `gh api 'search/issues?q=repo:{owner}/{repo}+is:pr+is:merged+<n>'`) and
 check whether the code it describes still exists and still behaves that way.
