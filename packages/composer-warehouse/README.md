@@ -137,8 +137,11 @@ High-confidence pairs and human `accepted` reviews are recorded in
 **`person_matches`**; ambiguous ones wait there for `person-review`. The links
 are then derived from those pairs as *clusters*, not pair by pair:
 `persons/cluster.py` merges the pairs strongest-first into disjoint groups,
-picks one canonical per group (the fullest given names), and points every member
-straight at it. So `Entity.canonical_entity_id` is always one hop to a canonical
+picks one canonical per group, and points every member straight at it. The
+canonical is the best-evidenced member: Wikidata-anchored first, then
+MusicBrainz-anchored, then the most sources, then the fullest given names. Gold
+shows its label, so a noisy spelling with an extra initial cannot win on length
+alone (#379). So `Entity.canonical_entity_id` is always one hop to a canonical
 — no chains, no cycles — and a `rejected` review becomes a cannot-link the group
 honours even when the merge arrives transitively. Nothing is deleted and ids
 stay stable, so the pass is re-runnable.
@@ -334,7 +337,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_person_matching.py` | Scoring and classifying a pair with the shipped model: dates, generations, rare surnames, aliases, cut-points. |
 | `test_person_constraints.py` | Cannot-links from distinct QIDs and MusicBrainz ids, and when corroboration discharges them. |
 | `test_person_cluster.py` | Turning scored pairs into clusters: chains, cannot-links (also transitive), edge-order independence. |
-| `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals, reviewer decisions, QID twins. |
+| `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals (an authority-anchored member over a fuller name, then more sources over a fuller name, #379), reviewer decisions, QID twins. |
 | `test_person_catalogues.py` | Catalogue evidence (#362): a surname-only entity linked to the composer whose Köchel numbers it shares; conflicting given names, different surnames, rivals, years a generation apart and per-composer schemes (`WoO`) never linked; a dominant partner beating a weak rival; a review-queued pair upgraded; cluster compatibility; cannot-links honoured. |
 | `test_person_training.py` | Fitting the model: automatic labels, comparison vectors, non-match sampling, the prior, and `train()` end to end (including an empty warehouse). |
 | `test_person_evaluation.py` | The labelling rules, the deterministic split, downsampling weights, metrics, and that the shipped model beats the pre-#173 scorer on the committed dataset. |
