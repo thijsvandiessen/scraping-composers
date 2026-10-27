@@ -38,8 +38,15 @@ Dependabot handles updates (`.github/dependabot.yml`).
 
 - Run the dependency audit from `CLAUDE.md`, and `npm audit --omit=dev` in
   `apps/frontend` after `npm ci`.
-- For each advisory: package, advisory id, fixed version, and whether an open
-  Dependabot PR already bumps it.
+- List the open Dependabot alerts
+  (`gh api 'repos/{owner}/{repo}/dependabot/alerts?state=open&per_page=100'`).
+  They cover more than the audits: dev and transitive dependencies, and
+  every lockfile in the repo, including ones CI never installs from. For an
+  alert in a lockfile nothing uses, say so: the fix is deleting the file.
+  If this one call is refused (it needs Dependabot alerts read access),
+  say so in the report and carry on with the rest.
+- For each advisory or alert: package, advisory id, severity, fixed version,
+  the lockfile, and whether an open Dependabot PR already bumps it.
 - List any bump PR closed without merging in the past week.
 
 ## 3. Open issues
