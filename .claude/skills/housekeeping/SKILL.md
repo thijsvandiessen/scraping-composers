@@ -7,8 +7,11 @@ description: Weekly repo check-up — open PRs, dependency updates and open issu
 
 Report only: don't push, comment, approve, merge, close or label anything.
 The one exception is the self-review PR in step 4, which touches only this
-file. Repo: `thijsvandiessen/scraping-composers`. Use the GitHub MCP tools
-(`mcp__github__*`), not `gh`.
+file. Repo: `thijsvandiessen/scraping-composers`. Talk to GitHub only
+through `gh api` (REST), not the GitHub MCP tools or other `gh` commands:
+cloud sessions block GraphQL, so `gh pr list`, `gh pr create` and the like
+fail. If `gh api` fails, stop and say so; don't produce a partial report.
+Use `--jq` to keep only the fields you need, so listings stay small.
 
 ## 1. Open PRs
 
@@ -25,6 +28,10 @@ Put it in one bucket:
 - **Stale**: no update in 30+ days.
 - **Fine**: everything else.
 
+For a failing check, read the log of the failed job itself
+(`gh api .../actions/jobs/<id>/logs`) and grep it for `##[error]`: the
+log's tail is usually checkout cleanup, not the failure.
+
 ## 2. Dependencies
 
 Dependabot handles updates (`.github/dependabot.yml`).
@@ -37,10 +44,15 @@ Dependabot handles updates (`.github/dependabot.yml`).
 
 ## 3. Open issues
 
-List open issues with `fields: ["number","title","updated_at"]` first, then
-read each body with `issue_read`; a listing with bodies overflows the tool
-output. For each open issue, read it, then look for merged PRs and commits
-that mention it (`git log --grep`, `mcp__github__search_pull_requests`) and
+List open issues with `gh api --paginate repos/{owner}/{repo}/issues` and
+drop entries with a `pull_request` key. Keep only number, title and
+`updated_at` first; a listing with bodies overflows the tool output (100k+
+characters at 30 issues). With more than about ten issues, write the
+bodies to a file and hand it to a subagent to triage; otherwise read each
+with `gh api .../issues/<n>`. The cloud checkout is shallow, so run
+`git fetch --unshallow` before searching history. For each open issue, read
+it, then look for merged PRs and commits that mention it (`git log --grep`,
+`gh api 'search/issues?q=repo:{owner}/{repo}+is:pr+is:merged+<n>'`) and
 check whether the code it describes still exists and still behaves that way.
 Start by checking that the packages and files the issue names still exist
 (`ls packages apps`); an issue about a removed package is obsolete.
@@ -69,7 +81,9 @@ Otherwise open a draft PR with them:
 - Branch from the latest `main`. Use the branch the session names, if it
   names one, else `housekeeping/self-review-<YYYY-MM-DD>`.
 - Edit only this file. Commit and title the PR as
-  `docs(housekeeping): <what changes>` (commitlint checks both).
+  `docs(housekeeping): <what changes>` (commitlint checks both). Push with
+  `git push`, then open it with `gh api repos/{owner}/{repo}/pulls -f
+  draft=true -f head=<branch> -f base=main -f title=... -f body=...`.
 - In the PR body, list each change with its one-line reason, taken from
   what this run ran into.
 - Don't merge it, mark it ready or request reviewers: the owner decides.
