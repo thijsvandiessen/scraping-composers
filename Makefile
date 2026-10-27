@@ -1,7 +1,11 @@
-.PHONY: dev stop graph
+.PHONY: i dev stop graph
 
 # Ports the Procfile servers listen on (uvicorn x3, Django, Astro).
 DEV_PORTS := 8000,8001,8002,8003,4321
+
+i:
+	uv sync
+	pnpm --dir apps/frontend install
 
 dev:
 	uvx honcho start -e .env
