@@ -17,7 +17,9 @@ Put it in one bucket:
 
 - **Stuck bump**: a Dependabot PR open for more than a day. Minor and patch
   bumps auto-merge (`.github/workflows/dependabot-auto-merge.yml`), so say
-  what blocked it: a failing check (with the root cause from its log), a
+  what blocked it: a failing check (with the root cause from its log: call
+`get_job_logs` with `run_id` and `failed_only`, since a single job's tail is
+often just checkout cleanup), a
   conflict, or a major bump that needs a human. Also read the `dependabot`
   job on every bump PR, whatever its age: if it failed, auto-merge was never
   enabled and the PR won't merge itself even once CI is green.
@@ -39,8 +41,10 @@ Dependabot handles updates (`.github/dependabot.yml`).
 
 List open issues with `fields: ["number","title","updated_at"]` first, then
 read each body with `issue_read`; a listing with bodies overflows the tool
-output. For each open issue, read it, then look for merged PRs and commits
-that mention it (`git log --grep`, `mcp__github__search_pull_requests`) and
+output (100k+ characters at 30 issues), so with more than about ten issues
+hand the saved listing file to a subagent to triage instead. For each open issue, read it, then look for merged PRs and commits
+that mention it (`mcp__github__search_pull_requests`, `search_commits`; `git log --grep`
+only sees a shallow clone's recent history) and
 check whether the code it describes still exists and still behaves that way.
 Start by checking that the packages and files the issue names still exist
 (`ls packages apps`); an issue about a removed package is obsolete.
