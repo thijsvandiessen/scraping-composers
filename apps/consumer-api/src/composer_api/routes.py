@@ -238,7 +238,7 @@ def list_composers(
 
 @v1.get("/composers/{composer_id}", response_model=ComposerDetail)
 def get_composer(composer_id: uuid.UUID, db: DbSession) -> ComposerDetail:
-    return get_person(db, composer_id, None, "composer not found")
+    return get_person(db, composer_id, "composer", "composer not found")
 
 
 @v1.get("/composers/{composer_id}/works", response_model=ComposerWorksPage)

@@ -378,8 +378,8 @@ def test_list_composers_invalid_limit_returns_422(client: TestClient) -> None:
     assert client.get("/v1/composers?limit=101").status_code == 422
 
 
-def test_get_composer_returns_detail_with_claims(client: TestClient) -> None:
-    r = client.get(f"/v1/composers/{_person_id(client, 'Bach, Johann')}")
+def test_get_composer_returns_detail_with_claims(composers_client: TestClient) -> None:
+    r = composers_client.get(f"/v1/composers/{_person_id(composers_client, 'Bach, Johann')}")
     assert r.status_code == 200
     data = r.json()
     assert data["label"] == "Bach, Johann"
@@ -388,9 +388,18 @@ def test_get_composer_returns_detail_with_claims(client: TestClient) -> None:
     assert "has_profession" in predicates
 
 
+@pytest.mark.parametrize("label", ["Maestro, Some", "Doe, Jane"])
+def test_get_composer_404s_for_people_the_list_leaves_out(composers_client: TestClient, label: str) -> None:
+    """A composer page exists only for people /v1/composers lists: a soloist, or
+    someone tagged composer whose works are barely programmed, gets a 404."""
+    person_id = _person_id(composers_client, label)
+    assert composers_client.get(f"/v1/composers/{person_id}").status_code == 404
+    assert composers_client.get(f"/v1/entities/{person_id}").status_code == 200
+
+
 def test_claim_source_url_is_record_page(client: TestClient) -> None:
     """Claims point at the exact source page they came from, not the source homepage."""
-    data = client.get(f"/v1/composers/{_person_id(client, 'Beethoven, Ludwig van')}").json()
+    data = client.get(f"/v1/entities/{_person_id(client, 'Beethoven, Ludwig van')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
     assert profession["source"] == "fake"
     assert profession["source_url"] == "https://fake.example/wiki/Q255"
@@ -399,7 +408,7 @@ def test_claim_source_url_is_record_page(client: TestClient) -> None:
 
 def test_claim_source_url_is_none_without_record_page(client: TestClient) -> None:
     """Records without a page URL carry no link, not the source homepage."""
-    data = client.get(f"/v1/composers/{_person_id(client, 'Bach, Johann')}").json()
+    data = client.get(f"/v1/entities/{_person_id(client, 'Bach, Johann')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
     assert profession["source_url"] is None
 
@@ -1158,7 +1167,7 @@ def test_gold_hides_people_without_performance_evidence(gold_client: TestClient)
 
 def test_gold_claim_source_url_survives_promotion(gold_client: TestClient) -> None:
     """Promotion copies entity records, so gold claims still link the exact source page."""
-    data = gold_client.get(f"/v1/composers/{_person_id(gold_client, 'Beethoven, Ludwig van')}").json()
+    data = gold_client.get(f"/v1/entities/{_person_id(gold_client, 'Beethoven, Ludwig van')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
     assert profession["source_url"] == "https://fake.example/wiki/Q255"
     assert profession["source_external_id"] == "Q255"

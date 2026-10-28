@@ -17,7 +17,8 @@ uv run uvicorn composer_api:silver_app --port 8003   # staging
   sorts are of those performances rather than their own credits. The `composer` profession claim
   is too loose (Wikidata gives it to pop stars and conductors), and so is a work count:
   catalogue-only work lists credit self-publishers with hundreds of works nobody programmes. Such
-  people stay in gold, they are just not listed as composers. The counts are precomputed in
+  people stay in gold, they are just not listed as composers, and `/v1/composers/{id}` 404s for
+  them as `/v1/soloists/{id}` does for a non-soloist. The counts are precomputed in
   `composer_programmes` by the derive passes and promote, so the list doesn't aggregate the
   concert and recording tables per request
 - `GET /v1/genres?kind=genre|movement` — the top-level genres (or movements) as facets, each with
@@ -72,7 +73,7 @@ SQLite file, and into Postgres when `COMPOSER_TEST_POSTGRES_URL` is set.
 
 | Area | Covers |
 | --- | --- |
-| People | Soloist, conductor and composer lists: role selection, composers picked by concerts of their works (not work count, own credits or profession) and counted and sorted by them, a person in two roles, search, pagination, the source filter, sorting by concert or recording count, invalid paging (422), detail with claims, and 404s for a missing person or the wrong role. |
+| People | Soloist, conductor and composer lists: role selection, composers picked by concerts of their works (not work count, own credits or profession) and counted and sorted by them, a person in two roles, search, pagination, the source filter, sorting by concert or recording count, invalid paging (422), detail with claims, and 404s for a missing person or the wrong role (including a composer detail for someone the composer list leaves out). |
 | Provenance | `source_url` pointing at the record page, or `null` (never the homepage) when the record has none, in silver and after promotion. |
 | Entities and stats | Search across kinds, the kind filter, random sampling, linked claim objects, incoming claims, 404s, and dataset counts. |
 | Works and mentions | Works with aliases and mention counts, search by composer, the source filter, work detail with proof and its premiere date and place, identifiers, Wikidata id and part/derived links in gold, the review queue with its candidate, and a composer's works with concert and catalogue proof. |

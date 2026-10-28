@@ -150,7 +150,14 @@ def get_person(
     if entity is None or entity.kind != "person":
         raise NotFoundError(not_found_detail)
 
-    if profession is not None:
+    if profession == "composer":
+        # the list's rule, so a page exists for exactly the people the list shows
+        programmes = db.scalar(
+            select(ComposerProgramme.programme_count).where(ComposerProgramme.entity_id == entity.id)
+        )
+        if (programmes or 0) < COMPOSER_MIN_PROGRAMMES:
+            raise NotFoundError(not_found_detail)
+    elif profession is not None:
         prof_id = db.scalar(select(Entity.id).where(Entity.kind == "profession", Entity.label == profession))
         has_prof = prof_id is not None and db.scalar(
             select(func.count()).where(
