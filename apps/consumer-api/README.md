@@ -17,7 +17,8 @@ uv run uvicorn composer_api:silver_app --port 8003   # staging
   sorts are of those performances rather than their own credits. The `composer` profession claim
   is too loose (Wikidata gives it to pop stars and conductors), and so is a work count:
   catalogue-only work lists credit self-publishers with hundreds of works nobody programmes. Such
-  people stay in gold, they are just not listed as composers. The counts are precomputed in
+  people stay in gold, they are just not listed as composers, and `/v1/composers/{id}` 404s for
+  them as `/v1/soloists/{id}` does for a non-soloist. The counts are precomputed in
   `composer_programmes` by the derive passes and promote, so the list doesn't aggregate the
   concert and recording tables per request
 - `GET /v1/genres?kind=genre|movement` — the top-level genres (or movements) as facets, each with
@@ -52,7 +53,8 @@ uv run uvicorn composer_api:silver_app --port 8003   # staging
 
 Every claim in a detail response carries its provenance: `source` (the scraper
 name), `source_url` (the exact page the fact came from, e.g.
-`https://www.wikidata.org/wiki/Q255`, falling back to the source homepage), and
+`https://www.wikidata.org/wiki/Q255`, or `null` when the record has no page of
+its own — never the source homepage), and
 `source_external_id` (the source's own id, e.g. the Wikidata QID).
 
 The [frontend](../frontend/README.md) and the [dashboard](../dashboard/README.md)
@@ -71,11 +73,12 @@ SQLite file, and into Postgres when `COMPOSER_TEST_POSTGRES_URL` is set.
 
 | Area | Covers |
 | --- | --- |
-| People | Soloist, conductor and composer lists: role selection, composers picked by concerts of their works (not work count, own credits or profession) and counted and sorted by them, a person in two roles, search, pagination, the source filter, sorting by concert or recording count, invalid paging (422), detail with claims, and 404s for a missing person or the wrong role. |
-| Provenance | `source_url` pointing at the record page or falling back to the source's base URL, in silver and after promotion. |
+| People | Soloist, conductor and composer lists: role selection, composers picked by concerts of their works (not work count, own credits or profession) and counted and sorted by them, a person in two roles, search, pagination, the source filter, sorting by concert or recording count, invalid paging (422), detail with claims, and 404s for a missing person or the wrong role (including a composer detail for someone the composer list leaves out). |
+| Provenance | `source_url` pointing at the record page, or `null` (never the homepage) when the record has none, in silver and after promotion. |
 | Entities and stats | Search across kinds, the kind filter, random sampling, linked claim objects, incoming claims, 404s, and dataset counts. |
 | Works and mentions | Works with aliases and mention counts, search by composer, the source filter, work detail with proof and its premiere date and place, identifiers, Wikidata id and part/derived links in gold, the review queue with its candidate, and a composer's works with concert and catalogue proof. |
 | Concerts and recordings | Lists newest first with summaries, search by participant and source, details with participants, programme and works, and a person's concerts and recordings. |
 | Genres (`test_genres.py`) | Roll-up through `subclass_of` in silver, gold on SQLite and gold on Postgres: a person tagged only with "waltz" found under "dance music" (by the genre's people and by `/v1/composers?genre=`), a legacy label-only tag counting, facet person counts per kind, parents and children, a cycle terminating, and 404s for an unknown genre or a person id. |
 | Ensembles (`test_ensembles.py`) | Silver listing every spelling with the anchor's type and city, a name-derived type, `anchored=false` sorted by appearances, the `anchored`/`type` filters, the detail's aliases, MusicBrainz id and claims, gold holding one ensemble per anchor with both spellings' concerts, 404s and an invalid sort. |
+| Connections | `/v1/entities/{id}/connections`: a composer reaching its performers and the reverse, the works that prove an edge, stage partners, a person reaching their birthplace, and the exclusions — no self-link, no profession hub, `min_weight` dropping one-off pairings. Budgets: `per_relation` as a hard cap, `per_relation` unset reserving a share then filling by rank, `limit` capping the whole graph, and the relation filter. Ranking: `weight` unable to separate two equal edges where `affinity` demotes the most-performed, affinity holding for a composer who also performs, a neighbour linked by several claims collapsing to one node, and a place ranked by its people's reach. Errors: 422 for an unknown `rank`, 404 for an unknown entity, 503 without a snapshot. These go through Neo4j and the snapshot, as in production, and need `COMPOSER_TEST_NEO4J_URL`. Hand-seeded snapshots, which always run, cover both rankings over the stored scores, `total` counting edges the pool dropped, `min_weight`, a claim relation filter naming the claim asked for, the budgets, and an entity missing from the snapshot having no neighbours. |
 | Gold curation | Gold hiding people without performance evidence, keeping works with their mention counts, and stats reflecting curation. |

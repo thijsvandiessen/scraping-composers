@@ -4,3 +4,11 @@ class NotFoundError(Exception):
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
         self.detail = detail
+
+
+class GraphUnavailableError(Exception):
+    """No connections snapshot has been taken; the app maps it to HTTP 503."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail

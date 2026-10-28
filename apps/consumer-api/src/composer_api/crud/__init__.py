@@ -1,4 +1,5 @@
 from .concerts import get_concert, list_concerts, person_concerts
+from .connections import entity_connections
 from .ensembles import get_ensemble, list_ensembles
 from .entities import get_entity, get_stats, list_entities
 from .genres import genre_people, get_genre, list_genre_facets
@@ -8,6 +9,7 @@ from .works import composer_works, get_work, list_mentions, list_works
 
 __all__ = [
     "composer_works",
+    "entity_connections",
     "get_concert",
     "genre_people",
     "get_ensemble",

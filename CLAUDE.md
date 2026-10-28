@@ -95,6 +95,31 @@ The tests put silver and gold in separate schemas on this one server. In real
 use gold has a server of its own (`docker compose up -d postgres-gold`, port
 5434, `GOLD_DATABASE_URL`).
 
+## Neo4j-backed tests
+
+`composer-graph` and the consumer API's graph-backed connections tests need a
+real Neo4j (to build the snapshot the API serves); CI runs them in a separate
+`test-neo4j` job. They skip when
+`COMPOSER_TEST_NEO4J_URL` is unset. **Each test empties the database it is
+pointed at**, so don't point them at the `neo4j` service you loaded gold
+into. Use a throwaway container:
+
+```
+docker run -d --rm --name neo4j-test -e NEO4J_AUTH=neo4j/composers -p 7690:7687 neo4j:2026.09-community
+export COMPOSER_TEST_NEO4J_URL=bolt://localhost:7690
+for m in packages/composer-graph apps/consumer-api; do
+  uv run --directory "$m" pytest --rootdir . -q
+done
+```
+
+The consumer API's `/v1/entities/{id}/connections` reads the snapshot
+`composer-ingest export-neo4j` (or `make graph`) stores in gold's
+`entity_connections`, not the graph itself, so production needs no Neo4j.
+`promote` empties it: run `make graph` after every promote, or the endpoint
+answers 503. The ranking depends on each node's reach (`times_performed`,
+`performances`, `appearances`, `claim_degree`), which the loader stores
+before the snapshot is taken.
+
 ## Schema changes
 
 SQLite gets its schema from `create_all` and is rebuilt from bronze; Postgres

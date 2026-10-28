@@ -1,6 +1,6 @@
 // Human labels for the claim predicates the pipeline is known to emit
 // (packages/composer-scrapers/.../wikidata/parse.py and friends). Unknown
-// predicates fall back to a readable transform — nothing is hidden.
+// predicates fall back to a readable transform; only HIDDEN_PREDICATES are left out.
 
 const PREDICATE_LABELS: Record<string, string> = {
   has_profession: "Profession",
@@ -67,6 +67,10 @@ export const METRIC_PREDICATES = new Set([
   "identifier_count",
   "work_count",
 ]);
+
+// One source's own bookkeeping (the NY Phil archive's appearance summary), not
+// facts about the person; left out of the page entirely.
+export const HIDDEN_PREDICATES = new Set(["program_count", "first_season", "last_season"]);
 
 export function predicateLabel(predicate: string): string {
   const known = PREDICATE_LABELS[predicate];

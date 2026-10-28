@@ -87,3 +87,31 @@ def test_a_second_load_replaces_the_first(session: Session, tmp_path: Path, driv
         load_graph(gold, driver)
 
     assert _rows(driver, "MATCH (c:Concert) RETURN count(c) AS n") == [{"n": 3}]
+
+
+def test_load_stores_each_family_of_reach_separately(
+    session: Session, tmp_path: Path, driver: Driver
+) -> None:
+    """Beethoven is played at c1 and c3, Schumann at c1 and c2; Beinum conducts
+    c1 (two works) and c2 (one), and is linked by claims to Arnhem, his teacher
+    Mengelberg and the waltz genre. Each count stays in its own property."""
+    with gold_session(session, tmp_path) as gold:
+        load_graph(gold, driver)
+
+    rows = _rows(
+        driver,
+        "MATCH (n:Person|Place) RETURN n.label AS label, n.times_performed AS times_performed, "
+        "n.performances AS performances, n.appearances AS appearances, n.claim_degree AS claim_degree "
+        "ORDER BY label",
+    )
+    by_label = {row.pop("label"): row for row in rows}
+    assert by_label["Beethoven, Ludwig van"]["times_performed"] == 2
+    assert by_label["Schumann, Robert"]["times_performed"] == 2
+    assert by_label["Beinum, Eduard van"] == {
+        "times_performed": None,
+        "performances": 3,
+        "appearances": 2,
+        "claim_degree": 3,
+    }
+    assert by_label["Zimmermann, Louis"]["performances"] == 1
+    assert by_label["Arnhem"]["claim_degree"] == 1

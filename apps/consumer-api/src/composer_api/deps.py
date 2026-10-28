@@ -48,6 +48,28 @@ FilterQuery = Annotated[Filters, Depends()]
 
 
 @dataclass(frozen=True)
+class GraphBudget:
+    """The caps that turn a raw neighbourhood into a drawable one.
+
+    Grouped for the same reason as ``Pagination`` and ``Filters``: the whole
+    set travels together on every connections request, and passing them
+    individually puts both the route and its crud function over the argument
+    cap. See ``crud.connections`` for what each one is for.
+    """
+
+    limit: Annotated[int, Query(ge=1, le=100)] = 24
+    # Unset, each relation is guaranteed six and the rest of ``limit`` is
+    # shared out by rank; set, it is a hard cap per relation.
+    per_relation: Annotated[int | None, Query(ge=1, le=50)] = None
+    min_weight: Annotated[int, Query(ge=1)] = 1
+    rank: Annotated[str, Query(pattern="^(affinity|weight)$")] = "affinity"
+    relation: str | None = None
+
+
+GraphQuery = Annotated[GraphBudget, Depends()]
+
+
+@dataclass(frozen=True)
 class PeopleFilters(Filters):
     """``Filters`` plus the people lists' ``genre``: a genre or movement id,
     matching persons tagged with it or anything below it in the hierarchy."""

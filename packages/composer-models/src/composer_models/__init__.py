@@ -11,6 +11,7 @@ seeded entity UUIDs that define entity identity in both databases.
 
 from .base import Base, utcnow
 from .concerts import Concert, ConcertParticipant, ConcertWork
+from .connections import CLAIMS, POOL_SIZE, ConnectionEdge, ConnectionsPayload, EntityConnections
 from .core import IngestRun, Source
 from .entities import Claim, Entity, EntityRecord
 from .persons import PersonMatch
@@ -19,13 +20,18 @@ from .recordings import Recording, RecordingParticipant, RecordingWork
 from .works import RawWorkMention, Work, WorkIdentifier, WorkLink, WorkTitle
 
 __all__ = [
+    "CLAIMS",
+    "POOL_SIZE",
     "Base",
     "Claim",
     "ComposerProgramme",
     "Concert",
     "ConcertParticipant",
     "ConcertWork",
+    "ConnectionEdge",
+    "ConnectionsPayload",
     "Entity",
+    "EntityConnections",
     "EntityRecord",
     "IngestRun",
     "PersonMatch",

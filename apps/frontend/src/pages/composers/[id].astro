@@ -1,10 +1,12 @@
 ---
-import FactValue from "../../components/FactValue.astro";
+import ConnectionGraph from "../../components/ConnectionGraph.astro";
+import FactValues from "../../components/FactValues.astro";
 import WorkListItem from "../../components/WorkListItem.astro";
 import Base from "../../layouts/Base.astro";
-import { getComposer, listComposerWorks } from "../../lib/api";
-import { METRIC_PREDICATES, predicateLabel } from "../../lib/predicates";
-import type { Claim, ComposerWorksPage } from "../../lib/schemas";
+import { getComposer, getConnections, listComposerWorks } from "../../lib/api";
+import { layout } from "../../lib/graph";
+import { HIDDEN_PREDICATES, METRIC_PREDICATES, predicateLabel } from "../../lib/predicates";
+import type { Claim, ComposerWorksPage, Connections } from "../../lib/schemas";
 
 const { id } = Astro.params;
 const composer = id ? await getComposer(id) : null;
@@ -15,13 +17,25 @@ if (!composer) {
 const rawWorksPage = Number(Astro.url.searchParams.get("page") ?? "1");
 const worksPage = Number.isInteger(rawWorksPage) && rawWorksPage >= 1 ? rawWorksPage : 1;
 
+// Fetched side by side: the graph comes from Neo4j, and a slow or missing
+// graph shouldn't hold up the works list, nor take the page down with it.
 let works: ComposerWorksPage | null = null;
 let worksError: string | null = null;
-try {
-  works = await listComposerWorks(composer.id, { page: worksPage });
-} catch (err) {
+let connections: Connections | null = null;
+const [worksResult, connectionsResult] = await Promise.allSettled([
+  listComposerWorks(composer.id, { page: worksPage }),
+  getConnections(composer.id),
+]);
+if (worksResult.status === "fulfilled") {
+  works = worksResult.value;
+} else {
+  const err: unknown = worksResult.reason;
   worksError = err instanceof Error ? err.message : String(err);
 }
+if (connectionsResult.status === "fulfilled") {
+  connections = connectionsResult.value;
+}
+const graph = connections && connections.items.length > 0 ? layout(connections.items) : null;
 
 const worksTotalPages = works ? Math.max(1, Math.ceil(works.total / works.limit)) : 1;
 
@@ -33,8 +47,9 @@ function worksPageUrl(target: number): string {
 }
 
 // Biographical facts up front, source-popularity counters apart at the bottom.
-const facts = composer.claims.filter((c) => !METRIC_PREDICATES.has(c.predicate));
-const metrics = composer.claims.filter((c) => METRIC_PREDICATES.has(c.predicate));
+const shown = composer.claims.filter((c) => !HIDDEN_PREDICATES.has(c.predicate));
+const facts = shown.filter((c) => !METRIC_PREDICATES.has(c.predicate));
+const metrics = shown.filter((c) => METRIC_PREDICATES.has(c.predicate));
 
 function groupByPredicate(claims: Claim[]): Map<string, Claim[]> {
   const grouped = new Map<string, Claim[]>();
@@ -56,7 +71,20 @@ const metricGroups = groupByPredicate(metrics);
 <Base title={`${composer.label} — Composers`}>
   <p class="back-link"><a href="/composers">← All composers</a></p>
   <h1>{composer.label}</h1>
-  <p class="meta">In the dataset since {composer.created_at.slice(0, 10)}.</p>
+  {connections && graph && (
+    <>
+      <ConnectionGraph
+        graph={graph}
+        label={composer.label}
+        href={(entityId, kind) => (kind === "person" ? `/connections/${entityId}` : null)}
+      />
+      <p class="meta">
+        <a href={`/connections/${composer.id}`}>The evidence →</a>
+        {connections.total > connections.items.length &&
+          ` The strongest ${connections.items.length} of ${connections.total}.`}
+      </p>
+    </>
+  )}
 
   {facts.length === 0 && <p class="empty">No facts recorded for this composer yet.</p>}
 
@@ -65,7 +93,7 @@ const metricGroups = groupByPredicate(metrics);
       {[...factGroups.entries()].map(([predicate, claims]) => (
         <>
           <dt>{predicateLabel(predicate)}</dt>
-          <dd>{claims.map((claim) => <FactValue claim={claim} />)}</dd>
+          <FactValues claims={claims} />
         </>
       ))}
     </dl>
@@ -78,7 +106,7 @@ const metricGroups = groupByPredicate(metrics);
         {[...metricGroups.entries()].map(([predicate, claims]) => (
           <>
             <dt>{predicateLabel(predicate)}</dt>
-            <dd>{claims.map((claim) => <FactValue claim={claim} />)}</dd>
+            <FactValues claims={claims} />
           </>
         ))}
       </dl>
@@ -102,8 +130,8 @@ const metricGroups = groupByPredicate(metrics);
         {works.items.map((work) => <WorkListItem work={work} />)}
       </ul>
       <nav class="pagination" aria-label="Works pagination">
-        {worksPage > 1 && <a href={worksPageUrl(worksPage - 1)}>← Previous</a>}
-        {worksPage < worksTotalPages && <a href={worksPageUrl(worksPage + 1)}>Next →</a>}
+        {worksPage > 1 && <a rel="prev" href={worksPageUrl(worksPage - 1)}>← Previous</a>}
+        {worksPage < worksTotalPages && <a rel="next" href={worksPageUrl(worksPage + 1)}>Next →</a>}
         <span class="spacer" />
         <span class="summary">
           page {worksPage} of {worksTotalPages} — {works.total} work{works.total === 1 ? "" : "s"}

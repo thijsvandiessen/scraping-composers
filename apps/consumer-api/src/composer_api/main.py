@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import NullPool
 
 from .deps import get_db
-from .errors import NotFoundError
+from .errors import GraphUnavailableError, NotFoundError
 from .routes import v1
 
 
@@ -32,15 +32,22 @@ def _not_found_handler(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=404, content={"detail": exc.detail})
 
 
+def _graph_unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
+    # The gold endpoints keep working, only the connections are missing.
+    assert isinstance(exc, GraphUnavailableError)
+    return JSONResponse(status_code=503, content={"detail": exc.detail})
+
+
 def create_app(title: str, factory_provider: Callable[[], sessionmaker[Session]]) -> FastAPI:
     """A consumer API app bound to its own database.
 
-    ``factory_provider`` is called lazily on the first request, so importing
-    this module never touches (or creates) a database file.
+    The provider is called lazily on the first request, so importing this
+    module never touches (or creates) a database file.
     """
     app = FastAPI(title=title)
     app.include_router(v1)
     app.add_exception_handler(NotFoundError, _not_found_handler)
+    app.add_exception_handler(GraphUnavailableError, _graph_unavailable_handler)
     cached: sessionmaker[Session] | None = None
 
     def _get_db() -> Generator[Session, None, None]:

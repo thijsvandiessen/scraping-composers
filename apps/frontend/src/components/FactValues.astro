@@ -1,0 +1,47 @@
+---
+import type { Claim } from "../lib/schemas";
+import FactValue from "./FactValue.astro";
+
+interface Props {
+  // Every claim for one predicate.
+  claims: Claim[];
+}
+
+// Values shown before the rest fold away behind "+N more".
+const VISIBLE_VALUES = 5;
+
+const { claims } = Astro.props;
+
+// One row per distinct value with every source that reports it,
+// best-corroborated first: "composer" from twelve sources is one row.
+const grouped = new Map<string, Claim[]>();
+for (const claim of claims) {
+  const key = claim.object_label ?? claim.value ?? "";
+  const bucket = grouped.get(key);
+  if (bucket) {
+    bucket.push(claim);
+  } else {
+    grouped.set(key, [claim]);
+  }
+}
+const values = [...grouped.values()].sort((a, b) => b.length - a.length);
+const visible = values.slice(0, VISIBLE_VALUES);
+const hidden = values.slice(VISIBLE_VALUES);
+---
+
+<dd>
+  {visible.map((same) => <FactValue claims={same} />)}
+  {
+    hidden.length > 0 && (
+      <details class="fold more-values">
+        <summary>
+          <span class="when-closed">+{hidden.length} more</span>
+          <span class="when-open">show less</span>
+        </summary>
+        {hidden.map((same) => (
+          <FactValue claims={same} />
+        ))}
+      </details>
+    )
+  }
+</dd>

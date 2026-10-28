@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query
 
 from .crud import (
     composer_works,
+    entity_connections,
     genre_people,
     get_concert,
     get_ensemble,
@@ -25,7 +26,14 @@ from .crud import (
     person_concerts,
     person_recordings,
 )
-from .deps import DbSession, EnsembleQuery, FilterQuery, PageQuery, PeopleFilterQuery
+from .deps import (
+    DbSession,
+    EnsembleQuery,
+    FilterQuery,
+    GraphQuery,
+    PageQuery,
+    PeopleFilterQuery,
+)
 from .schemas import (
     ComposerDetail,
     ComposerPage,
@@ -33,6 +41,7 @@ from .schemas import (
     ConcertDetail,
     ConcertListPage,
     ConcertPage,
+    ConnectionsOut,
     EnsembleDetail,
     EnsemblePage,
     EntityDetail,
@@ -71,6 +80,22 @@ def entities(
 @v1.get("/entities/{entity_id}", response_model=EntityDetail)
 def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
     return get_entity(db, entity_id)
+
+
+@v1.get("/entities/{entity_id}/connections", response_model=ConnectionsOut)
+def entity_connections_route(entity_id: uuid.UUID, db: DbSession, budget: GraphQuery) -> ConnectionsOut:
+    """The strongest neighbours of one entity, budgeted so a graph can draw them.
+
+    The whole neighbourhood is unusable — a busy conductor reaches thousands of
+    people, and the heaviest edges (everyone performs Beethoven) are the least
+    telling. ``rank=affinity`` discounts each neighbour by how much it is
+    performed or referenced overall, ``per_relation`` keeps the performance
+    edges from crowding out the biographical ones, and ``min_weight`` drops the
+    one-off co-occurrences that are mostly matcher noise. Served from the
+    snapshot ``composer-ingest export-neo4j`` stores in gold; 503 until one
+    has been taken.
+    """
+    return entity_connections(db, entity_id, budget)
 
 
 @v1.get("/ensembles", response_model=EnsemblePage)
@@ -211,7 +236,7 @@ def list_composers(
 
 @v1.get("/composers/{composer_id}", response_model=ComposerDetail)
 def get_composer(composer_id: uuid.UUID, db: DbSession) -> ComposerDetail:
-    return get_person(db, composer_id, None, "composer not found")
+    return get_person(db, composer_id, "composer", "composer not found")
 
 
 @v1.get("/composers/{composer_id}/works", response_model=ComposerWorksPage)

@@ -71,9 +71,10 @@ npx openapi-ts -i http://localhost:8000/openapi.json -o src/lib/generated
   garbage. Unknown fields are stripped rather than rejected, so additive API
   changes don't break the frontend (re-run `npm run gen` to pick them up).
 - Search, sort, and pagination are plain GET forms and links, so they work
-  without JavaScript. The only script is a progressive enhancement on the
-  composer list: ← / → follow the previous/next page links (ignored while
-  typing in the search form or with a modifier key held).
+  without JavaScript. The only script is a progressive enhancement in the
+  layout: on any paginated page (the composer list, a composer's works) ← / →
+  follow the previous/next page links (ignored while typing in a form field or
+  with a modifier key held).
 
 ## Checks
 
