@@ -1,0 +1,66 @@
+---
+import type { Graph } from "../lib/graph";
+import { relationLabel, relationsLabel, weightLabel } from "../lib/graph";
+
+interface Props {
+  graph: Graph;
+  /** The entity at the centre. */
+  label: string;
+  /** Where a neighbour leads; `null` draws it as plain, unclickable text. */
+  href: (entityId: string, kind: string) => string | null;
+}
+
+const { graph, label, href } = Astro.props;
+---
+
+<figure class="graph">
+  <svg
+    viewBox={graph.viewBox}
+    role="img"
+    aria-label={`Connection graph for ${label}, with ${graph.nodes.length} neighbours`}
+  >
+    <g class="edges">
+      {graph.nodes.map((node) => (
+        <line
+          x1={graph.centre.x}
+          y1={graph.centre.y}
+          x2={node.x}
+          y2={node.y}
+          stroke-width={node.strokeWidth}
+          data-group={node.group}
+        />
+      ))}
+    </g>
+    <g class="nodes">
+      {graph.nodes.map((node) => {
+        const mark = (
+          <Fragment>
+            <title>
+              {`${node.connection.label} — ${relationsLabel(node.connection)}, ${weightLabel(node.connection.relation, node.connection.weight)}`}
+            </title>
+            <circle cx={node.x} cy={node.y} r={node.radius} data-group={node.group} />
+            <text x={node.x + node.labelOffset} y={node.y + 4} text-anchor={node.anchor}>
+              {node.connection.label}
+            </text>
+          </Fragment>
+        );
+        const target = href(node.connection.entity_id, node.connection.kind);
+        return target ? <a href={target}>{mark}</a> : <g class="fixed">{mark}</g>;
+      })}
+    </g>
+    <g class="centre">
+      <circle cx={graph.centre.x} cy={graph.centre.y} r={graph.centre.radius} />
+      <text x={graph.centre.x} y={graph.centre.y + graph.centre.radius + 20} text-anchor="middle">
+        {label}
+      </text>
+    </g>
+  </svg>
+  <figcaption>
+    Distance from the centre is rank — the closest node is the strongest connection. Size and line
+    weight show how much evidence there is. Select a person to see their connections.
+  </figcaption>
+</figure>
+
+<ul class="legend">
+  {graph.relations.map((relation, index) => <li data-group={index}>{relationLabel(relation)}</li>)}
+</ul>
