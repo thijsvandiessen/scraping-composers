@@ -2496,7 +2496,7 @@
   "paths": {
     "/v1/composers": {
       "get": {
-        "description": "People credited with at least three works, whatever their profession claims say.",
+        "description": "People whose works are on at least three concerts and recordings combined, whatever their\nprofession claims say. Counts and sorts are of those performances, not the person's own credits.",
         "operationId": "list_composers_v1_composers_get",
         "parameters": [
           {

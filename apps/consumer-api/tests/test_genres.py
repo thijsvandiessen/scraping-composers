@@ -15,7 +15,7 @@ from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
 from composer_models.testing import requires_postgres
 from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 from composer_warehouse.derived import refresh_derived
-from composer_warehouse.testing import FakeSource, genre, ingest_source, mention, person
+from composer_warehouse.testing import FakeSource, genre, ingest_source, perf_mention, person
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -33,11 +33,25 @@ def _tag(qid: str, label: str, predicate: str = "has_genre", kind: str = "genre"
     return SourceClaim(predicate, kind, label, object_wikidata_id=qid)
 
 
-def _composer(name: str, *claims: SourceClaim) -> tuple[EntityDocument | WorkMentionDocument, ...]:
-    """A person with three works, so /v1/composers lists them."""
-    return (
-        person(name, *claims, external_id=f"p:{name}"),
-        *(mention(title, name, f"{name}:{title}") for title in ("Overture", "Serenade", "Requiem")),
+COMPOSERS = (
+    "Strauss, Johann",
+    "Lehár, Franz",
+    "Verdi, Giuseppe",
+    "Lanner, Joseph",
+    "Cyclist, A",
+    "Bach, Johann Sebastian",
+)
+
+
+def _composer(name: str, *claims: SourceClaim) -> EntityDocument:
+    return person(name, *claims, external_id=f"p:{name}")
+
+
+def _programmed(name: str) -> tuple[WorkMentionDocument, ...]:
+    """Three works, each on a concert of its own, so /v1/composers lists the composer."""
+    return tuple(
+        perf_mention(f"{name}:{title}", title, name, {"concert_id": f"{name}:{title}", "date": "1990-01-01"})
+        for title in ("Overture", "Serenade", "Requiem")
     )
 
 
@@ -59,15 +73,17 @@ def _seed(session: Session) -> None:
         ),
     )
     records = (
-        *_composer("Strauss, Johann", _tag("Q2", "Viennese waltz")),
-        *_composer("Lehár, Franz", _tag("Q215", "waltz"), _tag("Q1344", "opera")),
-        *_composer("Verdi, Giuseppe", _tag("Q1344", "opera")),
+        _composer("Strauss, Johann", _tag("Q2", "Viennese waltz")),
+        _composer("Lehár, Franz", _tag("Q215", "waltz"), _tag("Q1344", "opera")),
+        _composer("Verdi, Giuseppe", _tag("Q1344", "opera")),
         # an old bronze run: the genre by label only, linked by refresh_derived
-        *_composer("Lanner, Joseph", SourceClaim("has_genre", "genre", "Waltz")),
-        *_composer("Cyclist, A", _tag("Q901", "cycle a")),
-        *_composer("Bach, Johann Sebastian", _tag("Q8361", "Baroque music", "in_movement", "movement")),
+        _composer("Lanner, Joseph", SourceClaim("has_genre", "genre", "Waltz")),
+        _composer("Cyclist, A", _tag("Q901", "cycle a")),
+        _composer("Bach, Johann Sebastian", _tag("Q8361", "Baroque music", "in_movement", "movement")),
     )
     ingest_source(session, FakeSource(records=records, name="wikidata"))
+    programmes = tuple(m for name in COMPOSERS for m in _programmed(name))
+    ingest_source(session, FakeSource(records=programmes, name="berlinphil"))
     refresh_derived(session)
 
 
