@@ -30,7 +30,6 @@ from .deps import (
     DbSession,
     EnsembleQuery,
     FilterQuery,
-    GraphDriver,
     GraphQuery,
     PageQuery,
     PeopleFilterQuery,
@@ -84,9 +83,7 @@ def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
 
 
 @v1.get("/entities/{entity_id}/connections", response_model=ConnectionsOut)
-def entity_connections_route(
-    entity_id: uuid.UUID, db: DbSession, graph: GraphDriver, budget: GraphQuery
-) -> ConnectionsOut:
+def entity_connections_route(entity_id: uuid.UUID, db: DbSession, budget: GraphQuery) -> ConnectionsOut:
     """The strongest neighbours of one entity, budgeted so a graph can draw them.
 
     The whole neighbourhood is unusable — a busy conductor reaches thousands of
@@ -94,10 +91,11 @@ def entity_connections_route(
     telling. ``rank=affinity`` discounts each neighbour by how much it is
     performed or referenced overall, ``per_relation`` keeps the performance
     edges from crowding out the biographical ones, and ``min_weight`` drops the
-    one-off co-occurrences that are mostly matcher noise. Served from the Neo4j
-    projection of gold; 503 when that isn't loaded or reachable.
+    one-off co-occurrences that are mostly matcher noise. Served from the
+    snapshot ``composer-ingest export-neo4j`` stores in gold; 503 until one
+    has been taken.
     """
-    return entity_connections(db, graph, entity_id, budget)
+    return entity_connections(db, entity_id, budget)
 
 
 @v1.get("/ensembles", response_model=EnsemblePage)

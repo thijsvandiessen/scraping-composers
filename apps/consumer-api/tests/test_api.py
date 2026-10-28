@@ -15,7 +15,8 @@ import pytest
 from composer_api import create_app
 from composer_api.crud.common import deep_link
 from composer_gold import gold_engine, promote
-from composer_graph import load_graph
+from composer_graph import load_graph, snapshot_connections
+from composer_models import ConnectionEdge, EntityConnections
 from composer_models.db import init_db
 from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
 from composer_models.testing import requires_postgres
@@ -1188,9 +1189,11 @@ def test_gold_stats_reflect_curation(gold_client: TestClient) -> None:
 
 # --- /v1/entities/{id}/connections ---
 #
-# Read from Neo4j: these load the promoted gold into the server at
-# COMPOSER_TEST_NEO4J_URL (emptying it first) and skip when it is unset. The
-# 404 and 422 paths never reach the graph and always run.
+# Served from the snapshot export-neo4j stores in gold. The graph fixtures take
+# it the real way: load the promoted gold into the server at
+# COMPOSER_TEST_NEO4J_URL (emptying it first), snapshot it back into gold, and
+# skip when that is unset. The tests further down seed snapshots by hand and
+# always run, as do the 404, 422 and 503 paths.
 
 NEO4J_URL = os.environ.get("COMPOSER_TEST_NEO4J_URL") or None
 
@@ -1206,10 +1209,11 @@ def graph() -> Iterator[Driver]:
 
 
 def _graph_client(title: str, gold_factory: sessionmaker[Session], graph: Driver) -> TestClient:
-    """A gold client whose graph is the projection of that same gold."""
+    """A gold client serving the snapshot of its own graph projection."""
     with gold_factory() as gold:
         load_graph(gold, graph)
-    return TestClient(create_app(title, lambda: gold_factory, lambda: graph))
+        snapshot_connections(gold, graph)
+    return TestClient(create_app(title, lambda: gold_factory))
 
 
 def _connections(client: TestClient, entity_id: str, query: str = "") -> dict[str, Any]:
@@ -1315,11 +1319,122 @@ def test_connections_404_for_unknown_entity(concerts_client: TestClient) -> None
     assert r.status_code == 404
 
 
-def test_connections_503_without_a_graph(concerts_client: TestClient) -> None:
-    """An app with no graph still knows the entity; it just can't draw it."""
+def test_connections_503_without_a_snapshot(concerts_client: TestClient) -> None:
+    """A gold with no snapshot still knows the entity; it just can't draw it."""
     karajan = _entity_id(concerts_client, "Karajan, Herbert von")
     r = concerts_client.get(f"/v1/entities/{karajan}/connections")
     assert r.status_code == 503
+
+
+def _edge(
+    family: str,
+    neighbour: tuple[str, str],
+    weight: int,
+    affinity: float,
+    *relations: str,
+    direction: str = "out",
+) -> ConnectionEdge:
+    relations = relations or (family,)
+    return ConnectionEdge(
+        family=family,
+        entity_id=neighbour[0],
+        label=neighbour[1],
+        kind="person",
+        relations=list(relations),
+        directions=dict.fromkeys(relations, direction),
+        weight=weight,
+        scores={"affinity": affinity, "weight": float(weight)},
+        roles=[],
+        via=[],
+    )
+
+
+@pytest.fixture
+def seeded_client(promote_gold: PromoteGold) -> TestClient:
+    """The concerts gold with a hand-made snapshot for Karajan: two performed
+    edges the rankings order differently, a stage partner, and a place linked
+    by two claims. The weight counts include edges the pool did not keep."""
+    factory = _concerts_gold(promote_gold)
+    client = TestClient(create_app("test-gold-seeded", lambda: factory))
+    karajan = _entity_id(client, "Karajan, Herbert von")
+    ids = {
+        label: _entity_id(client, label)
+        for label in ("Richard Strauss", "Hector Berlioz", "Mutter, Anne-Sophie")
+    }
+    edges = [
+        _edge("performed", (ids["Richard Strauss"], "Richard Strauss"), 5, 0.5),
+        _edge("performed", (ids["Hector Berlioz"], "Hector Berlioz"), 2, 0.9),
+        _edge("appeared_with", (ids["Mutter, Anne-Sophie"], "Mutter, Anne-Sophie"), 1, 0.7),
+        _edge("claims", (str(uuid.uuid4()), "Salzburg"), 2, 0.6, "born_in", "died_in"),
+    ]
+    weights = {
+        "performed": {"1": 4, "2": 1, "5": 1},  # four one-off composers fell out of the pool
+        "appeared_with": {"1": 1},
+        "claims": {"2": 1},
+        "born_in": {"2": 1},
+        "died_in": {"2": 1},
+    }
+    with factory() as gold:
+        gold.add(
+            EntityConnections(entity_id=uuid.UUID(karajan), payload={"edges": edges, "weights": weights})
+        )
+        gold.commit()
+    return client
+
+
+def test_snapshot_is_ranked_by_affinity_by_default(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan)
+    assert [i["label"] for i in data["items"]] == [
+        "Hector Berlioz",
+        "Mutter, Anne-Sophie",
+        "Salzburg",
+        "Richard Strauss",
+    ]
+    assert data["items"][0]["score"] == 0.9
+    # total counts every edge, kept in the pool or not
+    assert data["total"] == 8
+
+
+def test_snapshot_rank_weight_reorders(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan, "?rank=weight")
+    assert [i["label"] for i in data["items"]][:1] == ["Richard Strauss"]
+    assert all(i["score"] == i["weight"] for i in data["items"])
+
+
+def test_snapshot_min_weight_filters_edges_and_total(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan, "?min_weight=2")
+    assert [i["label"] for i in data["items"]] == ["Hector Berlioz", "Salzburg", "Richard Strauss"]
+    assert data["total"] == 3
+
+
+def test_snapshot_relation_filter_names_the_claim_asked_for(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan, "?relation=died_in")
+    assert [(i["label"], i["relation"], i["relations"]) for i in data["items"]] == [
+        ("Salzburg", "died_in", ["born_in", "died_in"])
+    ]
+    assert data["total"] == 1
+    performed = _connections(seeded_client, karajan, "?relation=performed")
+    assert {i["relation"] for i in performed["items"]} == {"performed"}
+    assert performed["total"] == 6
+
+
+def test_snapshot_budgets_apply(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan, "?per_relation=1")
+    assert Counter(i["relation"] for i in data["items"]) == {"performed": 1, "appeared_with": 1, "born_in": 1}
+    assert len(_connections(seeded_client, karajan, "?limit=2")["items"]) == 2
+
+
+def test_snapshot_without_a_row_has_no_neighbours(seeded_client: TestClient) -> None:
+    """Once a snapshot exists, an entity missing from it simply has none."""
+    abbado = _entity_id(seeded_client, "Abbado, Claudio")
+    data = _connections(seeded_client, abbado)
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 def _concert(cid: str, title: str, composer: str, conductor: str, **extra: Any) -> WorkMentionDocument:

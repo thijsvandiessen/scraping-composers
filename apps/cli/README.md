@@ -20,7 +20,7 @@ to override `LOG_LEVEL`.
 | `genres`, `link-genres` | report how far the genre/movement hierarchy reaches: the share of person tags reached, orphans and musical forms counted and the most-used of each listed (`--kind`, `--limit`); and point label-only genres at their QID entity (also run before every promote) | [composer-warehouse](../../packages/composer-warehouse/README.md#genres-and-movements) |
 | `rebuild-silver` | replay the whole bucket into a fresh silver | [composer-warehouse](../../packages/composer-warehouse/README.md#rebuilding-silver) |
 | `promote` | rebuild gold from silver (work links, concerts and recordings are re-derived first) | [composer-gold](../../packages/composer-gold/README.md) |
-| `export-kumu`, `export-neo4j` | export gold to a Kumu blueprint or a Neo4j graph | [composer-gold](../../packages/composer-gold/README.md#mapping-gold-in-kumu), [composer-graph](../../packages/composer-graph/README.md) |
+| `export-kumu`, `export-neo4j`, `snapshot-connections` | export gold to a Kumu blueprint or a Neo4j graph (which also stores the connections snapshot the API serves), and re-take that snapshot from a loaded graph | [composer-gold](../../packages/composer-gold/README.md#mapping-gold-in-kumu), [composer-graph](../../packages/composer-graph/README.md) |
 
 ## Tests
 
@@ -41,5 +41,5 @@ uv run --directory apps/cli pytest --rootdir . --cov=composer_cli
 | Gold | `promote` passing thresholds, `export-kumu` (blueprint written, no gold database). |
 | Entry point | Routing to subcommands, no subcommand, `-v` and `--log-level`, a bad `LOG_LEVEL`, `DATABASE_URL`. |
 
-Not covered: `export-neo4j` (its load is tested in `composer-graph`), the
+Not covered: `export-neo4j` and `snapshot-connections` (the load and the snapshot are tested in `composer-graph`), the
 `export-kumu` failure path, and `review --accept`.

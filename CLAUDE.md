@@ -97,8 +97,9 @@ use gold has a server of its own (`docker compose up -d postgres-gold`, port
 
 ## Neo4j-backed tests
 
-`composer-graph` and the consumer API's connections tests need a real Neo4j;
-CI runs them in a separate `test-neo4j` job. They skip when
+`composer-graph` and the consumer API's graph-backed connections tests need a
+real Neo4j (to build the snapshot the API serves); CI runs them in a separate
+`test-neo4j` job. They skip when
 `COMPOSER_TEST_NEO4J_URL` is unset. **Each test empties the database it is
 pointed at**, so don't point them at the `neo4j` service you loaded gold
 into. Use a throwaway container:
@@ -111,11 +112,13 @@ for m in packages/composer-graph apps/consumer-api; do
 done
 ```
 
-The consumer API's `/v1/entities/{id}/connections` reads from that graph, so
-after a `promote`, run `composer-ingest export-neo4j` (or `make graph`) too.
-The loader stores each node's reach (`times_performed`, `performances`,
-`appearances`, `claim_degree`), which the ranking depends on. A graph loaded
-by an older loader lacks them and falls back to ranking by raw weight.
+The consumer API's `/v1/entities/{id}/connections` reads the snapshot
+`composer-ingest export-neo4j` (or `make graph`) stores in gold's
+`entity_connections`, not the graph itself, so production needs no Neo4j.
+`promote` empties it: run `make graph` after every promote, or the endpoint
+answers 503. The ranking depends on each node's reach (`times_performed`,
+`performances`, `appearances`, `claim_degree`), which the loader stores
+before the snapshot is taken.
 
 ## Schema changes
 

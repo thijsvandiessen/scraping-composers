@@ -67,6 +67,10 @@ passes over it; curation happens when it is promoted into gold.
   works are on (`programmes.py`). Derived state, refreshed by the two derive
   passes in silver and recomputed by promote in gold; `/v1/composers` reads it
   instead of aggregating the event tables on every request.
+- **`entity_connections`** — gold only: each entity's neighbourhood in the
+  Neo4j graph as one JSON row (`connections.py`), written by `export-neo4j`
+  after the graph is loaded and emptied by every promote.
+  `/v1/entities/{id}/connections` serves it, so production runs no Neo4j.
 
 ## Schema and migrations
 

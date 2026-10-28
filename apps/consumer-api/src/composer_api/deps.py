@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Annotated
 
 from fastapi import Depends, Query
-from neo4j import Driver
 from sqlalchemy.orm import Session
 
 
@@ -16,16 +15,6 @@ def get_db() -> Generator[Session, None, None]:
 
 
 DbSession = Annotated[Session, Depends(get_db)]
-
-
-def get_graph() -> Driver | None:
-    """The Neo4j driver the connections read from; ``create_app`` overrides
-    this. ``None`` is an app with no graph (silver), which the route turns into
-    a 503 only after the entity itself has been found."""
-    return None
-
-
-GraphDriver = Annotated[Driver | None, Depends(get_graph)]
 
 
 @dataclass(frozen=True)

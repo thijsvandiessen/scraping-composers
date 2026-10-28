@@ -7,7 +7,7 @@ class NotFoundError(Exception):
 
 
 class GraphUnavailableError(Exception):
-    """The graph database is not configured or not reachable; the app maps it to HTTP 503."""
+    """No connections snapshot has been taken; the app maps it to HTTP 503."""
 
     def __init__(self, detail: str) -> None:
         super().__init__(detail)
