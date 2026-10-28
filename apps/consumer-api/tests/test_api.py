@@ -260,7 +260,8 @@ def test_person_with_both_roles_appears_in_both_lists(client: TestClient) -> Non
 
 @pytest.fixture
 def composers_client() -> Iterator[TestClient]:
-    """Silver client where composer status hinges on work counts, not professions."""
+    """Silver client where composer status hinges on concerts of the works, not
+    professions or work counts."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -270,38 +271,77 @@ def composers_client() -> Iterator[TestClient]:
     people = _FakeSource(
         [
             _person("Bach, Johann", SourceClaim("has_profession", "profession", "composer")),
-            # tagged composer, but only two works: a conductor's stray pieces
-            _person("Maestro, Some", SourceClaim("has_profession", "profession", "composer")),
+            # tagged composer and on every concert, but his works are on only two
+            _person(
+                "Maestro, Some",
+                SourceClaim("has_profession", "profession", "composer"),
+                SourceClaim("has_profession", "profession", "conductor"),
+            ),
             _person("Doe, Jane", SourceClaim("has_profession", "profession", "soloist")),
         ]
     )
-    works = [
-        ("Bach, Johann", ("Mass in B minor", "Goldberg Variations", "St Matthew Passion")),
-        # no profession claim at all, yet three works
-        ("Hensel, Fanny", ("Das Jahr", "Piano Trio in D minor", "Easter Sonata")),
-        ("Maestro, Some", ("Fanfare for Orchestra", "Lullaby for Strings")),
+    programme = [
+        # Bach: three concerts; the second piece on concert 1 counts it once
+        ("1", "Bach, Johann", "Mass in B minor"),
+        ("1", "Bach, Johann", "Goldberg Variations"),
+        ("2", "Bach, Johann", "Goldberg Variations"),
+        ("3", "Bach, Johann", "St Matthew Passion"),
+        # no profession claim and a single work, yet on four concerts
+        *((concert, "Hensel, Fanny", "Easter Sonata") for concert in ("1", "2", "3", "4")),
+        ("1", "Maestro, Some", "Fanfare for Orchestra"),
+        ("2", "Maestro, Some", "Lullaby for Strings"),
     ]
-    programmes = FakeSource(
+    concerts = FakeSource(
         records=tuple(
-            mention(title, composer, f"m:{composer}:{title}")
-            for composer, titles in works
-            for title in titles
+            perf_mention(
+                f"perf:{concert}:{title}",
+                title,
+                composer,
+                {"concert_id": concert, "date": f"1990-01-0{concert}", "conductors": ["Maestro, Some"]},
+            )
+            for concert, composer, title in programme
         ),
-        name="programmes",
-        base_url="https://programmes.example",
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    # hundreds of works in a catalogue, none of them ever programmed
+    catalogue = FakeSource(
+        records=tuple(
+            mention(title, "Rondeau, Michel", f"imslp:{title}")
+            for title in ("Prelude", "Toccata", "Chorale", "Fugue")
+        ),
+        name="imslp_works",
+        base_url="https://imslp.org",
     )
     with factory() as s:
         ingest_source(s, people)
-        ingest_source(s, programmes)
+        ingest_source(s, concerts)
+        ingest_source(s, catalogue)
+        derive_concerts(s)
     yield TestClient(create_app("test-silver-composers", lambda: factory))
 
 
-def test_list_composers_takes_three_works_not_the_profession(composers_client: TestClient) -> None:
+def test_list_composers_takes_performed_works_not_the_profession(composers_client: TestClient) -> None:
     r = composers_client.get("/v1/composers")
     assert r.status_code == 200
     data = r.json()
-    assert {item["label"] for item in data["items"]} == {"Bach, Johann", "Hensel, Fanny"}
+    # Maestro: own concerts don't count, and his works reach only two;
+    # Rondeau: four catalogue works, none performed
+    assert [(i["label"], i["concert_count"], i["recording_count"]) for i in data["items"]] == [
+        ("Bach, Johann", 3, 0),
+        ("Hensel, Fanny", 4, 0),
+    ]
     assert data["total"] == 2
+
+
+def test_list_composers_sorts_by_concerts_of_their_works(composers_client: TestClient) -> None:
+    data = composers_client.get("/v1/composers?sort=concerts").json()
+    assert [i["label"] for i in data["items"]] == ["Hensel, Fanny", "Bach, Johann"]
+
+
+def test_non_composers_keep_their_own_concert_counts(composers_client: TestClient) -> None:
+    items = composers_client.get("/v1/conductors").json()["items"]
+    assert [(i["label"], i["concert_count"]) for i in items] == [("Maestro, Some", 4)]
 
 
 def test_list_composers_search_filter(composers_client: TestClient) -> None:

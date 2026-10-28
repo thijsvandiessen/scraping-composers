@@ -14,12 +14,14 @@ from .concerts import Concert, ConcertParticipant, ConcertWork
 from .core import IngestRun, Source
 from .entities import Claim, Entity, EntityRecord
 from .persons import PersonMatch
+from .programmes import ComposerProgramme, refresh_composer_programmes
 from .recordings import Recording, RecordingParticipant, RecordingWork
 from .works import RawWorkMention, Work, WorkIdentifier, WorkLink, WorkTitle
 
 __all__ = [
     "Base",
     "Claim",
+    "ComposerProgramme",
     "Concert",
     "ConcertParticipant",
     "ConcertWork",
@@ -36,5 +38,6 @@ __all__ = [
     "WorkIdentifier",
     "WorkLink",
     "WorkTitle",
+    "refresh_composer_programmes",
     "utcnow",
 ]

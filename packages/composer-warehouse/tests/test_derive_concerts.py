@@ -1,6 +1,6 @@
 """Tests for the silver concert-derivation pass."""
 
-from composer_models import Concert, ConcertParticipant, ConcertWork, Entity, Source
+from composer_models import ComposerProgramme, Concert, ConcertParticipant, ConcertWork, Entity, Source
 from composer_models.normalize import event_uuid
 from composer_schema import SourceClaim
 from composer_warehouse.concerts import derive_concerts
@@ -347,6 +347,25 @@ def test_derive_concerts_is_rerunnable(session: Session) -> None:
     assert session.scalar(select(func.count(Concert.id))) == 4
     assert session.scalar(select(func.count(ConcertWork.id))) == 5
     assert session.scalar(select(func.count(ConcertParticipant.id))) == 5
+
+
+def test_derive_concerts_counts_each_composers_concerts(session: Session) -> None:
+    _seed_performances(session)
+    derive_concerts(session)
+    derive_concerts(session)  # rerun replaces the counts rather than adding to them
+
+    counts = {
+        label: (row.concert_count, row.recording_count, row.programme_count)
+        for label, row in session.execute(
+            select(Entity.label, ComposerProgramme).join(Entity, Entity.id == ComposerProgramme.entity_id)
+        ).tuples()
+    }
+    # Beethoven: three mentions on two concerts
+    assert counts == {
+        "Beethoven, Ludwig van": (2, 0, 2),
+        "Robert Schumann": (1, 0, 1),
+        "Verdi, Giuseppe": (1, 0, 1),
+    }
 
 
 def _concert_ids(session: Session) -> dict[tuple[str, str], object]:

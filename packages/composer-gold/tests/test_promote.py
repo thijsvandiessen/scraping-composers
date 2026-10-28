@@ -13,6 +13,7 @@ from composer_gold import (
 )
 from composer_models import (
     Claim,
+    ComposerProgramme,
     Concert,
     ConcertParticipant,
     Entity,
@@ -897,6 +898,34 @@ def test_composer_reach_is_counted_per_dedup_cluster(session: Session, tmp_path:
 
     with _gold_session(gold_path) as gold:
         assert "Hensel, Fanny" in {e.label for e in gold.scalars(select(Entity))}
+
+
+def test_promote_counts_a_composers_programmes_across_spellings(session: Session, tmp_path: Path) -> None:
+    """Gold recomputes the counts once mentions point at the canonical person."""
+    berlinphil = FakeSource(
+        records=tuple(
+            perf_mention(f"perf:{concert}", title, composer, {"concert_id": concert, "date": "2009-02-08"})
+            for concert, title, composer in (
+                ("1", "Das Jahr", "Hensel, Fanny"),
+                ("2", "Easter Sonata", "Mendelssohn, Fanny"),
+            )
+        ),
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    ingest_source(session, berlinphil)
+    canonical = session.scalars(select(Entity).where(Entity.label == "Hensel, Fanny")).one()
+    duplicate = session.scalars(select(Entity).where(Entity.label == "Mendelssohn, Fanny")).one()
+    duplicate.canonical_entity_id = canonical.id
+    session.commit()
+    derive_concerts(session)
+    gold_path = tmp_path / "gold.db"
+
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        row = gold.scalars(select(ComposerProgramme)).one()
+        assert (row.entity_id, row.concert_count, row.programme_count) == (canonical.id, 2, 2)
 
 
 def _seed_ensemble_silver(session: Session) -> None:

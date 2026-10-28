@@ -159,9 +159,9 @@ def test_gold_copies_concerts_recordings_and_works(pipeline: Pipeline) -> None:
 # --- gold API -------------------------------------------------------------------
 
 
-def test_api_lists_composers_with_three_works(api: TestClient) -> None:
+def test_api_lists_composers_whose_works_are_performed(api: TestClient) -> None:
     # Mahler is in gold (he conducts) and wikidata tags him a composer, but
-    # with one mentioned work he isn't listed as one.
+    # his works aren't on enough concerts and recordings to list him as one.
     body = api.get("/v1/composers", params={"limit": 100}).json()
     assert {item["label"] for item in body["items"]} == {"Ludwig van Beethoven"}
 
