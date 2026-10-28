@@ -28,5 +28,19 @@ const { title } = Astro.props;
       Every fact shows the source it came from; the source tag links to the exact page where the
       information can be verified.
     </footer>
+    <script>
+      // ← / → follow any page's pagination links (rel="prev" / rel="next"), unless
+      // the user is typing in a form field.
+      document.addEventListener("keydown", (event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+        if (event.target instanceof HTMLElement && event.target.closest("input, select, textarea, [contenteditable]")) return;
+        const rel = event.key === "ArrowLeft" ? "prev" : event.key === "ArrowRight" ? "next" : null;
+        const link = rel && document.querySelector<HTMLAnchorElement>(`.pagination a[rel="${rel}"]`);
+        if (link) {
+          event.preventDefault();
+          link.click();
+        }
+      });
+    </script>
   </body>
 </html>
