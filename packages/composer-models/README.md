@@ -32,7 +32,8 @@ passes over it; curation happens when it is promoted into gold.
   `canonical_entity_id` points a duplicate person at its cluster canonical, and
   a label-only genre or movement at the QID-keyed one it names.
   `genres.py` holds the vocabulary's fixed points: the top-level genres and
-  movements (by QID) that facets and the orphan report measure against.
+  movements (by QID) that facets and the orphan report measure against, and
+  the `genre_type` value that marks a musical form.
 - **`claims`** — typed edges between entities, e.g.
   `person --has_profession--> profession`, `person --born_in--> place`,
   `person --composed--> work`. The object is either another entity
@@ -62,6 +63,10 @@ passes over it; curation happens when it is promoted into gold.
   `dedupe-persons`.
 - **`concerts`** and **`recordings`** (with their participants and
   programmes) — derived from the mentions in silver, copied into gold.
+- **`composer_programmes`** — per composer, the concerts and recordings their
+  works are on (`programmes.py`). Derived state, refreshed by the two derive
+  passes in silver and recomputed by promote in gold; `/v1/composers` reads it
+  instead of aggregating the event tables on every request.
 
 ## Schema and migrations
 

@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
 
-from composer_schema.catalogues import OPUS
+from composer_schema.catalogues import OPUS, normalize_wikidata_code
 
 from .extract import WorkFeatures, extract_features
 from .match import EXTERNAL_SCHEMES
@@ -55,34 +55,50 @@ def _imslp_catalogue(raw: dict[str, Any]) -> list[str]:
     return _strings(raw.get("opus_catalogue_number"))
 
 
-def _wikidata_catalogue(raw: dict[str, Any]) -> list[str]:
-    """Each P528 code, prefixed with its catalogue's short name when the code
-    is a bare number -- Wikidata states Köchel 550 as "K. 550" on some items
-    and as "550" (catalogue: Köchel catalogue, short name "KV") on others."""
-    fields: list[str] = []
+def _text(entry: dict[str, Any], key: str) -> str | None:
+    value = entry.get(key)
+    return value if isinstance(value, str) else None
+
+
+def _wikidata_catalogue(raw: dict[str, Any], composer: str | None) -> list[tuple[str, str]]:
+    """Each P528 code, read by its catalogue item (see
+    :func:`composer_schema.catalogues.normalize_wikidata_code`): Wikidata
+    states Köchel 550 as "K. 550" on some items and as "550" (catalogue:
+    Köchel catalogue, short name "KV") on others, and Terry 238/3 as "238/3"
+    in a catalogue with no short name at all."""
+    pairs: list[tuple[str, str]] = []
     for entry in raw.get("catalogue_codes") or []:
-        if not isinstance(entry, dict):
+        if not isinstance(entry, dict) or (code := _text(entry, "code")) is None:  # pyright: ignore[reportUnknownArgumentType]
             continue
-        code = entry.get("code")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        if not isinstance(code, str):
-            continue
-        short = entry.get("catalogue_short")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
-        if re.match(r"^\s*[\dIVXLC]", code) and isinstance(short, str):
-            code = f"{short} {code}"
-        fields.append(code)
-    return fields
+        pairs += normalize_wikidata_code(
+            code,
+            _text(entry, "catalogue_item"),  # pyright: ignore[reportUnknownArgumentType]
+            _text(entry, "catalogue_short"),  # pyright: ignore[reportUnknownArgumentType]
+            composer,
+        )
+    return pairs
 
 
 _CATALOGUE_READERS: dict[str, Callable[[dict[str, Any]], list[str]]] = {
     "imslp_works": _imslp_catalogue,
+}
+_STATED_READERS: dict[str, Callable[[dict[str, Any], str | None], list[tuple[str, str]]]] = {
     "wikidata_catalogue": _wikidata_catalogue,
 }
 
 
 def structured_catalogue(source_name: str, raw: dict[str, Any]) -> list[str]:
-    """The catalogue/opus fields a source states apart from the title."""
+    """The catalogue/opus fields a source states apart from the title, as
+    text to read for the composer."""
     reader = _CATALOGUE_READERS.get(source_name)
     return reader(raw) if reader is not None else []
+
+
+def stated_catalogue(source_name: str, raw: dict[str, Any], composer: str | None) -> list[tuple[str, str]]:
+    """The ``(scheme, value)`` catalogue numbers a source states already
+    resolved to their catalogue, as Wikidata does with each code's item."""
+    reader = _STATED_READERS.get(source_name)
+    return reader(raw, composer) if reader is not None else []
 
 
 def external_ids(source_name: str, raw: dict[str, Any]) -> frozenset[tuple[str, str]]:
@@ -108,7 +124,12 @@ def mention_features(source_name: str, title: str, composer: str | None, raw: di
     """The features the matcher compares for one mention: its title read for
     ``composer``, plus the structured catalogue fields and external ids its
     source states."""
-    features = extract_features(title, composer=composer, structured=structured_catalogue(source_name, raw))
+    features = extract_features(
+        title,
+        composer=composer,
+        structured=structured_catalogue(source_name, raw),
+        stated=stated_catalogue(source_name, raw, composer),
+    )
     external = external_ids(source_name, raw)
     if not external:
         return features
@@ -126,5 +147,6 @@ __all__ = [
     "mention_features",
     "normalize_iswc",
     "part_of",
+    "stated_catalogue",
     "structured_catalogue",
 ]

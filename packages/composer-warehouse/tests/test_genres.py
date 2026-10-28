@@ -173,3 +173,43 @@ def test_report_counts_orphans_and_ranks_them_by_persons(session: Session) -> No
         ("lost genre", None, 1),
         ("tonadilla", "Q51", 1),
     ]
+    # five distinct tags, of which only A's "Viennese waltz" reaches dance music
+    assert (report.tags, report.tags_reached) == (5, 1)
+    assert report.reach == 0.2
+
+
+def test_report_counts_musical_forms_apart_from_orphans(session: Session) -> None:
+    """A form ("symphony") has no path to a top-level genre either, but it is
+    a term of another axis, not a gap in the genre tree (#364)."""
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                genre("Q9734", "symphony", form=True),
+                genre("Q8701407", "waltz", DANCE, form=True),
+                genre(*DANCE),
+                genre("Q50", "sardana"),
+            ),
+            name="wikidata_genres",
+        ),
+    )
+    ingest_source(
+        session,
+        FakeSource(
+            records=(
+                _tagged("A", ("Q9734", "symphony"), ("Q8701407", "waltz")),
+                _tagged("B", ("Q9734", "symphony"), ("Q50", "sardana")),
+            )
+        ),
+    )
+
+    report = genre_report(session, "genre", {"Q316930": "dance music"})
+
+    assert (report.orphans, report.forms) == (1, 1)  # a form that reaches the top is neither
+    assert [(o.label, o.persons) for o in report.top_orphans] == [("sardana", 1)]
+    assert [(o.label, o.wikidata_id, o.persons) for o in report.top_forms] == [("symphony", "Q9734", 2)]
+    assert (report.tags, report.tags_reached) == (4, 1)
+
+
+def test_an_empty_report_has_no_reach(session: Session) -> None:
+    assert genre_report(session, "movement", {"Q9730": "classical music"}).reach == 0.0

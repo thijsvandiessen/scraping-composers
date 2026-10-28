@@ -7,7 +7,9 @@ does. ``rebuild_silver`` closes that gap: it replays every document snapshot
 of every source in the bucket (the bronze tier — the only place the full
 documents, claims included, live) into a fresh database, re-runs the
 derivation passes (work links, concerts, recordings), and atomically swaps the
-result in.
+result in. Persons are deduped before those passes run, so the works a
+composer's duplicate entities split apart during the replay are folded
+together against the canonical composer (#362).
 
 What gets replayed comes from the bucket itself, not from
 ``composer_scrapers.REGISTRY``: a crawl-config source has no adapter, but the
@@ -69,6 +71,7 @@ class RebuildStats:
     places_linked: int = 0
     genres_linked: int = 0
     ensembles_anchored: int = 0
+    works_merged: int = 0
     work_links: int = 0
     concerts: int = 0
     recordings: int = 0
@@ -279,6 +282,7 @@ def _replay(
         places_linked=derived.places.linked,
         genres_linked=derived.genres.linked,
         ensembles_anchored=derived.ensembles.anchored,
+        works_merged=derived.merged.merged,
         work_links=derived.works.links,
         concerts=derived.concerts.concerts,
         recordings=derived.recordings.recordings,

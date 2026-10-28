@@ -573,6 +573,7 @@ def _seed_genres(db_url: str) -> None:
                     genre("Q215", "waltz", ("Q316930", "dance music")),
                     genre("Q316930", "dance music"),
                     genre("Q50", "sardana"),
+                    genre("Q9734", "symphony", form=True),
                 ),
                 name="wikidata_genres",
             ),
@@ -585,6 +586,7 @@ def _seed_genres(db_url: str) -> None:
                         "Serra, Joaquim",
                         SourceClaim("has_genre", "genre", "sardana", object_wikidata_id="Q50"),
                         SourceClaim("has_genre", "genre", "Waltz"),
+                        SourceClaim("has_genre", "genre", "symphony", object_wikidata_id="Q9734"),
                     ),
                 )
             ),
@@ -600,10 +602,13 @@ def test_cmd_genres_reports_the_orphan_count(tmp_path: Path, capsys: pytest.Capt
 
     assert cmd_genres(_ns(database_url=db_url, kind="genre", limit=5)) == 0
     out = capsys.readouterr().out
-    assert "genres: 4" in out
+    assert "genres: 5" in out
     assert "label only             1 (1 linked to a QID one)" in out
     assert "orphans                1 (no subclass_of path to a top-level genre)" in out
     assert "1  sardana (Q50)" in out
+    assert "musical forms          1 (no path either, counted apart from the orphans)" in out
+    assert "most-used musical forms:\n         1  symphony (Q9734)" in out
+    assert "person tags reached    1 of 3 (33%)" in out
     assert "movements" not in out
 
 
@@ -617,7 +622,7 @@ def test_main_routes_to_genres_for_both_kinds(
         main()
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    assert "genres: 4" in out
+    assert "genres: 5" in out
     assert "movements: 0" in out
 
 

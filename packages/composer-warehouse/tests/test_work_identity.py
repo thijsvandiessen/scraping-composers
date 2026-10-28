@@ -2,13 +2,16 @@
 ingest resolves on the strong keys and stores them, and the link pass points
 parts, arrangements and versions at their parent."""
 
+import uuid
+from dataclasses import replace
 from typing import Any
 
 from composer_models import RawWorkMention, Source, Work, WorkIdentifier, WorkLink
 from composer_warehouse.ingestion import new_work
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
-from composer_warehouse.works import extract_features
-from composer_warehouse.works.links import link_works
+from composer_warehouse.works import Candidate, extract_features
+from composer_warehouse.works.links import _range_links, link_works  # pyright: ignore[reportPrivateUsage]
+from composer_warehouse.works.schemes import holds_sets
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -160,6 +163,52 @@ def test_wikidata_catalogue_ids_are_stored_and_normalised(session: Session) -> N
     }
 
 
+def test_wikidata_codes_are_read_by_their_catalogue_item(session: Session) -> None:
+    """Terry 238/3 has no short name to read it by, and a Rinaldi catalogue
+    code keeps the catalogue item as its scheme (#361)."""
+    jc_bach = "Johann Christian Bach"
+    codes = [
+        {
+            "catalogue_item": "Q139766427",
+            "code": "238/3",
+            "catalogue": "Terry-Verzeichnis",
+            "catalogue_short": None,
+        },
+        {
+            "catalogue_item": "Q112328324",
+            "code": "R. op. 243",
+            "catalogue": "Rinaldi",
+            "catalogue_short": None,
+        },
+    ]
+    ingest(
+        session,
+        "wikidata_catalogue",
+        perf_mention("Q3:Q1", "Quintet", jc_bach, wikidata("Q3", catalogue_codes=codes)),
+    )
+    ingest(
+        session,
+        "imslp_works",
+        perf_mention("w1", "Quintet in D", jc_bach, {"opus_catalogue_number": "Ty 238/3"}),
+    )
+
+    stored = set(session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)).tuples())
+    assert {("Ty", "238/3"), ("wd:Q112328324", "r. op. 243")} <= stored
+    assert len(session.scalars(select(Work)).all()) == 1
+
+
+def test_two_wikidata_items_meet_on_a_code_in_an_unmapped_catalogue(session: Session) -> None:
+    code = [{"catalogue_item": "Q16749680", "code": "C 48", "catalogue": "Chomiński catalog"}]
+    chopin = "Chopin, Frédéric"
+    ingest(
+        session,
+        "wikidata_catalogue",
+        perf_mention("Q4:Q1268", "Piano Concerto No. 2", chopin, wikidata("Q4", catalogue_codes=code)),
+        perf_mention("Q5:Q1268", "Klavierkonzert f-Moll", chopin, wikidata("Q5", catalogue_codes=code)),
+    )
+    assert len(session.scalars(select(Work)).all()) == 1
+
+
 def test_wikidata_part_of_links_a_movement_to_its_work(session: Session) -> None:
     ingest(
         session,
@@ -189,3 +238,92 @@ def test_link_works_rebuilds_rather_than_accumulates(session: Session) -> None:
     link_works(session)
     link_works(session)
     assert len(session.scalars(select(WorkLink)).all()) == 1
+
+
+def test_pieces_link_to_their_range_instead_of_merging_into_it(session: Session) -> None:
+    ingest(
+        session,
+        "a",
+        mention("15 Inventions, BWV 772-786", BACH, "a1"),
+        mention("Invention No. 1 in C major, BWV 772", BACH, "a2"),
+        mention("Invention No. 15 in B minor, BWV 786", BACH, "a3"),
+        mention("Sinfonia No. 1 in C major, BWV 787", BACH, "a4"),
+    )
+    assert len(session.scalars(select(Work)).all()) == 4
+
+    stats = link_works(session)
+    assert stats.by_range == 2
+    assert links(session) == {
+        ("Invention No. 1 in C major, BWV 772", "part_of", "15 Inventions, BWV 772-786", "catalogue_range"),
+        ("Invention No. 15 in B minor, BWV 786", "part_of", "15 Inventions, BWV 772-786", "catalogue_range"),
+    }
+
+
+def test_imslps_structured_range_keeps_the_set_apart(session: Session) -> None:
+    handel = "Handel, George Frideric"
+    raw = {"opus_catalogue_number": "Op.6 ; HWV 319-330"}
+    ingest(session, "imslp_works", perf_mention("w1", "12 Concerti Grossi, Op.6", handel, raw))
+    ingest(session, "roh", mention("Concerto grosso in G major HWV 319", handel, "r1"))
+
+    assert len(session.scalars(select(Work)).all()) == 2
+    link_works(session)
+    assert links(session) == {
+        ("Concerto grosso in G major HWV 319", "part_of", "12 Concerti Grossi, Op.6", "catalogue_range")
+    }
+
+
+def test_a_number_inside_nested_sets_links_to_the_smallest(session: Session) -> None:
+    """*15 Inventions* sits inside *Inventions and Sinfonias*: the invention is
+    part of the smaller set, and a sinfonia (only in the bigger one) of that."""
+    ingest(
+        session,
+        "a",
+        mention("Inventions and Sinfonias BWV 772\u2013801", BACH, "a1"),
+        mention("15 Inventions, BWV 772-786", BACH, "a2"),
+        mention("Invention No. 1 in C major, BWV 772", BACH, "a3"),
+        mention("Sinfonia No. 1 in C major, BWV 787", BACH, "a4"),
+    )
+    stats = link_works(session)
+    assert (stats.by_range, stats.ambiguous) == (2, 0)
+    assert links(session) == {
+        ("Invention No. 1 in C major, BWV 772", "part_of", "15 Inventions, BWV 772-786", "catalogue_range"),
+        (
+            "Sinfonia No. 1 in C major, BWV 787",
+            "part_of",
+            "Inventions and Sinfonias BWV 772\u2013801",
+            "catalogue_range",
+        ),
+    }
+
+
+def test_a_number_inside_overlapping_sets_links_to_neither(session: Session) -> None:
+    ingest(
+        session,
+        "a",
+        mention("Inventions BWV 772-786", BACH, "a1"),
+        mention("Keyboard pieces BWV 780-801", BACH, "a2"),
+        mention("Invention No. 9 in F minor, BWV 780", BACH, "a3"),
+        mention("Invention No. 1 in C major, BWV 772", BACH, "a4"),
+    )
+    stats = link_works(session)
+    assert (stats.by_range, stats.ambiguous) == (1, 1)
+    assert links(session) == {
+        ("Invention No. 1 in C major, BWV 772", "part_of", "Inventions BWV 772-786", "catalogue_range")
+    }
+
+
+def test_an_external_id_with_hyphens_is_no_range() -> None:
+    """A MusicBrainz id reads like ``...-799131026480``; taken as a range it
+    would enumerate billions of members (seen on the 2026-10-25 silver, #378)."""
+    assert holds_sets("BWV") and holds_sets("KV6") and holds_sets("KV6 Anh") and holds_sets("WoO")
+    assert not (holds_sets("musicbrainz") or holds_sets("wd:Q1") or holds_sets("op") or holds_sets("other"))
+    mbid = ("musicbrainz", "4dad1f72-5f8d-3a63-ae31-799131026480")
+    oversized = ("BWV", "1-10000")
+    holder = Candidate(
+        uuid.uuid4(), replace(extract_features("Symphony"), identifiers=frozenset({mbid, oversized}))
+    )
+    single = frozenset({("musicbrainz", "799131026470"), ("BWV", "500")})
+    piece = Candidate(uuid.uuid4(), replace(extract_features("Piece"), identifiers=single))
+    found: dict[tuple[uuid.UUID, str, uuid.UUID], str] = {}
+    assert _range_links([holder, piece], found) == 0
+    assert found == {}

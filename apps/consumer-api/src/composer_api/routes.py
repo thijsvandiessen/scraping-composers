@@ -231,7 +231,8 @@ def list_composers(
     filters: PeopleFilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
-    """People credited with at least three works, whatever their profession claims say."""
+    """People whose works are on at least three concerts and recordings combined, whatever their
+    profession claims say. Counts and sorts are of those performances, not the person's own credits."""
     return list_people(db, filters, pager, "composer", sort=sort)
 
 

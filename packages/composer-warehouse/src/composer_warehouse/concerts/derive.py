@@ -20,7 +20,15 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from composer_models import Concert, ConcertParticipant, ConcertWork, Entity, RawWorkMention, Source
+from composer_models import (
+    Concert,
+    ConcertParticipant,
+    ConcertWork,
+    Entity,
+    RawWorkMention,
+    Source,
+    refresh_composer_programmes,
+)
 from composer_models.normalize import dedup_key, event_uuid
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
@@ -177,6 +185,7 @@ def derive_concerts(session: Session) -> DeriveConcertsStats:
         session.execute(insert(ConcertParticipant), rows.participants[i : i + INSERT_BATCH])
     for i in range(0, len(rows.works), INSERT_BATCH):
         session.execute(insert(ConcertWork), rows.works[i : i + INSERT_BATCH])
+    refresh_composer_programmes(session)
     session.commit()
 
     return DeriveConcertsStats(

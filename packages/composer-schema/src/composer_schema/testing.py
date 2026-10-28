@@ -86,12 +86,16 @@ def genre(
     *parents: tuple[str, str],
     kind: str = "genre",
     aliases: tuple[str, ...] = (),
+    form: bool = False,
 ) -> EntityDocument:
     """A genre (or, with ``kind="movement"``, a movement) document as the
     ``wikidata_genres`` source emits it: pinned to ``qid`` by its URL, with a
-    ``subclass_of`` claim per ``(parent QID, parent label)``."""
+    ``subclass_of`` claim per ``(parent QID, parent label)``, and with
+    ``form=True`` the ``genre_type`` claim of a musical form."""
     claims = [SourceClaim("subclass_of", kind, plabel, object_wikidata_id=pqid) for pqid, plabel in parents]
     claims += [SourceClaim("also_known_as", value=alias) for alias in aliases]
+    if form:
+        claims.append(SourceClaim("genre_type", value="musical form"))
     return EntityDocument(
         id=f"{kind}:{qid}",
         url=f"https://www.wikidata.org/wiki/{qid}",

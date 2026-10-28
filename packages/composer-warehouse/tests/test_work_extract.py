@@ -48,6 +48,12 @@ def test_structured_fields_add_catalogue_numbers_and_an_opus() -> None:
     assert f.identifiers == {("KV", "550")}
 
 
+def test_stated_pairs_join_the_titles_own_numbers() -> None:
+    f = extract_features("Quintet, Op. 11 No. 6", stated=[("Ty", "238/3"), ("op", "99")])
+    assert f.identifiers == {("Ty", "238/3")}
+    assert f.opus_number == "11"  # the title's opus wins, as with a structured field
+
+
 def test_an_imslp_internal_number_is_not_a_catalogue() -> None:
     assert extract_features("Sonata", structured=["ILB 193"]).identifiers == frozenset()
 
@@ -114,3 +120,15 @@ def test_plain_title_has_no_features() -> None:
     assert f.musical_key is None
     assert f.number is None
     assert f.normalized_title == "clair de lune"
+
+
+def test_a_range_is_one_identifier_not_its_first_number() -> None:
+    f = extract_features("6 Brandenburg Concertos, BWV 1046-1051")
+    assert f.identifiers == {("BWV", "1046-1051")}
+    assert (f.catalogue_prefix, f.catalogue_number) == ("BWV", "1046-1051")
+    assert "1051" not in f.core_title
+
+
+def test_a_set_holding_the_titles_own_number_is_dropped() -> None:
+    f = extract_features("Suite 6 E-dur, BWV 817 Franzoesische Suiten BWV 812-817")
+    assert f.identifiers == {("BWV", "817")}

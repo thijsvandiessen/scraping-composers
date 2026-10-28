@@ -14,7 +14,7 @@ from composer_schema import EntityDocument, SourceClaim
 from composer_scrapers import REGISTRY
 from composer_scrapers.wikidata import WikidataGenresAdapter
 from composer_scrapers.wikidata import genres as genres_mod
-from composer_scrapers.wikidata.genres import NODE_QUERY, PARENT_QUERY, SEED_QUERY
+from composer_scrapers.wikidata.genres import COUNTERPART_QUERY, NODE_QUERY, PARENT_QUERY, SEED_QUERY
 
 ENTITY = "http://www.wikidata.org/entity/"
 MUSIC_GENRE = "Q188451"
@@ -27,6 +27,8 @@ class Item:
     classes: set[str] = field(default_factory=lambda: {MUSIC_GENRE})
     parents: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
+    forms: set[str] = field(default_factory=set[str])
+    different: tuple[str, ...] = ()
 
 
 @dataclass
@@ -48,10 +50,15 @@ class FakeWdqs:
                 item = self.items[qid]
                 rows.append({**_item(qid), "itemLabel": _lit(item.label)})
                 rows += [{**_item(qid), "class": _uri(c)} for c in sorted(item.classes & wanted)]
+                rows += [
+                    {**_item(qid), "form": _uri(f)} for f in sorted(item.forms & set(_values(query, "form")))
+                ]
                 rows += [{**_item(qid), "alias": _lit(a)} for a in item.aliases]
             return rows
         if "wdt:P279 ?parent" in query:
             return [{**_item(q), "parent": _uri(p)} for q in items for p in self.items[q].parents]
+        if "wdt:P1889 ?other" in query:
+            return [{**_item(q), "other": _uri(o)} for q in items for o in self.items[q].different]
         prop = re.search(r"wdt:(P13[56]) \?value", query)
         if prop is not None:
             return [{"value": _uri(v)} for v in self.seeds.get(prop.group(1), [])]
@@ -126,7 +133,9 @@ def test_seeds_and_their_ancestors_become_records_with_subclass_claims(
         "item": "Q2",
         "label": "waltz",
         "classes": [MUSIC_GENRE],
+        "forms": [],
         "parents": ["Q3"],
+        "counterparts": [],
         "depth": 0,
     }
     assert _parents(docs["genre:Q1"]) == ["Q2"]
@@ -153,6 +162,93 @@ def test_a_seed_outside_the_classes_is_kept() -> None:
     with mock_session(wdqs.handler) as session:
         nodes = genres_mod._Walk(session, None).nodes("genre", ["Q1"])
     assert [node.label for node in nodes] == ["sardana"]
+
+
+# The ballroom dance "waltz" (a type of dance, not a music genre) whose only
+# parent the class filter drops, and its P1889 items: the music genre of the
+# same name, and a genre with another name.
+DANCE_GRAPH = GRAPH | {
+    "Q20": Item("waltz", classes=set(), parents=("Q21",), different=("Q22", "Q23")),
+    "Q21": Item("ballroom dance", classes=set()),
+    "Q22": Item("Waltz", parents=("Q3",)),
+    "Q23": Item("polka", parents=("Q3",)),
+    "Q24": Item("New Age", classes=set(), different=("Q25",)),
+    "Q25": Item("new age music"),
+    "Q26": Item("ballet", classes=set(), different=("Q27",)),
+    "Q27": Item("ballet", classes=set()),  # the same name, but not a music genre
+}
+
+
+def test_a_stranded_seed_climbs_through_its_same_named_counterpart(monkeypatch: pytest.MonkeyPatch) -> None:
+    docs = _fetch(monkeypatch, FakeWdqs(DANCE_GRAPH, {"P136": ["Q20"], "P135": ["Q10"]}))
+
+    assert _parents(docs["genre:Q20"]) == ["Q22"]
+    assert docs["genre:Q20"].raw["counterparts"] == ["Q22"]
+    assert docs["genre:Q22"].raw["depth"] == 1
+    assert _parents(docs["genre:Q22"]) == ["Q3"]  # and on up to dance music
+    assert "genre:Q21" not in docs  # the dance's own parent is still dropped
+    assert "genre:Q23" not in docs  # another name is another genre
+
+
+def test_a_counterpart_may_add_music_to_the_name_but_must_be_of_the_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every seed here has no parent at all, so depth 1 has nothing to climb
+    to and runs for the counterparts alone."""
+    docs = _fetch(monkeypatch, FakeWdqs(DANCE_GRAPH, {"P136": ["Q24", "Q26"], "P135": ["Q10"]}))
+
+    assert _parents(docs["genre:Q24"]) == ["Q25"]
+    assert _parents(docs["genre:Q26"]) == []
+    assert "genre:Q27" not in docs
+
+
+def test_a_counterpart_that_is_already_kept_is_linked_without_a_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wdqs = FakeWdqs(DANCE_GRAPH, {"P136": ["Q20", "Q22"], "P135": ["Q10"]})
+    docs = _fetch(monkeypatch, wdqs)
+
+    assert _parents(docs["genre:Q20"]) == ["Q22"]
+    assert docs["genre:Q22"].raw["depth"] == 0
+    assert sum("?seen" in q and "Q22" in _values(q, "item") for q in wdqs.asked) == 1
+
+
+def test_a_seed_whose_only_kept_parent_is_a_classless_seed_is_stranded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "ballet" the dance sits under "performing arts", which a composer is
+    tagged with too: kept, but not a music genre, so it leads nowhere."""
+    graph = DANCE_GRAPH | {
+        "Q26": Item("ballet", classes=set(), parents=("Q40",), different=("Q41",)),
+        "Q40": Item("performing arts", classes=set()),
+        "Q41": Item("ballet", parents=("Q3",)),
+    }
+    docs = _fetch(monkeypatch, FakeWdqs(graph, {"P136": ["Q26", "Q40"], "P135": ["Q10"]}))
+
+    assert _parents(docs["genre:Q26"]) == ["Q40", "Q41"]
+    assert docs["genre:Q26"].raw["counterparts"] == ["Q41"]
+
+
+def test_only_a_seed_with_no_kept_parent_asks_for_counterparts(monkeypatch: pytest.MonkeyPatch) -> None:
+    graph = DANCE_GRAPH | {"Q2": Item("waltz", parents=("Q3",), different=("Q22",))}
+    wdqs = FakeWdqs(graph, {"P136": ["Q2", "Q20"], "P135": ["Q10"]})
+    docs = _fetch(monkeypatch, wdqs)
+
+    assert _parents(docs["genre:Q2"]) == ["Q3"]
+    asked = [_values(q, "item") for q in wdqs.asked if "wdt:P1889" in q]
+    assert asked == [["Q20"]]
+
+
+def test_a_musical_form_carries_a_genre_type_claim(monkeypatch: pytest.MonkeyPatch) -> None:
+    graph = GRAPH | {
+        "Q30": Item("symphony", forms={"Q862597"}, parents=("Q31",)),
+        "Q31": Item("composed musical work", classes=set()),
+    }
+    docs = _fetch(monkeypatch, FakeWdqs(graph, {"P136": ["Q30", "Q2"], "P135": ["Q10"]}))
+
+    assert SourceClaim("genre_type", value="musical form") in docs["genre:Q30"].claims
+    assert docs["genre:Q30"].raw["forms"] == ["Q862597"]
+    assert not any(c.predicate == "genre_type" for c in docs["genre:Q2"].claims)
 
 
 def test_cycles_terminate_and_keep_both_edges(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -249,6 +345,8 @@ def test_queries_ask_what_the_walk_reads() -> None:
     assert "wdt:P31/wdt:P279*" in NODE_QUERY
     assert 'FILTER(LANG(?alias) = "en")' in NODE_QUERY
     assert "wdt:P279 ?parent" in PARENT_QUERY
+    assert "wdt:P1889 ?other" in COUNTERPART_QUERY
+    assert "?item wdt:P31 ?form" in NODE_QUERY
     assert "wdt:P106 wd:Q36834" in SEED_QUERY
 
 

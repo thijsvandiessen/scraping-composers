@@ -22,7 +22,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 from composer_models import Claim, Entity
-from composer_models.genres import GENRE_KINDS, MEMBERSHIP_PREDICATES
+from composer_models.genres import GENRE_KINDS, MEMBERSHIP_PREDICATES, MUSICAL_FORM
 from composer_models.normalize import dedup_key, entity_uuid, qid_key, wikidata_id
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
@@ -108,8 +108,17 @@ class GenreReport:
     legacy_linked: int = 0
     with_parent: int = 0
     orphans: int = 0
+    forms: int = 0
+    tags: int = 0
+    tags_reached: int = 0
     missing_top_level: list[str] = field(default_factory=list[str])
     top_orphans: list[OrphanGenre] = field(default_factory=list[OrphanGenre])
+    top_forms: list[OrphanGenre] = field(default_factory=list[OrphanGenre])
+
+    @property
+    def reach(self) -> float:
+        """The share of person tags whose entity has a path to a top level."""
+        return self.tags_reached / self.tags if self.tags else 0.0
 
 
 def genre_report(session: Session, kind: str, top_level: dict[str, str], limit: int = 10) -> GenreReport:
@@ -120,6 +129,13 @@ def genre_report(session: Session, kind: str, top_level: dict[str, str], limit: 
     a QID-keyed genre whose ancestors all fell outside the vocabulary, or a
     label-only one nothing could be linked to. ``top_orphans`` ranks them by
     how many persons they tag, so the report says which gaps matter.
+
+    A musical form with no such path ("symphony", whose Wikidata parent is
+    "composed musical work") is not a gap in the genre tree but a term of
+    another axis, so it is counted in ``forms`` and ranked in ``top_forms``
+    instead (#364). ``tags`` counts distinct (person, entity) tags, linked
+    label-only entities folded onto their canonical, and ``tags_reached`` the
+    ones on an entity with a path to a top level.
     """
     entities = session.execute(
         select(Entity.id, Entity.dedup_key, Entity.label, Entity.canonical_entity_id).where(
@@ -160,9 +176,22 @@ def genre_report(session: Session, kind: str, top_level: dict[str, str], limit: 
             seen.add(pair)
             persons[pair[1]] += 1
 
-    orphans = [e for e, _, _, target in entities if target is None and e not in reached]
+    form_ids = set(
+        session.scalars(
+            select(Claim.subject_id)
+            .join(Entity, Entity.id == Claim.subject_id)
+            .where(Entity.kind == kind, Claim.predicate == "genre_type", Claim.value == MUSICAL_FORM)
+        )
+    )
+    unreached = [e for e, _, _, target in entities if target is None and e not in reached]
+    orphans = [e for e in unreached if e not in form_ids]
+    forms = [e for e in unreached if e in form_ids]
     labels = {entity_id: (label, key) for entity_id, key, label, _ in entities}
-    ranked = sorted(orphans, key=lambda e: (-persons[e], labels[e][0], str(e)))[:limit]
+
+    def ranked(ids: list[uuid.UUID]) -> list[OrphanGenre]:
+        top = sorted(ids, key=lambda e: (-persons[e], labels[e][0], str(e)))[:limit]
+        return [OrphanGenre(labels[e][0], wikidata_id(labels[e][1]), persons[e]) for e in top]
+
     qid_keyed = sum(1 for _, key, _, _ in entities if key.startswith(_QID_PREFIX))
     return GenreReport(
         kind=kind,
@@ -172,6 +201,10 @@ def genre_report(session: Session, kind: str, top_level: dict[str, str], limit: 
         legacy_linked=len(canonical),
         with_parent=len(with_parent & ids),
         orphans=len(orphans),
+        forms=len(forms),
+        tags=len(seen),
+        tags_reached=sum(count for entity_id, count in persons.items() if entity_id in reached),
         missing_top_level=sorted(qid for top, qid in tops.items() if top not in ids),
-        top_orphans=[OrphanGenre(labels[e][0], wikidata_id(labels[e][1]), persons[e]) for e in ranked],
+        top_orphans=ranked(orphans),
+        top_forms=ranked(forms),
     )

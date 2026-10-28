@@ -22,7 +22,7 @@ from composer_models import (
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..works import Candidate, load_candidates
+from ..works import WorkCandidates, load_candidates
 
 
 def content_hash(*parts: str | None) -> str:
@@ -50,10 +50,11 @@ class IngestState:
     existing_mentions: dict[str, tuple[int, str]]
     # (work id, title key) aliases already stored for this source
     existing_work_titles: set[tuple[uuid.UUID, str]]
-    # Candidate works keyed by composer, so the matcher only compares within a
-    # composer's catalogue. Refreshed as works are created, or gain an
+    # Candidate works grouped by canonical composer, so the matcher only
+    # compares within one composer's catalogue, however many entities that
+    # composer is filed under. Refreshed as works are created, or gain an
     # identifier, during the run.
-    work_candidates: dict[uuid.UUID | None, list[Candidate]]
+    work_candidates: WorkCandidates
     # (work id, scheme, value) identifiers already stored for this source
     existing_work_identifiers: set[tuple[uuid.UUID, str, str]] = field(default_factory=set)
     # work id -> the premiere date it carries, for works that carry one

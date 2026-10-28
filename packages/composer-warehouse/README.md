@@ -60,14 +60,34 @@ creation, not derived from the title. The tables are described in
 and `K.550` are all Köchel `KV 550` for Mozart (lettered sixth-edition numbers
 are `KV6`), `K` is Kirkpatrick for Domenico Scarlatti, Hoboken separators are
 unified (`Hob XVI:52`), and a bare `D`/`S`/`B`/`L`/`H` only counts for the
-composer who uses that catalogue. Besides the title, `works/sources.py` reads
+composer who uses that catalogue. A range or list (`BWV 772-786`) is one
+identifier naming the set, so a collection and its first piece conflict instead
+of merging; a title giving both a piece's number and its set's keeps the piece's. Besides the title, `works/sources.py` reads
 what a source states elsewhere in the payload: IMSLP's "Opus/Catalogue Number"
 (not its internal `ILB` number), and `wikidata_works`/`wikidata_catalogue`'s
-item QID, catalogue codes, MusicBrainz ids and ISWCs. Henle and Bärenreiter
+item QID, catalogue codes, MusicBrainz ids and ISWCs. A Wikidata catalogue code
+is read by its catalogue item (`stated_catalogue`), so Terry's bare `238/3` is
+`Ty 238/3`, and a code in a catalogue with no known scheme is stored under the
+item itself (`wd:Q16749680`, `c 48`), which two Wikidata items still match on.
+A rights society's, record label's or library's code (SACEM, a release number)
+is no work number and is not read.
+Henle and Bärenreiter
 `catalogue_number`s are edition numbers and are not read. Every identifier a
 mention brings is stored in `work_identifiers` against its work, and the
 matcher's candidates carry them (`works.load_candidates`), so a work found by
 its IMSLP catalogue field still matches on it in the next run.
+
+Candidates are grouped by the **canonical** composer (#362): a mention by the
+surname-only "Mozart" is matched against the works of every entity
+`dedupe-persons` linked it with. A rebuild ingests every mention before any
+person is linked, so `works/merge.py` (`merge_works`, run in `refresh_derived`)
+folds what the replay split apart: the works of one person cluster are matched
+as one catalogue (the canonical entity's works first, then each other entity's
+against them, at the auto-match threshold, repeated until nothing more folds), and a composerless work folds into
+the composer that owns its scheme (holds more than half of its numbers, as
+Mozart does Köchel) when that composer holds the same number. Folding moves the
+mentions, titles and identifiers onto the target, keeps the earlier premiere,
+and deletes the duplicate.
 
 **Parts, arrangements and versions** share their parent's number without being
 it. A title cue — `(from …)`/`(aus …)`, `arr.`/`Bearb.`/`transcr.`,
@@ -77,7 +97,11 @@ parent's. `works/links.py` (`link_works`) then rebuilds `work_links`: a derived
 work points at the one non-derived work by the same composer holding one of its
 parent numbers (`part_of`, `arrangement_of`, `version_of`; method `catalogue`),
 and a `wikidata_catalogue` work *part of* (P361) another item points at the work
-with that QID (method `wikidata`). It runs in `rebuild-silver` and before every
+with that QID (method `wikidata`). A work with a single number points
+(`part_of`, method `catalogue_range`) at the smallest work whose range or list
+holds it, so *Invention No. 1, BWV 772* is part of *15 Inventions, BWV 772-786*
+rather than of *Inventions and Sinfonias, BWV 772-801*; only sets that overlap
+without nesting leave it unlinked. It runs in `rebuild-silver` and before every
 promote. `composer-ingest work-identity` reports, per source, the share of
 works with a catalogue number or external id and how many are linked to a
 parent.
@@ -98,14 +122,26 @@ the gap **non-destructively**:
   [`persons/MODEL.md`](src/composer_warehouse/persons/MODEL.md) records how they
   were fitted and how well they score;
 - `constraints` turns distinct Wikidata QIDs or MusicBrainz ids into
-  cannot-links, unless dates from several sources corroborate the pair.
+  cannot-links, unless dates from several sources corroborate the pair;
+- `catalogues` links two clusters that hold the same number in a
+  composer-scoped catalogue (`works/schemes.py`: KV, BWV, D, Hob and the rest,
+  not `WoO`, `Anh`, opus numbers, external ids or `wd:` items), the evidence a
+  bare surname has no other way to give (#362). Conservatively: the clusters
+  must share a surname with no conflicting given name or year apart across
+  them, a cluster whose partners are rivals (Wolfgang Amadeus and Leopold) links
+  to neither unless one shares more than twice the numbers, and the links are
+  clustered with those incompatibilities as cannot-links. They are recorded as
+  `auto_linked` with method `shared_catalogue:<count>`.
 
 High-confidence pairs and human `accepted` reviews are recorded in
 **`person_matches`**; ambiguous ones wait there for `person-review`. The links
 are then derived from those pairs as *clusters*, not pair by pair:
 `persons/cluster.py` merges the pairs strongest-first into disjoint groups,
-picks one canonical per group (the fullest given names), and points every member
-straight at it. So `Entity.canonical_entity_id` is always one hop to a canonical
+picks one canonical per group, and points every member straight at it. The
+canonical is the best-evidenced member: Wikidata-anchored first, then
+MusicBrainz-anchored, then the most sources, then the fullest given names. Gold
+shows its label, so a noisy spelling with an extra initial cannot win on length
+alone (#379). So `Entity.canonical_entity_id` is always one hop to a canonical
 — no chains, no cycles — and a `rejected` review becomes a cannot-link the group
 honours even when the merge arrives transitively. Nothing is deleted and ids
 stay stable, so the pass is re-runnable.
@@ -180,7 +216,9 @@ the soloists). Each concert keeps its programme.
 payload is marked `_kind: "recording"` are grouped per source, the page-scoped
 groups are folded into one row per release, artists are resolved to person and
 ensemble entities, and each recording is linked to its works. Both passes
-rebuild their tables from scratch, so they can be re-run after new loads.
+rebuild their tables from scratch, so they can be re-run after new loads, and
+both end by refreshing `composer_programmes`: how many concerts and recordings
+each composer's works are on, which `/v1/composers` lists, counts and sorts by.
 
 Concert and recording ids are **stable**: each is a uuid5 of the kind, the
 source's name and the source's own key (`event_uuid` in `composer-models`), not
@@ -211,12 +249,19 @@ doesn't depend on ingest order; a label two QIDs share links nothing.
 QID-keyed vs label-only entities, how many have a parent, the top-level QIDs
 (`composer_models.genres`) missing from silver, and the **orphans** — entities
 with no `subclass_of` path to a top-level genre — ranked by how many persons
-they tag.
+they tag. Musical forms (a `genre_type` claim of `musical form`: "symphony",
+"concerto", "song") have no such path either, because Wikidata files them
+under "composed musical work" rather than a genre; they are a separate axis,
+not a gap, so the report counts and ranks them apart from the orphans. It also
+gives the **reach**: the share of distinct person tags on an entity with a
+path to a top level.
 
 ## Derived state
 
 `refresh_derived` (`derived.py`) runs every pass that recomputes silver state
-from silver itself: place linking, genre linking, then concerts, then recordings. It is what
+from silver itself: place linking, genre linking, ensemble anchors, folding the
+works a composer's duplicate entities split (`merge_works`), work links, then
+concerts, then recordings. It is what
 `rebuild-silver`, `composer-ingest promote` and the admin API's Promote call,
 so a pass added there reaches all three.
 
@@ -225,7 +270,7 @@ so a pass added there reaches all three.
 Interpretation (entity resolution, work matching) is applied when a record is
 first loaded — improving the heuristics doesn't fix rows already in the
 database. `rebuild-silver` closes that gap by replaying the bucket into a fresh
-database with the current code, then re-running dedupe and the derived passes (place and genre linking, concerts, recordings):
+database with the current code, then re-running dedupe and the derived passes (place and genre linking, work folding and links, concerts, recordings):
 
 ```sh
 uv run composer-ingest rebuild-silver   # bucket → composers.db (atomic swap)
@@ -279,9 +324,10 @@ factories) come from `composer_warehouse.testing`.
 
 | File | Covers |
 | --- | --- |
-| `test_work_extract.py` | Extracting catalogue numbers (BWV, K., Op.), key, type and number from titles, including German titles; numbers read for the composer (a bare `K` only for Mozart or Scarlatti), structured catalogue fields, and the part/arrangement/version cues that make a parent's number the parent's. |
-| `test_work_matching.py` | Scoring candidates and deciding auto-match, review or create; K and KV as one Köchel number, catalogue and Wikidata conflicts, old and new Köchel kept apart, and derived works never matching their parent. |
-| `test_work_identity.py` | Identity end to end (#351): the four Mozart No. 40 titles resolving to one work plus a version linked to it, a Brandenburg movement and arrangement linked to BWV 1048 without merging, an ambiguous parent left unlinked, IMSLP's structured catalogue field and a shared Wikidata item as strong keys, stored identifiers matching in the next run, Wikidata ids normalised, P361 links, and `link_works` rebuilding rather than accumulating. |
+| `test_work_extract.py` | Extracting catalogue numbers (BWV, K., Op.), key, type and number from titles, including German titles; numbers read for the composer (a bare `K` only for Mozart or Scarlatti), structured catalogue fields and pairs a source already normalised (`stated`), and the part/arrangement/version cues that make a parent's number the parent's, a range as one identifier, and a set dropped when the title also gives its own number. |
+| `test_work_matching.py` | Scoring candidates and deciding auto-match, review or create; K and KV as one Köchel number, catalogue and Wikidata conflicts, old and new Köchel kept apart, derived works never matching their parent, a range or list conflicting with a piece inside it (#358), and the pruned candidate search giving exactly what scoring every candidate gives, with a fraction of the title comparisons (#366). |
+| `test_work_identity.py` | Identity end to end (#351): the four Mozart No. 40 titles resolving to one work plus a version linked to it, a Brandenburg movement and arrangement linked to BWV 1048 without merging, an ambiguous parent left unlinked, IMSLP's structured catalogue field and a shared Wikidata item as strong keys, stored identifiers matching in the next run, Wikidata ids normalised, Wikidata codes read by their catalogue item (Terry's `238/3`, a `wd:<QID>` fallback two items match on, #361), P361 links, `link_works` rebuilding rather than accumulating, and catalogue ranges (#358): pieces linked `part_of` their range rather than merged into it, IMSLP's structured range kept apart from its first piece, a number inside nested sets linked to the smallest, one inside overlapping sets left unlinked, and only known catalogue schemes with bounded ranges expanded (#378). |
+| `test_work_merge.py` | Works across a composer's duplicate entities (#362): KV 550 by "Mozart" and "Wolfgang Amadeus Mozart" folded into one work once the persons are linked (the version still linked to it), composerless works folded into the owner of their catalogue but not into an arranger's or a per-composer scheme's, nothing folded without a person link, mentions, identifiers and the earlier premiere moved, idempotent re-runs, a work folded in a later round taking the works it absorbed along, ingest matching a duplicate's mention against its canonical, and `refresh_derived` folding before it links. |
 
 **People**
 
@@ -293,7 +339,8 @@ factories) come from `composer_warehouse.testing`.
 | `test_person_matching.py` | Scoring and classifying a pair with the shipped model: dates, generations, rare surnames, aliases, cut-points. |
 | `test_person_constraints.py` | Cannot-links from distinct QIDs and MusicBrainz ids, and when corroboration discharges them. |
 | `test_person_cluster.py` | Turning scored pairs into clusters: chains, cannot-links (also transitive), edge-order independence. |
-| `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals, reviewer decisions, QID twins. |
+| `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals (an authority-anchored member over a fuller name, then more sources over a fuller name, #379), reviewer decisions, QID twins. |
+| `test_person_catalogues.py` | Catalogue evidence (#362): a surname-only entity linked to the composer whose Köchel numbers it shares; conflicting given names, different surnames, rivals, years a generation apart and per-composer schemes (`WoO`) never linked; a dominant partner beating a weak rival; a review-queued pair upgraded; cluster compatibility; cannot-links honoured. |
 | `test_person_training.py` | Fitting the model: automatic labels, comparison vectors, non-match sampling, the prior, and `train()` end to end (including an empty warehouse). |
 | `test_person_evaluation.py` | The labelling rules, the deterministic split, downsampling weights, metrics, and that the shipped model beats the pre-#173 scorer on the committed dataset. |
 
@@ -308,11 +355,11 @@ factories) come from `composer_warehouse.testing`.
 | File | Covers |
 | --- | --- |
 | `test_link_places.py` | Linking a bare place to the pinned place of the same name, leaving ambiguous and unmatched names alone, and a re-run dropping a link that became ambiguous. |
-| `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, a credit resolved through an ensemble anchor's alias, re-running, and ids derived from source + key that a new concert sorting first doesn't move. |
-| `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, and ids derived from source + key. |
+| `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, a credit resolved through an ensemble anchor's alias, re-running, each composer's concert count, and ids derived from source + key that a new concert sorting first doesn't move. |
+| `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, each composer's recording count, and ids derived from source + key. |
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |
-| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, work links recreated on every rebuild, and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
-| `test_genres.py` | Genres and movements keyed on their QID across label changes, the record and claim paths meeting on one entity, label keys without a QID, linking label-only genres by label or alias (and not when ambiguous), relinking from scratch, the same genre set for any ingest order, and the orphan report's counts and ranking. |
+| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, work links recreated on every rebuild, works split across a composer's duplicate entities folded after the dedupe (#362), and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
+| `test_genres.py` | Genres and movements keyed on their QID across label changes, the record and claim paths meeting on one entity, label keys without a QID, linking label-only genres by label or alias (and not when ambiguous), relinking from scratch, the same genre set for any ingest order, and the orphan report's counts and ranking, musical forms counted apart from the orphans, and the share of person tags reached. |
 | `test_postgres_target.py` | Postgres only: the schema swap, readers across it, the manifest table, and the locks that keep a rebuild and a reader apart. |
 
 `ingestion/runner.py`'s `create_run` has no test here; the admin API, its only

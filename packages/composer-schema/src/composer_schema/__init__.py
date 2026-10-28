@@ -17,6 +17,9 @@ from enum import StrEnum
 from typing import Any, ClassVar
 
 from .kinds import (
+    CLASSICAL_NAME_CUES as CLASSICAL_NAME_CUES,
+)
+from .kinds import (
     ENSEMBLE_KIND as ENSEMBLE_KIND,
 )
 from .kinds import (

@@ -7,7 +7,7 @@ from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 
 from composer_config import settings
-from composer_models import Base
+from composer_models import Base, refresh_composer_programmes
 from composer_models.alembic_support import stamp_head
 from composer_models.db import get_engine, resync_pk_sequence
 from composer_warehouse.build import BuildManifest, BuildTarget, build_target, run_build
@@ -194,6 +194,8 @@ def _build(silver: Session, engine: Engine, config: PromoteConfig) -> PromoteSta
         copy_works_titles_mentions(build, gold)
         copy_concerts(build, gold)
         copy_recordings(build, gold)
+        # recomputed rather than copied: mentions now point at canonical persons
+        refresh_composer_programmes(gold)
         _resync_sequences(gold)
 
     if engine.dialect.name == "postgresql":

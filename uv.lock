@@ -439,12 +439,14 @@ version = "0.1.0"
 source = { editable = "packages/composer-http" }
 dependencies = [
     { name = "composer-config" },
+    { name = "httpcore" },
     { name = "httpx" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "composer-config", editable = "packages/composer-config" },
+    { name = "httpcore", specifier = ">=1.0" },
     { name = "httpx", specifier = ">=0.27" },
 ]
 
