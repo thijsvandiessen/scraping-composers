@@ -259,6 +259,60 @@ a.source-chip:hover {
   border-color: var(--accent);
 }
 
+/* "+N more" folds: source chips past the first two, and values past the first
+   five. Opened, the rest appears and "show less" follows it. */
+.fold summary {
+  font-size: 0.72rem;
+  color: var(--muted);
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+}
+
+.fold summary::-webkit-details-marker {
+  display: none;
+}
+
+.fold summary:hover {
+  color: var(--accent);
+}
+
+.fold[open] summary {
+  order: 1;
+}
+
+.fold .when-open,
+.fold[open] .when-closed {
+  display: none;
+}
+
+.fold[open] .when-open {
+  display: inline;
+}
+
+/* Folded chips open onto their own wrapped line. */
+.more-sources[open] {
+  flex-basis: 100%;
+}
+
+.more-sources[open],
+.more-sources-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.more-values {
+  margin-top: 0.3rem;
+}
+
+.more-values[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
 /* --- errors / empty states --- */
 
 .error-box {

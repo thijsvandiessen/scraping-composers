@@ -30,7 +30,7 @@ from ..schemas import (
     WorkProofOut,
     WorkSummary,
 )
-from .common import WORK_PROOF_CAP, mention_url
+from .common import WORK_PROOF_CAP, deep_link, mention_url
 
 
 def identifiers_by_work(db: Session, work_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[WorkIdentifierOut]]:
@@ -262,13 +262,15 @@ def composer_works(
                 continue
             if c_url or c_date or c_venue:
                 proof = WorkProofOut(
-                    source=src_name, source_url=c_url or src_base, date=c_date, venue=c_venue
+                    source=src_name, source_url=deep_link(c_url, src_base), date=c_date, venue=c_venue
                 )
             elif r_url or r_date:
-                proof = WorkProofOut(source=src_name, source_url=r_url or src_base, date=r_date, venue=None)
+                proof = WorkProofOut(
+                    source=src_name, source_url=deep_link(r_url, src_base), date=r_date, venue=None
+                )
             else:
                 proof = WorkProofOut(
-                    source=src_name, source_url=mention_url(raw) or src_base, date=None, venue=None
+                    source=src_name, source_url=deep_link(mention_url(raw), src_base), date=None, venue=None
                 )
             seen = seen_by_work.setdefault(work_id, set())
             key = (proof.source, proof.source_url)
@@ -358,12 +360,16 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
         if len(proofs) >= WORK_PROOF_CAP:
             break
         if c_url or c_date or c_venue:
-            proof = WorkProofOut(source=src_name, source_url=c_url or src_base, date=c_date, venue=c_venue)
+            proof = WorkProofOut(
+                source=src_name, source_url=deep_link(c_url, src_base), date=c_date, venue=c_venue
+            )
         elif r_url or r_date:
-            proof = WorkProofOut(source=src_name, source_url=r_url or src_base, date=r_date, venue=None)
+            proof = WorkProofOut(
+                source=src_name, source_url=deep_link(r_url, src_base), date=r_date, venue=None
+            )
         else:
             proof = WorkProofOut(
-                source=src_name, source_url=mention_url(raw) or src_base, date=None, venue=None
+                source=src_name, source_url=deep_link(mention_url(raw), src_base), date=None, venue=None
             )
         key = (proof.source, proof.source_url)
         if key in seen:

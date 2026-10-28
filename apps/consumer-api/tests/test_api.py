@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from composer_api import create_app
+from composer_api.crud.common import deep_link
 from composer_gold import gold_engine, promote
 from composer_graph import load_graph
 from composer_models.db import init_db
@@ -396,11 +397,26 @@ def test_claim_source_url_is_record_page(client: TestClient) -> None:
     assert profession["source_external_id"] == "Q255"
 
 
-def test_claim_source_url_falls_back_to_base_url(client: TestClient) -> None:
-    """Records without a page URL fall back to the source homepage."""
+def test_claim_source_url_is_none_without_record_page(client: TestClient) -> None:
+    """Records without a page URL carry no link, not the source homepage."""
     data = client.get(f"/v1/composers/{_person_id(client, 'Bach, Johann')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
-    assert profession["source_url"] == "https://fake.example"
+    assert profession["source_url"] is None
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://src.example/work/1", "https://src.example/work/1"),
+        ("https://src.example", None),
+        ("https://src.example/", None),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_deep_link_drops_the_source_homepage(url: str | None, expected: str | None) -> None:
+    """A record whose URL is just the source's homepage (Open Opus) gets no link either."""
+    assert deep_link(url, "https://src.example") == expected
 
 
 def test_get_composer_not_found(client: TestClient) -> None:
@@ -660,7 +676,7 @@ def test_work_detail_returns_metadata_aliases_and_proof(client: TestClient) -> N
     assert work["premiere_date"] is None  # no fixture mention carries raw["premiere"]
     assert work["premiere_place"] is None
     assert [p["source"] for p in work["proof"]] == ["programmes"]
-    assert work["proof"][0]["source_url"] == "https://programmes.example"
+    assert work["proof"][0]["source_url"] is None
 
 
 def test_gold_work_detail_carries_the_premiere(promote_gold: PromoteGold) -> None:
@@ -955,7 +971,7 @@ def test_composer_works_includes_concert_and_catalogue_proof(composer_works_clie
     assert zarathustra["proof"] != []
     proof = zarathustra["proof"][0]
     assert proof["source"] == "imslp_works"
-    assert proof["source_url"] == "https://imslp.org"
+    assert proof["source_url"] is None
     assert proof["date"] is None
 
     # a catalogue-only proof links to the work's own page, not the homepage
