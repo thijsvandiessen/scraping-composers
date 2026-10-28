@@ -7,7 +7,11 @@ i:
 	uv sync
 	pnpm --dir apps/frontend install
 
+# Starts the neo4j container `make stop` stopped (without reloading it — that's
+# `make graph`), so the gold API's /connections has a graph to read.
 dev:
+	@if docker info >/dev/null 2>&1; then docker compose up -d --wait neo4j; \
+	else echo "Docker isn't running: /connections will fail until Neo4j is up"; fi
 	uvx honcho start -e .env
 
 # Kill dev servers left behind when honcho dies without cleaning up (e.g. the
