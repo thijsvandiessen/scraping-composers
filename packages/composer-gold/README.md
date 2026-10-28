@@ -34,7 +34,9 @@ Silver is never modified by promotion, so it is repeatable at any time. Status
 and stats land in `gold.db.manifest.json` (on Postgres, a row in
 `composer_meta.build_manifest`). Concert and recording tables are derived in
 silver ([`composer-warehouse`](../composer-warehouse/README.md#concerts-and-recordings))
-and copied across.
+and copied across; `composer_programmes` is recomputed in gold instead, after
+mentions are re-pointed at canonical persons, so a composer's spellings count
+as one.
 
 Every rule can be switched off (CLI `--no-drop-unevidenced-persons`,
 `--no-collapse-duplicates`, `--no-prune-unreferenced`; the same toggles appear
@@ -102,7 +104,7 @@ Silver is the in-memory SQLite fixture from `composer_warehouse.testing`;
 
 | File | Covers |
 | --- | --- |
-| `test_promote.py` | The three rules together and each one switched off; rule 1's concert, recording, composer and sitelink thresholds; ensembles needing their own credit; an anchored ensemble collapsing into one with its type, home city and its spellings' records; re-pointing claims, mentions and concert participants to canonicals; copying derived concerts and recordings; a work's premiere date, place and source surviving promotion; work identifiers and links copied as they are; keeping work claims and instrumentation reached through a composer; claims between entities rule 3 already kept (a place's `in_country`, a genre's `subclass_of` between two genres one person has); a genre's `subclass_of` chain surviving, and a label-only genre collapsing onto its QID entity; the manifest and re-running. |
+| `test_promote.py` | The three rules together and each one switched off; rule 1's concert, recording, composer and sitelink thresholds; ensembles needing their own credit; an anchored ensemble collapsing into one with its type, home city and its spellings' records; re-pointing claims, mentions and concert participants to canonicals; copying derived concerts and recordings; recomputing a composer's programme counts across their spellings; a work's premiere date, place and source surviving promotion; work identifiers and links copied as they are; keeping work claims and instrumentation reached through a composer; claims between entities rule 3 already kept (a place's `in_country`, a genre's `subclass_of` between two genres one person has); a genre's `subclass_of` chain surviving, and a label-only genre collapsing onto its QID entity; the manifest and re-running. |
 | `test_promote_postgres.py` | Postgres only: the gold schema swap and its manifest, readers following the swap, usable sequences after promotion, and refusing to read silver mid-rebuild. |
 | `test_rule1_config.py` | Loading and writing `rule1_config.json`: round-trips, defaults for missing fields, and falling back on a missing or malformed file. |
 | `test_kumu.py` | The Kumu blueprint: performer → composer connections, claims as connections and literals as fields, `--min-weight`, `--limit`, switching claims or performances off, and a reproducible export. |

@@ -1,6 +1,7 @@
 """Tests for the silver recording-derivation pass."""
 
 from composer_models import (
+    ComposerProgramme,
     Concert,
     Entity,
     Recording,
@@ -70,6 +71,15 @@ def test_derive_recordings_groups_and_resolves(session: Session) -> None:
 
     assert (stats.recordings, stats.participant_links) == (1, 2)
     assert stats.unresolved_participant_names == 0
+
+
+def test_derive_recordings_counts_each_composers_recordings(session: Session) -> None:
+    _seed(session)
+    derive_recordings(session)
+
+    row = session.scalars(select(ComposerProgramme)).one()
+    # two works on one album count it once
+    assert (row.concert_count, row.recording_count, row.programme_count) == (0, 1, 1)
 
 
 def test_derive_recordings_key_falls_back_to_url(session: Session) -> None:

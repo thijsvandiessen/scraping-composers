@@ -63,6 +63,10 @@ passes over it; curation happens when it is promoted into gold.
   `dedupe-persons`.
 - **`concerts`** and **`recordings`** (with their participants and
   programmes) — derived from the mentions in silver, copied into gold.
+- **`composer_programmes`** — per composer, the concerts and recordings their
+  works are on (`programmes.py`). Derived state, refreshed by the two derive
+  passes in silver and recomputed by promote in gold; `/v1/composers` reads it
+  instead of aggregating the event tables on every request.
 
 ## Schema and migrations
 

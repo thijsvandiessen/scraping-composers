@@ -17,7 +17,9 @@ uv run uvicorn composer_api:silver_app --port 8003   # staging
   sorts are of those performances rather than their own credits. The `composer` profession claim
   is too loose (Wikidata gives it to pop stars and conductors), and so is a work count:
   catalogue-only work lists credit self-publishers with hundreds of works nobody programmes. Such
-  people stay in gold, they are just not listed as composers
+  people stay in gold, they are just not listed as composers. The counts are precomputed in
+  `composer_programmes` by the derive passes and promote, so the list doesn't aggregate the
+  concert and recording tables per request
 - `GET /v1/genres?kind=genre|movement` — the top-level genres (or movements) as facets, each with
   the number of persons tagged with it or any genre below it. `GET /v1/genres/{id}` adds its
   Wikidata QID, direct parents and children; `GET /v1/genres/{id}/people` lists the persons.
