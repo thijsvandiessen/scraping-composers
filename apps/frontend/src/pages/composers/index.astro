@@ -51,8 +51,8 @@ const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
         ))}
       </ul>
       <nav class="pagination" aria-label="Pagination">
-        {page > 1 && <a href={composerListUrl({ ...query, page: page - 1 })}>← Previous</a>}
-        {page < totalPages && <a href={composerListUrl({ ...query, page: page + 1 })}>Next →</a>}
+        {page > 1 && <a rel="prev" href={composerListUrl({ ...query, page: page - 1 })}>← Previous</a>}
+        {page < totalPages && <a rel="next" href={composerListUrl({ ...query, page: page + 1 })}>Next →</a>}
         <span class="spacer" />
         <span class="summary">
           page {page} of {totalPages} — {data.total} composer{data.total === 1 ? "" : "s"}
@@ -61,3 +61,17 @@ const totalPages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
     </>
   )}
 </Base>
+
+<script>
+  // ← / → follow the pagination links, unless the user is typing in the search form.
+  document.addEventListener("keydown", (event) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.target instanceof HTMLElement && event.target.closest("input, select, textarea, [contenteditable]")) return;
+    const rel = event.key === "ArrowLeft" ? "prev" : event.key === "ArrowRight" ? "next" : null;
+    const link = rel && document.querySelector<HTMLAnchorElement>(`.pagination a[rel="${rel}"]`);
+    if (link) {
+      event.preventDefault();
+      link.click();
+    }
+  });
+</script>
