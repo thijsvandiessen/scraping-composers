@@ -14,13 +14,13 @@ So this adapter reads the site instead of interpreting it. **A person becomes a
 composer here only because an event programme credited them as one** — never
 because a name looked like a composer's.
 
-Getting to those programmes is the whole difficulty. ``sitemap.xml`` is capped
-at 1000 URLs per section and there is no paginated variant, the calendar renders
-client-side, and ``/search`` returns nothing server-side; meanwhile a person page
-carries no usable composer signal of its own (``jobTitle`` was absent on 38 of a
-random 40). What the site does have is a dense graph — an event lists its
-artists, a person lists their events — so the sitemap seeds a walk over the
-entire ``/events/`` + ``/people/`` subgraph rather than bounding it.
+Getting to those programmes is the whole difficulty. robots.txt disallows the
+files ``sitemap.xml`` indexes, the calendar renders client-side, and ``/search``
+returns nothing server-side; meanwhile a person page carries no usable composer
+signal of its own (``jobTitle`` was absent on 38 of a random 40). What the site
+does have is a dense graph — an event lists its artists, a person lists their
+events — so the home page seeds a walk over the entire ``/events/`` +
+``/people/`` subgraph rather than bounding it.
 
 Every page fetched is mirrored by the session's page mirror for the source's
 cadence (see :mod:`.fetch`). Today only the composer credits are read, but the raw HTML stays
@@ -43,9 +43,8 @@ from composer_schema import resolve_entity_kind
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
 from .events import composer_slugs
-from .fetch import FOLLOW_REDIRECTS, REQUEST_DELAY_S, fetch_page, fetch_sitemap
+from .fetch import FOLLOW_REDIRECTS, REQUEST_DELAY_S, fetch_home, fetch_page
 from .people import PersonPage, parse_person
-from .sitemap import seed_urls
 from .urls import BASE_URL, links, person_url, section, slug
 
 log = logging.getLogger(__name__)
@@ -71,7 +70,11 @@ class LaPhilAdapter(HttpSourceAdapter[EntityDocument]):
         """
         ingested_at = datetime.now(UTC)
         walk = _Walk(max_pages)
-        walk.seed(seed_urls(fetch_sitemap(session)))
+        seeds = links(fetch_home(session))
+        if not seeds:
+            # Finishing "successfully" with no records would hide a site change.
+            raise RuntimeError("laphil: the home page links no event or person pages")
+        walk.seed(seeds)
         while (url := walk.next_url()) is not None:
             page = walk.fetch(session, url)
             if page is None:
@@ -115,11 +118,11 @@ class _Walk:
         self.pages = 0
 
     def seed(self, urls: Sequence[str]) -> None:
-        log.info("laphil: %d seed urls from the sitemap", len(urls))
+        log.info("laphil: %d seed urls from the home page", len(urls))
         self.enqueue(urls)
 
     def enqueue(self, urls: Iterable[str]) -> None:
-        """Queue *urls* in the order given — the sitemap's, then each page's own.
+        """Queue *urls* in the order given — the home page's, then each page's own.
 
         Not sorted: sorting walks the site alphabetically, which for a run
         stopped early means 60 pages of whatever begins with "a".

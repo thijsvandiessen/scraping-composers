@@ -27,7 +27,7 @@ everything after that (bucket, ingest, matching) is shared.
 | `nyphil` | New York Philharmonic performance history (Kaggle dataset) | static | |
 | `berlinphil` | Berliner Philharmoniker Digital Concert Hall archive | static | |
 | `wienerphil` | Vienna Philharmonic concert archive | static | |
-| `laphil` | Los Angeles Philharmonic concert programmes | yearly | |
+| `laphil` | Los Angeles Philharmonic concert programmes | yearly | a walk over the event and person pages, seeded from the home page: robots.txt disallows the files `sitemap.xml` indexes |
 | `roh` | Royal Opera House Collections performance database | static | [roh](docs/roh.md) |
 | `decca` | Decca Classics recorded catalogue | yearly | |
 | `harmoniamundi` | harmonia mundi label catalogue | yearly | [harmoniamundi](docs/harmoniamundi.md) |

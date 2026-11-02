@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from composer_scrapers.laphil.events import artist_credits, composer_slugs, program_items
 from composer_scrapers.laphil.people import parse_person
-from composer_scrapers.laphil.sitemap import seed_urls
 from composer_scrapers.laphil.urls import canonical, links, section, slug
 
 # A programme with all four shapes that occur: a linked composer whose work is
@@ -266,17 +265,3 @@ def test_links_collects_both_sections_in_document_order() -> None:
 def test_section_and_slug_split_a_canonical_url() -> None:
     url = "https://www.laphil.com/events/brahms-4"
     assert (section(url), slug(url)) == ("events", "brahms-4")
-
-
-def test_seed_urls_keeps_events_and_people_in_file_order() -> None:
-    sitemap = """<?xml version="1.0" encoding="UTF-8"?>
-    <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-      <url><loc>https://www.laphil.com/events/brahms-4</loc></url>
-      <url><loc>https://www.laphil.com/posts/an-article</loc></url>
-      <url><loc>https://www.laphil.com/people/johannes-brahms</loc></url>
-      <url><loc>https://www.laphil.com/events/brahms-4</loc></url>
-    </urlset>"""
-    assert seed_urls(sitemap) == [
-        "https://www.laphil.com/events/brahms-4",
-        "https://www.laphil.com/people/johannes-brahms",
-    ]

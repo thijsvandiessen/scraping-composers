@@ -37,9 +37,9 @@ def _person(name: str, *, job: str = "", bio: str = "", events: str = "") -> str
     )
 
 
-#: An event in the sitemap credits Beethoven; his page links an event that is
-#: *not* in the sitemap, and that one credits Brahms. Finding Brahms is the walk
-#: doing its job — the sitemap is capped and never mentions him.
+#: An event on the home page credits Beethoven; his page links an event that is
+#: *not* on the home page, and that one credits Brahms. Finding Brahms is the
+#: walk doing its job — the home page lists one season and never mentions him.
 SITE = {
     f"{BASE}/events/beethoven-7": _event(
         ("ludwig-van-beethoven", "BEETHOVEN"),
@@ -57,10 +57,15 @@ SITE = {
     f"{BASE}/people/jhoanna-sierralta": _person("Jhoanna Sierralta", job="assistant conductor"),
 }
 
-SITEMAP = f"<urlset><url><loc>{BASE}/events/beethoven-7</loc></url></urlset>"
+
+def _home(*paths: str) -> str:
+    return "".join(f'<a href="{path}">link</a>' for path in paths)
 
 
-def _stub_site(monkeypatch: pytest.MonkeyPatch, site: dict[str, str], sitemap: str = SITEMAP) -> list[str]:
+HOME = _home("/events/beethoven-7")
+
+
+def _stub_site(monkeypatch: pytest.MonkeyPatch, site: dict[str, str], home: str = HOME) -> list[str]:
     """Serve *site* to the adapter, returning the list it records fetches in."""
     fetched: list[str] = []
 
@@ -68,7 +73,7 @@ def _stub_site(monkeypatch: pytest.MonkeyPatch, site: dict[str, str], sitemap: s
         fetched.append(url)
         return site.get(url)
 
-    monkeypatch.setattr("composer_scrapers.laphil.fetch_sitemap", lambda _client: sitemap)
+    monkeypatch.setattr("composer_scrapers.laphil.fetch_home", lambda _client: home)
     monkeypatch.setattr("composer_scrapers.laphil.fetch_page", fetch_page)
     return fetched
 
@@ -79,7 +84,7 @@ def test_laphil_is_registered() -> None:
     assert REGISTRY["laphil"].base_url == BASE
 
 
-def test_walk_reaches_composers_the_sitemap_never_lists(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_walk_reaches_composers_the_home_page_never_lists(monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_site(monkeypatch, SITE)
     docs = list(LaPhilAdapter().fetch())
     assert [d.name for d in docs] == ["Ludwig van Beethoven", "Johannes Brahms"]
@@ -124,7 +129,7 @@ def test_a_programme_name_differing_only_in_case_is_not_an_alias(
         f"{BASE}/events/e": _event(("jessie-montgomery", "Jessie MONTGOMERY")),
         f"{BASE}/people/jessie-montgomery": _person("Jessie Montgomery"),
     }
-    _stub_site(monkeypatch, site, f"<urlset><url><loc>{BASE}/events/e</loc></url></urlset>")
+    _stub_site(monkeypatch, site, _home("/events/e"))
     (doc,) = list(LaPhilAdapter().fetch())
     assert [c.predicate for c in doc.claims] == ["has_profession"]
 
@@ -135,10 +140,8 @@ def test_a_composer_credited_twice_is_read_and_emitted_once(monkeypatch: pytest.
         f"{BASE}/events/two": _event(("ludwig-van-beethoven", "BEETHOVEN")),
         f"{BASE}/people/ludwig-van-beethoven": _person("Ludwig van Beethoven", job="composer"),
     }
-    sitemap = (
-        f"<urlset><url><loc>{BASE}/events/one</loc></url><url><loc>{BASE}/events/two</loc></url></urlset>"
-    )
-    fetched = _stub_site(monkeypatch, site, sitemap)
+    home = _home("/events/one", "/events/two")
+    fetched = _stub_site(monkeypatch, site, home)
     docs = list(LaPhilAdapter().fetch())
     assert len(docs) == 1
     assert fetched.count(f"{BASE}/people/ludwig-van-beethoven") == 1
@@ -152,11 +155,8 @@ def test_a_page_that_calls_itself_a_composer_is_taken_at_its_word(
         f"{BASE}/people/saad-haddad": _person("Saad Haddad", job="composer"),
         f"{BASE}/people/andrea-caputo": _person("Andrea Caputo", job="Clarinet"),
     }
-    sitemap = (
-        f"<urlset><url><loc>{BASE}/people/saad-haddad</loc></url>"
-        f"<url><loc>{BASE}/people/andrea-caputo</loc></url></urlset>"
-    )
-    _stub_site(monkeypatch, site, sitemap)
+    home = _home("/people/saad-haddad", "/people/andrea-caputo")
+    _stub_site(monkeypatch, site, home)
     assert [d.name for d in LaPhilAdapter().fetch()] == ["Saad Haddad"]
 
 
@@ -167,7 +167,7 @@ def test_an_ensemble_credited_as_composer_is_not_stored_as_a_person(
         f"{BASE}/events/e": _event(("escher-string-quartet", "ESCHER")),
         f"{BASE}/people/escher-string-quartet": _person("Escher String Quartet"),
     }
-    _stub_site(monkeypatch, site, f"<urlset><url><loc>{BASE}/events/e</loc></url></urlset>")
+    _stub_site(monkeypatch, site, _home("/events/e"))
     (doc,) = list(LaPhilAdapter().fetch())
     assert doc.kind == "ensemble"
 
@@ -180,10 +180,8 @@ def test_an_unfetchable_page_does_not_end_the_walk(monkeypatch: pytest.MonkeyPat
         f"{BASE}/events/two": _event(("johannes-brahms", "BRAHMS")),
         f"{BASE}/people/johannes-brahms": _person("Johannes Brahms"),
     }
-    sitemap = (
-        f"<urlset><url><loc>{BASE}/events/one</loc></url><url><loc>{BASE}/events/two</loc></url></urlset>"
-    )
-    _stub_site(monkeypatch, site, sitemap)
+    home = _home("/events/one", "/events/two")
+    _stub_site(monkeypatch, site, home)
     assert [d.name for d in LaPhilAdapter().fetch()] == ["Johannes Brahms"]
 
 
@@ -194,20 +192,20 @@ def test_max_pages_caps_the_walk(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(fetched) == 2
 
 
-def test_an_empty_site_yields_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_site(monkeypatch, {}, "<urlset></urlset>")
-    assert list(LaPhilAdapter().fetch()) == []
+def test_a_home_page_with_no_seeds_fails_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A redesign must fail the run, not complete it with zero records."""
+    _stub_site(monkeypatch, {}, "<html>redesigned</html>")
+    with pytest.raises(RuntimeError, match="links no event or person pages"):
+        list(LaPhilAdapter().fetch())
 
 
-def test_the_walk_follows_the_sitemap_order_not_the_alphabet(
+def test_the_walk_follows_the_home_page_order_not_the_alphabet(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Sorting the frontier would spend a truncated run on whatever begins with
     "a" — which on this site is a run of old events with no programme left."""
     site = {f"{BASE}/events/{name}": _event() for name in ("zebra", "alpha")}
-    sitemap = (
-        f"<urlset><url><loc>{BASE}/events/zebra</loc></url><url><loc>{BASE}/events/alpha</loc></url></urlset>"
-    )
-    fetched = _stub_site(monkeypatch, site, sitemap)
+    home = _home("/events/zebra", "/events/alpha")
+    fetched = _stub_site(monkeypatch, site, home)
     list(LaPhilAdapter().fetch())
     assert fetched == [f"{BASE}/events/zebra", f"{BASE}/events/alpha"]

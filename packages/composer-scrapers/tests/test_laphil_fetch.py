@@ -7,7 +7,7 @@ import pytest
 from composer_http import PageCache, SourceSession
 from composer_http.testing import mock_session
 from composer_scrapers.laphil import LaPhilAdapter
-from composer_scrapers.laphil.fetch import SITEMAP_URL, fetch_page, fetch_sitemap
+from composer_scrapers.laphil.fetch import HOME_URL, fetch_home, fetch_page
 
 
 @pytest.fixture(autouse=True)
@@ -26,11 +26,11 @@ def _client(
     return mock_session(transport, cache=cache)
 
 
-def test_fetch_sitemap_requests_the_sitemap() -> None:
+def test_fetch_home_requests_the_home_page() -> None:
     requested: list[str] = []
-    with _client(lambda _: httpx.Response(200, text="<urlset/>"), requested) as client:
-        assert fetch_sitemap(client) == "<urlset/>"
-    assert requested == [SITEMAP_URL]
+    with _client(lambda _: httpx.Response(200, text="<html>home</html>"), requested) as client:
+        assert fetch_home(client) == "<html>home</html>"
+    assert requested == [HOME_URL]
 
 
 def test_fetch_page_returns_the_body() -> None:
