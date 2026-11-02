@@ -85,7 +85,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "lute": ("laute",),
     "mandolin": ("mandoline",),
     "accordion": ("akkordeon", "akk"),
-    "organ": ("orgel", "org"),
+    "organ": ("orgel", "org", "pipe organ"),
     "harmonium": ("harm",),
     "harpsichord": ("cembalo", "hpd", "cemb"),
     "clavichord": (),
@@ -103,7 +103,17 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "treble recorder": ("alto recorder", "alt blockflote", "altblockflote"),
     "tenor recorder": ("tenor blockflote", "tenorblockflote"),
     "bass recorder": ("bass blockflote", "bassblockflote"),
-    "percussion": ("schlagzeug", "schlagwerk", "perc", "perk", "schlg", "schlzg", "schlz", "schl"),
+    "percussion": (
+        "percussion instrument",
+        "schlagzeug",
+        "schlagwerk",
+        "perc",
+        "perk",
+        "schlg",
+        "schlzg",
+        "schlz",
+        "schl",
+    ),
     "timpani": ("timp", "tmp", "pauken", "pauke", "kettledrums", "pk"),
     "crotales": ("crot",),
     "cymbals": ("cyms", "cym", "becken"),
@@ -121,6 +131,7 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     "marimba": ("mar",),
     "guiro": (),
     "voice": (
+        "human voice",
         "singstimme",
         "gesang",
         "vocal",
@@ -156,13 +167,13 @@ CATEGORIES: dict[str, tuple[str, ...]] = {
     # Distinct from "string orchestra", and the reason "strings"/"Streicher" is
     # not a spelling of it: in an orchestral scoring those name the string
     # *section* of a full orchestra, not a work for string orchestra.
-    "strings": ("str", "streicher", "cordes", "archi"),
+    "strings": ("str", "streicher", "cordes", "archi", "string section"),
     "string orchestra": ("streichorchester",),
     "chamber orchestra": ("kammerorchester",),
     "wind ensemble": ("wind band", "wind orchestra", "blasorchester", "blaserensemble"),
     # Sections named as such in a scoring list, like "strings" above.
-    "winds": ("blaser", "wind instruments"),
-    "brass": ("blechblaser", "brass instruments"),
+    "winds": ("blaser", "wind instruments", "woodwind section", "woodwind instruments"),
+    "brass": ("blechblaser", "brass instruments", "brass section"),
     "string quartet": ("streichquartett", "string quartets"),
     "string trio": ("streichtrio", "string trios"),
     "string quintet": ("streichquintett", "string quintets"),
@@ -233,6 +244,33 @@ MEMBERS: dict[str, tuple[str, ...]] = {
     "wind quintet": ("flute", "oboe", "clarinet", "bassoon", "horn"),
     "saxophone quartet": ("soprano saxophone", "alto saxophone", "tenor saxophone", "baritone saxophone"),
 }
+
+#: Categories that name a group of players rather than an instrument: the
+#: :data:`MEMBERS` ensembles, plus the ones that name no fixed instruments. A
+#: list that states one of these says what the work is *for* ("orchestra"),
+#: where a list of instruments alone may only be the parts that group plays.
+ENSEMBLES: frozenset[str] = frozenset(
+    {
+        *MEMBERS,
+        "orchestra",
+        "string orchestra",
+        "chamber orchestra",
+        "wind ensemble",
+        "choir",
+        "mixed choir",
+        "chamber choir",
+        "equal voices",
+        "male choir",
+        "female choir",
+        "children's choir",
+        "soloists",
+    }
+)
+
+#: Categories that name one section of an orchestra. A list naming one is a
+#: list of an orchestra's parts, not of what the work is for: "strings" in a
+#: symphony's list is not a work for strings.
+SECTIONS: frozenset[str] = frozenset({"strings", "winds", "brass"})
 
 #: Umlauts folded rather than stripped, so "Flöte" reaches "flote" and not "flte".
 _FOLDED = str.maketrans({"ä": "a", "ö": "o", "ü": "u", "ß": "ss", "é": "e", "è": "e"})

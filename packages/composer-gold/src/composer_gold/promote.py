@@ -19,6 +19,7 @@ from sqlalchemy.pool import NullPool
 from ._claims import (
     collect_other_literal_claims,
     collect_person_claims,
+    collect_work_entities,
     drop_pruned_object_claims,
     insert_claims,
     walk_referenced,
@@ -29,6 +30,7 @@ from ._copy import (
     copy_recordings,
     copy_records,
     copy_sources_and_runs,
+    copy_work_entities,
     copy_works_titles_mentions,
 )
 from ._rule1_config import Rule1Config
@@ -53,6 +55,7 @@ class PromoteStats:
     works: int = 0
     work_titles: int = 0
     mentions: int = 0
+    work_entities: int = 0
     concerts: int = 0
     concert_participant_links: int = 0
     unresolved_participant_names: int = 0
@@ -164,6 +167,7 @@ def _stats(build: GoldBuild) -> PromoteStats:
         works=build.work_count,
         work_titles=build.title_count,
         mentions=build.mention_count,
+        work_entities=build.work_entity_count,
         concerts=build.concert_count,
         concert_participant_links=build.participant_links,
         unresolved_participant_names=len(build.unresolved_names),
@@ -182,7 +186,7 @@ def _build(silver: Session, engine: Engine, config: PromoteConfig) -> PromoteSta
     with engine.begin() as gold:
         copy_sources_and_runs(build, gold)
         copy_entities(build, gold, build.kept_roots)  # kept person representatives
-        referenced = collect_person_claims(build)
+        referenced = collect_person_claims(build) | collect_work_entities(build)
         walk_referenced(build, referenced)
         collect_other_literal_claims(build)
         copy_entities(build, gold, build.kept_other)
@@ -192,6 +196,7 @@ def _build(silver: Session, engine: Engine, config: PromoteConfig) -> PromoteSta
         copy_records(build, gold)
         insert_claims(build, gold)
         copy_works_titles_mentions(build, gold)
+        copy_work_entities(build, gold)
         copy_concerts(build, gold)
         copy_recordings(build, gold)
         # recomputed rather than copied: mentions now point at canonical persons

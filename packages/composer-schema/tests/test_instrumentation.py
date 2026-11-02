@@ -10,7 +10,9 @@ import pytest
 from composer_schema.instrumentation import (
     CATEGORIES,
     CONTAINS,
+    ENSEMBLES,
     MEMBERS,
+    SECTIONS,
     category_for,
     members_of,
     parse_instrumentation,
@@ -127,6 +129,33 @@ def test_no_category_is_both_a_pairing_and_an_ensemble() -> None:
     """The two tables decide which predicate a part lands on, so a category in
     both would emit its parts twice under conflicting meanings."""
     assert not (set(CONTAINS) & set(MEMBERS))
+
+
+def test_ensembles_and_sections_are_categories_and_apart() -> None:
+    """A work list is read by these two sets: an ensemble is what the work is
+    for, a section marks a list of an orchestra's parts. A name in both, or in
+    neither table, would be read two ways or not at all."""
+    assert set(MEMBERS) <= ENSEMBLES
+    assert ENSEMBLES <= set(CATEGORIES)
+    assert SECTIONS <= set(CATEGORIES)
+    assert not (ENSEMBLES & SECTIONS)
+    assert not (ENSEMBLES & set(CONTAINS))
+
+
+@pytest.mark.parametrize(
+    ("raw", "category"),
+    [
+        # Wikidata's labels for its instrument items (P870 values)
+        ("string section", "strings"),
+        ("brass section", "brass"),
+        ("woodwind section", "winds"),
+        ("human voice", "voice"),
+        ("pipe organ", "organ"),
+        ("symphony orchestra", "orchestra"),
+    ],
+)
+def test_a_wikidata_instrument_label_is_found(raw: str, category: str) -> None:
+    assert category_for(raw) == category
 
 
 def test_no_spelling_denotes_two_categories() -> None:

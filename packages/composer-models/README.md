@@ -59,6 +59,11 @@ passes over it; curation happens when it is promoted into gold.
 - **`work_links`** — a part, arrangement or version pointing at the work it
   derives from (`relation` `part_of`/`arrangement_of`/`version_of`, `method`
   `catalogue`/`wikidata`). Derived state, rebuilt by `link_works`.
+- **`work_entities`** — a canonical work's links to the source `work` entities
+  that describe it (a Bärenreiter edition, a Wikidata item), one row per
+  `(work, entity, source)`: the way from a work to its `written_for` /
+  `includes_instrument` claims and the parts in the entity's records. Derived
+  state, rebuilt by `link_work_entities`.
 - **`person_matches`** — scored person pairs and review decisions from
   `dedupe-persons`.
 - **`concerts`** and **`recordings`** (with their participants and

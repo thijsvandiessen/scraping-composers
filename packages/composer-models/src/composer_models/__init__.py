@@ -17,7 +17,7 @@ from .entities import Claim, Entity, EntityRecord
 from .persons import PersonMatch
 from .programmes import ComposerProgramme, refresh_composer_programmes
 from .recordings import Recording, RecordingParticipant, RecordingWork
-from .works import RawWorkMention, Work, WorkIdentifier, WorkLink, WorkTitle
+from .works import RawWorkMention, Work, WorkEntity, WorkIdentifier, WorkLink, WorkTitle
 
 __all__ = [
     "CLAIMS",
@@ -41,6 +41,7 @@ __all__ = [
     "RecordingWork",
     "Source",
     "Work",
+    "WorkEntity",
     "WorkIdentifier",
     "WorkLink",
     "WorkTitle",

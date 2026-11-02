@@ -24,6 +24,9 @@ from .extract import WorkFeatures, extract_features
 from .match import EXTERNAL_SCHEMES
 
 _QID = re.compile(r"(Q\d+)$")
+
+#: The sources whose mentions are Wikidata items, and so carry the work's QID.
+WIKIDATA_WORK_SOURCES = frozenset({"wikidata_works", "wikidata_catalogue", "wikidata_instrumentation"})
 _MBID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _ISWC = re.compile(r"^T(\d{10})$")
 
@@ -104,7 +107,7 @@ def stated_catalogue(source_name: str, raw: dict[str, Any], composer: str | None
 def external_ids(source_name: str, raw: dict[str, Any]) -> frozenset[tuple[str, str]]:
     """The ``(scheme, value)`` external work ids a mention's payload states."""
     ids: set[tuple[str, str]] = set()
-    if source_name in ("wikidata_works", "wikidata_catalogue") and (qid := _qid(raw.get("item"))):
+    if source_name in WIKIDATA_WORK_SOURCES and (qid := _qid(raw.get("item"))):
         ids.add(("wikidata", qid))
     if source_name == "wikidata_catalogue":
         mbids = (m.lower() for m in _strings(raw.get("musicbrainz_work")))

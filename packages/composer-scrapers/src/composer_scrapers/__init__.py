@@ -93,6 +93,7 @@ from .wikidata import (  # noqa: E402
     WikidataCatalogueAdapter,
     WikidataEnsemblesAdapter,
     WikidataGenresAdapter,
+    WikidataInstrumentationAdapter,
     WikidataPlacesAdapter,
     WikidataWorksAdapter,
 )
@@ -107,6 +108,7 @@ REGISTRY: dict[str, SourceAdapter] = {
     "wikidata_ensembles": WikidataEnsemblesAdapter(),
     "wikidata_genres": WikidataGenresAdapter(),
     "wikidata_catalogue": WikidataCatalogueAdapter(),
+    "wikidata_instrumentation": WikidataInstrumentationAdapter(),
     "concertgebouw_archive": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),
     "berlinphil": BerlinPhilAdapter(),

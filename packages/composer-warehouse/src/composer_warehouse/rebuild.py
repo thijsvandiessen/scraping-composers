@@ -73,6 +73,7 @@ class RebuildStats:
     ensembles_anchored: int = 0
     works_merged: int = 0
     work_links: int = 0
+    work_entities_linked: int = 0
     concerts: int = 0
     recordings: int = 0
 
@@ -284,6 +285,7 @@ def _replay(
         ensembles_anchored=derived.ensembles.anchored,
         works_merged=derived.merged.merged,
         work_links=derived.works.links,
+        work_entities_linked=derived.work_entities.links,
         concerts=derived.concerts.concerts,
         recordings=derived.recordings.recordings,
     )

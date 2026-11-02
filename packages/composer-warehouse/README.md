@@ -64,8 +64,8 @@ composer who uses that catalogue. A range or list (`BWV 772-786`) is one
 identifier naming the set, so a collection and its first piece conflict instead
 of merging; a title giving both a piece's number and its set's keeps the piece's. Besides the title, `works/sources.py` reads
 what a source states elsewhere in the payload: IMSLP's "Opus/Catalogue Number"
-(not its internal `ILB` number), and `wikidata_works`/`wikidata_catalogue`'s
-item QID, catalogue codes, MusicBrainz ids and ISWCs. A Wikidata catalogue code
+(not its internal `ILB` number), the item QID of every Wikidata work source
+(`wikidata_works`, `wikidata_catalogue`, `wikidata_instrumentation`), and `wikidata_catalogue`'s catalogue codes, MusicBrainz ids and ISWCs. A Wikidata catalogue code
 is read by its catalogue item (`stated_catalogue`), so Terry's bare `238/3` is
 `Ty 238/3`, and a code in a catalogue with no known scheme is stored under the
 item itself (`wd:Q16749680`, `c 48`), which two Wikidata items still match on.
@@ -105,6 +105,17 @@ without nesting leave it unlinked. It runs in `rebuild-silver` and before every
 promote. `composer-ingest work-identity` reports, per source, the share of
 works with a catalogue number or external id and how many are linked to a
 parent.
+
+**Work entities.** A publisher catalogue or Wikidata emits a `work` entity
+beside each work mention, carrying what a mention cannot: `written_for` and
+`includes_instrument` claims, and the parts with their counts in the record's
+`raw["instrumentation"]`. `works/entities.py` (`link_work_entities`) rebuilds
+`work_entities` from the mention each entity's source record resolved: same
+source, and the same external id or the entity's id followed by
+`:<composer QID>` (a Wikidata work's mention per composer). An anthology's
+items (`<product>#<n>`) and unmatched mentions link nothing, and the link
+follows a re-matched mention. `merge_works` drops a folded work's links before
+the pass rebuilds them, and both run in `refresh_derived`.
 
 ## People deduplication
 
@@ -326,7 +337,8 @@ factories) come from `composer_warehouse.testing`.
 | --- | --- |
 | `test_work_extract.py` | Extracting catalogue numbers (BWV, K., Op.), key, type and number from titles, including German titles; numbers read for the composer (a bare `K` only for Mozart or Scarlatti), structured catalogue fields and pairs a source already normalised (`stated`), and the part/arrangement/version cues that make a parent's number the parent's, a range as one identifier, and a set dropped when the title also gives its own number. |
 | `test_work_matching.py` | Scoring candidates and deciding auto-match, review or create; K and KV as one Köchel number, catalogue and Wikidata conflicts, old and new Köchel kept apart, derived works never matching their parent, a range or list conflicting with a piece inside it (#358), and the pruned candidate search giving exactly what scoring every candidate gives, with a fraction of the title comparisons (#366). |
-| `test_work_identity.py` | Identity end to end (#351): the four Mozart No. 40 titles resolving to one work plus a version linked to it, a Brandenburg movement and arrangement linked to BWV 1048 without merging, an ambiguous parent left unlinked, IMSLP's structured catalogue field and a shared Wikidata item as strong keys, stored identifiers matching in the next run, Wikidata ids normalised, Wikidata codes read by their catalogue item (Terry's `238/3`, a `wd:<QID>` fallback two items match on, #361), P361 links, `link_works` rebuilding rather than accumulating, and catalogue ranges (#358): pieces linked `part_of` their range rather than merged into it, IMSLP's structured range kept apart from its first piece, a number inside nested sets linked to the smallest, one inside overlapping sets left unlinked, and only known catalogue schemes with bounded ranges expanded (#378). |
+| `test_work_identity.py` | Identity end to end (#351): the four Mozart No. 40 titles resolving to one work plus a version linked to it, a Brandenburg movement and arrangement linked to BWV 1048 without merging, an ambiguous parent left unlinked, IMSLP's structured catalogue field and a shared Wikidata item as strong keys (a `wikidata_instrumentation` mention matching on its item too), stored identifiers matching in the next run, Wikidata ids normalised, Wikidata codes read by their catalogue item (Terry's `238/3`, a `wd:<QID>` fallback two items match on, #361), P361 links, `link_works` rebuilding rather than accumulating, and catalogue ranges (#358): pieces linked `part_of` their range rather than merged into it, IMSLP's structured range kept apart from its first piece, a number inside nested sets linked to the smallest, one inside overlapping sets left unlinked, and only known catalogue schemes with bounded ranges expanded (#378). |
+| `test_work_entities.py` | Work entities linked to their work: through a mention under the same id, through a Wikidata mention per composer (`Q1:Q7294`) to every work it resolved, not through an anthology item or another source's id, nothing for an unmatched mention, the link following a re-matched mention and rebuilt rather than kept, one entity two sources share linked once per source, and a folded work's links removed by `merge_works` and restored on the merged work by `refresh_derived`. |
 | `test_work_merge.py` | Works across a composer's duplicate entities (#362): KV 550 by "Mozart" and "Wolfgang Amadeus Mozart" folded into one work once the persons are linked (the version still linked to it), composerless works folded into the owner of their catalogue but not into an arranger's or a per-composer scheme's, nothing folded without a person link, mentions, identifiers and the earlier premiere moved, idempotent re-runs, a work folded in a later round taking the works it absorbed along, ingest matching a duplicate's mention against its canonical, and `refresh_derived` folding before it links. |
 
 **People**

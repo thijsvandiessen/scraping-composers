@@ -145,6 +145,21 @@ def test_a_shared_wikidata_item_matches_titles_that_share_nothing_else(session: 
     assert methods == {"new", "wikidata"}
 
 
+def test_an_instrumentation_mention_matches_the_work_on_its_item(session: Session) -> None:
+    """``wikidata_instrumentation`` mentions are Wikidata items too, so the
+    work's instrumentation lands on the work the other Wikidata sources made."""
+    ingest(session, "wikidata_works", perf_mention("Q1:Q254", "Symphony No. 40", MOZART, wikidata("Q1")))
+    ingest(
+        session,
+        "wikidata_instrumentation",
+        perf_mention("Q1:Q254", "Symphonie Nr. 40", MOZART, wikidata("Q1", instrumentation={"parts": []})),
+    )
+
+    work = session.scalars(select(Work)).one()
+    assert work.canonical_title == "Symphony No. 40"
+    assert set(session.scalars(select(RawWorkMention.match_method))) == {"new", "wikidata"}
+
+
 def test_wikidata_catalogue_ids_are_stored_and_normalised(session: Session) -> None:
     raw = wikidata(
         "Q2",

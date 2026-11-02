@@ -47,7 +47,10 @@ uv run uvicorn composer_api:silver_app --port 8003   # staging
 - `GET /v1/works?q=&source=` / `GET /v1/works/{id}` — resolved works by title or composer, with
   aliases, mention counts, proof, `identifiers` (catalogue numbers and external ids) and
   `wikidata_id`; the detail adds `links` (the works it is a part, arrangement or version of)
-  and `derived` (its own parts, arrangements and versions)
+  and `derived` (its own parts, arrangements and versions), and `scoring`: what the work is
+  `written_for` and the instruments it `includes`, each with the sources stating it, and
+  each source's part list with counts (`Horn (4)` is horn, count 4), read from the source
+  entities linked to the work (`work_entities`)
 - `GET /v1/mentions?status=` — work mentions with the matcher's decision;
   `status=needs_review` is the review queue, each entry with its best candidate work
 
@@ -68,7 +71,8 @@ uv run --directory apps/consumer-api pytest --rootdir . --cov=composer_api
 
 `test_api.py` runs the silver app over seed data in in-memory SQLite, and the
 gold app over its promoted copy; `test_ensembles.py` does the same for the
-ensemble endpoints over a seed with a Wikidata anchor and its spellings. Every gold fixture runs twice: promoted into a
+ensemble endpoints over a seed with a Wikidata anchor and its spellings, and
+`test_scoring.py` for a work's instrumentation. Every gold fixture runs twice: promoted into a
 SQLite file, and into Postgres when `COMPOSER_TEST_POSTGRES_URL` is set.
 
 | Area | Covers |
@@ -81,4 +85,5 @@ SQLite file, and into Postgres when `COMPOSER_TEST_POSTGRES_URL` is set.
 | Genres (`test_genres.py`) | Roll-up through `subclass_of` in silver, gold on SQLite and gold on Postgres: a person tagged only with "waltz" found under "dance music" (by the genre's people and by `/v1/composers?genre=`), a legacy label-only tag counting, facet person counts per kind, parents and children, a cycle terminating, and 404s for an unknown genre or a person id. |
 | Ensembles (`test_ensembles.py`) | Silver listing every spelling with the anchor's type and city, a name-derived type, `anchored=false` sorted by appearances, the `anchored`/`type` filters, the detail's aliases, MusicBrainz id and claims, gold holding one ensemble per anchor with both spellings' concerts, 404s and an invalid sort. |
 | Connections | `/v1/entities/{id}/connections`: a composer reaching its performers and the reverse, the works that prove an edge, stage partners, a person reaching their birthplace, and the exclusions — no self-link, no profession hub, `min_weight` dropping one-off pairings. Budgets: `per_relation` as a hard cap, `per_relation` unset reserving a share then filling by rank, `limit` capping the whole graph, and the relation filter. Ranking: `weight` unable to separate two equal edges where `affinity` demotes the most-performed, affinity holding for a composer who also performs, a neighbour linked by several claims collapsing to one node, and a place ranked by its people's reach. Errors: 422 for an unknown `rank`, 404 for an unknown entity, 503 without a snapshot. These go through Neo4j and the snapshot, as in production, and need `COMPOSER_TEST_NEO4J_URL`. Hand-seeded snapshots, which always run, cover both rankings over the stored scores, `total` counting edges the pool dropped, `min_weight`, a claim relation filter naming the claim asked for, the budgets, and an entity missing from the snapshot having no neighbours. |
+| Scoring (`test_scoring.py`) | A work's `scoring` in silver, gold on SQLite and gold on Postgres: `written_for` and `includes` with the sources stating each (Bärenreiter and Wikidata agreeing on the horn), each source's part list with its counts and one list for two editions stating the same, an unknown instrument shown as stated, and an empty scoring for a work no source describes. |
 | Gold curation | Gold hiding people without performance evidence, keeping works with their mention counts, and stats reflecting curation. |
