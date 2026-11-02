@@ -16,9 +16,9 @@ import re
 from types import ModuleType
 
 import pytest
-from composer_scrapers.wikidata import catalogue, ensembles, genres, places, query, works
+from composer_scrapers.wikidata import catalogue, ensembles, genres, instrumentation, places, query, works
 
-MODULES: tuple[ModuleType, ...] = (query, works, places, genres, ensembles, catalogue)
+MODULES: tuple[ModuleType, ...] = (query, works, places, genres, ensembles, catalogue, instrumentation)
 
 
 def _queries() -> dict[str, str]:
@@ -78,6 +78,7 @@ def test_every_adapter_query_is_collected() -> None:
         "ensembles.ENSEMBLE_ID_QUERY",
         "ensembles.ENSEMBLE_MULTI_QUERY",
         "catalogue.CATALOGUE_ID_QUERY",
+        "instrumentation.INSTRUMENTATION_ID_QUERY",
     ):
         assert name in QUERIES
 

@@ -11,7 +11,8 @@ are tagged with, and their ``subclass of`` hierarchy.
 ``ensembles`` a fifth: orchestras and choirs, the anchors name-keyed
 ensembles are folded onto. ``catalogue`` a sixth: works with a catalogue
 number, carrying their MusicBrainz ids, ISWCs and parent works for the
-warehouse's work identity.
+warehouse's work identity. ``instrumentation`` a seventh: works with a stated
+instrumentation (P870), as instrumentation claims and parts with their counts.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from .. import EntityDocument, HttpSourceAdapter, RefreshCadence
 from .catalogue import WikidataCatalogueAdapter
 from .ensembles import WikidataEnsemblesAdapter
 from .genres import WikidataGenresAdapter
+from .instrumentation import WikidataInstrumentationAdapter
 from .parse import BASE_URL, _records_from_rows
 from .places import WikidataPlacesAdapter
 from .query import PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _fetch_metrics, _fetch_page, _fetch_qids
@@ -39,6 +41,7 @@ __all__ = [
     "WikidataCatalogueAdapter",
     "WikidataEnsemblesAdapter",
     "WikidataGenresAdapter",
+    "WikidataInstrumentationAdapter",
     "WikidataPlacesAdapter",
     "WikidataWorksAdapter",
 ]
