@@ -23,7 +23,9 @@ Put it in one bucket:
   what blocked it: a failing check (with the root cause from its log), a
   conflict, or a major bump that needs a human. Also read the `dependabot`
   job on every bump PR, whatever its age: if it failed, auto-merge was never
-  enabled and the PR won't merge itself even once CI is green.
+  enabled and the PR won't merge itself even once CI is green. If all bump PRs
+  share the failure, name it once (e.g. "Auto merge is not allowed for this
+  repository", a repo setting) instead of per PR.
 - **Red or conflicted**: any other PR with a failing check or a conflict.
 - **Stale**: no update in 30+ days.
 - **Fine**: everything else.
@@ -37,7 +39,10 @@ log's tail is usually checkout cleanup, not the failure.
 Dependabot handles updates (`.github/dependabot.yml`).
 
 - Run the dependency audit from `CLAUDE.md`, and `npm audit --omit=dev` in
-  `apps/frontend` after `npm ci`.
+  `apps/frontend` after `npm ci`. Write the exported
+  `requirements.txt` to the scratchpad, not `$TMPDIR` (unset in cloud sessions).
+  Also run `git ls-files | grep -E 'lock'`: a lockfile CI never installs from
+  (e.g. `pnpm-lock.yaml` beside an `npm ci` workflow) is worth a line.
 - List the open Dependabot alerts
   (`gh api 'repos/{owner}/{repo}/dependabot/alerts?state=open&per_page=100'`).
   They cover more than the audits: dev and transitive dependencies, and
@@ -52,7 +57,10 @@ Dependabot handles updates (`.github/dependabot.yml`).
 ## 3. Open issues
 
 List open issues with `gh api --paginate repos/{owner}/{repo}/issues` and
-drop entries with a `pull_request` key. Keep only number, title and
+drop entries with a `pull_request` key. Write
+  the bodies file in the first pass (`--jq` with `.body[0:1800]`) so the
+  subagent can start straight away, and give it every issue number so none are
+  silently skipped; check its report covers them all. Keep only number, title and
 `updated_at` first; a listing with bodies overflows the tool output (100k+
 characters at 30 issues). With more than about ten issues, write the
 bodies to a file and hand it to a subagent to triage; otherwise read each
