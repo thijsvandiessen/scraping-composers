@@ -21,7 +21,7 @@ a composer; this module supplies the name and dates once that is established,
 and ``job_title`` corroborates it when the page happens to carry one.
 
 ``event_urls`` is what keeps the walk going: a person page links the events they
-appeared in — up to ~49 of them, well past what the capped sitemap lists.
+appeared in — up to ~49 of them, well past what the home page lists.
 """
 
 from __future__ import annotations
