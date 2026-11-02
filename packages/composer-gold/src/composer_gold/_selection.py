@@ -190,6 +190,7 @@ class GoldBuild:
         self.work_count = 0
         self.title_count = 0
         self.mention_count = 0
+        self.work_entity_count = 0
         self.concert_count = 0
         self.participant_links = 0
         self.unresolved_names: set[str] = set()

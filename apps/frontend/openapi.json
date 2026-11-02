@@ -2037,6 +2037,117 @@
         "title": "RecordingWorkOut",
         "type": "object"
       },
+      "ScoringInstrumentOut": {
+        "description": "One instrumentation category a work's sources state, and which ones.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "sources"
+        ],
+        "title": "ScoringInstrumentOut",
+        "type": "object"
+      },
+      "ScoringPartOut": {
+        "description": "One part as a source lists it: \"Horn (4)\" is instrument horn, count 4.",
+        "properties": {
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "instrument": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrument"
+          },
+          "solo": {
+            "default": false,
+            "title": "Solo",
+            "type": "boolean"
+          },
+          "stated": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stated"
+          }
+        },
+        "required": [
+          "stated",
+          "instrument"
+        ],
+        "title": "ScoringPartOut",
+        "type": "object"
+      },
+      "ScoringSourceOut": {
+        "description": "One source's part-by-part list for the work.",
+        "properties": {
+          "parts": {
+            "items": {
+              "$ref": "#/components/schemas/ScoringPartOut"
+            },
+            "title": "Parts",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          }
+        },
+        "required": [
+          "source",
+          "source_url",
+          "parts"
+        ],
+        "title": "ScoringSourceOut",
+        "type": "object"
+      },
       "StatsOut": {
         "properties": {
           "claims": {
@@ -2291,6 +2402,14 @@
             "title": "Proof",
             "type": "array"
           },
+          "scoring": {
+            "$ref": "#/components/schemas/WorkScoringOut",
+            "default": {
+              "includes": [],
+              "sources": [],
+              "written_for": []
+            }
+          },
           "wikidata_id": {
             "anyOf": [
               {
@@ -2452,6 +2571,37 @@
           "source_url"
         ],
         "title": "WorkProofOut",
+        "type": "object"
+      },
+      "WorkScoringOut": {
+        "description": "What the work is scored for, read from the source entities linked to it.\n\n``written_for`` is what the work is *for* (an orchestra, a violin and a\npiano); ``includes`` the instruments it uses (an orchestral work's flutes).\n``sources`` keeps each source's own list with counts, which no two sources\nare merged across.",
+        "properties": {
+          "includes": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ScoringInstrumentOut"
+            },
+            "title": "Includes",
+            "type": "array"
+          },
+          "sources": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ScoringSourceOut"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "written_for": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ScoringInstrumentOut"
+            },
+            "title": "Written For",
+            "type": "array"
+          }
+        },
+        "title": "WorkScoringOut",
         "type": "object"
       },
       "WorkSummary": {
@@ -3427,7 +3577,7 @@
     },
     "/v1/entities/{entity_id}/connections": {
       "get": {
-        "description": "The strongest neighbours of one entity, budgeted so a graph can draw them.\n\nThe whole neighbourhood is unusable \u2014 a busy conductor reaches thousands of\npeople, and the heaviest edges (everyone performs Beethoven) are the least\ntelling. ``rank=affinity`` discounts each neighbour by how much it is\nperformed or referenced overall, ``per_relation`` keeps the performance\nedges from crowding out the biographical ones, and ``min_weight`` drops the\none-off co-occurrences that are mostly matcher noise. Served from the Neo4j\nprojection of gold; 503 when that isn't loaded or reachable.",
+        "description": "The strongest neighbours of one entity, budgeted so a graph can draw them.\n\nThe whole neighbourhood is unusable \u2014 a busy conductor reaches thousands of\npeople, and the heaviest edges (everyone performs Beethoven) are the least\ntelling. ``rank=affinity`` discounts each neighbour by how much it is\nperformed or referenced overall, ``per_relation`` keeps the performance\nedges from crowding out the biographical ones, and ``min_weight`` drops the\none-off co-occurrences that are mostly matcher noise. Served from the\nsnapshot ``composer-ingest export-neo4j`` stores in gold; 503 until one\nhas been taken.",
         "operationId": "entity_connections_route_v1_entities__entity_id__connections_get",
         "parameters": [
           {

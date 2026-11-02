@@ -416,6 +416,40 @@ export const zRecordingDetail = z.object({
 });
 
 /**
+ * ScoringInstrumentOut
+ *
+ * One instrumentation category a work's sources state, and which ones.
+ */
+export const zScoringInstrumentOut = z.object({
+    id: z.uuid(),
+    label: z.string(),
+    sources: z.array(z.string())
+});
+
+/**
+ * ScoringPartOut
+ *
+ * One part as a source lists it: "Horn (4)" is instrument horn, count 4.
+ */
+export const zScoringPartOut = z.object({
+    count: z.int().nullish(),
+    instrument: z.string().nullable(),
+    solo: z.boolean().optional().default(false),
+    stated: z.string().nullable()
+});
+
+/**
+ * ScoringSourceOut
+ *
+ * One source's part-by-part list for the work.
+ */
+export const zScoringSourceOut = z.object({
+    parts: z.array(zScoringPartOut),
+    source: z.string(),
+    source_url: z.string().nullable()
+});
+
+/**
  * StatsOut
  */
 export const zStatsOut = z.object({
@@ -514,6 +548,22 @@ export const zComposerWorksPage = z.object({
 });
 
 /**
+ * WorkScoringOut
+ *
+ * What the work is scored for, read from the source entities linked to it.
+ *
+ * ``written_for`` is what the work is *for* (an orchestra, a violin and a
+ * piano); ``includes`` the instruments it uses (an orchestral work's flutes).
+ * ``sources`` keeps each source's own list with counts, which no two sources
+ * are merged across.
+ */
+export const zWorkScoringOut = z.object({
+    includes: z.array(zScoringInstrumentOut).optional().default([]),
+    sources: z.array(zScoringSourceOut).optional().default([]),
+    written_for: z.array(zScoringInstrumentOut).optional().default([])
+});
+
+/**
  * WorkDetail
  */
 export const zWorkDetail = z.object({
@@ -533,6 +583,11 @@ export const zWorkDetail = z.object({
     premiere_date: z.string().nullable(),
     premiere_place: z.string().nullish(),
     proof: z.array(zWorkProofOut),
+    scoring: zWorkScoringOut.optional().default({
+        includes: [],
+        sources: [],
+        written_for: []
+    }),
     wikidata_id: z.string().nullish(),
     work_type: z.string().nullable()
 });

@@ -26,7 +26,8 @@ done had the persons been linked from the start:
 
 Folding a work moves its mentions (and the review queue's pointers to it), its
 titles and its identifiers onto the target, keeps the earlier premiere, and
-deletes it. ``work_links`` is rebuilt afterwards by ``link_works``. The pass
+deletes it. ``work_links`` and ``work_entities`` are rebuilt afterwards by
+``link_works`` and ``link_work_entities``. The pass
 is idempotent: a second run finds nothing left to fold.
 """
 
@@ -35,7 +36,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from composer_models import RawWorkMention, Work, WorkIdentifier, WorkLink, WorkTitle
+from composer_models import RawWorkMention, Work, WorkEntity, WorkIdentifier, WorkLink, WorkTitle
 from composer_schema.premiere import supersedes
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
@@ -205,6 +206,7 @@ def _move_rows(session: Session, merges: dict[uuid.UUID, uuid.UUID], chunk: list
     session.execute(
         delete(WorkLink).where(or_(WorkLink.work_id.in_(chunk), WorkLink.target_work_id.in_(chunk)))
     )
+    session.execute(delete(WorkEntity).where(WorkEntity.work_id.in_(chunk)))
 
 
 def _fold_works(session: Session, merges: dict[uuid.UUID, uuid.UUID], chunk: list[uuid.UUID]) -> None:

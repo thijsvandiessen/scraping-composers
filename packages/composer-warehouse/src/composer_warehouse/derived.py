@@ -9,8 +9,9 @@ added here reaches all of them at once.
 Order matters: entity links come first (places, then genres, then ensemble
 anchors), then the works a composer's duplicate entities split apart are
 folded together (which needs ``dedupe_persons`` to have linked the persons,
-so ``rebuild_silver`` runs it first), then work links, so the event
-derivations that read entities and works see the linked ones.
+so ``rebuild_silver`` runs it first), then work links and the links from each
+source's work entity to its work, so the event derivations that read entities
+and works see the linked ones.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from .ensembles import AnchorStats, anchor_ensembles
 from .genres import GenreLinkStats, link_label_genres
 from .places import LinkPlacesStats, link_places
 from .recordings import DeriveRecordingsStats, derive_recordings
+from .works.entities import WorkEntityStats, link_work_entities
 from .works.links import LinkStats, link_works
 from .works.merge import MergeStats, merge_works
 
@@ -35,6 +37,7 @@ class DerivedStats:
     ensembles: AnchorStats
     merged: MergeStats
     works: LinkStats
+    work_entities: WorkEntityStats
     concerts: DeriveConcertsStats
     recordings: DeriveRecordingsStats
 
@@ -46,6 +49,7 @@ def refresh_derived(session: Session) -> DerivedStats:
     ensembles = anchor_ensembles(session)
     merged = merge_works(session)
     works = link_works(session)
+    work_entities = link_work_entities(session)
     concerts = derive_concerts(session)
     recordings = derive_recordings(session)
     return DerivedStats(
@@ -54,6 +58,7 @@ def refresh_derived(session: Session) -> DerivedStats:
         ensembles=ensembles,
         merged=merged,
         works=works,
+        work_entities=work_entities,
         concerts=concerts,
         recordings=recordings,
     )

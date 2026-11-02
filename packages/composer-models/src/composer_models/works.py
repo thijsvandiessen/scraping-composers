@@ -152,3 +152,27 @@ class WorkLink(Base):
 
     work: Mapped[Work] = relationship(foreign_keys=[work_id])
     target: Mapped[Work] = relationship(foreign_keys=[target_work_id])
+
+
+class WorkEntity(Base):
+    """A source's own entity for a canonical work: the ``work`` entity a
+    publisher catalogue or Wikidata emits beside its mention, which carries the
+    facts the mention cannot (``written_for``, ``includes_instrument``, the
+    parts in its record's ``raw``). Rebuilt wholesale by
+    ``composer_warehouse.works.entities.link_work_entities``, from the mention
+    the same source record resolved to this work."""
+
+    __tablename__ = "work_entities"
+    __table_args__ = (
+        UniqueConstraint("work_id", "entity_id", "source_id", name="uq_work_entity"),
+        Index("ix_work_entities_entity", "entity_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    work_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("works.id"))
+    entity_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("entities.id"))
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id"))
+
+    work: Mapped[Work] = relationship()
+    entity: Mapped[Entity] = relationship()
+    source: Mapped[Source] = relationship()

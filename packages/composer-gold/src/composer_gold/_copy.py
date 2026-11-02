@@ -19,6 +19,7 @@ from composer_models import (
     RecordingWork,
     Source,
     Work,
+    WorkEntity,
     WorkIdentifier,
     WorkLink,
     WorkTitle,
@@ -218,6 +219,25 @@ def copy_works_titles_mentions(build: GoldBuild, gold: Connection) -> None:
     for i in range(0, len(mention_rows), INSERT_BATCH):
         gold.execute(insert(RawWorkMention), mention_rows[i : i + INSERT_BATCH])
     build.mention_count = len(mention_rows)
+
+
+def copy_work_entities(build: GoldBuild, gold: Connection) -> None:
+    """Each work's links to the source entities that describe it, the entity
+    re-pointed at its root. Every link's entity was kept by rule 3's work-entity
+    seed and every work is kept, so the copy drops nothing a curated run made."""
+    gold_entities = build.kept_roots | build.kept_other
+    rows: dict[tuple[uuid.UUID, uuid.UUID, int], dict[str, Any]] = {}
+    for link in build.silver.execute(select(WorkEntity).order_by(WorkEntity.id)).scalars():
+        entity_id = build.root(link.entity_id)
+        if entity_id in gold_entities:
+            rows.setdefault(
+                (link.work_id, entity_id, link.source_id),
+                {"id": link.id, "work_id": link.work_id, "entity_id": entity_id, "source_id": link.source_id},
+            )
+    batch = list(rows.values())
+    for i in range(0, len(batch), INSERT_BATCH):
+        gold.execute(insert(WorkEntity), batch[i : i + INSERT_BATCH])
+    build.work_entity_count = len(batch)
 
 
 def copy_concerts(build: GoldBuild, gold: Connection) -> None:

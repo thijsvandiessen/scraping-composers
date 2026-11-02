@@ -137,6 +137,45 @@ class WorkProofOut(BaseModel):
     venue: str | None = None
 
 
+class ScoringInstrumentOut(BaseModel):
+    """One instrumentation category a work's sources state, and which ones."""
+
+    id: uuid.UUID  # the ``instrumentation`` entity
+    label: str
+    sources: list[str]
+
+
+class ScoringPartOut(BaseModel):
+    """One part as a source lists it: "Horn (4)" is instrument horn, count 4."""
+
+    stated: str | None  # the source's own wording, or its item label
+    instrument: str | None  # the category, when the table knows the name
+    count: int | None = None
+    solo: bool = False
+
+
+class ScoringSourceOut(BaseModel):
+    """One source's part-by-part list for the work."""
+
+    source: str
+    source_url: str | None
+    parts: list[ScoringPartOut]
+
+
+class WorkScoringOut(BaseModel):
+    """What the work is scored for, read from the source entities linked to it.
+
+    ``written_for`` is what the work is *for* (an orchestra, a violin and a
+    piano); ``includes`` the instruments it uses (an orchestral work's flutes).
+    ``sources`` keeps each source's own list with counts, which no two sources
+    are merged across.
+    """
+
+    written_for: list[ScoringInstrumentOut] = []
+    includes: list[ScoringInstrumentOut] = []
+    sources: list[ScoringSourceOut] = []
+
+
 class WorkDetail(BaseModel):
     id: uuid.UUID
     canonical_title: str
@@ -158,6 +197,8 @@ class WorkDetail(BaseModel):
     links: list[WorkLinkOut] = []
     # the parts, arrangements and versions of this one
     derived: list[WorkLinkOut] = []
+    # instrumentation from the sources' own entities for this work
+    scoring: WorkScoringOut = WorkScoringOut()
 
 
 class ComposerWorkOut(BaseModel):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from composer_models import Claim, Entity
+from composer_models import Claim, Entity, WorkEntity
 from sqlalchemy import Connection, insert, select
 
 from ._copy import INSERT_BATCH, chunked
@@ -46,6 +46,16 @@ def collect_person_claims(build: GoldBuild) -> set[uuid.UUID]:
     return {obj for obj, subjects in referrers.items() if len(subjects) >= threshold}
 
 
+def collect_work_entities(build: GoldBuild) -> set[uuid.UUID]:
+    """Rule 3's second seed: every source's ``work`` entity linked to a work.
+
+    Nothing kept points at such an entity — a publisher states ``composed_by``
+    from the work, not ``composed`` from the composer — yet it is what carries
+    a work's instrumentation, and gold keeps every work. So the link stands in
+    for the reference: a work entity is kept because its work is."""
+    return {build.root(e) for e in build.silver.scalars(select(WorkEntity.entity_id).distinct())}
+
+
 def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
     """Rule 3: keep referenced non-person entities (to a fixpoint),
     collecting their claims about each other along the way.
@@ -63,6 +73,10 @@ def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
     # ensemble seeds the walk itself, so its own object claims (``based_in``,
     # ``part_of``) are copied and the places they name are kept.
     seeds = referenced | (build.kept_ensembles - build.kept_roots)
+    # Persons are rule 1's alone: a kept entity's claim about one (a work's
+    # ``composed_by``, ``arranged_by``) must not bring back a person rule 1
+    # dropped. Claims to kept persons are not walked either, as before.
+    persons = {build.root(p) for p in build.all_persons}
     frontier = {r for r in seeds if r not in build.kept_roots and r not in build.unevidenced_ensembles}
     while frontier:
         build.kept_other |= frontier
@@ -70,7 +84,7 @@ def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
         for chunk in chunked(sorted(frontier, key=str)):
             for c in build.silver.execute(select(Claim).where(Claim.subject_id.in_(chunk))).scalars():
                 obj = build.root(c.object_id) if c.object_id is not None else None
-                if obj is None or obj in build.kept_roots or obj in build.unevidenced_ensembles:
+                if obj is None or obj in persons or obj in build.unevidenced_ensembles:
                     continue
                 if obj not in build.kept_other:
                     next_frontier.add(obj)

@@ -21,6 +21,7 @@ from composer_models import (
     RawWorkMention,
     Recording,
     Work,
+    WorkEntity,
     WorkIdentifier,
     WorkLink,
 )
@@ -1153,6 +1154,74 @@ def test_promote_reaches_instrumentation_two_hops_from_the_composer(session: Ses
         # work's instruments survive curation exactly as a duo's scoring does.
         assert ("written_for", scorings["violin and piano"]) in edges
         assert ("includes_instrument", scorings["harp"]) in edges
+
+
+def _seed_publisher_work(session: Session) -> None:
+    """Silver as a publisher catalogue leaves it: the edition's mention, and a
+    ``work`` entity under the same id pointing *at* the composer, so no kept
+    claim points at the entity. Its arranger is a name nothing else credits."""
+    edition = EntityDocument(
+        id="BA1",
+        url="https://www.baerenreiter.com/BA1",
+        source_name="baerenreiter",
+        ingested_at=datetime(2024, 5, 1, tzinfo=UTC),
+        name="Symphony No. 2 (Brahms, Johannes)",
+        kind="work",
+        raw={"instrumentation": {"parts": [{"stated": "Horn (4)", "instrument": "horn", "count": 4}]}},
+        claims=(
+            SourceClaim("composed_by", "person", "Brahms, Johannes"),
+            SourceClaim("arranged_by", "person", "Nobody, Anyone"),
+            SourceClaim("includes_instrument", "instrumentation", "horn"),
+        ),
+    )
+    ingest_source(
+        session,
+        FakeSource(
+            records=(mention("Symphony No. 2", "Brahms, Johannes", "BA1"), edition),
+            name="baerenreiter",
+            base_url="https://www.baerenreiter.com",
+        ),
+    )
+    refresh_derived(session)
+
+
+def test_promote_keeps_a_work_entity_linked_to_its_work(session: Session, tmp_path: Path) -> None:
+    """A publisher's work entity reaches gold through its link to the work, not a
+    claim, and brings its instrumentation and record (the parts) along."""
+    _seed_publisher_work(session)
+    gold_path = tmp_path / "gold.db"
+    stats = promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        entity = gold.scalars(select(Entity).where(Entity.kind == "work")).one()
+        link = gold.scalars(select(WorkEntity)).one()
+        assert link.entity_id == entity.id
+        assert gold.get(Work, link.work_id) is not None
+        instruments = {
+            label
+            for (label,) in gold.execute(
+                select(Entity.label)
+                .join(Claim, Claim.object_id == Entity.id)
+                .where(Claim.subject_id == entity.id, Claim.predicate == "includes_instrument")
+            )
+        }
+        assert instruments == {"horn"}
+        record = gold.scalars(select(EntityRecord).where(EntityRecord.entity_id == entity.id)).one()
+        assert "Horn (4)" in record.raw
+    assert stats.work_entities == 1
+
+
+def test_a_kept_work_entity_does_not_bring_back_a_dropped_person(session: Session, tmp_path: Path) -> None:
+    """Rule 3 walks a kept entity's claims to their objects; a person among them
+    is rule 1's to judge, so an arranger with no credits stays out."""
+    _seed_publisher_work(session)
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        labels = set(gold.scalars(select(Entity.label)))
+        assert "Nobody, Anyone" not in labels
+        assert gold.scalar(select(Claim).where(Claim.predicate == "arranged_by")) is None
 
 
 def test_promote_drops_an_unattributed_work_entity(session: Session, tmp_path: Path) -> None:

@@ -31,6 +31,7 @@ from ..schemas import (
     WorkSummary,
 )
 from .common import WORK_PROOF_CAP, deep_link, mention_url
+from .scoring import work_scoring
 
 
 def identifiers_by_work(db: Session, work_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[WorkIdentifierOut]]:
@@ -417,4 +418,5 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
         proof=proofs,
         links=links,
         derived=derived,
+        scoring=work_scoring(db, work_id),
     )
