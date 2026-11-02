@@ -2,13 +2,13 @@
 
 Work detail URLs have a fixed, publisher-stable shape — ``/cr/music/<slug>/<id>``
 — so discovery keys on *that shape* rather than on the markup of whatever page
-the links appear in. One function therefore serves the composer index, a
-composer's work list and a catalogue search result alike, and survives a
-redesign of any of them.
+the links appear in. One function therefore serves a composer page and a
+catalogue search result alike, and survives a redesign of either.
 """
 
 from __future__ import annotations
 
+import html as html_lib
 import re
 from dataclasses import dataclass
 
@@ -20,18 +20,20 @@ _WORK_HREF = re.compile(
     re.IGNORECASE,
 )
 
-#: ``/composer/Walter+Steffens`` — the composer index and every catalogue page
-#: link to composers this way.
+#: ``/composer/Walter+Steffens`` — how the index links a composer with a page of
+#: their own.
 _COMPOSER_HREF = re.compile(
     r"""href=["'](?:https?://(?:www\.)?boosey\.com)?(/composer/[^"'?#]+)["']""",
     re.IGNORECASE,
 )
 
-#: Standard pagination hint. Boosey's listings may or may not emit it; when they
-#: don't, a work list is treated as a single page (see ``fetch.iter_work_links``).
+#: ``composerid=2778`` — how the index links every other composer, and how a
+#: composer's page links their catalogue search and their biography.
+_COMPOSER_ID = re.compile(r"""[?&;]composerid=(\d+)""", re.IGNORECASE)
+
+#: The ">>" link in a search result's page controls.
 _NEXT_HREF = re.compile(
-    r"""<a\b[^>]*\brel=["']next["'][^>]*\bhref=["']([^"']+)["']"""
-    r"""|<a\b[^>]*\bhref=["']([^"']+)["'][^>]*\brel=["']next["']""",
+    r"""<a\b[^>]*\bhref=["']([^"']+)["'][^>]*\bclass=["'][^"']*\bpageNext\b""",
     re.IGNORECASE,
 )
 
@@ -75,9 +77,12 @@ def composer_paths(html: str) -> list[str]:
     return paths
 
 
+def composer_ids(html: str) -> list[str]:
+    """Every composer id a page links to, in first-seen order."""
+    return list(dict.fromkeys(_COMPOSER_ID.findall(html)))
+
+
 def next_page_path(html: str) -> str | None:
-    """The ``rel="next"`` link on a paginated listing, or ``None`` when last."""
+    """The next-page link of a search result, or ``None`` on the last page."""
     match = _NEXT_HREF.search(html)
-    if match is None:
-        return None
-    return match.group(1) or match.group(2)
+    return html_lib.unescape(match.group(1)) if match is not None else None

@@ -9,7 +9,7 @@ rather than markup. Replace them with trimmed real pages once one is on hand.
 
 from __future__ import annotations
 
-from composer_scrapers.boosey.catalogue import composer_paths, next_page_path, work_links
+from composer_scrapers.boosey.catalogue import composer_ids, composer_paths, next_page_path, work_links
 from composer_scrapers.boosey.works import duration_minutes, parse_work, text_lines
 
 # A definition-list layout.
@@ -102,9 +102,27 @@ def test_composer_paths_dedupe_and_keep_order() -> None:
     assert composer_paths(html) == ["/composer/Aaron+Copland", "/composer/Benjamin+Britten"]
 
 
-def test_next_page_path_reads_rel_next_either_attribute_order() -> None:
-    assert next_page_path(WORK_LIST) == "/composer/Walter+Steffens?page=2"
-    assert next_page_path('<a href="/p/2" rel="next">Next</a>') == "/p/2"
+def test_composer_ids_dedupe_and_keep_order() -> None:
+    html = """
+    <a href="/cr/catalogue/ps/powersearch_results?composerid=102403">Aa</a>
+    <a href="/cr/catalogue/ps/powersearch_results?composerid=2778">Adams</a>
+    <a href="/cr/catalogue/ps/powersearch_results?composerid=2778&DL_ClassificationGroupIDs=14066">Opera</a>
+    <a href="/pages/cr/composer/composer_main?composerid=4887&amp;ttype=BIOGRAPHY">Biography</a>
+    <a href="/pages/cr/composer/composer_main?ttype=SNAPSHOT&amp;composerid=9">Snapshot</a>
+    <a href="/composer/Aaron+Copland">no id</a>
+    """
+    assert composer_ids(html) == ["102403", "2778", "4887", "9"]
+
+
+def test_next_page_path_reads_the_page_controls() -> None:
+    html = """
+    <span class="pagecontrols">
+      <a href="/ps_items.cshtml?pg=1&amp;type=nf" class="index__letter is-active">1</a>
+      <a href="/ps_items.cshtml?pg=2&amp;type=nf" class="index__letter ">2</a>
+      <a href="/ps_items.cshtml?pg=2&amp;type=nf" class="index__letter pageNext"><span>&gt;&gt;</span></a>
+    </span>
+    """
+    assert next_page_path(html) == "/ps_items.cshtml?pg=2&type=nf"
 
 
 def test_next_page_path_is_none_on_the_last_page() -> None:
@@ -161,6 +179,35 @@ def test_parse_work_omits_fields_the_page_does_not_state() -> None:
     assert "duration" not in work.fields
     assert "scoring" not in work.fields
     assert work.fields["year"] == "1911"
+
+
+def test_composer_comes_from_the_title_tag_when_the_header_credit_has_no_link() -> None:
+    html = """
+    <head><title>Karl Friedrich Abel - Cello Concerto</title></head>
+    <div class="page-header__composer"><a >Abel, Karl Friedrich</a></div>
+    <h1 class="page-header__title">Cello Concerto</h1>
+    """
+    work = parse_work(html)
+    assert work is not None
+    assert work.composer == "Karl Friedrich Abel"
+
+
+def test_composer_of_an_arrangement_excludes_the_arranger() -> None:
+    html = """
+    <head><title>Ant&iacute;n Dvorák - Humoresque </title></head>
+    <div class="page-header__composer"><a href="/composer/Antonín+Dvorák">Dvorák - A Rihm</a></div>
+    <h1 class="page-header__title">Humoresque </h1>
+    """
+    work = parse_work(html)
+    assert work is not None
+    assert work.composer == "Antín Dvorák"
+
+
+def test_composer_drops_the_arranger_the_title_tag_names() -> None:
+    html = "<head><title>Adolphe Adam (John Lanchbery) - Giselle</title></head><h1>Giselle</h1>"
+    work = parse_work(html)
+    assert work is not None
+    assert work.composer == "Adolphe Adam"
 
 
 def test_parse_work_ignores_the_composer_index_link() -> None:
