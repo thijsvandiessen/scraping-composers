@@ -981,6 +981,32 @@ def test_ensembles_need_a_credit_of_their_own(session: Session, tmp_path: Path) 
     assert (stats.ensembles_kept, stats.ensembles_dropped) == (1, 1)
 
 
+def test_a_venue_reaches_gold_with_its_city_though_nothing_points_at_it(
+    session: Session, tmp_path: Path
+) -> None:
+    venue = EntityDocument(
+        id="t/la-scala",
+        url="https://www.wikidata.org/wiki/Q5471",
+        source_name="fake",
+        ingested_at=datetime(2024, 1, 1, tzinfo=UTC),
+        name="La Scala",
+        kind="venue",
+        raw={},
+        claims=(SourceClaim("based_in", "place", "Milan"), SourceClaim("opened_on", value="1778")),
+    )
+    ingest_source(session, FakeSource(records=(venue,)))
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        scala = gold.scalars(select(Entity).where(Entity.kind == "venue")).one()
+        assert scala.dedup_key == "wikidata:Q5471"
+        city = gold.scalars(select(Entity).where(Entity.kind == "place")).one()
+        assert city.label == "Milan"
+        predicates = set(gold.scalars(select(Claim.predicate).where(Claim.subject_id == scala.id)))
+        assert {"based_in", "opened_on"} <= predicates
+
+
 def test_rule1_off_keeps_unevidenced_ensembles(session: Session, tmp_path: Path) -> None:
     _seed_ensemble_silver(session)
     gold_path = tmp_path / "gold.db"

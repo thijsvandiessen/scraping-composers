@@ -136,6 +136,29 @@ def test_a_claim_pinned_to_a_qid_lands_on_that_items_entity(session: Session) ->
     assert claim.object_id == marxsen.id
 
 
+def test_a_venue_with_a_qid_is_one_entity_however_it_is_spelled(session: Session) -> None:
+    """A venue is keyed on its QID alone, like an ensemble: two spellings of one
+    building must not make two venues."""
+    source = FakeSource(
+        records=tuple(
+            EntityDocument(
+                id=label,
+                url="https://www.wikidata.org/wiki/Q5471",
+                source_name="fake",
+                ingested_at=_INGESTED_AT,
+                name=label,
+                kind="venue",
+                raw={},
+            )
+            for label in ("La Scala", "Teatro alla Scala")
+        ),
+    )
+    ingest_source(session, source)
+
+    venue = session.scalars(select(Entity).where(Entity.kind == "venue")).one()
+    assert venue.dedup_key == "wikidata:Q5471"
+
+
 def test_mentioned_in_uses_record_url_when_present(session: Session) -> None:
     source = FakeSource(
         records=(

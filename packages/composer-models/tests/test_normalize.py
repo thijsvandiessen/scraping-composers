@@ -132,7 +132,7 @@ def test_qid_key() -> None:
 
 def test_genres_and_movements_with_a_qid_are_keyed_on_it_alone() -> None:
     """A renamed Wikidata label must not split the genre in two (#349)."""
-    assert QID_KEYED_KINDS == {"genre", "movement", "ensemble"}
+    assert QID_KEYED_KINDS == {"genre", "movement", "ensemble", "venue"}
     for kind in QID_KEYED_KINDS:
         assert entity_key(kind, "waltz", "Q215") == "wikidata:Q215"
         assert entity_key(kind, "Waltz (dance)", "Q215") == entity_key(kind, "waltz", "Q215")
