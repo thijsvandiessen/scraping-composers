@@ -47,6 +47,7 @@ _YIELD_PER = 10_000
 ENTITY_LABELS: dict[str, str] = {
     "person": "Person",
     "ensemble": "Ensemble",
+    "venue": "Venue",
     "place": "Place",
     "genre": "Genre",
     "movement": "Movement",
@@ -80,7 +81,7 @@ CLAIM_TYPES: dict[str, str] = {
     "parent_of": "PARENT_OF",
     "spouse_of": "SPOUSE_OF",
     "sibling_of": "SIBLING_OF",
-    # Ensemble → home city and ensemble → the larger group it belongs to.
+    # Ensemble or venue → home city, and ensemble → the larger group it belongs to.
     "based_in": "BASED_IN",
     "part_of": "PART_OF",
 }

@@ -213,6 +213,7 @@ def _top_performers(appearances: _Appearances, limit: int) -> list[uuid.UUID]:
 _KIND_TYPES: dict[str, str] = {
     "person": "Person",
     "ensemble": "Ensemble",
+    "venue": "Venue",
     "place": "Place",
     "genre": "Genre",
     "profession": "Profession",

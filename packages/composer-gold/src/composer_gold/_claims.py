@@ -73,6 +73,9 @@ def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
     # ensemble seeds the walk itself, so its own object claims (``based_in``,
     # ``part_of``) are copied and the places they name are kept.
     seeds = referenced | (build.kept_ensembles - build.kept_roots)
+    # A venue is a building, not a credit: nothing points at one and rule 1 has
+    # nothing to judge it by, so each seeds the walk, keeping its city with it.
+    seeds |= {build.root(v) for v in build.silver.scalars(select(Entity.id).where(Entity.kind == "venue"))}
     # Persons are rule 1's alone: a kept entity's claim about one (a work's
     # ``composed_by``, ``arranged_by``) must not bring back a person rule 1
     # dropped. Claims to kept persons are not walked either, as before.

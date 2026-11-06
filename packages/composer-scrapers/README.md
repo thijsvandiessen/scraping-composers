@@ -21,6 +21,7 @@ everything after that (bucket, ingest, matching) is shared.
 | `wikidata_instrumentation` | every Wikidata work with a composer and an instrumentation (P870, deprecated statements left out), with each statement's quantity (P1114) and role (P3831) | yearly | a work mention matched on its QID and a `work` entity with `written_for`/`includes_instrument` claims; the parts and their counts in `raw["instrumentation"]`; see below |
 | `openopus` | Open Opus work catalogue | yearly | |
 | `classicalmusiconline` | classical-music-online.net composer catalogue and works | yearly | two levels: 26 index pages, then ~11.6k composer pages (a couple of hours); `--max-pages` caps the composer pages |
+| `classicapedia` | Classicapedia biographies, teacher and pupil links, works, venues and orchestras | yearly | lower-trust; ~22.8k pages (about 6.5 hours); venues and orchestras pinned through their Wikipedia article; [classicapedia](docs/classicapedia.md) |
 | `classicfm` | composer and artist name lists from classicfm.com | yearly | |
 | `concertgebouw_archive` | Concertgebouworkest concert archive | static | |
 | `rco` | Royal Concertgebouw Orchestra live calendar | yearly | |
@@ -189,6 +190,7 @@ Most sources are tested in three layers, one file each:
 | `berlinphil` | ✓ | — | ✓ |
 | `boosey` | ✓ | ✓ | ✓ |
 | `classicalmusiconline` | `test_classicalmusiconline.py` covers all three | | |
+| `classicapedia` | ✓ | ✓ | ✓ |
 | `classicfm` | ✓ | ✓ | ✓ |
 | `concertgebouw_archive` | `test_concertgebouw.py` | — | `test_concertgebouw_fetch.py` |
 | `decca` | ✓ | ✓ | ✓ |

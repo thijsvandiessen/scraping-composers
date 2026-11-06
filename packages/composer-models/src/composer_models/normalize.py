@@ -57,8 +57,9 @@ _QID_KEY = re.compile(r"^wikidata:(Q\d+)$")
 #: text Wikidata may rename. ``label|QID`` (what :func:`dedup_key` writes for a
 #: person) would split one genre into two entities on a rename — and a silver
 #: rebuild replays every bronze run, old labels included (#349). An ensemble
-#: with a QID is that orchestra under whatever name it is printed (#350).
-QID_KEYED_KINDS = frozenset({"genre", "movement", "ensemble"})
+#: with a QID is that orchestra under whatever name it is printed (#350), and a
+#: venue with a QID that building, however a source spells it.
+QID_KEYED_KINDS = frozenset({"genre", "movement", "ensemble", "venue"})
 
 
 def dedup_key(name: str, wikidata_id: str | None = None) -> str:
