@@ -39,8 +39,7 @@ log's tail is usually checkout cleanup, not the failure.
 Dependabot handles updates (`.github/dependabot.yml`).
 
 - Run the dependency audit from `CLAUDE.md`, and `npm audit --omit=dev` in
-  `apps/frontend` after `npm ci`. Write the exported
-  `requirements.txt` to the scratchpad, not `$TMPDIR` (unset in cloud sessions).
+  `apps/frontend` after `npm ci`.
   Also run `git ls-files | grep -E 'lock'`: a lockfile CI never installs from
   (e.g. `pnpm-lock.yaml` beside an `npm ci` workflow) is worth a line.
 - List the open Dependabot alerts
