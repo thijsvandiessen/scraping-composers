@@ -166,7 +166,7 @@ def _move_rows(session: Session, merges: dict[uuid.UUID, uuid.UUID], chunk: list
         select(RawWorkMention.id, RawWorkMention.work_id, RawWorkMention.candidate_work_id).where(
             or_(RawWorkMention.work_id.in_(chunk), RawWorkMention.candidate_work_id.in_(chunk))
         )
-    ).tuples()
+    )
     moved = [
         {
             "id": mention_id,

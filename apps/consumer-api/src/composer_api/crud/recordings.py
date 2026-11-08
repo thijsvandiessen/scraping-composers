@@ -125,9 +125,7 @@ def list_recordings(
                 select(RecordingWork.recording_id, func.count(RecordingWork.id))
                 .where(RecordingWork.recording_id.in_(recording_ids))
                 .group_by(RecordingWork.recording_id)
-            )
-            .tuples()
-            .all()
+            ).all()
         )
 
     return RecordingListPage(

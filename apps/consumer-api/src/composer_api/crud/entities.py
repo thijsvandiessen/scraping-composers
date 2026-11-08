@@ -26,9 +26,9 @@ def get_stats(db: Session) -> StatsOut:
         return db.scalar(query) or 0
 
     entities_by_kind = dict(
-        db.execute(select(Entity.kind, func.count(Entity.id)).group_by(Entity.kind).order_by(Entity.kind))
-        .tuples()
-        .all()
+        db.execute(
+            select(Entity.kind, func.count(Entity.id)).group_by(Entity.kind).order_by(Entity.kind)
+        ).all()
     )
     records_by_source = dict(
         db.execute(
@@ -36,18 +36,14 @@ def get_stats(db: Session) -> StatsOut:
             .join(EntityRecord, EntityRecord.source_id == Source.id)
             .group_by(Source.name)
             .order_by(Source.name)
-        )
-        .tuples()
-        .all()
+        ).all()
     )
     mentions_by_status = dict(
         db.execute(
             select(RawWorkMention.match_status, func.count(RawWorkMention.id))
             .group_by(RawWorkMention.match_status)
             .order_by(RawWorkMention.match_status)
-        )
-        .tuples()
-        .all()
+        ).all()
     )
     return StatsOut(
         entities_total=count(select(func.count(Entity.id))),

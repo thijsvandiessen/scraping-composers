@@ -153,7 +153,7 @@ def _appearances(session: Session) -> _Appearances:
             select(table.entity_id, table.role, func.count())
             .where(table.entity_id.is_not(None))
             .group_by(table.entity_id, table.role)
-        ).tuples()
+        )
         for entity_id, role, count in rows:
             assert entity_id is not None  # guarded by the WHERE above
             counts[entity_id] = counts.get(entity_id, 0) + count
@@ -184,7 +184,7 @@ def _performance_edges(session: Session) -> dict[tuple[uuid.UUID, uuid.UUID], in
             .join(Entity, Entity.id == Work.composer_entity_id)
             .where(participant.entity_id.is_not(None))
             .group_by(participant.entity_id, Work.composer_entity_id)
-        ).tuples()
+        )
         for performer_id, composer_id, count in rows:
             assert performer_id is not None and composer_id is not None
             edges[(performer_id, composer_id)] += count

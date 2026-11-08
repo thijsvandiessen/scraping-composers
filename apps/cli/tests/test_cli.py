@@ -299,9 +299,7 @@ def test_cmd_rematch_reads_structured_catalogue_fields(tmp_path: Path) -> None:
         rematched = session.scalars(select(RawWorkMention).where(RawWorkMention.external_id == "w1")).one()
         assert (rematched.match_status, rematched.match_method) == ("auto_matched", "catalogue")
         assert session.scalar(select(func.count(Work.id))) == 1
-        assert ("KV", "550") in set(
-            session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)).tuples()
-        )
+        assert ("KV", "550") in set(session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)))
 
 
 def test_work_identity_reports_the_share_of_anchored_works(

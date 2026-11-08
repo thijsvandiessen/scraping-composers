@@ -109,12 +109,12 @@ class DeriveRecordingsStats:
 def _group_recordings(session: Session) -> dict[Key, dict[str, Any]]:
     """Fold all work mentions into recordings keyed by (source, external key)."""
     source_names: dict[int, str] = {
-        source_id: name for source_id, name in session.execute(select(Source.id, Source.name)).tuples()
+        source_id: name for source_id, name in session.execute(select(Source.id, Source.name))
     }
     recordings: dict[Key, dict[str, Any]] = {}
     for mention_id, source_id, raw in session.execute(
         select(RawWorkMention.id, RawWorkMention.source_id, RawWorkMention.raw)
-    ).tuples():
+    ):
         fields = _recording_fields(source_names.get(source_id, ""), json.loads(raw))
         if fields is None:
             continue
@@ -248,13 +248,13 @@ def derive_recordings(session: Session) -> DeriveRecordingsStats:
         key: entity_id
         for entity_id, key in session.execute(
             select(Entity.id, Entity.dedup_key).where(Entity.kind == "person")
-        ).tuples()
+        )
     }
     ensemble_by_key: dict[str, uuid.UUID] = {
         key: entity_id
         for entity_id, key in session.execute(
             select(Entity.id, Entity.dedup_key).where(Entity.kind == "ensemble")
-        ).tuples()
+        )
     }
 
     grouped = _group_recordings(session)
@@ -262,7 +262,7 @@ def derive_recordings(session: Session) -> DeriveRecordingsStats:
     merged = sorted((_merge_cluster(grouped, members) for members in clusters), key=lambda item: item[0])
 
     source_names: dict[int, str] = {
-        source_id: name for source_id, name in session.execute(select(Source.id, Source.name)).tuples()
+        source_id: name for source_id, name in session.execute(select(Source.id, Source.name))
     }
     rows = _RowBatch(person_by_key, ensemble_by_key, alias_index(session))
     for key, data in merged:

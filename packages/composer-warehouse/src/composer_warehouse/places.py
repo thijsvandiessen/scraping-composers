@@ -40,7 +40,7 @@ def link_places(session: Session) -> LinkPlacesStats:
     bare: list[tuple[uuid.UUID, str]] = []
     for entity_id, key in session.execute(
         select(Entity.id, Entity.dedup_key).where(Entity.kind == PLACE_KIND)
-    ).tuples():
+    ):
         qid = wikidata_id(key)
         if qid is None:
             bare.append((entity_id, key))

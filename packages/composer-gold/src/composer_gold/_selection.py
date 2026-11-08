@@ -47,14 +47,14 @@ def _appearance_counts(
         select(ConcertParticipant.entity_id, ConcertParticipant.concert_id).where(
             ConcertParticipant.entity_id.is_not(None)
         )
-    ).tuples():
+    ):
         if entity_id is not None:  # guaranteed by the WHERE; narrows the type
             concert_events.setdefault(root(entity_id), set()).add(concert_id)
     for entity_id, recording_id in silver.execute(
         select(RecordingParticipant.entity_id, RecordingParticipant.recording_id).where(
             RecordingParticipant.entity_id.is_not(None)
         )
-    ).tuples():
+    ):
         if entity_id is not None:
             recording_events.setdefault(root(entity_id), set()).add(recording_id)
     roots = concert_events.keys() | recording_events.keys()
@@ -90,7 +90,7 @@ def _composer_reach(
         select(
             RawWorkMention.composer_entity_id, RawWorkMention.work_id, func.lower(RawWorkMention.raw_title)
         ).where(RawWorkMention.composer_entity_id.is_not(None))
-    ).tuples():
+    ):
         if composer_id is not None:  # guaranteed by the WHERE; narrows the type
             works.setdefault(root(composer_id), set()).add(str(work_id) if work_id else title)
     for tag, event, mention_id in (
@@ -101,7 +101,7 @@ def _composer_reach(
             select(RawWorkMention.composer_entity_id, event)
             .join(RawWorkMention, RawWorkMention.id == mention_id)
             .where(RawWorkMention.composer_entity_id.is_not(None))
-        ).tuples():
+        ):
             if composer_id is not None:
                 programmes.setdefault(root(composer_id), set()).add((tag, event_id))
     return {
@@ -123,7 +123,7 @@ def _resolve_roots(silver: Session) -> dict[uuid.UUID, uuid.UUID]:
         entity_id: canonical_id
         for entity_id, canonical_id in silver.execute(
             select(Entity.id, Entity.canonical_entity_id).where(Entity.canonical_entity_id.is_not(None))
-        ).tuples()
+        )
         if canonical_id is not None  # guaranteed by the WHERE; narrows the type
     }
 
@@ -147,7 +147,7 @@ def _sitelink_roots(
     max_sitelinks: dict[uuid.UUID, int] = {}
     for subject_id, value in silver.execute(
         select(Claim.subject_id, Claim.value).where(Claim.predicate == "sitelink_count")
-    ).tuples():
+    ):
         if value is None:
             continue
         try:

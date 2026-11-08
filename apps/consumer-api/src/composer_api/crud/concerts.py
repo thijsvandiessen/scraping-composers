@@ -117,9 +117,7 @@ def list_concerts(db: Session, q: str | None, source: str | None, page: int, lim
                 select(ConcertWork.concert_id, func.count(ConcertWork.id))
                 .where(ConcertWork.concert_id.in_(concert_ids))
                 .group_by(ConcertWork.concert_id)
-            )
-            .tuples()
-            .all()
+            ).all()
         )
 
     return ConcertListPage(

@@ -152,7 +152,7 @@ def _wikidata_links(session: Session) -> dict[tuple[uuid.UUID, str, uuid.UUID], 
     by_qid: dict[str, set[uuid.UUID]] = {}
     for work_id, qid in session.execute(
         select(WorkIdentifier.work_id, WorkIdentifier.value).where(WorkIdentifier.scheme == "wikidata")
-    ).tuples():
+    ):
         by_qid.setdefault(qid, set()).add(work_id)
 
     links: dict[tuple[uuid.UUID, str, uuid.UUID], str] = {}
@@ -160,7 +160,7 @@ def _wikidata_links(session: Session) -> dict[tuple[uuid.UUID, str, uuid.UUID], 
         select(RawWorkMention.work_id, RawWorkMention.raw)
         .join(Source, Source.id == RawWorkMention.source_id)
         .where(Source.name == WIKIDATA_PART_SOURCE, RawWorkMention.work_id.is_not(None))
-    ).tuples():
+    ):
         if work_id is None:
             continue
         for qid in part_of(WIKIDATA_PART_SOURCE, json.loads(raw)):

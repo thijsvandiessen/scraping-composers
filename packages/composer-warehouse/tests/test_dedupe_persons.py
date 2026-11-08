@@ -256,7 +256,7 @@ def test_no_canonical_is_itself_a_duplicate(session: Session) -> None:
         entity_id: canonical_id
         for entity_id, canonical_id in session.execute(
             select(Entity.id, Entity.canonical_entity_id).where(Entity.canonical_entity_id.is_not(None))
-        ).tuples()
+        )
     }
     assert links  # the fixture linked something, so the assertion below has teeth
     assert not [dup for dup, canonical in links.items() if canonical in links]

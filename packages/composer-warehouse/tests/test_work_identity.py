@@ -169,7 +169,7 @@ def test_wikidata_catalogue_ids_are_stored_and_normalised(session: Session) -> N
     )
     ingest(session, "wikidata_catalogue", perf_mention("Q2:Q254", "Symphony No. 40", MOZART, raw))
 
-    stored = set(session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)).tuples())
+    stored = set(session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)))
     assert stored == {
         ("wikidata", "Q2"),
         ("KV", "550"),
@@ -207,7 +207,7 @@ def test_wikidata_codes_are_read_by_their_catalogue_item(session: Session) -> No
         perf_mention("w1", "Quintet in D", jc_bach, {"opus_catalogue_number": "Ty 238/3"}),
     )
 
-    stored = set(session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)).tuples())
+    stored = set(session.execute(select(WorkIdentifier.scheme, WorkIdentifier.value)))
     assert {("Ty", "238/3"), ("wd:Q112328324", "r. op. 243")} <= stored
     assert len(session.scalars(select(Work)).all()) == 1
 
