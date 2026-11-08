@@ -9,14 +9,88 @@ on:
 permissions:
   contents: read
 
+# A new push to a PR supersedes the run in progress; runs on main always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Measure coverage with sys.monitoring (Python 3.12+) instead of a trace
+  # function: same report, without the ~50% slowdown of tracing every line.
+  COVERAGE_CORE: sysmon
+  # Every pytest run below: one xdist worker per CPU. loadgroup keeps tests
+  # marked xdist_group("neo4j") on one worker, because each empties the
+  # database. Coverage is report-only: no --cov-fail-under until a baseline
+  # is established.
+  PYTEST_ADDOPTS: -n auto --dist loadgroup --cov-report=term-missing
+
 jobs:
+  # --- static checks ---------------------------------------------------------
+
+  lint:
+    name: lint & format (ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-python
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+
+  typecheck:
+    name: types (pyright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-python
+      - run: uv run pyright
+
+  audit:
+    name: dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-python
+        with:
+          sync: "false"
+      # audit the pinned lock export without re-resolving; workspace members
+      # are unpublished, so they are excluded from the export
+      - run: uv export --frozen --no-emit-workspace --format requirements-txt -o requirements.txt
+      - run: uvx pip-audit --disable-pip --no-deps -r requirements.txt
+
+  frontend:
+    name: frontend (lint, format, astro check & build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run check
+      - run: npm run build
+
+  # --- tests -----------------------------------------------------------------
+  # Each workspace member is tested on its own (its own pyproject.toml). The
+  # cov targets are import names, which differ from the member directory.
+
   test:
     name: tests (${{ matrix.member }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        # cov targets are import names, which differ from the member directory
         include:
           - { member: packages/composer-schema,    cov: "--cov=composer_schema" }
           - { member: packages/composer-models,    cov: "--cov=composer_models" }
@@ -36,16 +110,13 @@ jobs:
           - { member: tests/e2e,                   cov: "--cov=composer_e2e" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          python-version: "3.12"
-      - run: uv sync --locked
-      # report-only: no --cov-fail-under until a baseline is established
-      - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }} --cov-report=term-missing
+      - uses: ./.github/actions/setup-python
+      - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }}
 
   test-postgres:
     name: postgres tests (${{ matrix.member }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -71,20 +142,18 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U composers -d composers_test"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+          --health-interval 2s --health-timeout 5s --health-retries 30
     env:
       COMPOSER_TEST_POSTGRES_URL: postgresql+psycopg://composers:composers@localhost:5432/composers_test
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          python-version: "3.12"
-      - run: uv sync --locked
-      - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }} --cov-report=term-missing
+      - uses: ./.github/actions/setup-python
+      - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }}
 
   test-neo4j:
     name: neo4j tests (${{ matrix.member }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -100,68 +169,10 @@ jobs:
           - 7687:7687
         options: >-
           --health-cmd "wget -qO- http://localhost:7474 || exit 1"
-          --health-interval 5s --health-timeout 5s --health-retries 30
+          --health-interval 2s --health-timeout 5s --health-retries 75
     env:
       COMPOSER_TEST_NEO4J_URL: bolt://localhost:7687
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          python-version: "3.12"
-      - run: uv sync --locked
-      - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }} --cov-report=term-missing
-
-  audit:
-    name: dependency audit (pip-audit)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          python-version: "3.12"
-      # audit the pinned lock export without re-resolving; workspace members
-      # are unpublished, so they are excluded from the export
-      - run: uv export --frozen --no-emit-workspace --format requirements-txt -o requirements.txt
-      - run: uvx pip-audit --disable-pip --no-deps -r requirements.txt
-
-  frontend:
-    name: frontend (lint, format, astro check & build)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/frontend
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: apps/frontend/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run format:check
-      - run: npm run check
-      - run: npm run build
-
-  typecheck:
-    name: types (pyright)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          python-version: "3.12"
-      - run: uv sync --locked
-      - run: uv run pyright
-
-  lint:
-    name: lint & format (ruff)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        with:
-          python-version: "3.12"
-      - run: uv sync --locked
-      - run: uv run ruff check
-      - run: uv run ruff format --check
+      - uses: ./.github/actions/setup-python
+      - run: uv run --directory ${{ matrix.member }} pytest --rootdir . ${{ matrix.cov }}

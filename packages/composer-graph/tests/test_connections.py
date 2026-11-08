@@ -20,7 +20,12 @@ from sqlalchemy.orm import Session
 
 NEO4J_URL = os.environ.get("COMPOSER_TEST_NEO4J_URL") or None
 
-pytestmark = pytest.mark.skipif(NEO4J_URL is None, reason="COMPOSER_TEST_NEO4J_URL not set")
+# Every test empties the database, so under xdist they all share one worker
+# (CI runs with --dist loadgroup) instead of wiping each other's graph.
+pytestmark = [
+    pytest.mark.skipif(NEO4J_URL is None, reason="COMPOSER_TEST_NEO4J_URL not set"),
+    pytest.mark.xdist_group("neo4j"),
+]
 
 
 @pytest.fixture

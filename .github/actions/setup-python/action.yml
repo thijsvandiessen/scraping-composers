@@ -1,0 +1,20 @@
+name: Set up Python workspace
+description: >-
+  Install uv and Python 3.12 (uv's cache restored by setup-uv) and sync the
+  workspace from the lockfile. --locked fails when uv.lock is out of sync with
+  a pyproject.toml instead of silently re-resolving it.
+
+inputs:
+  sync:
+    description: Run `uv sync --locked` after installing uv.
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        python-version: "3.12"
+    - if: inputs.sync == 'true'
+      shell: bash
+      run: uv sync --locked

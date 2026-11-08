@@ -43,6 +43,19 @@ for m in packages/composer-schema packages/composer-models packages/composer-htt
 done
 ```
 
+CI runs every pytest in parallel through two workflow-level variables:
+`PYTEST_ADDOPTS="-n auto --dist loadgroup --cov-report=term-missing"`
+(pytest-xdist, one worker per CPU) and `COVERAGE_CORE=sysmon` (coverage via
+`sys.monitoring`, without the tracing slowdown). Export the same two to make the
+loop above match CI and run in a fraction of the time. Tests must therefore be
+safe to run in parallel: give each its own temp files and Postgres schemas
+(`pg_url` does), and put tests that share one external resource in an
+`xdist_group` — the Neo4j tests share `xdist_group("neo4j")`, which
+`--dist loadgroup` keeps on a single worker.
+
+The setup steps every Python job shares (setup-uv, `uv sync --locked`) live in
+the composite action `.github/actions/setup-python`.
+
 ## Docs follow the tests
 
 Domain docs live with the code: each member has a `README.md` whose **Tests**
@@ -102,7 +115,11 @@ real Neo4j (to build the snapshot the API serves); CI runs them in a separate
 `test-neo4j` job. They skip when
 `COMPOSER_TEST_NEO4J_URL` is unset. **Each test empties the database it is
 pointed at**, so don't point them at the `neo4j` service you loaded gold
-into. Use a throwaway container:
+into, and under xdist run with `--dist loadgroup` (the default `load` spreads
+them over workers that wipe each other's graph). A new graph-backed test gets
+the group from `pytestmark` in `composer-graph`, or automatically in the
+consumer API (its `conftest.py` groups every test using the `graph` fixture).
+Use a throwaway container:
 
 ```
 docker run -d --rm --name neo4j-test -e NEO4J_AUTH=neo4j/composers -p 7690:7687 neo4j:2026.09-community
