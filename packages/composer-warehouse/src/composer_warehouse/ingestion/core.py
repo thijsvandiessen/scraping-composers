@@ -49,7 +49,7 @@ def _ingest_work_mention(state: IngestState, item: WorkMentionDocument, now: dat
         existing_mid, existing_hash = existing
         raw_json = json.dumps(item.raw, ensure_ascii=False)
         new_hash = content_hash(item.title, item.composer, raw_json)
-        values: dict[str, object] = {"last_seen_at": now, "last_run_id": state.run.id}
+        values: dict[str, object] = {"last_seen_at": now}
         if new_hash != existing_hash:
             values.update(raw_title=item.title, raw_composer=item.composer, raw=raw_json)
             state.existing_mentions[item.id] = (existing_mid, new_hash)
@@ -166,7 +166,7 @@ def _ingest_entity_record(state: IngestState, record: EntityDocument, now: datet
     existing_id, existing_entity_id, existing_hash = existing_entry
     raw_json = json.dumps(record.raw, ensure_ascii=False)
     new_hash = content_hash(record.name, record.url, raw_json)
-    values: dict[str, object] = {"last_seen_at": now, "last_run_id": state.run.id}
+    values: dict[str, object] = {"last_seen_at": now}
     if new_hash != existing_hash:
         values.update(name=record.name, url=record.url, raw=raw_json)
         state.existing_records[record.id] = (existing_id, existing_entity_id, new_hash)

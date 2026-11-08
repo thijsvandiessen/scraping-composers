@@ -16,6 +16,9 @@ passes over it; curation happens when it is promoted into gold.
 - **`entity_records`** — raw records per source, unique on
   `(source, external_id)`. Stores the original payload as JSON plus
   `first_seen_at`/`last_seen_at` timestamps and run ids. Re-ingesting is idempotent.
+  `last_run_id` (here and on `raw_work_mentions`) is the last *completed* run
+  that saw the row; one pointing at a `failed` run marks a row only failed runs
+  have seen (see [composer-warehouse](../composer-warehouse/README.md#ingest-flow)).
 - **`entities`** — canonical, deduplicated nodes. `kind` says what a node is:
   `person`, `profession`, `period`, `genre`, `movement`, `place`, `work`, `ensemble`,
   `publisher`, `instrumentation` (an open set — `kind` is a plain string column,

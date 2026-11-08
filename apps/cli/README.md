@@ -8,7 +8,7 @@ to override `LOG_LEVEL`.
 | --- | --- | --- |
 | `fetch <source>` | fetch a source into the bronze bucket (`--max-pages` for a smoke run) | [composer-bronze](../../packages/composer-bronze/README.md) |
 | `process <source>` | load every loadable snapshot of a source into silver, oldest first (`--run-id` to pick one) | [composer-warehouse](../../packages/composer-warehouse/README.md#ingest-flow) |
-| `stats`, `runs` | dataset counts, and the ingest run log | |
+| `stats`, `runs` | dataset counts, and the ingest run log (plus, per source, rows only failed runs have seen) | |
 | `claims <name>` | an entity's claims and which source asserts each (`--kind`, `--predicate`) | |
 | `works <query>` | resolved works by composer or title, with the titles they were seen under | |
 | `review`, `rematch` | the work mentions the matcher was unsure about (`--accept`, `--new`), and re-running matching | [composer-warehouse](../../packages/composer-warehouse/README.md#works) |
@@ -33,7 +33,7 @@ uv run --directory apps/cli pytest --rootdir . --cov=composer_cli
 
 | Area | Covers |
 | --- | --- |
-| Queries | `claims` (per-source attribution, filters, record provenance, collapsing repeats, unknown names), `stats` (empty, entities, works, person dedupe counts), `runs`, `works`, `ensembles` (all, and `--unanchored`). |
+| Queries | `claims` (per-source attribution, filters, record provenance, collapsing repeats, unknown names), `stats` (empty, entities, works, person dedupe counts), `runs` (and the rows only failed runs saw), `works`, `ensembles` (all, and `--unanchored`). |
 | Ingest | `fetch` → `process` round trip, a failing source, `process` loading every loadable run, no runs to load, `anchor-ensembles`, `derive-concerts`, and `rebuild-silver` (every bucket source, rejecting a URL with nothing to swap). |
 | Works | `review` listing and `--new`, `rematch` (including a source's structured catalogue field), `work-identity` shares per source. |
 | Genres | `link-genres` linking a label-only genre, `genres` printing the counts, the orphan and musical-form counts and the share of tags reached for one kind, and `main` routing `genres` to both kinds. |

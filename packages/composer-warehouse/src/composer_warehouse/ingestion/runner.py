@@ -5,6 +5,7 @@ from composer_models import IngestRun, utcnow
 from composer_schema import EntityDocument, WorkMentionDocument
 from sqlalchemy.orm import Session
 
+from .confirm import confirm_run
 from .core import IngestError, run_ingest_records
 from .entities import get_or_create_source
 
@@ -37,6 +38,9 @@ def execute_run(
     source = run.source
     try:
         seen, new = run_ingest_records(session, source, run, records)
+        # Committed together with the status below, so last_run_id never
+        # names a run that went on to fail (#195).
+        confirm_run(session, run)
         run.status = "completed"
     except IngestError as err:
         run.status = "failed"

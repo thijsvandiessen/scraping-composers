@@ -6,6 +6,7 @@ import argparse
 import functools
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -998,6 +999,23 @@ def test_cmd_runs_shows_run_log(tmp_path: Path, capsys: pytest.CaptureFixture[st
     out = capsys.readouterr().out
     assert "wikidata" in out
     assert "completed" in out
+    assert "unconfirmed" not in out
+
+
+def test_cmd_runs_reports_rows_only_failed_runs_saw(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_url = f"sqlite:///{tmp_path}/test.db"
+    factory = init_db(get_engine(db_url))
+    records = (person("Haydn, Joseph"), person("Bach, Johann Sebastian"))
+    with factory() as session:
+        ingest_source(session, FakeSource(records=records, name="wikidata", fail_after=1))
+
+    rc = cmd_runs(_ns(database_url=db_url, limit=20))
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "unconfirmed rows" in out
+    assert re.search(r"wikidata\s+1 records\s+0 mentions", out)
 
 
 # ---------------------------------------------------------------------------
