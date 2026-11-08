@@ -10,6 +10,7 @@ from composer_warehouse.persons.fellegi_sunter import TermFrequencyTable
 from composer_warehouse.persons.match import (
     AUTO_THRESHOLD,
     REVIEW_THRESHOLD,
+    SURNAME_ONLY_REVIEW_THRESHOLD,
     Corpus,
     PersonProfile,
     PersonScorer,
@@ -159,6 +160,36 @@ def test_classify_cut_points(value: float, expected: str) -> None:
     assert classify(value) == expected
 
 
+@pytest.mark.parametrize("method", ["given:one_surname_only", "given:both_surname_only+born:exact"])
+def test_a_surname_only_pair_is_never_auto_linked(method: str) -> None:
+    """#202: every namesake in a block scores alike against a bare surname, so
+    however high the score, a link would be a guess between them."""
+    assert classify(1.0, method) == "needs_review"
+    assert classify(SURNAME_ONLY_REVIEW_THRESHOLD, method) == "needs_review"
+    assert classify(SURNAME_ONLY_REVIEW_THRESHOLD - 0.01, method) == "distinct"
+
+
+def test_other_methods_keep_the_ordinary_cut_points() -> None:
+    assert classify(AUTO_THRESHOLD, "given:exact+born:exact") == "auto_linked"
+    assert classify(AUTO_THRESHOLD, "surname_gate") == "auto_linked"
+
+
+def test_a_bare_surname_carries_evidence_rather_than_none() -> None:
+    """The #202 defect: one bare side was a null level, so the pair scored at
+    exactly the prior however rare the surname. It is now a fitted level, and
+    the surname's rarity still moves it."""
+    model = default_model()
+    given = model.by_name("given")
+    assert given.null_level is None
+    assert given.bits("ONE_SURNAME_ONLY") != 0.0
+    scorer = _scorer(dutoit=2, smith=400)
+    value, method = scorer.score(_profile("Dutoit"), _profile("Charles Dutoit"))
+    assert method == "given:one_surname_only"
+    assert value != pytest.approx(model.prior)
+    common, _ = scorer.score(_profile("Smith"), _profile("Smith, John"))
+    assert common < value
+
+
 def test_the_shipped_model_is_loadable_and_calibrated() -> None:
     model = default_model()
     assert 0.0 < model.prior < 0.1  # matches are a small minority of blocked pairs
@@ -170,3 +201,16 @@ def test_the_shipped_model_is_loadable_and_calibrated() -> None:
         year = model.by_name(column)
         assert year.bits("CONFLICT") < 0 < year.bits("EXACT")
         assert year.bits("ABSENT") == 0.0  # no year is no evidence
+
+
+def test_a_bare_alias_does_not_defuse_a_given_name_conflict() -> None:
+    """A bare surname cannot conflict, so a record's bare alias would beat its
+    own primary name's comparison: "Leopold Mozart", listed also as "Mozart",
+    became a surname-only candidate for Wolfgang Amadeus (#202)."""
+    scorer = _scorer(mozart=3, smith=400)
+    leopold = PersonProfile(parse_name("Leopold Mozart"), aliases=(parse_name("Mozart"),))
+    _, method = scorer.score(leopold, _profile("Wolfgang Amadeus Mozart"))
+    assert method == "given:conflict"
+    # A record that *is* a bare surname still compares as one.
+    _, method = scorer.score(_profile("Mozart"), _profile("Wolfgang Amadeus Mozart"))
+    assert method == "given:one_surname_only"

@@ -1,9 +1,10 @@
 """Tests for the post-hoc person dedupe pass."""
 
+import pytest
 from composer_models import Entity, PersonMatch
 from composer_models.normalize import wikidata_id
 from composer_schema import EntityDocument, SourceClaim
-from composer_warehouse.persons import apply_clusters, dedupe_persons, reset_person_links
+from composer_warehouse.persons import apply_clusters, dedupe_persons, match, reset_person_links
 from composer_warehouse.testing import FakeSource, ingest_source, person
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -104,20 +105,29 @@ def test_a_corroborated_surname_only_pair_is_queued_for_review(session: Session)
     assert (auto, review) == (0, 1)
     assert _linked(session) == 0
     match = session.scalars(select(PersonMatch)).one()
-    assert (match.status, match.method) == ("needs_review", "given:absent+born:exact")
+    assert (match.status, match.method) == ("needs_review", "given:one_surname_only+born:exact")
     assert match.entity.label == "Beethoven"  # the sparser name is the duplicate
 
 
-def test_a_bare_surname_on_its_own_is_not_proposed_at_all(session: Session) -> None:
-    """A bare surname against a full name, with nothing else to go on.
+def test_a_bare_rare_surname_is_queued_never_linked(session: Session) -> None:
+    """A bare surname against a full name, with nothing else to go on (#202).
 
-    The issue calls this band "irreducibly ambiguous by construction" — most
-    bare surnames have several candidate full names, and the old scorer put
-    46,046 such pairs in the review queue at a flat 0.70 where no reviewer
-    could do better than guess. With no corroboration the model now scores them
-    below the review threshold and they are simply not raised.
+    It used to score at exactly the prior and was never recorded either way.
+    On a rare surname it now reaches the review queue — never an auto-link,
+    since nothing on the bare side tells one namesake from another.
     """
     _ingest(session, person("Beethoven"), person("Beethoven, Ludwig van"), *_crowd())
+    assert _counts(session) == (0, 1)
+    match = session.scalars(select(PersonMatch)).one()
+    assert (match.status, match.method) == ("needs_review", "given:one_surname_only")
+    assert _linked(session) == 0
+
+
+def test_a_bare_common_surname_is_not_proposed_at_all(session: Session) -> None:
+    """On a common surname the same comparison stays below its cut-point: the
+    old scorer queued 46,046 such pairs at a flat 0.70, where no reviewer could
+    do better than guess between the namesakes."""
+    _ingest(session, person("Smith"), *_crowd())
     assert _counts(session) == (0, 0)
 
 
@@ -360,8 +370,10 @@ def test_distinct_qids_are_not_merged(session: Session) -> None:
 def test_no_cluster_holds_two_uncorroborated_qids(session: Session) -> None:
     """The acceptance criterion, over a corpus with something of everything.
 
-    A bare-name record is free to join either wikidata item; what it must not
-    do is carry one into the other's cluster.
+    A bare-name record must not carry one wikidata item into the other's
+    cluster. Since #202 it does not join either when it fits both: that would
+    be a guess between them, so its links are held back for review. One that
+    fits a single item still links.
     """
     _ingest(
         session,
@@ -369,6 +381,7 @@ def test_no_cluster_holds_two_uncorroborated_qids(session: Session) -> None:
         _wikidata("Bach, Johann Sebastian", "Q76428", *_dates("1685", "1750")),
         person("Bach, Johann Sebastian", *_dates("1685", "1750"), external_id="plain"),
         _wikidata("Bach, Johann Christian", "Q57226", *_dates("1735", "1782")),
+        person("Bach, Johann Christian", *_dates("1735", "1782"), external_id="plain-jc"),
         *_crowd(),
     )
     result = dedupe_persons(session)
@@ -382,10 +395,89 @@ def test_no_cluster_holds_two_uncorroborated_qids(session: Session) -> None:
     for cluster in clusters:
         found = {qids[member] for member in cluster if qids[member]}
         assert len(found) <= 1, f"cluster spans {found}"
-    # The bare-name record did join one of them — the constraint bounds the
-    # cluster, it does not stop the pass from linking.
+    # Johann Christian's bare-name record joined the one item it fits; Johann
+    # Sebastian's fits two, so both of its links went to review instead, and
+    # the cannot-link still refuses the direct Q1339-Q76428 link.
     assert result.partition.clustering.members == 2
-    assert len(result.partition.clustering.refused) == 2
+    assert result.ambiguous == 2
+    assert len(result.partition.clustering.refused) == 1
+    plain_js = next(
+        entity
+        for entity in session.scalars(select(Entity).where(Entity.label == "Bach, Johann Sebastian"))
+        if not qids[entity.id]
+    )
+    assert plain_js.canonical_entity_id is None
+
+
+def _strauss_family() -> list[EntityDocument]:
+    """Johann Strauss I, II and III as wikidata files them: three items, each
+    listing the plain "Johann Strauss" among its aliases."""
+    alias = SourceClaim("also_known_as", value="Johann Strauss")
+    return [
+        _wikidata("Johann Strauss I", "Q184178", alias, *_dates("1804", "1849")),
+        _wikidata("Johann Strauss II", "Q83309", alias, *_dates("1825", "1899")),
+        _wikidata("Johann Strauss III", "Q28999", alias, *_dates("1866", "1939")),
+    ]
+
+
+def test_a_namesake_family_is_never_collapsed_onto_one_member(session: Session) -> None:
+    """#202: a record that fits several authority items is a guess, not a link.
+
+    An undated "Johann Strauss" agrees exactly with the alias all three items
+    carry, and a bare "Strauss" fits any of them. The cannot-links keep I, II
+    and III apart, but would still attach each record to whichever item scored
+    highest. Neither may be auto-linked to any of them: they go to review,
+    where a human can pick the namesake.
+    """
+    _ingest(
+        session,
+        *_strauss_family(),
+        person("Johann Strauss", external_id="plain"),
+        person("Strauss"),
+        *_crowd(),
+    )
+    result = dedupe_persons(session)
+
+    assert result.auto == 0
+    assert _linked(session) == 0
+    statuses = {match.status for match in session.scalars(select(PersonMatch))}
+    assert statuses == {"needs_review"}
+
+
+def test_a_namesake_family_is_held_back_however_confident_the_score(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same family with the auto cut-point dropped to the review one, so
+    the undated "Johann Strauss" scores as a link against all three items. The
+    guard, not the threshold, is what keeps it out of every cluster."""
+    monkeypatch.setattr(match, "AUTO_THRESHOLD", match.REVIEW_THRESHOLD)
+    _ingest(
+        session,
+        *_strauss_family(),
+        person("Johann Strauss", external_id="plain"),
+        person("Strauss"),
+        *_crowd(),
+    )
+    result = dedupe_persons(session)
+
+    assert result.ambiguous == 3
+    assert result.auto == 0
+    assert _linked(session) == 0
+    assert {m.status for m in session.scalars(select(PersonMatch))} == {"needs_review"}
+
+
+def test_a_record_fitting_one_authority_item_still_links(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard is about rivals, not about authority ids as such: with only
+    Johann Strauss II on file, the same "Johann Strauss" links to him."""
+    monkeypatch.setattr(match, "AUTO_THRESHOLD", match.REVIEW_THRESHOLD)
+    _ingest(session, _strauss_family()[1], person("Johann Strauss", external_id="plain"), *_crowd())
+    result = dedupe_persons(session)
+
+    people = _by_label(session)
+    assert result.ambiguous == 0
+    assert people["Johann Strauss"].canonical_entity_id == people["Johann Strauss II"].id
 
 
 def test_corroboration_lets_a_wikidata_duplicate_merge(session: Session) -> None:

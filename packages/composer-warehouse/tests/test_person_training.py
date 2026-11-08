@@ -7,12 +7,14 @@ import uuid
 import pytest
 from composer_schema import SourceClaim
 from composer_warehouse.persons import training
+from composer_warehouse.persons.compare import SURNAME_ONLY
 from composer_warehouse.persons.corpus import PersonRecord, build_corpus, candidate_pairs
 from composer_warehouse.persons.evaluation import MATCH, NON_MATCH, LabelledPair, build_labels
 from composer_warehouse.persons.extract import parse_name
 from composer_warehouse.persons.match import person_comparisons
 from composer_warehouse.persons.training import (
     NAME_ONLY,
+    PRIOR_LEVELS,
     collect_patterns,
     estimate_prior,
     sample_non_match_levels,
@@ -174,6 +176,23 @@ def test_estimate_prior_stays_within_its_bounds() -> None:
     records = _records()
     prior = estimate_prior(records, build_corpus(records))
     assert 1e-6 <= prior <= 0.5
+
+
+def test_the_prior_is_recovered_from_given_names_compared_with_given_names() -> None:
+    """#202 made the surname-only levels informative, but not part of the
+    prior's moment bound: whether a record has given names at all is not
+    distributed alike over random and blocked pairs, matches or not."""
+    assert set(PRIOR_LEVELS) == {"CONFLICT", "INITIALS", "PREFIX", "EXACT"}
+    assert not {level.name for level in SURNAME_ONLY} & set(PRIOR_LEVELS)
+
+
+@pytest.mark.usefixtures("small_sample")
+def test_bare_surnames_do_not_move_the_prior() -> None:
+    records = _records()
+    with_bare = [*records, *(_record(name) for name in ("Bach", "Mozart", "Haydn", "Smith", "Smith"))]
+    assert estimate_prior(with_bare, build_corpus(with_bare)) == pytest.approx(
+        estimate_prior(records, build_corpus(records)), abs=0.05
+    )
 
 
 # ---------------------------------------------------------------------------
