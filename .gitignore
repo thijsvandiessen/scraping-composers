@@ -5,6 +5,7 @@ extract-cache.db*
 tmp_alembic.db*
 page-cache.db*
 raw-data/
+scripts/
 crawl_configs.json
 apps/dashboard/dashboard.sqlite3
 node_modules/
