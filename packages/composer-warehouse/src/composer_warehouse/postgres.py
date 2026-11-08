@@ -216,7 +216,7 @@ class PostgresSchemaTarget:
     def _ensure_manifest_table(conn: Connection) -> None:
         # Released when the caller's transaction ends, after the table commits.
         conn.execute(
-            text("SELECT pg_advisory_xact_lock(:key, hashtext(:schema))"),
+            text(f"SELECT pg_advisory_xact_lock({_LOCK_ARGS})"),
             {"key": _META_LOCK_KEY, "schema": _META_SCHEMA},
         )
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{_META_SCHEMA}"'))
