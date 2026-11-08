@@ -39,7 +39,7 @@ from .fellegi_sunter import (
     fit_supervised,
     observed_distribution,
 )
-from .match import GIVEN, Corpus, PersonScorer, comparison_levels, person_comparisons
+from .match import GIVEN, Corpus, PersonScorer, comparison_levels, deciding_names, person_comparisons
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +61,8 @@ def pair_tf_bits(corpus: Corpus, a: PersonRecord, b: PersonRecord) -> float:
     """The term-frequency adjustment for a record pair."""
     scorer = _scorer(corpus)
     pa, pb = a.profile(), b.profile()
-    return scorer.tf_bits(pa.name, pb.name, comparison_levels(pa.name, pb.name, pa, pb))
+    an, bn = deciding_names(pa, pb)
+    return scorer.tf_bits(an, bn, comparison_levels(an, bn, pa, pb))
 
 
 def collect_patterns(records: Sequence[PersonRecord], corpus: Corpus) -> dict[Pattern, int]:
@@ -74,8 +75,9 @@ def collect_patterns(records: Sequence[PersonRecord], corpus: Corpus) -> dict[Pa
     counts: dict[Pattern, int] = {}
     for a, b in candidate_pairs(records):
         pa, pb = a.profile(), b.profile()
-        levels = comparison_levels(pa.name, pb.name, pa, pb)
-        pattern = Pattern(levels=levels, tf_bits=bucket_tf(scorer.tf_bits(pa.name, pb.name, levels)))
+        an, bn = deciding_names(pa, pb)
+        levels = comparison_levels(an, bn, pa, pb)
+        pattern = Pattern(levels=levels, tf_bits=bucket_tf(scorer.tf_bits(an, bn, levels)))
         counts[pattern] = counts.get(pattern, 0) + 1
     return counts
 
@@ -130,7 +132,7 @@ def to_vectors(pairs: Sequence[LabelledPair]) -> list[LabelledVector]:
         a, b = profiles(pair)
         vectors.append(
             LabelledVector(
-                levels=comparison_levels(a.name, b.name, a, b),
+                levels=comparison_levels(*deciding_names(a, b), a, b),
                 is_match=pair.label == MATCH,
                 weight=pair.weight,
                 columns=NAME_ONLY if pair.provenance in YEAR_DERIVED else None,

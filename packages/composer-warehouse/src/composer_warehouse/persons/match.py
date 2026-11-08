@@ -13,12 +13,13 @@ after retraining.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 from .compare import GivenLevel, YearLevel, given_level, year_level
-from .extract import PersonName
+from .extract import REORDERED, PersonName, comparable
 from .fellegi_sunter import Comparison, LinkageModel, TermFrequencyTable
 
 MODEL_PATH = Path(__file__).with_name("model.json")
@@ -70,6 +71,40 @@ class PersonProfile:
     birth_year: int | None = None
     aliases: tuple[PersonName, ...] = ()
     death_year: int | None = None
+
+
+def profile_readings(profile: PersonProfile) -> Iterator[PersonName]:
+    """Every name a profile can be compared under, primary first.
+
+    The primary name comes under all its readings; aliases leave out the
+    surname-first one. An alias list is already a set of alternative names,
+    often in both orders, and wikidata's run to dozens of scripts and
+    nicknames each: reading every one of them backwards too let "T.I." meet
+    "ATB" through two Persian aliases on the live corpus.
+    """
+    yield from profile.name.readings()
+    for alias in profile.aliases:
+        yield from (reading for reading in alias.readings() if reading.reading != REORDERED)
+
+
+def pairings(a: PersonProfile, b: PersonProfile) -> Iterator[tuple[PersonName, PersonName]]:
+    """Every (name, name) pairing of two profiles that agrees on a surname.
+
+    Each side contributes its names under every reading (:func:`profile_readings`),
+    so "Ye Xiaogang" meets "Xiaogang Ye" under the surname ``ye``. Primaries
+    come first: callers with no model to rank pairings by take the first one.
+    """
+    names_b = tuple(profile_readings(b))
+    for an in profile_readings(a):
+        for bn in names_b:
+            if comparable(an, bn):
+                yield an, bn
+
+
+def deciding_names(a: PersonProfile, b: PersonProfile) -> tuple[PersonName, PersonName]:
+    """The pairing a model-free caller compares two profiles on: the first one
+    that agrees on a surname, else the two primary names as they stand."""
+    return next(pairings(a, b), (a.name, b.name))
 
 
 @dataclass(frozen=True)
@@ -141,27 +176,26 @@ class PersonScorer:
     def score(self, a: PersonProfile, b: PersonProfile) -> tuple[float, str]:
         """Posterior P(same person) in [0, 1] with the method that decided it.
 
-        Aliases are tried alongside the primary names and the strongest pairing
-        wins — a record filed under a stage name can still match the legal name
-        of the same person.
+        Aliases are tried alongside the primary names, and every name under each
+        of its readings, and the strongest pairing wins — a record filed under a
+        stage name can still match the legal name of the same person, and "Ye
+        Xiaogang" can match "Xiaogang Ye" (#201).
 
-        Only pairings that agree on the surname are considered. Blocking
-        guarantees that of the *primary* names, but an alias list can contain
-        any surname at all, and comparing given names across two unrelated ones
-        is meaningless: it let "Béla Balázs" match the alias "B. V. Asaf'ev" on
-        initials, because nothing required `balazs` and `asaf'ev` to be the same
-        surname. A pair with no surname in common is not comparable.
+        Only pairings that agree on the surname are considered (see
+        :func:`pairings`). Blocking guarantees one such pairing exists, but an
+        alias list can contain any surname at all, and comparing given names
+        across two unrelated ones is meaningless: it let "Béla Balázs" match the
+        alias "B. V. Asaf'ev" on initials, because nothing required `balazs` and
+        `asaf'ev` to be the same surname. A pair with no surname in common is
+        not comparable.
         """
         best_score = 0.0
         best_levels: tuple[str, ...] = ()
-        for an in (a.name, *a.aliases):
-            for bn in (b.name, *b.aliases):
-                if not an.surname or an.surname != bn.surname:
-                    continue
-                levels = comparison_levels(an, bn, a, b)
-                value = self.model.match_probability(levels, self.tf_bits(an, bn, levels))
-                if not best_levels or value > best_score:
-                    best_score, best_levels = value, levels
+        for an, bn in pairings(a, b):
+            levels = comparison_levels(an, bn, a, b)
+            value = self.model.match_probability(levels, self.tf_bits(an, bn, levels))
+            if not best_levels or value > best_score:
+                best_score, best_levels = value, levels
         return (best_score, _method(best_levels)) if best_levels else (0.0, "surname_gate")
 
 
