@@ -6,6 +6,9 @@ import pytest
 from composer_warehouse.testing import session as session
 
 
+# tryfirst: xdist reads the group in its own collection hook, so the marker
+# has to be on the item before that runs.
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     """Keep the tests that load Neo4j on one xdist worker.
 

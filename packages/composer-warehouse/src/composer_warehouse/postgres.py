@@ -48,6 +48,10 @@ _REBUILD_LOCK_KEY = 0x51_1E_00_01
 _LOCK_ARGS = ":key, hashtext(:schema)"
 
 _META_SCHEMA = "composer_meta"
+# Serialises creating the manifest table: CREATE ... IF NOT EXISTS is not safe
+# against itself, so two builds starting at once on a fresh server could both
+# try to create composer_meta and one fail on a duplicate key.
+_META_LOCK_KEY = 0x51_1E_00_02
 
 
 @contextmanager
@@ -210,6 +214,11 @@ class PostgresSchemaTarget:
 
     @staticmethod
     def _ensure_manifest_table(conn: Connection) -> None:
+        # Released when the caller's transaction ends, after the table commits.
+        conn.execute(
+            text("SELECT pg_advisory_xact_lock(:key, hashtext(:schema))"),
+            {"key": _META_LOCK_KEY, "schema": _META_SCHEMA},
+        )
         conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{_META_SCHEMA}"'))
         conn.execute(
             text(
