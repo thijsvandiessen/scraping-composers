@@ -72,8 +72,12 @@ uv run --directory packages/composer-graph pytest --rootdir . --cov=composer_gra
 | --- | --- |
 | `test_rows.py` | Reading gold as graph rows: labelled entity nodes with literal claims as properties, concert and work nodes (with their identifiers and Wikidata id), `PART_OF` between works, `COMPOSED_BY`, `PERFORMED_IN` with the role, `PROGRAMMED`, object claims as typed relationships, `SUBCLASS_OF` between genres, the `wikidata_id` node property, and an anchored ensemble's `ensemble_type` and `BASED_IN`. |
 | `test_connections.py` | Snapshotting connections out of a real Neo4j: an entity's performance edges with both scores, roles and proof (one snippet per year a work was played), a claim edge's per-relation directions, the weight counts, and a new snapshot replacing the old one. |
+| `test_testing.py` | `exclusive_neo4j`, the lock every Neo4j-backed test holds: a second holder of the same server's lock waits for the first, and two servers' locks are independent. |
 | `test_load.py` | Loading into a real Neo4j: the event graph, performer → composer strength as a path count, composers connected by shared programmes, a second load replacing the first, and each family of a node's reach (`times_performed`, `performances`, `appearances`, `claim_degree`) stored in its own property. |
 
 `test_load.py` and `test_connections.py` are skipped unless `COMPOSER_TEST_NEO4J_URL` points at a server
 (CI's `test-neo4j` job, or `docker compose up -d neo4j` locally with
 `bolt://localhost:7688`). The load empties the database it is pointed at.
+So their driver fixtures (and the consumer API's `graph` fixture) hold
+`composer_graph.testing.exclusive_neo4j` for the whole test, a file lock keyed by the server URL: under
+xdist, or with two suites on one server, the tests take turns instead of wiping each other's graph.

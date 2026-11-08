@@ -18,11 +18,11 @@ env:
   # Measure coverage with sys.monitoring (Python 3.12+) instead of a trace
   # function: same report, without the ~50% slowdown of tracing every line.
   COVERAGE_CORE: sysmon
-  # Every pytest run below: one xdist worker per CPU. loadgroup keeps tests
-  # marked xdist_group("neo4j") on one worker, because each empties the
-  # database. Coverage is report-only: no --cov-fail-under until a baseline
-  # is established.
-  PYTEST_ADDOPTS: -n auto --dist loadgroup --cov-report=term-missing
+  # Every pytest run below: one xdist worker per CPU. The Neo4j tests, which
+  # each empty the database, take turns through a file lock (composer_graph.
+  # testing.exclusive_neo4j). Coverage is report-only: no --cov-fail-under
+  # until a baseline is established.
+  PYTEST_ADDOPTS: -n auto --cov-report=term-missing
 
 jobs:
   # --- static checks ---------------------------------------------------------

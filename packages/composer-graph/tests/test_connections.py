@@ -12,6 +12,7 @@ from typing import cast
 
 import pytest
 from composer_graph import load_graph, snapshot_connections
+from composer_graph.testing import exclusive_neo4j
 from composer_models import ConnectionsPayload, Entity, EntityConnections
 from graph_fixture import gold_session
 from neo4j import Driver, GraphDatabase
@@ -20,12 +21,7 @@ from sqlalchemy.orm import Session
 
 NEO4J_URL = os.environ.get("COMPOSER_TEST_NEO4J_URL") or None
 
-# Every test empties the database, so under xdist they all share one worker
-# (CI runs with --dist loadgroup) instead of wiping each other's graph.
-pytestmark = [
-    pytest.mark.skipif(NEO4J_URL is None, reason="COMPOSER_TEST_NEO4J_URL not set"),
-    pytest.mark.xdist_group("neo4j"),
-]
+pytestmark = pytest.mark.skipif(NEO4J_URL is None, reason="COMPOSER_TEST_NEO4J_URL not set")
 
 
 @pytest.fixture
@@ -33,7 +29,8 @@ def driver() -> Iterator[Driver]:
     assert NEO4J_URL is not None
     user = os.environ.get("COMPOSER_TEST_NEO4J_USER", "neo4j")
     password = os.environ.get("COMPOSER_TEST_NEO4J_PASSWORD", "composers")
-    with GraphDatabase.driver(NEO4J_URL, auth=(user, password)) as driver:
+    # Each test empties the database: hold it for the whole test.
+    with exclusive_neo4j(NEO4J_URL), GraphDatabase.driver(NEO4J_URL, auth=(user, password)) as driver:
         yield driver
 
 

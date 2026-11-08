@@ -44,14 +44,15 @@ done
 ```
 
 CI runs every pytest in parallel through two workflow-level variables:
-`PYTEST_ADDOPTS="-n auto --dist loadgroup --cov-report=term-missing"`
+`PYTEST_ADDOPTS="-n auto --cov-report=term-missing"`
 (pytest-xdist, one worker per CPU) and `COVERAGE_CORE=sysmon` (coverage via
 `sys.monitoring`, without the tracing slowdown). Export the same two to make the
 loop above match CI and run in a fraction of the time. Tests must therefore be
 safe to run in parallel: give each its own temp files and Postgres schemas
-(`pg_url` does), and put tests that share one external resource in an
-`xdist_group` — the Neo4j tests share `xdist_group("neo4j")`, which
-`--dist loadgroup` keeps on a single worker.
+(`pg_url` does), and make tests that share one external resource take turns
+with a lock, as the Neo4j tests do. Don't use `xdist_group` with
+`--dist loadgroup` for that: pytest 9.2 ignores the nodeid suffix xdist 3.8
+uses to implement groups, so the tests silently spread over workers again.
 
 The setup steps every Python job shares (setup-uv, `uv sync --locked`) live in
 the composite action `.github/actions/setup-python`.
@@ -115,10 +116,10 @@ real Neo4j (to build the snapshot the API serves); CI runs them in a separate
 `test-neo4j` job. They skip when
 `COMPOSER_TEST_NEO4J_URL` is unset. **Each test empties the database it is
 pointed at**, so don't point them at the `neo4j` service you loaded gold
-into, and under xdist run with `--dist loadgroup` (the default `load` spreads
-them over workers that wipe each other's graph). A new graph-backed test gets
-the group from `pytestmark` in `composer-graph`, or automatically in the
-consumer API (its `conftest.py` groups every test using the `graph` fixture).
+into. Under xdist they take turns: the driver fixtures in `composer-graph` and
+the consumer API's `graph` fixture hold `composer_graph.testing.exclusive_neo4j`
+(a file lock keyed by the server URL) for the whole test, so a new
+graph-backed test is safe as long as it reaches Neo4j through one of them.
 Use a throwaway container:
 
 ```
