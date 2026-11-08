@@ -49,7 +49,7 @@ def _facts(db: Session, ids: set[uuid.UUID]) -> dict[uuid.UUID, _Facts]:
         .outerjoin(obj, obj.id == Claim.object_id)
         .where(Claim.subject_id.in_(ids), Claim.predicate.in_(_DESCRIBING))
         .order_by(Claim.predicate, Claim.value, obj.label)
-    ).tuples()
+    )
     for subject_id, predicate, value, object_id, object_label in rows:
         fact = facts[subject_id]
         ref = EntityRef(id=object_id, label=object_label) if object_id and object_label else None
@@ -131,7 +131,7 @@ def list_ensembles(db: Session, filters: Filters, pager: Pagination, ef: Ensembl
         query = query.order_by(appearances.desc(), Entity.label)
     else:
         query = query.order_by(Entity.label)
-    rows = db.execute(query.offset(pager.offset).limit(pager.limit)).tuples().all()
+    rows = db.execute(query.offset(pager.offset).limit(pager.limit)).all()
 
     facts = _facts(db, {entity.canonical_entity_id or entity.id for entity, _, _ in rows})
     return EnsemblePage(

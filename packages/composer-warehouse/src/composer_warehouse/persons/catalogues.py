@@ -72,7 +72,7 @@ def composer_keys(session: Session) -> dict[uuid.UUID, set[tuple[str, str]]]:
         .join(Work, Work.id == WorkIdentifier.work_id)
         .where(Work.composer_entity_id.is_not(None))
         .distinct()
-    ).tuples():
+    ):
         if composer_id is not None and is_composer_scoped(scheme):
             keys.setdefault(composer_id, set()).add((scheme, value))
     return keys

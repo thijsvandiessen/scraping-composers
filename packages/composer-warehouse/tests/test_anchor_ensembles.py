@@ -105,9 +105,9 @@ def test_groups_whose_names_overlap_stay_apart(vienna: Session) -> None:
 
 def test_a_rerun_is_idempotent(vienna: Session) -> None:
     first = anchor_ensembles(vienna)
-    links = set(vienna.execute(select(Entity.id, Entity.canonical_entity_id)).tuples())
+    links = set(vienna.execute(select(Entity.id, Entity.canonical_entity_id)))
     assert anchor_ensembles(vienna) == first
-    assert set(vienna.execute(select(Entity.id, Entity.canonical_entity_id)).tuples()) == links
+    assert set(vienna.execute(select(Entity.id, Entity.canonical_entity_id))) == links
 
 
 def test_a_link_goes_when_its_evidence_does(session: Session) -> None:

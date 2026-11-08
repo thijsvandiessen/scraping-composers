@@ -138,7 +138,7 @@ def collect_decisions(session: Session) -> tuple[list[PersonDecision], list[Work
             .join(RawWorkMention, RawWorkMention.source_id == Source.id)
             .join(Work, Work.id == RawWorkMention.work_id)
             .where(RawWorkMention.match_status == "manual_matched")
-        ).tuples()
+        )
     ]
     return person_decisions, work_decisions
 

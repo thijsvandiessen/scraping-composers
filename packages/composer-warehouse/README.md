@@ -372,7 +372,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |
 | `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, work links recreated on every rebuild, works split across a composer's duplicate entities folded after the dedupe (#362), and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
 | `test_genres.py` | Genres and movements keyed on their QID across label changes, the record and claim paths meeting on one entity, label keys without a QID, linking label-only genres by label or alias (and not when ambiguous), relinking from scratch, the same genre set for any ingest order, and the orphan report's counts and ranking, musical forms counted apart from the orphans, and the share of person tags reached. |
-| `test_postgres_target.py` | Postgres only: the schema swap, readers across it, the manifest table, and the locks that keep a rebuild and a reader apart. |
+| `test_postgres_target.py` | Postgres only: the schema swap, readers across it, the manifest table (also created safely by builds starting together), and the locks that keep a rebuild and a reader apart. |
 
 `ingestion/runner.py`'s `create_run` has no test here; the admin API, its only
 caller, tests it through its load endpoint.

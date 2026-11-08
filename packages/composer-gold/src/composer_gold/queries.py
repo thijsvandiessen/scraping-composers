@@ -22,7 +22,7 @@ def object_claims(session: Session) -> dict[tuple[uuid.UUID, str, uuid.UUID], li
         .join(Source, Source.id == Claim.source_id)
         .where(Claim.object_id.is_not(None))
         .order_by(Claim.subject_id, Claim.predicate, Source.name)
-    ).tuples()
+    )
     claims: dict[tuple[uuid.UUID, str, uuid.UUID], list[str]] = defaultdict(list)
     for subject_id, predicate, object_id, source_name in rows:
         assert object_id is not None
@@ -43,7 +43,7 @@ def literal_claims(session: Session, predicates: Collection[str]) -> dict[uuid.U
         select(Claim.subject_id, Claim.predicate, Claim.value, func.count())
         .where(Claim.object_id.is_(None), Claim.value.is_not(None), Claim.predicate.in_(predicates))
         .group_by(Claim.subject_id, Claim.predicate, Claim.value)
-    ).tuples()
+    )
     tallies: dict[uuid.UUID, dict[str, Counter[str]]] = defaultdict(lambda: defaultdict(Counter))
     for subject_id, predicate, value, count in rows:
         assert value is not None
@@ -65,7 +65,7 @@ def entity_sources(session: Session) -> dict[uuid.UUID, tuple[list[str], str | N
         .join(Source, Source.id == EntityRecord.source_id)
         .where(EntityRecord.entity_id.is_not(None))
         .order_by(EntityRecord.entity_id, Source.name)
-    ).tuples()
+    )
     names: dict[uuid.UUID, list[str]] = defaultdict(list)
     urls: dict[uuid.UUID, str] = {}
     for entity_id, source_name, url in rows:

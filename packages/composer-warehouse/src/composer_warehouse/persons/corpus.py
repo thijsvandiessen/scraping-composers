@@ -93,7 +93,7 @@ def _load_claims(session: Session) -> _ClaimIndex:
         select(Claim.subject_id, Claim.predicate, Claim.value, Claim.source_id).where(
             Claim.predicate.in_(wanted)
         )
-    ).tuples()
+    )
     for subject_id, predicate, value, source_id in rows:
         if not value:
             continue
@@ -129,7 +129,7 @@ def load_records(session: Session, entities: Sequence[Entity] | None = None) -> 
     entity_sources: dict[uuid.UUID, set[int]] = defaultdict(set)
     for entity_id, source_id in session.execute(
         select(Entity.id, Claim.source_id).join(Claim, Claim.subject_id == Entity.id)
-    ).tuples():
+    ):
         entity_sources[entity_id].add(source_id)
 
     records: list[PersonRecord] = []

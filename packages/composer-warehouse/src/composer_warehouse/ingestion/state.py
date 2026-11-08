@@ -78,19 +78,22 @@ def load_state(session: Session, source: Source, run: IngestRun) -> IngestState:
                 EntityRecord.url,
                 EntityRecord.raw,
             ).where(EntityRecord.source_id == source.id)
-        ).tuples()
+        )
     }
     entities_by_key = {
         (kind, key): entity_id
-        for kind, key, entity_id in session.execute(select(Entity.kind, Entity.dedup_key, Entity.id)).tuples()
+        for kind, key, entity_id in session.execute(select(Entity.kind, Entity.dedup_key, Entity.id))
     }
-    existing_claims = set(
-        session.execute(
+    # Unpacked into plain tuples: the ingest adds tuples to these sets and
+    # tests membership with them.
+    existing_claims = {
+        (subject, predicate, obj, value)
+        for subject, predicate, obj, value in session.execute(
             select(Claim.subject_id, Claim.predicate, Claim.object_id, Claim.value).where(
                 Claim.source_id == source.id
             )
-        ).tuples()
-    )
+        )
+    }
     existing_mentions = {
         ext: (mid, content_hash(title, composer, raw))
         for ext, mid, title, composer, raw in session.execute(
@@ -101,23 +104,25 @@ def load_state(session: Session, source: Source, run: IngestRun) -> IngestState:
                 RawWorkMention.raw_composer,
                 RawWorkMention.raw,
             ).where(RawWorkMention.source_id == source.id)
-        ).tuples()
+        )
     }
-    existing_work_titles = set(
-        session.execute(
+    existing_work_titles = {
+        (work_id, title_key)
+        for work_id, title_key in session.execute(
             select(WorkTitle.work_id, WorkTitle.title_key).where(WorkTitle.source_id == source.id)
-        ).tuples()
-    )
-    existing_work_identifiers = set(
-        session.execute(
+        )
+    }
+    existing_work_identifiers = {
+        (work_id, scheme, value)
+        for work_id, scheme, value in session.execute(
             select(WorkIdentifier.work_id, WorkIdentifier.scheme, WorkIdentifier.value).where(
                 WorkIdentifier.source_id == source.id
             )
-        ).tuples()
-    )
+        )
+    }
     work_premieres: dict[uuid.UUID, str] = {
         work_id: date
-        for work_id, date in session.execute(select(Work.id, Work.premiere_date)).tuples()
+        for work_id, date in session.execute(select(Work.id, Work.premiere_date))
         if date is not None
     }
 

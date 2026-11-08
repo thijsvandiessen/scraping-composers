@@ -216,7 +216,7 @@ def _cluster_edges(session: Session) -> tuple[list[Edge], list[tuple[uuid.UUID, 
         select(
             PersonMatch.entity_id, PersonMatch.canonical_entity_id, PersonMatch.score, PersonMatch.status
         ).where(PersonMatch.status.in_(("auto_linked", "accepted", "rejected")))
-    ).tuples()
+    )
     for entity_id, canonical_id, score, status in rows:
         if status == "rejected":
             barred.append((entity_id, canonical_id))
@@ -349,7 +349,7 @@ def dedupe_persons(session: Session) -> DedupeResult:
     state = _DedupeState(
         session=session,
         scorer=scorer,
-        decided=set(session.execute(select(PersonMatch.entity_id, PersonMatch.canonical_entity_id)).tuples()),
+        decided=set(session.execute(select(PersonMatch.entity_id, PersonMatch.canonical_entity_id))),
     )
 
     for a, b in candidate_pairs(records):

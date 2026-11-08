@@ -32,7 +32,7 @@ def _ensemble_appearances(session: Session) -> dict[object, int]:
             .join(Entity, Entity.id == participant)
             .where(Entity.kind == "ensemble")
             .group_by(participant)
-        ).tuples()
+        )
         for entity_id, count in rows:
             counts[entity_id] = counts.get(entity_id, 0) + count
     return counts
@@ -49,7 +49,7 @@ def cmd_ensembles(args: argparse.Namespace) -> int:
             select(Entity.id, Entity.label, Entity.dedup_key, Entity.canonical_entity_id).where(
                 Entity.kind == "ensemble"
             )
-        ).tuples()
+        )
         ensembles = [(entity_id, label, key, canonical) for entity_id, label, key, canonical in rows]
         labels = {entity_id: label for entity_id, label, _, _ in ensembles}
         listed = [
@@ -155,7 +155,7 @@ def entity_claims(session: Session, name: str, filters: ClaimFilters | None = No
             claims = claims.where(Claim.predicate == filters.predicate)
         if filters.source is not None:
             claims = claims.where(Source.name == filters.source)
-        results.append((entity, list(session.execute(claims).tuples())))
+        results.append((entity, list(session.execute(claims))))
     return results
 
 

@@ -64,7 +64,7 @@ def _anchor_names(session: Session, anchors: dict[uuid.UUID, str]) -> dict[str, 
             Claim.predicate == "also_known_as",
             Claim.subject_id.in_(select(Entity.id).where(Entity.kind == ENSEMBLE)),
         )
-    ).tuples():
+    ):
         if value and subject_id in anchors:
             index.setdefault(ensemble_match_key(value), set()).add(subject_id)
     return index
@@ -76,7 +76,7 @@ def _load_ensembles(session: Session) -> tuple[dict[uuid.UUID, str], dict[uuid.U
     name_keyed: dict[uuid.UUID, tuple[str, str]] = {}
     for entity_id, label, key in session.execute(
         select(Entity.id, Entity.label, Entity.dedup_key).where(Entity.kind == ENSEMBLE)
-    ).tuples():
+    ):
         if wikidata_id(key) is not None:
             anchors[entity_id] = label
         else:
@@ -92,7 +92,7 @@ def _home_cities(session: Session, anchor_ids: set[uuid.UUID]) -> dict[uuid.UUID
         select(Claim.subject_id, place.label)
         .join(place, place.id == Claim.object_id)
         .where(Claim.predicate == "based_in")
-    ).tuples():
+    ):
         if subject_id in anchor_ids:
             cities.setdefault(subject_id, set()).add(dedup_key(label))
     return cities
@@ -130,7 +130,7 @@ def _boundary(
     session: Session, index: dict[str, set[uuid.UUID]], name_keyed: dict[uuid.UUID, tuple[str, str]]
 ) -> tuple[int, int]:
     """(persons named like an anchor, name-keyed ensembles named like a Wikidata person)."""
-    persons = session.execute(select(Entity.label, Entity.dedup_key).where(Entity.kind == "person")).tuples()
+    persons = session.execute(select(Entity.label, Entity.dedup_key).where(Entity.kind == "person"))
     persons_like_anchors = 0
     wikidata_person_names: set[str] = set()
     for label, key in persons:

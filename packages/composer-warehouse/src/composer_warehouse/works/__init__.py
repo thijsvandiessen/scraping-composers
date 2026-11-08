@@ -97,7 +97,7 @@ def composer_canonicals(session: Session) -> dict[uuid.UUID, uuid.UUID]:
             select(Entity.id, Entity.canonical_entity_id).where(
                 Entity.kind == "person", Entity.canonical_entity_id.is_not(None)
             )
-        ).tuples()
+        )
         if canonical_id is not None
     }
 
@@ -139,14 +139,14 @@ def candidate_rows(session: Session) -> Iterator[tuple[uuid.UUID, uuid.UUID | No
     stored: dict[uuid.UUID, set[tuple[str, str]]] = {}
     for work_id, scheme, value in session.execute(
         select(WorkIdentifier.work_id, WorkIdentifier.scheme, WorkIdentifier.value)
-    ).tuples():
+    ):
         stored.setdefault(work_id, set()).add((scheme, value))
 
     for work_id, composer_id, title, composer in session.execute(
         select(Work.id, Work.composer_entity_id, Work.canonical_title, Entity.label).outerjoin(
             Entity, Entity.id == Work.composer_entity_id
         )
-    ).tuples():
+    ):
         yield (
             work_id,
             composer_id,

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import pytest
@@ -9,6 +12,7 @@ from composer_config import settings
 from composer_models.db import get_engine
 from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
 from composer_models.testing import requires_postgres
+from composer_warehouse import postgres
 from composer_warehouse.build import build_target, run_build
 from composer_warehouse.postgres import schema_read_lock
 from composer_warehouse.rebuild import silver_target
@@ -136,6 +140,33 @@ def test_manifest_survives_the_schema_it_describes(pg_url: str) -> None:
     assert manifest.status == "completed"
     assert manifest.stats == {"rows": 1}
     assert manifest.finished_at is not None
+
+
+def test_builds_starting_together_on_a_fresh_server_share_one_manifest_table(
+    pg_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # CREATE SCHEMA IF NOT EXISTS races itself: without a lock, the second of
+    # two builds starting at once on a fresh server fails on a duplicate key.
+    # A schema of its own stands in for composer_meta, which other tests made.
+    meta = f"meta_{uuid.uuid4().hex[:10]}"
+    monkeypatch.setattr(postgres, "_META_SCHEMA", meta)
+    workers = 8
+    start = threading.Barrier(workers)
+
+    def read() -> None:
+        target = silver_target(pg_url)
+        start.wait()
+        assert target.read_manifest() is None
+
+    try:
+        with ThreadPoolExecutor(workers) as pool:
+            for future in [pool.submit(read) for _ in range(workers)]:
+                future.result()
+    finally:
+        engine = get_engine(pg_url, schema="public")
+        with engine.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA IF EXISTS "{meta}" CASCADE'))
+        engine.dispose()
 
 
 def test_concurrent_rebuild_is_rejected(pg_url: str) -> None:

@@ -358,7 +358,7 @@ def test_derive_concerts_counts_each_composers_concerts(session: Session) -> Non
         label: (row.concert_count, row.recording_count, row.programme_count)
         for label, row in session.execute(
             select(Entity.label, ComposerProgramme).join(Entity, Entity.id == ComposerProgramme.entity_id)
-        ).tuples()
+        )
     }
     # Beethoven: three mentions on two concerts
     assert counts == {
@@ -373,7 +373,7 @@ def _concert_ids(session: Session) -> dict[tuple[str, str], object]:
         ((source, key), concert_id)
         for concert_id, source, key in session.execute(
             select(Concert.id, Source.name, Concert.external_key).join(Source, Source.id == Concert.source_id)
-        ).tuples()
+        )
     )
 
 

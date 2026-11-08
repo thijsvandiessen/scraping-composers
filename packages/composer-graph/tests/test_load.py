@@ -12,6 +12,7 @@ from typing import LiteralString
 
 import pytest
 from composer_graph import load_graph
+from composer_graph.testing import exclusive_neo4j
 from graph_fixture import gold_session
 from neo4j import Driver, GraphDatabase
 from sqlalchemy.orm import Session
@@ -26,7 +27,8 @@ def driver() -> Iterator[Driver]:
     assert NEO4J_URL is not None
     user = os.environ.get("COMPOSER_TEST_NEO4J_USER", "neo4j")
     password = os.environ.get("COMPOSER_TEST_NEO4J_PASSWORD", "composers")
-    with GraphDatabase.driver(NEO4J_URL, auth=(user, password)) as driver:
+    # Each test empties the database: hold it for the whole test.
+    with exclusive_neo4j(NEO4J_URL), GraphDatabase.driver(NEO4J_URL, auth=(user, password)) as driver:
         yield driver
 
 
