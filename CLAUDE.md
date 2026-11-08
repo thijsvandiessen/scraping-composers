@@ -166,9 +166,8 @@ uv run ruff format --check
 ## Dependency audit
 
 ```
-uv export --frozen --no-emit-workspace --format requirements-txt -o requirements.txt
-uvx pip-audit --disable-pip --no-deps -r requirements.txt
-rm requirements.txt   # generated file, don't commit it
+uv export --frozen --no-emit-workspace --format requirements-txt \
+  | uvx pip-audit --disable-pip --no-deps -r /dev/stdin
 ```
 
 This job can turn red with no code change: a newly published advisory fails

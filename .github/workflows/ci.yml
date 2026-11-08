@@ -56,9 +56,12 @@ jobs:
         with:
           sync: "false"
       # audit the pinned lock export without re-resolving; workspace members
-      # are unpublished, so they are excluded from the export
-      - run: uv export --frozen --no-emit-workspace --format requirements-txt -o requirements.txt
-      - run: uvx pip-audit --disable-pip --no-deps -r requirements.txt
+      # are unpublished, so they are excluded from the export. shell: bash
+      # adds pipefail, so a failed export can't pass as an empty audit.
+      - shell: bash
+        run: >-
+          uv export --frozen --no-emit-workspace --format requirements-txt
+          | uvx pip-audit --disable-pip --no-deps -r /dev/stdin
 
   frontend:
     name: frontend (lint, format, astro check & build)

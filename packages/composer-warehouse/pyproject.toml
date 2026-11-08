@@ -13,7 +13,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Pulled in by consumers that load the shared `composer_warehouse.testing` plugin.
-testing = ["composer-schema[testing]", "pytest>=9.1.1"]
+testing = ["composer-schema[testing]", "pytest>=9.2.0"]
 
 [build-system]
 requires = ["hatchling"]
