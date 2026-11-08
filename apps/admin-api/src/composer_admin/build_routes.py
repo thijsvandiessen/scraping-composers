@@ -5,6 +5,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TypeVar
 
+from composer_bronze.bucket import Bucket
 from composer_config import settings
 from composer_gold import (
     DEFAULT_MIN_REFERRERS,
@@ -18,7 +19,12 @@ from composer_gold import (
 )
 from composer_warehouse.build import BuildTarget
 from composer_warehouse.derived import refresh_derived
-from composer_warehouse.rebuild import rebuild_silver, silver_target
+from composer_warehouse.rebuild import (
+    NothingToReplayError,
+    rebuild_silver,
+    require_replayable_sources,
+    silver_target,
+)
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -185,14 +191,17 @@ def _silver_target() -> BuildTarget | None:
         return None
 
 
-def _rebuild_silver_in_background() -> None:
-    """Rebuild silver from the bucket; status lives in the silver manifest."""
+def _rebuild_silver_in_background(bucket: Bucket, sources: list[tuple[str, list[str]]]) -> None:
+    """Rebuild silver from the bucket; status lives in the silver manifest.
+
+    ``sources`` is what the request already checked was there to replay.
+    """
     # Which sources get replayed is the bucket's own listing, not the scraper
     # registry — crawl-config sources have no adapter but do have extracted
     # documents in the bucket. The bucket and the base-URL lookup are reached
     # through the module that owns them so tests can swap them.
     try:
-        rebuild_silver(snapshots.bucket(), snapshots.source_base_url)
+        rebuild_silver(bucket, snapshots.source_base_url, sources=sources)
     except Exception:
         # Recorded as a failed manifest by rebuild_silver; log for the console.
         log.exception("background silver rebuild failed")
@@ -227,7 +236,14 @@ def start_rebuild_silver(background: BackgroundTasks) -> SilverStatus:
     manifest = target.read_manifest()
     if manifest is not None and manifest.status == "running":
         raise HTTPException(status.HTTP_409_CONFLICT, "a silver rebuild is already in progress")
-    background.add_task(_rebuild_silver_in_background)
+    # Checked here rather than left to the task: a refusal there only reaches
+    # the server log, while the request would already have answered 202.
+    bucket = snapshots.bucket()
+    try:
+        sources = require_replayable_sources(bucket)
+    except NothingToReplayError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    background.add_task(_rebuild_silver_in_background, bucket, sources)
     current = _silver_status()
     current.status = "running"
     return current

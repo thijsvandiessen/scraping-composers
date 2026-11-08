@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -27,7 +28,12 @@ from composer_models.testing import requires_postgres
 from composer_schema import SourceClaim
 from composer_warehouse.build import read_build_manifest
 from composer_warehouse.derived import refresh_derived
-from composer_warehouse.rebuild import rebuild_silver, replayable_sources, silver_target
+from composer_warehouse.rebuild import (
+    NothingToReplayError,
+    rebuild_silver,
+    replayable_sources,
+    silver_target,
+)
 from composer_warehouse.testing import FakeSource, genre, ingest_source, mention, perf_mention, person
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
@@ -247,6 +253,84 @@ def test_silver_target_rejects_urls_with_nothing_to_swap(tmp_path: Path) -> None
         rebuild_silver(bucket, base_url_for, "mysql://user:pass@host/composers")
     with pytest.raises(ValueError, match="sqlite file or a Postgres URL"):
         silver_target("sqlite://")  # in-memory: nothing to swap
+
+
+def _write_pages_only(bucket: LocalBucket, source: str) -> None:
+    """A crawled-but-not-yet-extracted source: a completed raw ``pages`` snapshot."""
+    bucket.write_records(source, "run-1", [{"_type": "crawl", "url": "https://x.example"}])
+    bucket.write_manifest(SnapshotManifest.start(source, "run-1").completed(record_count=1))
+
+
+def _empty_missing(bucket: LocalBucket) -> None:
+    """The bucket path doesn't exist: run from the wrong directory, say."""
+
+
+def _empty_pages_only(bucket: LocalBucket) -> None:
+    """Source directories exist, so ``list_sources`` is non-empty, yet nothing loads."""
+    _write_pages_only(bucket, "crawled-a")
+    _write_pages_only(bucket, "crawled-b")
+
+
+@pytest.mark.parametrize("make_bucket", [_empty_missing, _empty_pages_only], ids=["missing", "pages-only"])
+def test_rebuild_refuses_a_bucket_with_nothing_to_replay(
+    tmp_path: Path, make_bucket: Callable[[LocalBucket], None]
+) -> None:
+    """#192: replaying zero sources would swap an empty database over silver.
+
+    The refusal comes before ``run_build``, so the database *and* its completed
+    manifest are left byte for byte as they were.
+    """
+    db_path = tmp_path / "silver.db"
+    manifest_path = Path(f"{db_path}.manifest.json")
+    seeded = LocalBucket(tmp_path / "seeded")
+    _seed_bucket(seeded)
+    rebuild_silver(seeded, base_url_for, f"sqlite:///{db_path}")
+    database_before, manifest_before = db_path.read_bytes(), manifest_path.read_bytes()
+
+    empty = LocalBucket(tmp_path / "empty")
+    make_bucket(empty)
+    with pytest.raises(NothingToReplayError, match="no source in .*empty"):
+        rebuild_silver(empty, base_url_for, f"sqlite:///{db_path}")
+
+    assert db_path.read_bytes() == database_before
+    assert manifest_path.read_bytes() == manifest_before
+    assert not Path(f"{db_path}.tmp").exists()
+
+
+def test_rebuild_refusal_creates_no_database_on_a_first_run(tmp_path: Path) -> None:
+    db_path = tmp_path / "silver.db"
+
+    with pytest.raises(NothingToReplayError):
+        rebuild_silver(LocalBucket(tmp_path / "missing"), base_url_for, f"sqlite:///{db_path}")
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_rebuild_refuses_an_empty_explicit_source_list(tmp_path: Path) -> None:
+    bucket = LocalBucket(tmp_path / "bucket")
+    _seed_bucket(bucket)
+
+    with pytest.raises(NothingToReplayError):
+        rebuild_silver(bucket, base_url_for, f"sqlite:///{tmp_path / 'silver.db'}", sources=[])
+
+    assert not (tmp_path / "silver.db").exists()
+
+
+def test_rebuild_with_one_loadable_source_is_not_refused(tmp_path: Path) -> None:
+    """The guard is about *zero* loadable sources, not few: one is enough, even
+    beside a source with only raw pages."""
+    bucket = LocalBucket(tmp_path / "bucket")
+    Scraper(FakeSource(records=(person("Gardiner, John Eliot"),), name="solo")).fetch_to_bucket(bucket)
+    _write_pages_only(bucket, "crawled-only")
+    db_path = tmp_path / "silver.db"
+
+    stats = rebuild_silver(bucket, base_url_for, f"sqlite:///{db_path}")
+
+    assert stats.sources_replayed == 1
+    with _session(db_path) as silver:
+        assert silver.scalars(select(Entity.label)).all() == ["Gardiner, John Eliot"]
+    manifest = read_build_manifest(db_path)
+    assert manifest is not None and manifest.status == "completed"
 
 
 def test_rebuild_skips_a_snapshot_with_no_documents(tmp_path: Path) -> None:

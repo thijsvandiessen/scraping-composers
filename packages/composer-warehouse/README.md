@@ -295,6 +295,14 @@ That includes any LLM-extracted snapshots the retired crawl → extract pipeline
 wrote: delete their directories from the bucket to keep them out. Raw
 crawled-page snapshots are never loaded.
 
+A bucket with nothing to replay — a path that doesn't exist (the default
+`./raw-data` is relative to where you run it), or one whose sources hold only
+raw pages — is refused before anything is touched: the rebuild raises
+`NothingToReplayError` (a `ValueError`), `composer-ingest rebuild-silver`
+exits 1 and `POST /admin/v1/rebuild-silver` answers 400. The database and its
+manifest stay exactly as they were, rather than an empty database being
+swapped in and reported `completed` (#192).
+
 Human review decisions survive the rebuild: accepted/rejected person pairs
 carry over directly (entity ids are deterministic), and manual work matches
 are re-resolved by the work's composer + title (created again if matching no
@@ -370,7 +378,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, a credit resolved through an ensemble anchor's alias, re-running, each composer's concert count, and ids derived from source + key that a new concert sorting first doesn't move. |
 | `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, each composer's recording count, and ids derived from source + key. |
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |
-| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, work links recreated on every rebuild, works split across a composer's duplicate entities folded after the dedupe (#362), and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
+| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, refusing a missing or pages-only bucket with the database and manifest untouched while one loadable source still rebuilds (#192), work links recreated on every rebuild, works split across a composer's duplicate entities folded after the dedupe (#362), and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
 | `test_genres.py` | Genres and movements keyed on their QID across label changes, the record and claim paths meeting on one entity, label keys without a QID, linking label-only genres by label or alias (and not when ambiguous), relinking from scratch, the same genre set for any ingest order, and the orphan report's counts and ranking, musical forms counted apart from the orphans, and the share of person tags reached. |
 | `test_postgres_target.py` | Postgres only: the schema swap, readers across it, the manifest table (also created safely by builds starting together), and the locks that keep a rebuild and a reader apart. |
 

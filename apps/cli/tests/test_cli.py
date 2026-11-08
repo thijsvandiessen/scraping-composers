@@ -930,6 +930,34 @@ def test_cmd_rebuild_silver_replays_every_bucket_source_with_production_identity
     }
 
 
+def test_cmd_rebuild_silver_refuses_an_empty_bucket_and_keeps_silver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#192: a bucket path that isn't there must not swap an empty database in."""
+    from composer_scrapers import REGISTRY
+
+    db_path = tmp_path / "test.db"
+    manifest_path = Path(f"{db_path}.manifest.json")
+    db_url = f"sqlite:///{db_path}"
+    bucket_path = str(tmp_path / "bucket")
+    monkeypatch.setitem(
+        REGISTRY, "fake", FakeSource(records=(person("Bach, Johann Sebastian"),), name="fake")
+    )
+    assert cmd_fetch(_ns(source="fake", max_pages=None, bucket_path=bucket_path)) == 0
+    assert cmd_rebuild_silver(_ns(database_url=db_url, bucket_path=bucket_path)) == 0
+    database_before, manifest_before = db_path.read_bytes(), manifest_path.read_bytes()
+    capsys.readouterr()
+
+    rc = cmd_rebuild_silver(_ns(database_url=db_url, bucket_path=str(tmp_path / "not-a-bucket")))
+
+    assert rc == 1
+    out = capsys.readouterr().out
+    assert "refusing to rebuild silver" in out
+    assert str(tmp_path / "not-a-bucket") in out
+    assert db_path.read_bytes() == database_before
+    assert manifest_path.read_bytes() == manifest_before
+
+
 def test_cmd_rebuild_silver_rejects_a_url_with_nothing_to_swap(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
