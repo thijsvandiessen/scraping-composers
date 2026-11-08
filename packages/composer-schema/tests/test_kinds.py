@@ -1,7 +1,13 @@
 """The label-based ensemble guard: what a credited name is allowed to be (#174)."""
 
 import pytest
-from composer_schema import looks_like_ensemble, resolve_entity_kind
+from composer_schema import (
+    CLASSICAL_NAME_CUES,
+    ENSEMBLE_TYPES,
+    ensemble_type_from_name,
+    looks_like_ensemble,
+    resolve_entity_kind,
+)
 
 # Every one of these reached the database as kind='person', from a participant
 # credit on a concert or a recording.
@@ -79,3 +85,58 @@ def test_only_person_is_second_guessed() -> None:
     assert resolve_entity_kind("ensemble", "Malmö Symphony Orchestra") == "ensemble"
     assert resolve_entity_kind("work", "Symphony No. 5") == "work"
     assert resolve_entity_kind("place", "Orchestra Hall") == "place"
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("Vienna Philharmonic Orchestra", "orchestra"),
+        ("Wiener Philharmoniker", "orchestra"),
+        ("Gewandhausorchester Leipzig", "orchestra"),
+        ("Britten Sinfonia", "orchestra"),
+        ("Vienna Chamber Philharmonic Orchestra", "orchestra"),
+        ("Orchestra of the Royal Opera House", "orchestra"),
+        ("Wiener Philharmoniker Streichquartett", "chamber_ensemble"),
+        ("Escher String Quartet", "chamber_ensemble"),
+        ("Marcus Roberts Trio", "chamber_ensemble"),
+        ("Vienna Philharmonia Chorus", "choir"),
+        ("Tölzer Knabenchor", "choir"),
+        ("Royal Opera Chorus", "choir"),
+        ("Opera North", "opera_company"),
+        ("Count Basie Big Band", "band"),
+        ("Academy of St Martin in the Fields", None),
+        ("Ensemble Intercontemporain", None),
+    ],
+)
+def test_ensemble_type_from_name_reads_the_most_specific_cue(label: str, expected: str | None) -> None:
+    assert ensemble_type_from_name(label) == expected
+
+
+def test_every_name_derived_type_is_a_known_type() -> None:
+    labels = ["Escher String Quartet", "Berlin Radio Choir", "Staatskapelle Orchestra", "Opera North"]
+    assert {ensemble_type_from_name(label) for label in labels} <= set(ENSEMBLE_TYPES)
+
+
+@pytest.mark.parametrize(("cue", "expected"), sorted(CLASSICAL_NAME_CUES.items()))
+def test_every_classical_name_cue_types_the_group_it_admits(cue: str, expected: str | None) -> None:
+    """The wikidata_ensembles source admits a musical group for any of these
+    words, so the typer has to read each one the same way (#374)."""
+    assert ensemble_type_from_name(f"Budapest {cue.capitalize()}") == expected
+    assert expected is None or expected in ENSEMBLE_TYPES
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("Budapesti Fesztiválzenekar", "orchestra"),
+        ("Sächsische Staatskapelle Dresden", "orchestra"),
+        ("Magyar Rádió Kórus", "choir"),
+        ("Zemlinsky Kvartett", "chamber_ensemble"),
+    ],
+)
+def test_the_cue_words_type_whole_names(label: str, expected: str) -> None:
+    assert ensemble_type_from_name(label) == expected
+
+
+def test_the_cue_words_do_not_widen_the_person_guard() -> None:
+    assert not looks_like_ensemble("Budapest Zenekar")

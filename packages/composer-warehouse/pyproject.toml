@@ -8,12 +8,12 @@ dependencies = [
     "composer-config",
     "composer-models",
     "composer-schema",
-    "sqlalchemy>=2.1.4",
+    "sqlalchemy>=2.1.6",
 ]
 
 [project.optional-dependencies]
 # Pulled in by consumers that load the shared `composer_warehouse.testing` plugin.
-testing = ["composer-schema[testing]", "pytest>=9.1.1"]
+testing = ["composer-schema[testing]", "pytest>=9.2.0"]
 
 [build-system]
 requires = ["hatchling"]

@@ -8,7 +8,7 @@ dependencies = [
     "composer-http",
     "composer-schema",
     "httpx>=0.27",
-    "kagglehub>=0.3",
+    "kagglehub>=1.0.3",
 ]
 
 [build-system]

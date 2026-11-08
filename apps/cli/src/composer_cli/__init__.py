@@ -12,12 +12,14 @@ from composer_gold import (
     DEFAULT_PERFORMER_LIMIT,
     DEFAULT_RULE1_CONFIG_PATH,
 )
-from composer_graph import DEFAULT_BATCH_SIZE
+from composer_graph import DEFAULT_BATCH_SIZE, DEFAULT_WORKERS
 from composer_scrapers import REGISTRY
 from composer_warehouse.persons import AUTO_THRESHOLD, MODEL_PATH
 
-from .export_cmds import cmd_export_kumu, cmd_export_neo4j
+from .export_cmds import cmd_export_kumu, cmd_export_neo4j, cmd_snapshot_connections
+from .genre_cmds import cmd_genres, cmd_link_genres
 from .ingest_cmds import (
+    cmd_anchor_ensembles,
     cmd_derive_concerts,
     cmd_derive_recordings,
     cmd_fetch,
@@ -31,8 +33,8 @@ from .person_cmds import (
     cmd_person_review,
     cmd_person_train,
 )
-from .query_cmds import cmd_claims, cmd_runs, cmd_stats
-from .work_cmds import cmd_rematch, cmd_review, cmd_works
+from .query_cmds import cmd_claims, cmd_ensembles, cmd_runs, cmd_stats
+from .work_cmds import cmd_rematch, cmd_review, cmd_work_identity, cmd_works
 
 if TYPE_CHECKING:
     # What ArgumentParser.add_subparsers returns; argparse doesn't expose a
@@ -53,6 +55,13 @@ def _add_query_parsers(sub: _SubParsers) -> None:
     p_claims.add_argument("--source", help="restrict to one source (e.g. wikidata)")
     p_claims.add_argument("--limit", type=int, default=10, help="max matching entities to show")
     p_claims.set_defaults(func=cmd_claims)
+
+    p_ensembles = sub.add_parser("ensembles", help="list ensembles, most credited first")
+    p_ensembles.add_argument(
+        "--unanchored", action="store_true", help="only those no Wikidata ensemble accounts for"
+    )
+    p_ensembles.add_argument("--limit", type=int, default=50)
+    p_ensembles.set_defaults(func=cmd_ensembles)
 
     p_runs = sub.add_parser("runs", help="show the ingest run log")
     p_runs.add_argument("--limit", type=int, default=20)
@@ -80,6 +89,12 @@ def _add_work_parsers(sub: _SubParsers) -> None:
         "rematch", help="re-run matching over unmatched/needs-review mentions (after tuning)"
     )
     p_rematch.set_defaults(func=cmd_rematch)
+
+    p_identity = sub.add_parser(
+        "work-identity",
+        help="per source: the share of works with a catalogue number or external work id, and derived links",
+    )
+    p_identity.set_defaults(func=cmd_work_identity)
 
 
 def _add_bucket_path_arg(parser: argparse.ArgumentParser) -> None:
@@ -196,23 +211,40 @@ def _add_export_parsers(sub: _SubParsers) -> None:
     p_neo4j = sub.add_parser(
         "export-neo4j",
         help="replace a Neo4j database with the whole gold graph (entities, works, concerts, "
-        "recordings and the links between them)",
+        "recordings and the links between them), then snapshot each entity's connections into gold",
     )
-    _add_gold_url_arg(p_neo4j)
-    p_neo4j.add_argument(
-        "--neo4j-url", default=settings.neo4j_url, help="bolt URL of the server (default: $NEO4J_URL)"
-    )
-    p_neo4j.add_argument("--neo4j-user", default=settings.neo4j_user, help="(default: $NEO4J_USER)")
-    p_neo4j.add_argument(
-        "--neo4j-password", default=settings.neo4j_password, help="(default: $NEO4J_PASSWORD)"
-    )
-    p_neo4j.add_argument(
-        "--database", default=None, help="the Neo4j database to replace (default: the server's default)"
-    )
+    _add_neo4j_args(p_neo4j)
     p_neo4j.add_argument(
         "--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help="rows per write transaction"
     )
     p_neo4j.set_defaults(func=cmd_export_neo4j)
+
+    p_snapshot = sub.add_parser(
+        "snapshot-connections",
+        help="re-take the connections snapshot the API serves from an already loaded Neo4j graph",
+    )
+    _add_neo4j_args(p_snapshot)
+    p_snapshot.set_defaults(func=cmd_snapshot_connections)
+
+
+def _add_neo4j_args(parser: argparse.ArgumentParser) -> None:
+    _add_gold_url_arg(parser)
+    parser.add_argument(
+        "--neo4j-url", default=settings.neo4j_url, help="bolt URL of the server (default: $NEO4J_URL)"
+    )
+    parser.add_argument("--neo4j-user", default=settings.neo4j_user, help="(default: $NEO4J_USER)")
+    parser.add_argument(
+        "--neo4j-password", default=settings.neo4j_password, help="(default: $NEO4J_PASSWORD)"
+    )
+    parser.add_argument(
+        "--database", default=None, help="the Neo4j database to use (default: the server's default)"
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=DEFAULT_WORKERS,
+        help="entities snapshotted at once (default: %(default)s)",
+    )
 
 
 def _add_person_parsers(sub: _SubParsers) -> None:
@@ -251,6 +283,11 @@ def _add_person_parsers(sub: _SubParsers) -> None:
     )
     p_eval.set_defaults(func=cmd_person_eval)
 
+    p_anchor = sub.add_parser(
+        "anchor-ensembles", help="fold name-keyed ensembles onto the Wikidata ensembles they name"
+    )
+    p_anchor.set_defaults(func=cmd_anchor_ensembles)
+
     p_concerts = sub.add_parser(
         "derive-concerts", help="rebuild the concert tables from the work mentions' performance context"
     )
@@ -260,6 +297,18 @@ def _add_person_parsers(sub: _SubParsers) -> None:
         "derive-recordings", help="rebuild the recording tables from the work mentions' release context"
     )
     p_recordings.set_defaults(func=cmd_derive_recordings)
+
+    p_genres = sub.add_parser(
+        "genres", help="report how far the genre/movement hierarchy reaches, orphans included"
+    )
+    p_genres.add_argument("--kind", choices=("genre", "movement"), help="one kind only (default both)")
+    p_genres.add_argument("--limit", type=int, default=10, help="most-used orphans to list")
+    p_genres.set_defaults(func=cmd_genres)
+
+    p_link_genres = sub.add_parser(
+        "link-genres", help="point label-only genres/movements at the QID-keyed entity they name"
+    )
+    p_link_genres.set_defaults(func=cmd_link_genres)
 
     p_preview = sub.add_parser(
         "person-review", help="list (or resolve) person duplicate pairs flagged for review"

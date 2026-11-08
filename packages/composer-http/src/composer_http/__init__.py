@@ -5,7 +5,8 @@ Two things every per-source adapter (:mod:`composer_scrapers`) needs:
 * the **contact identity** advertised to the sites we fetch — a User-Agent
   naming a reachable human, which is the whole of politeness as far as those
   sites can see;
-* **retrying a request**, since every API here rate-limits or flakes eventually.
+* **retrying a request**, since every API here rate-limits or flakes eventually,
+  each attempt bounded by a total deadline (:mod:`composer_http.deadline`).
 
 :mod:`composer_http.pages` adds a third: a mirror of pages already fetched, for
 the sources that spend one request per record. :mod:`composer_http.session` puts all three together as
@@ -21,12 +22,14 @@ from typing import Any, TypeVar
 
 import httpx
 
+from .deadline import DeadlineTransport
 from .pages import PageCache, open_page_cache, request_fingerprint
 from .session import SourceSession, Validator
 
 __all__ = [
     "DEFAULT_RETRIES",
     "DEFAULT_TIMEOUT_S",
+    "DeadlineTransport",
     "PageCache",
     "SourceSession",
     "Validator",
@@ -43,7 +46,8 @@ __all__ = [
 
 DEFAULT_RETRIES = 3
 
-#: Default per-request timeout. Sources whose payload is a multi-megabyte dump
+#: Default per-request timeout, which is also the request's total deadline
+#: (see :mod:`composer_http.deadline`). Sources whose payload is a multi-megabyte dump
 #: raise it at the call site rather than everyone paying for the slowest one.
 DEFAULT_TIMEOUT_S = 30.0
 
@@ -85,11 +89,17 @@ def new_client(
 ) -> httpx.Client:
     """An httpx client identified by our contact User-Agent.
 
+    *timeout* bounds each request twice: as httpx's per-operation timeout (no
+    single connect or read waits longer) and as a total wall-clock deadline for
+    the whole round trip, which httpx alone does not enforce — a server that
+    trickles bytes would otherwise hold the request open indefinitely. Expiry
+    raises an :class:`httpx.TimeoutException`, which the retry helpers retry.
+
     *headers* is merged over the User-Agent, so a source that needs its own
     header (``Accept-Language``, say) does not have to rebuild the identity.
     """
     merged = {"User-Agent": user_agent(), **(headers or {})}
-    return httpx.Client(headers=merged, timeout=timeout)
+    return httpx.Client(headers=merged, timeout=timeout, transport=DeadlineTransport(timeout))
 
 
 def call_with_retries(

@@ -46,6 +46,13 @@ class Theme(StrEnum):
     PERSON = "person"
     #: A person's history with one orchestra.
     PERFORMANCE = "performance"
+    #: What a place is and where it lies: its type and the places containing it.
+    PLACE = "place"
+    #: Ensembles and venues: what kind they are, where they are based, and when
+    #: they were founded or opened.
+    INSTITUTION = "institution"
+    #: How genres and movements nest inside one another.
+    TAXONOMY = "taxonomy"
     #: Counts and identifiers that rank or link entities but assert nothing
     #: about the music.
     BOOKKEEPING = "bookkeeping"
@@ -101,7 +108,13 @@ _VOCABULARY: tuple[Predicate, ...] = (
     ),
     _p("has_duration", Theme.WORK, LITERAL, "length in whole minutes"),
     _p("catalogue_number", Theme.WORK, LITERAL, "a catalogue or edition number (opus, BWV, HN ...)"),
-    _p("part_of", Theme.WORK, "work", "the subject is one piece within the object (a volume or set)"),
+    _p(
+        "part_of",
+        Theme.WORK,
+        ("work", "ensemble"),
+        "the subject is one piece within the object (a volume or set); on an ensemble (from Wikidata), "
+        "a group it belongs to",
+    ),
     # edition
     _p("published_by", Theme.EDITION, "publisher", "an edition of the work is published by the object"),
     _p("edition_type", Theme.EDITION, LITERAL, "the kind of edition (score, parts, Urtext ...)"),
@@ -121,12 +134,28 @@ _VOCABULARY: tuple[Predicate, ...] = (
     _p("program_count", Theme.PERFORMANCE, LITERAL, "orchestra programmes featuring the person"),
     _p("first_season", Theme.PERFORMANCE, LITERAL, "the first season the orchestra performed with them"),
     _p("last_season", Theme.PERFORMANCE, LITERAL, "the latest season the orchestra performed with them"),
+    # place
+    _p("place_type", Theme.PLACE, LITERAL, "what the place is (settlement, country, region ...)"),
+    _p("located_in", Theme.PLACE, "place", "an administrative place containing the subject"),
+    _p("in_country", Theme.PLACE, "place", "the country the place is in"),
+    _p("coordinates", Theme.PLACE, LITERAL, "the place's location, as lat,lon"),
+    # institution
+    _p("ensemble_type", Theme.INSTITUTION, LITERAL, "what the ensemble is (orchestra, choir, quartet ...)"),
+    _p("based_in", Theme.INSTITUTION, "place", "the city an ensemble or venue is based in"),
+    _p("founded_on", Theme.INSTITUTION, LITERAL, "the date an ensemble or venue was founded"),
+    _p("opened_on", Theme.INSTITUTION, LITERAL, "the date a venue opened"),
+    # taxonomy
+    _p("subclass_of", Theme.TAXONOMY, ("genre", "movement"), "the subject is a narrower kind of the object"),
+    _p("genre_type", Theme.TAXONOMY, LITERAL, "marks a genre that is a musical form (the only value so far)"),
     # bookkeeping
     _p("sitelink_count", Theme.BOOKKEEPING, LITERAL, "Wikipedia articles about the entity (a fame proxy)"),
     _p("statement_count", Theme.BOOKKEEPING, LITERAL, "statements on the entity's Wikidata item"),
     _p("identifier_count", Theme.BOOKKEEPING, LITERAL, "external identifiers on the Wikidata item"),
     _p("work_count", Theme.BOOKKEEPING, LITERAL, "Wikidata items naming the person as composer"),
     _p("musicbrainz_id", Theme.BOOKKEEPING, LITERAL, "the MusicBrainz artist id"),
+    _p("geonames_id", Theme.BOOKKEEPING, LITERAL, "the place's GeoNames id"),
+    _p("iso_3166_code", Theme.BOOKKEEPING, LITERAL, "the ISO 3166 code of a country or subdivision"),
+    _p("wikipedia_article", Theme.BOOKKEEPING, LITERAL, "the URL of the entity's Wikipedia article"),
     _p("mentioned_in", Theme.BOOKKEEPING, LITERAL, "the page a source record came from (set by ingest)"),
 )
 

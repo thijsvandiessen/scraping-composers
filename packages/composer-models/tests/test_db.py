@@ -39,6 +39,7 @@ UNBOUNDED_COLUMNS = [
     ("works", "canonical_title"),
     ("works", "title_key"),
     ("work_titles", "title_key"),
+    ("work_identifiers", "value"),
     ("raw_work_mentions", "raw_title"),
     ("concerts", "event_type"),
     ("concert_participants", "discipline"),
@@ -52,7 +53,10 @@ def test_scraper_sourced_columns_carry_no_length_limit(table: str, column: str) 
     assert getattr(Base.metadata.tables[table].c[column].type, "length", None) is None
 
 
-@pytest.mark.parametrize(("table", "column"), [("entities", "dedup_key"), ("work_titles", "title_key")])
+@pytest.mark.parametrize(
+    ("table", "column"),
+    [("entities", "dedup_key"), ("work_titles", "title_key"), ("work_identifiers", "value")],
+)
 def test_key_columns_sit_in_a_unique_constraint(table: str, column: str) -> None:
     """These are the columns whose *values* the normalizers must bound: they
     are unbounded in the schema but live in a btree index Postgres caps."""

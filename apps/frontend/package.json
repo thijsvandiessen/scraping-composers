@@ -17,16 +17,16 @@
     "gen": "npm run gen:openapi && npm run gen:api"
   },
   "dependencies": {
-    "@astrojs/node": "^11.1.8",
-    "astro": "^7.4.0",
+    "@astrojs/node": "^11.1.9",
+    "astro": "^7.4.4",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@astrojs/check": "^0.9.10",
+    "@astrojs/check": "^0.9.12",
     "@hey-api/openapi-ts": "^0.99.0",
-    "@types/node": "^26.6.5",
-    "oxfmt": "^0.73.0",
-    "oxlint": "^1.87.0",
+    "@types/node": "^26.6.6",
+    "oxfmt": "^0.75.0",
+    "oxlint": "^1.90.0",
     "typescript": "^6.0.3"
   },
   "overrides": {

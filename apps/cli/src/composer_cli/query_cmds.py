@@ -3,19 +3,71 @@ from dataclasses import dataclass
 
 from composer_models import (
     Claim,
+    ConcertParticipant,
     Entity,
     EntityRecord,
     IngestRun,
     PersonMatch,
     RawWorkMention,
+    RecordingParticipant,
     Source,
     Work,
     WorkTitle,
 )
 from composer_models.db import get_engine, init_db
-from composer_models.normalize import dedup_key
+from composer_models.normalize import dedup_key, wikidata_id
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
+
+
+def _ensemble_appearances(session: Session) -> dict[object, int]:
+    """Concerts + recordings each ensemble is credited on, as of the last derive."""
+    counts: dict[object, int] = {}
+    for participant, event in (
+        (ConcertParticipant.entity_id, ConcertParticipant.concert_id),
+        (RecordingParticipant.entity_id, RecordingParticipant.recording_id),
+    ):
+        rows = session.execute(
+            select(participant, func.count(func.distinct(event)))
+            .join(Entity, Entity.id == participant)
+            .where(Entity.kind == "ensemble")
+            .group_by(participant)
+        ).tuples()
+        for entity_id, count in rows:
+            counts[entity_id] = counts.get(entity_id, 0) + count
+    return counts
+
+
+def cmd_ensembles(args: argparse.Namespace) -> int:
+    """Ensembles, most credited first; ``--unanchored`` keeps the ones no
+    Wikidata ensemble accounts for (see ``anchor-ensembles``)."""
+    engine = get_engine(args.database_url)
+    session_factory = init_db(engine)
+    with session_factory() as session:
+        appearances = _ensemble_appearances(session)
+        rows = session.execute(
+            select(Entity.id, Entity.label, Entity.dedup_key, Entity.canonical_entity_id).where(
+                Entity.kind == "ensemble"
+            )
+        ).tuples()
+        ensembles = [(entity_id, label, key, canonical) for entity_id, label, key, canonical in rows]
+        labels = {entity_id: label for entity_id, label, _, _ in ensembles}
+        listed = [
+            (
+                appearances.get(entity_id, 0),
+                label,
+                wikidata_id(key),
+                labels.get(canonical) if canonical else None,
+            )
+            for entity_id, label, key, canonical in ensembles
+            if not args.unanchored or (wikidata_id(key) is None and canonical is None)
+        ]
+    listed.sort(key=lambda row: (-row[0], row[1]))
+    for count, label, qid, anchor_label in listed[: args.limit]:
+        where = qid or (f"→ {anchor_label}" if anchor_label else "unanchored")
+        print(f"{count:>6}  {label}  [{where}]")
+    print(f"{len(listed)} ensemble(s){' unanchored' if args.unanchored else ''}")
+    return 0
 
 
 def cmd_stats(args: argparse.Namespace) -> int:

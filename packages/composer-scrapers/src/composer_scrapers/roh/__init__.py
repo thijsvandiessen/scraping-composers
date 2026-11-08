@@ -58,6 +58,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from composer_http import SourceSession
+from composer_schema.premiere import PREMIERE_KEY
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, WorkMentionDocument
 from .credits import Credit
@@ -273,6 +274,7 @@ def _work_document(work: WorkPage, entry: IndexEntry, ingested_at: datetime) -> 
             "credits": _credit_list(work.credits),
             "fields": dict(work.fields),
             "premieres": _premieres(work),
+            **_world_premiere(work, work.genre or entry.genre),
             "productions": [
                 {
                     "production_id": ref.production_id,
@@ -299,6 +301,26 @@ def _premieres(work: WorkPage) -> dict[str, dict[str, str | None]]:
             continue
         found[label] = {"stated": stated, "date": iso_date(stated), "place": place(stated)}
     return found
+
+
+def _world_premiere(work: WorkPage, genre: str | None) -> dict[str, dict[str, str | None]]:
+    """The work's premiere under the shared ``raw["premiere"]`` convention, or
+    nothing.
+
+    Only an opera's: the mention pairs the composer with the *music*
+    (:attr:`WorkPage.work_title`), and for an opera the staged work and the
+    music are one, so its world premiere is the music's. A ballet's world
+    premiere is the ballet's -- *Adagio Hammerklavier*, 1973 -- and stamping
+    that on Beethoven's sonata would be wrong by a century and a half. The ROH
+    and company premieres are facts about this house's staging and never
+    qualify."""
+    if genre != "Opera":
+        return {}
+    stated = work.fields.get("World premiere")
+    date = iso_date(stated) if stated is not None else None
+    if stated is None or date is None:
+        return {}
+    return {PREMIERE_KEY: {"date": date, "place": place(stated)}}
 
 
 # ---------------------------------------------------------------------------

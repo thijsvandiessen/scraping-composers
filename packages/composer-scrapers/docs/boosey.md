@@ -2,8 +2,8 @@
 
 `boosey` is the first source carrying *work* metadata — scoring, duration, year
 of composition — rather than concert programmes or people. It walks the
-publisher's catalogue in three hops (composer index → each composer's work list
-→ each work's detail page) and emits **two documents per work**, sharing the
+publisher's catalogue in three hops (the A–Z composer index → each composer's
+catalogue search → each work's detail page) and emits **two documents per work**, sharing the
 work's Boosey id:
 
 - a `WorkMentionDocument`, which the work matcher resolves to a canonical `works`
@@ -20,6 +20,12 @@ uv run composer-ingest fetch boosey --max-pages 5
 uv run composer-ingest process boosey
 uv run composer-ingest claims "Kerori" --kind work --source boosey
 ```
+
+Search results are loaded by the page's JavaScript from `ps_items.cshtml`, and
+the search is held in the server session: `powersearch_results?composerid=<id>`
+starts it and sets the cookie, then `ps_items.cshtml` serves its pages. A
+composer's own page features only a few works, so the walk reads it only for the
+composer id.
 
 Two things to know before running it wide:
 

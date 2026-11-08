@@ -74,6 +74,7 @@ from .baerenreiter import BaerenreiterAdapter  # noqa: E402
 from .berlinphil import BerlinPhilAdapter  # noqa: E402
 from .boosey import BooseyAdapter  # noqa: E402
 from .classicalmusiconline import ClassicalMusicOnlineAdapter  # noqa: E402
+from .classicapedia import ClassicapediaAdapter  # noqa: E402
 from .classicfm import ClassicFmAdapter  # noqa: E402
 from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
 from .decca import DeccaAdapter  # noqa: E402
@@ -88,19 +89,34 @@ from .openopus import OpenOpusAdapter  # noqa: E402
 from .rco import RcoAdapter  # noqa: E402
 from .roh import RohAdapter  # noqa: E402
 from .wienerphil import WienerPhilAdapter  # noqa: E402
-from .wikidata import WikidataAdapter  # noqa: E402
+from .wikidata import (  # noqa: E402
+    WikidataAdapter,
+    WikidataCatalogueAdapter,
+    WikidataEnsemblesAdapter,
+    WikidataGenresAdapter,
+    WikidataInstrumentationAdapter,
+    WikidataPlacesAdapter,
+    WikidataWorksAdapter,
+)
 
 REGISTRY: dict[str, SourceAdapter] = {
     "imslp": ImslpAdapter(),
     "imslp_works": ImslpWorksAdapter(),
     "imslp_recordings": ImslpRecordingsAdapter(),
     "wikidata": WikidataAdapter(),
+    "wikidata_works": WikidataWorksAdapter(),
+    "wikidata_places": WikidataPlacesAdapter(),
+    "wikidata_ensembles": WikidataEnsemblesAdapter(),
+    "wikidata_genres": WikidataGenresAdapter(),
+    "wikidata_catalogue": WikidataCatalogueAdapter(),
+    "wikidata_instrumentation": WikidataInstrumentationAdapter(),
     "concertgebouw_archive": ConcertgebouwAdapter(),
     "nyphil": NyPhilAdapter(),
     "berlinphil": BerlinPhilAdapter(),
     "rco": RcoAdapter(),
     "openopus": OpenOpusAdapter(),
     "classicalmusiconline": ClassicalMusicOnlineAdapter(),
+    "classicapedia": ClassicapediaAdapter(),
     "boosey": BooseyAdapter(),
     "baerenreiter": BaerenreiterAdapter(),
     "henle": HenleAdapter(),

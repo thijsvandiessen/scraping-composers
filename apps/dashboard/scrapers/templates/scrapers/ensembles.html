@@ -1,0 +1,35 @@
+{% extends "unfold/layouts/base.html" %}
+
+{% block content %}
+{% include "scrapers/style.html" %}
+
+{% if error %}<div class="sc-banner error">{{ error }}</div>{% endif %}
+
+<p class="sc-muted">
+  Ensembles no Wikidata orchestra or choir accounts for — neither keyed on a QID nor
+  folded onto one by <code>anchor-ensembles</code> — most credited first. The type is
+  read from the name.
+</p>
+
+<form method="get" action="" class="sc-toolbar">
+  <input type="text" name="q" value="{{ q }}" placeholder="search ensembles by name…" class="sc-btn" style="cursor: text; min-width: 18rem;">
+  <button type="submit" class="sc-btn sc-btn-primary">Search</button>
+  <span class="sc-muted">{{ total }} unanchored — page {{ page }} of {{ pages }}</span>
+</form>
+
+<table class="sc-table">
+  <tr><th>label</th><th>type</th><th>concerts</th><th>recordings</th></tr>
+  {% for ensemble in items %}
+  <tr>
+    <td><a href="{% url 'entity_detail' ensemble.id %}"><strong>{{ ensemble.label }}</strong></a></td>
+    <td>{{ ensemble.ensemble_type|default:"—" }}</td>
+    <td>{{ ensemble.concert_count }}</td>
+    <td>{{ ensemble.recording_count }}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="4" class="sc-muted">every ensemble is anchored</td></tr>
+  {% endfor %}
+</table>
+
+{% include "scrapers/pagination.html" %}
+{% endblock %}

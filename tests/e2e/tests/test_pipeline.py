@@ -159,9 +159,9 @@ def test_gold_copies_concerts_recordings_and_works(pipeline: Pipeline) -> None:
 # --- gold API -------------------------------------------------------------------
 
 
-def test_api_lists_composers_with_three_works(api: TestClient) -> None:
+def test_api_lists_composers_whose_works_are_performed(api: TestClient) -> None:
     # Mahler is in gold (he conducts) and wikidata tags him a composer, but
-    # with one mentioned work he isn't listed as one.
+    # his works aren't on enough concerts and recordings to list him as one.
     body = api.get("/v1/composers", params={"limit": 100}).json()
     assert {item["label"] for item in body["items"]} == {"Ludwig van Beethoven"}
 
@@ -229,6 +229,45 @@ def test_a_second_ingestion_event_flows_through_to_gold(tmp_path: Path) -> None:
     assert _birthplaces(pipeline.gold(), "Ludwig van Beethoven") == {"Cologne", "Bonn"}
     with _gold_api(pipeline) as api:
         assert api.get("/v1/concerts").json()["total"] == 4
+
+
+def _event_ids(api: TestClient, kind: str, field: str) -> dict[str, str]:
+    """Every concert (by date) or recording (by title) the API lists, to its id."""
+    items = api.get(f"/v1/{kind}", params={"limit": 100}).json()["items"]
+    ids = {item[field]: item["id"] for item in items}
+    assert len(ids) == len(items), f"{kind}: {field} must tell the fixtures apart"
+    return ids
+
+
+def test_concert_and_recording_ids_survive_a_new_ingestion(tmp_path: Path) -> None:
+    """``/concerts/{id}`` and ``/recordings/{id}`` are public links: a later
+    ingestion must not move them. Edition 2 adds a concert and a release whose
+    keys sort before every existing one, which is what used to renumber the
+    rest when the derive passes counted rows 1..n."""
+    pipeline = Pipeline(tmp_path)
+    pipeline.ingest(edition=1)
+    pipeline.curate()
+    with _gold_api(pipeline) as api:
+        concerts = _event_ids(api, "concerts", "date")
+        recordings = _event_ids(api, "recordings", "title")
+    assert (len(concerts), len(recordings)) == (3, 2)
+
+    pipeline.ingest(edition=2)
+    pipeline.curate()
+    with _gold_api(pipeline) as api:
+        concerts_after = _event_ids(api, "concerts", "date")
+        recordings_after = _event_ids(api, "recordings", "title")
+        # the old links still open the same concert and recording
+        for date, concert_id in concerts.items():
+            assert api.get(f"/v1/concerts/{concert_id}").json()["date"] == date
+        for title, recording_id in recordings.items():
+            assert api.get(f"/v1/recordings/{recording_id}").json()["title"] == title
+
+    assert {date: concerts_after[date] for date in concerts} == concerts
+    assert {title: recordings_after[title] for title in recordings} == recordings
+    # the additions got ids of their own
+    assert len(set(concerts_after.values())) == 4
+    assert len(set(recordings_after.values())) == 3
 
 
 def test_rebuild_silver_from_bronze_reproduces_gold(pipeline: Pipeline, tmp_path: Path) -> None:

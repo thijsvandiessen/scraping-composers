@@ -1,12 +1,13 @@
 """HTTP access to laphil.com, mirrored page by page.
 
-The site publishes no complete index. ``sitemap.xml`` is a single flat urlset
-capped at 1000 URLs per section (1000 ``/events/``, 1000 ``/people/``, and no
-paginated variant answers), the events calendar renders client-side, and
-``/search`` returns nothing server-side. What the site does have is a densely
-linked graph: every event page lists its artists, every person page lists the
-events they appeared in. So the sitemap is a seed, not an inventory, and the
-whole ``/events/`` + ``/people/`` subgraph is reached by walking those links.
+The site publishes no index this source may read. ``sitemap.xml`` is now a
+sitemap index whose ``/sitemaps/*.xml`` files robots.txt disallows
+(``Disallow: /*.xml$`` allows only ``/sitemap.xml`` itself), the events calendar
+renders client-side, and ``/search`` returns nothing server-side. What the site
+does have is a densely linked graph: every event page lists its artists, every
+person page lists the events they appeared in. So the home page, which links the
+current season, is the seed, and the whole ``/events/`` + ``/people/`` subgraph
+is reached by walking those links.
 
 That is thousands of requests, and each page is ~400KB of mostly navigation
 chrome, so every page goes through the session's page mirror: the sweep
@@ -28,11 +29,10 @@ from .urls import BASE_URL
 
 log = logging.getLogger(__name__)
 
-SITEMAP_URL = f"{BASE_URL}/sitemap.xml"
+HOME_URL = f"{BASE_URL}/"
 
-#: Between uncached requests. robots.txt sets no crawl-delay; this is the same
-#: politeness rate the other orchestra archives here use.
-REQUEST_DELAY_S = 0.5
+#: Between uncached requests: robots.txt sets ``Crawl-delay: 1``.
+REQUEST_DELAY_S = 1.0
 
 
 #: Not optional here: a *past* event answers ``/events/<slug>`` with a 302 to
@@ -42,9 +42,9 @@ REQUEST_DELAY_S = 0.5
 FOLLOW_REDIRECTS = True
 
 
-def fetch_sitemap(session: SourceSession) -> str:
-    """The sitemap urlset, which seeds the walk. Not mirrored: it is the seed."""
-    return session.get_text(SITEMAP_URL, label="sitemap")
+def fetch_home(session: SourceSession) -> str:
+    """The home page, which seeds the walk. Not mirrored: it is the seed."""
+    return session.get_text(HOME_URL, label="home")
 
 
 def fetch_page(session: SourceSession, url: str) -> str | None:

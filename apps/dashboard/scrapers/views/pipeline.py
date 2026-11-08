@@ -58,6 +58,23 @@ def fetch_due(request: HttpRequest) -> HttpResponse:
     return redirect("scrapers_index")
 
 
+def abandon_snapshot(request: HttpRequest, source: str, snapshot_id: str) -> HttpResponse:
+    """Mark a snapshot whose fetch was killed as failed, so its source can fetch again."""
+    if request.method != "POST":
+        return HttpResponseNotAllowed(["POST"])
+    api = AdminAPI.from_env()
+    try:
+        abandoned = api.abandon_snapshot(source, snapshot_id)
+    except AdminAPIError as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(
+            request,
+            f"abandoned snapshot {source}/{snapshot_id}: {abandoned['record_count']} record(s) kept on disk",
+        )
+    return redirect("scrapers_index")
+
+
 def load_index(request: HttpRequest) -> HttpResponse:
     """Load page: ingest raw bucket snapshots into the database."""
     api = AdminAPI.from_env()

@@ -1,4 +1,4 @@
-"""Silver data browsing: overview stats, entities, work mentions, works."""
+"""Silver data browsing: overview stats, entities, unanchored ensembles, work mentions, works."""
 
 import uuid
 
@@ -57,6 +57,29 @@ def entities(request: HttpRequest, kind: str | None = None) -> HttpResponse:
         **page_context(result, request.path, params),
     }
     return render(request, "scrapers/entities.html", context)
+
+
+def ensembles(request: HttpRequest) -> HttpResponse:
+    """Ensembles no Wikidata item accounts for, most credited first: the ones
+    the anchoring pass (#350) could not place, and what to look at next."""
+    api = DataAPI.silver()
+    q = request.GET.get("q", "").strip()
+    page = page_number(request)
+    result: dict[str, object] = {}
+    error: str | None = None
+    try:
+        result = api.list_ensembles(Filters(q=q or None), anchored=False, page=page, sort="appearances")
+    except AdminAPIError as exc:
+        error = str(exc)
+    context = {
+        **admin.site.each_context(request),
+        "title": "Unanchored ensembles",
+        "items": result.get("items", []),
+        "q": q,
+        "error": error,
+        **page_context(result, request.path, {"q": q} if q else {}),
+    }
+    return render(request, "scrapers/ensembles.html", context)
 
 
 def entity_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpResponse:

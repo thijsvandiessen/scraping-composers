@@ -42,7 +42,7 @@ def person_concerts(db: Session, person_id: uuid.UUID, page: int, limit: int) ->
     ).all()
 
     # works performed at the page's concerts, capped per concert
-    works_by_concert: dict[int, list[str]] = {}
+    works_by_concert: dict[uuid.UUID, list[str]] = {}
     concert_ids = [concert.id for concert, _role, _src in rows]
     if concert_ids:
         work_rows = db.execute(
@@ -99,9 +99,9 @@ def list_concerts(db: Session, q: str | None, source: str | None, page: int, lim
     ).all()
 
     concert_ids = [concert.id for concert, _src in rows]
-    conductors_by_concert: dict[int, list[str]] = {}
-    soloists_by_concert: dict[int, int] = {}
-    works_by_concert: dict[int, int] = {}
+    conductors_by_concert: dict[uuid.UUID, list[str]] = {}
+    soloists_by_concert: dict[uuid.UUID, int] = {}
+    works_by_concert: dict[uuid.UUID, int] = {}
     if concert_ids:
         for concert_id, role, name in db.execute(
             select(ConcertParticipant.concert_id, ConcertParticipant.role, ConcertParticipant.name)
@@ -144,7 +144,7 @@ def list_concerts(db: Session, q: str | None, source: str | None, page: int, lim
     )
 
 
-def get_concert(db: Session, concert_id: int) -> ConcertDetail:
+def get_concert(db: Session, concert_id: uuid.UUID) -> ConcertDetail:
     row = db.execute(
         select(Concert, Source.name)
         .join(Source, Source.id == Concert.source_id)

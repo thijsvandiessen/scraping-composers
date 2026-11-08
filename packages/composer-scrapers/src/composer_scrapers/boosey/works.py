@@ -33,6 +33,8 @@ _BLOCK = re.compile(
 _TAG = re.compile(r"<[^>]+>")
 _H1 = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
 _TITLE_TAG = re.compile(r"<title\b[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+#: The arranger the ``<title>`` puts after a composer: ``Adolphe Adam (John Lanchbery)``.
+_ARRANGER = re.compile(r"\s*\([^()]*\)\s*$")
 _COMPOSER_LINK = re.compile(
     r"""<a\b[^>]*href=["'](?:https?://(?:www\.)?boosey\.com)?/composer/[^"']*["'][^>]*>(.*?)</a>""",
     re.IGNORECASE | re.DOTALL,
@@ -127,13 +129,19 @@ def _title(html: str, lines: list[str]) -> str:
     return lines[0] if lines else ""
 
 
-def _composer(html: str, fields: dict[str, str]) -> str | None:
-    """The composer, from the page's ``/composer/...`` link.
+def _composer(html: str, title: str, fields: dict[str, str]) -> str | None:
+    """The composer, from the page's ``<title>``: ``Antonín Dvorák - Humoresque``.
 
-    Boosey links the composer's name on every work page, which is a far more
-    reliable signal than the URL slug (where composer and title run together
-    with no separator that can be split on).
+    That is the one place every work page gives the plain full name. The page
+    header's credit reads ``Abel, Karl Friedrich``, or ``Dvorák - A Rihm`` for an
+    arrangement, and links to ``/composer/...`` only if the composer has a page.
+    So a link is only the fallback, and the URL slug is no use at all (composer
+    and title run together with no separator that can be split on).
     """
+    if match := _TITLE_TAG.search(html):
+        full = re.sub(r"\s+", " ", unescape(_TAG.sub(" ", match.group(1)))).strip()
+        if full.endswith(f" - {title}"):
+            return _ARRANGER.sub("", full.removesuffix(f" - {title}")).strip() or None
     for match in _COMPOSER_LINK.finditer(html):
         name = re.sub(r"\s+", " ", unescape(_TAG.sub(" ", match.group(1)))).strip()
         if name and name.lower() not in {"composers", "all composers", "browse composers"}:
@@ -166,4 +174,4 @@ def parse_work(html: str) -> ParsedWork | None:
     if not title:
         return None
     fields = _labelled_values(lines)
-    return ParsedWork(title=title, composer=_composer(html, fields), fields=fields)
+    return ParsedWork(title=title, composer=_composer(html, title, fields), fields=fields)

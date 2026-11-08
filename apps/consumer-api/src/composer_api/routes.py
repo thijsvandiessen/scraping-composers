@@ -5,14 +5,20 @@ from fastapi import APIRouter, Query
 
 from .crud import (
     composer_works,
+    entity_connections,
+    genre_people,
     get_concert,
+    get_ensemble,
     get_entity,
+    get_genre,
     get_person,
     get_recording,
     get_stats,
     get_work,
     list_concerts,
+    list_ensembles,
     list_entities,
+    list_genre_facets,
     list_mentions,
     list_people,
     list_recordings,
@@ -20,7 +26,14 @@ from .crud import (
     person_concerts,
     person_recordings,
 )
-from .deps import DbSession, FilterQuery, PageQuery
+from .deps import (
+    DbSession,
+    EnsembleQuery,
+    FilterQuery,
+    GraphQuery,
+    PageQuery,
+    PeopleFilterQuery,
+)
 from .schemas import (
     ComposerDetail,
     ComposerPage,
@@ -28,8 +41,14 @@ from .schemas import (
     ConcertDetail,
     ConcertListPage,
     ConcertPage,
+    ConnectionsOut,
+    EnsembleDetail,
+    EnsemblePage,
     EntityDetail,
     EntityPage,
+    GenreDetail,
+    GenrePeoplePage,
+    GenreSummary,
     MentionPage,
     RecordingDetail,
     RecordingListPage,
@@ -61,6 +80,61 @@ def entities(
 @v1.get("/entities/{entity_id}", response_model=EntityDetail)
 def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
     return get_entity(db, entity_id)
+
+
+@v1.get("/entities/{entity_id}/connections", response_model=ConnectionsOut)
+def entity_connections_route(entity_id: uuid.UUID, db: DbSession, budget: GraphQuery) -> ConnectionsOut:
+    """The strongest neighbours of one entity, budgeted so a graph can draw them.
+
+    The whole neighbourhood is unusable — a busy conductor reaches thousands of
+    people, and the heaviest edges (everyone performs Beethoven) are the least
+    telling. ``rank=affinity`` discounts each neighbour by how much it is
+    performed or referenced overall, ``per_relation`` keeps the performance
+    edges from crowding out the biographical ones, and ``min_weight`` drops the
+    one-off co-occurrences that are mostly matcher noise. Served from the
+    snapshot ``composer-ingest export-neo4j`` stores in gold; 503 until one
+    has been taken.
+    """
+    return entity_connections(db, entity_id, budget)
+
+
+@v1.get("/ensembles", response_model=EnsemblePage)
+def ensembles(
+    db: DbSession, pager: PageQuery, filters: FilterQuery, ensemble_filters: EnsembleQuery
+) -> EnsemblePage:
+    """Orchestras, choirs and other groups, with their type and home city.
+
+    ``anchored=false`` lists the ones no Wikidata item accounts for; with
+    ``sort=appearances`` the most-credited come first.
+    """
+    return list_ensembles(db, filters, pager, ensemble_filters)
+
+
+@v1.get("/ensembles/{ensemble_id}", response_model=EnsembleDetail)
+def ensemble_detail(ensemble_id: uuid.UUID, db: DbSession) -> EnsembleDetail:
+    """One ensemble: its other names, the groups it is part of, and its claims."""
+    return get_ensemble(db, ensemble_id)
+
+
+@v1.get("/genres", response_model=list[GenreSummary])
+def genres(
+    db: DbSession, kind: Annotated[str, Query(pattern="^(genre|movement)$")] = "genre"
+) -> list[GenreSummary]:
+    """The top-level genres (or movements) as facets, each counting the persons
+    tagged with it or with any genre below it."""
+    return list_genre_facets(db, kind)
+
+
+@v1.get("/genres/{genre_id}", response_model=GenreDetail)
+def genre_detail(genre_id: uuid.UUID, db: DbSession) -> GenreDetail:
+    """One genre or movement with its direct parents and children."""
+    return get_genre(db, genre_id)
+
+
+@v1.get("/genres/{genre_id}/people", response_model=GenrePeoplePage)
+def get_genre_people(genre_id: uuid.UUID, db: DbSession, pager: PageQuery) -> GenrePeoplePage:
+    """Persons tagged with the genre or any genre below it."""
+    return genre_people(db, genre_id, pager)
 
 
 @v1.get("/works", response_model=WorkPage)
@@ -103,7 +177,7 @@ def concerts(
 
 
 @v1.get("/concerts/{concert_id}", response_model=ConcertDetail)
-def concert_detail(concert_id: int, db: DbSession) -> ConcertDetail:
+def concert_detail(concert_id: uuid.UUID, db: DbSession) -> ConcertDetail:
     """One concert: participants (with roles and disciplines) and its programme."""
     return get_concert(db, concert_id)
 
@@ -132,7 +206,7 @@ def recordings(
 
 
 @v1.get("/recordings/{recording_id}", response_model=RecordingDetail)
-def recording_detail(recording_id: int, db: DbSession) -> RecordingDetail:
+def recording_detail(recording_id: uuid.UUID, db: DbSession) -> RecordingDetail:
     """One recording: its credited artists and the works on it."""
     return get_recording(db, recording_id)
 
@@ -152,16 +226,17 @@ def get_person_recordings(
 def list_composers(
     db: DbSession,
     pager: PageQuery,
-    filters: FilterQuery,
+    filters: PeopleFilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
-    """People credited with at least three works, whatever their profession claims say."""
+    """People whose works are on at least three concerts and recordings combined, whatever their
+    profession claims say. Counts and sorts are of those performances, not the person's own credits."""
     return list_people(db, filters, pager, "composer", sort=sort)
 
 
 @v1.get("/composers/{composer_id}", response_model=ComposerDetail)
 def get_composer(composer_id: uuid.UUID, db: DbSession) -> ComposerDetail:
-    return get_person(db, composer_id, None, "composer not found")
+    return get_person(db, composer_id, "composer", "composer not found")
 
 
 @v1.get("/composers/{composer_id}/works", response_model=ComposerWorksPage)
@@ -179,7 +254,7 @@ def get_composer_works(
 def list_soloists(
     db: DbSession,
     pager: PageQuery,
-    filters: FilterQuery,
+    filters: PeopleFilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
     return list_people(db, filters, pager, "soloist", sort=sort)
@@ -194,7 +269,7 @@ def get_soloist(soloist_id: uuid.UUID, db: DbSession) -> ComposerDetail:
 def list_conductors(
     db: DbSession,
     pager: PageQuery,
-    filters: FilterQuery,
+    filters: PeopleFilterQuery,
     sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
 ) -> ComposerPage:
     return list_people(db, filters, pager, "conductor", sort=sort)

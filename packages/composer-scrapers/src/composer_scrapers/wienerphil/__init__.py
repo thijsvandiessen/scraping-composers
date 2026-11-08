@@ -32,7 +32,7 @@ from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceRecord, WorkMentionDocument
 from .details import detail
-from .dropdowns import COMPOSERS, PERFORMERS, WORKS, composer_record, performer_record, vocabularies
+from .dropdowns import COMPOSERS, PERFORMERS, WORKS, composer_record, credited, performer_record, vocabularies
 from .fetch import BASE_URL, REQUEST_DELAY_S, fetch_detail, fetch_fragments, fetch_landing, total_item_count
 from .performances import Concert, concerts, mentions, merge
 
@@ -162,12 +162,16 @@ class WienerPhilAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument])
     ) -> Iterator[SourceRecord]:
         """One record per name in the composer and performer vocabularies.
 
+        A composer entry that credits several people becomes one record each
+        (see :func:`.dropdowns.credited`), so "Franz Liszt, Franz Schubert" is
+        neither a third person nor a second Liszt record.
+
         The venue vocabulary is deliberately not emitted: a venue is a column on
         the concert, not an entity of its own.
         """
-        for name in vocabulary.get(COMPOSERS, ()):
-            if name:
-                yield composer_record(name)
+        composers = (person for name in vocabulary.get(COMPOSERS, ()) if name for person in credited(name))
+        for name in dict.fromkeys(composers):
+            yield composer_record(name)
         for name in vocabulary.get(PERFORMERS, ()):
             if name:
                 yield performer_record(name, conducted, disciplines)

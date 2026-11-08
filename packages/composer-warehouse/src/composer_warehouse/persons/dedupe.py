@@ -11,6 +11,10 @@ recorded the pass rebuilds the whole partition from the surviving links and
 writes one canonical per cluster, so ``Entity.canonical_entity_id`` is always a
 single hop to a cluster canonical and never a link in a chain.
 
+Before that, :mod:`catalogues` adds the links the names alone cannot make: two
+compatible entities holding the same number in one composer's catalogue (the
+surname-only "Mozart" and "Wolfgang Amadeus Mozart" both holding K. 550).
+
 :mod:`constraints` gets a veto over that partition. Two records carrying
 distinct Wikidata QIDs or distinct MusicBrainz ids are two people unless
 corroboration says otherwise, and the constraint is enforced against the whole
@@ -28,17 +32,18 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 from composer_models import Entity, PersonMatch
 from sqlalchemy import CursorResult, Delete, Update, delete, select, update
 from sqlalchemy.orm import Session
 
+from . import catalogues
 from .cluster import Clustering, Edge, build_clusters
 from .constraints import Constraints, authority_constraints
 from .corpus import PersonRecord, build_corpus, candidate_pairs, load_records
-from .extract import PersonName, parse_name
+from .extract import PersonName
 from .match import PersonScorer, classify, default_model
 
 log = logging.getLogger(__name__)
@@ -77,7 +82,10 @@ class _DedupeState:
     decided: set[tuple[uuid.UUID, uuid.UUID]]
     auto: int = 0
     review: int = 0
+    catalogue: int = 0
     pending: int = 0
+    # pairs this pass queued for review, so an upgrade can take one back
+    queued: set[tuple[uuid.UUID, uuid.UUID]] = field(default_factory=set[tuple[uuid.UUID, uuid.UUID]])
 
 
 def _record_decision(
@@ -101,6 +109,7 @@ def _record_decision(
         state.auto += 1
     else:
         state.review += 1
+        state.queued.add((duplicate.entity_id, canonical.entity_id))
     state.pending += 1
     if state.pending % COMMIT_BATCH == 0:
         state.session.commit()
@@ -165,14 +174,31 @@ def reset_person_links(session: Session) -> tuple[int, int]:
     return deleted, unlinked
 
 
-def _cluster_canonical(members: frozenset[uuid.UUID], names: dict[uuid.UUID, PersonName]) -> uuid.UUID:
-    """The member with the fullest given names, ties broken on the id.
+def _canonical_rank(record: PersonRecord) -> tuple[bool, bool, int, int, str]:
+    """Sort key for :func:`_cluster_canonical`; the smallest ranks first."""
+    return (
+        not record.wikidata_ids,
+        not record.musicbrainz_ids,
+        -len(record.sources),
+        -_given_length(record.name),
+        str(record.entity_id),
+    )
+
+
+def _cluster_canonical(members: frozenset[uuid.UUID], records: dict[uuid.UUID, PersonRecord]) -> uuid.UUID:
+    """The best-evidenced member: a Wikidata anchor, then a MusicBrainz one,
+    then the most sources, then the fullest given names, then the id.
+
+    Evidence comes before name length because gold shows the canonical's label,
+    and the fullest name in a big cluster is often a noisy one: "Wolfgang
+    Amadeus A. Mozart" outspells the Q254 "Wolfgang Amadeus Mozart" by an
+    initial (#379). An anchored entity carries the authority's own label.
 
     Chosen once from the whole cluster. Picking a canonical per pair was what
     let one group point at two different entities, since each pair only ever
     saw the two names in front of it.
     """
-    return min(members, key=lambda entity_id: (-_given_length(names[entity_id]), str(entity_id)))
+    return min(members, key=lambda entity_id: _canonical_rank(records[entity_id]))
 
 
 def _cluster_edges(session: Session) -> tuple[list[Edge], list[tuple[uuid.UUID, uuid.UUID]]]:
@@ -199,6 +225,52 @@ def _cluster_edges(session: Session) -> tuple[list[Edge], list[tuple[uuid.UUID, 
     return links, barred
 
 
+def _link_shared_catalogues(state: _DedupeState, records: list[PersonRecord]) -> None:
+    """Record the links catalogue evidence makes (see :mod:`.catalogues`).
+
+    Weighed against the partition the scored links make so far, so it runs
+    after them. A pair the model only queued for review is upgraded to a link;
+    a pair a human decided is left alone.
+    """
+    links, rejected = _cluster_edges(state.session)
+    constraints = authority_constraints(records, links)
+    found = catalogues.catalogue_links(
+        records,
+        catalogues.composer_keys(state.session),
+        links,
+        [*rejected, *constraints.cannot_link],
+    )
+    by_id = {record.entity_id: record for record in records}
+    for a, b, count in found:
+        canonical, duplicate = _canonical_and_duplicate(by_id[a], by_id[b])
+        method = f"{catalogues.METHOD}:{count}"
+        existing = state.session.scalars(
+            select(PersonMatch).where(
+                ((PersonMatch.entity_id == a) & (PersonMatch.canonical_entity_id == b))
+                | ((PersonMatch.entity_id == b) & (PersonMatch.canonical_entity_id == a))
+            )
+        ).first()
+        if existing is not None:
+            if existing.status != "needs_review":
+                continue
+            existing.status, existing.score, existing.method = "auto_linked", catalogues.SCORE, method
+            if (existing.entity_id, existing.canonical_entity_id) in state.queued:
+                state.review -= 1
+        else:
+            state.session.add(
+                PersonMatch(
+                    entity_id=duplicate.entity_id,
+                    canonical_entity_id=canonical.entity_id,
+                    score=catalogues.SCORE,
+                    method=method,
+                    status="auto_linked",
+                )
+            )
+            state.decided.add((duplicate.entity_id, canonical.entity_id))
+        state.catalogue += 1
+    state.session.commit()
+
+
 @dataclass(frozen=True)
 class Partition:
     """The person partition and the authority constraints that shaped it."""
@@ -219,6 +291,8 @@ class DedupeResult:
     auto: int
     review: int
     partition: Partition
+    # of ``auto``, the links catalogue evidence made (see :mod:`.catalogues`)
+    catalogue: int = 0
 
 
 def apply_clusters(session: Session) -> Partition:
@@ -238,14 +312,14 @@ def apply_clusters(session: Session) -> Partition:
     entities = {
         entity.id: entity for entity in session.scalars(select(Entity).where(Entity.kind == "person"))
     }
-    names = {entity_id: parse_name(entity.label) for entity_id, entity in entities.items()}
+    records = {record.entity_id: record for record in load_records(session, list(entities.values()))}
     links, rejected = _cluster_edges(session)
-    constraints = authority_constraints(load_records(session, list(entities.values())), links)
+    constraints = authority_constraints(list(records.values()), links)
     clustering = build_clusters(links, [*rejected, *constraints.cannot_link])
 
     wanted: dict[uuid.UUID, uuid.UUID | None] = {}
     for members in clustering.clusters:
-        canonical = _cluster_canonical(members, names)
+        canonical = _cluster_canonical(members, records)
         for member in members:
             wanted[member] = None if member == canonical else canonical
     for entity_id, entity in entities.items():
@@ -282,6 +356,14 @@ def dedupe_persons(session: Session) -> DedupeResult:
         _decide_pair(state, a, b)
 
     session.commit()
+    _link_shared_catalogues(state, records)
     partition = apply_clusters(session)
-    log.info("auto-linked %d, queued %d for review", state.auto, state.review)
-    return DedupeResult(auto=state.auto, review=state.review, partition=partition)
+    log.info(
+        "auto-linked %d (%d on shared catalogue numbers), queued %d for review",
+        state.auto + state.catalogue,
+        state.catalogue,
+        state.review,
+    )
+    return DedupeResult(
+        auto=state.auto + state.catalogue, review=state.review, partition=partition, catalogue=state.catalogue
+    )

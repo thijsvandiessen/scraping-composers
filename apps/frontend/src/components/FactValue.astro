@@ -3,21 +3,61 @@ import type { Claim } from "../lib/schemas";
 import SourceChip from "./SourceChip.astro";
 
 interface Props {
-  claim: Claim;
+  // Claims that all state the same value, one per reporting source.
+  claims: Claim[];
 }
 
-const { claim } = Astro.props;
-const text = claim.object_label ?? claim.value ?? "—";
+// Chips shown before the rest fold away behind "+N more".
+const VISIBLE_SOURCES = 2;
+
+const { claims } = Astro.props;
+const first = claims[0];
+const text = first?.object_label ?? first?.value ?? "—";
 // Some values are themselves URLs (e.g. the auto-injected mentioned_in claim
 // carries the record's page); render those as links.
 const isUrl = /^https?:\/\//.test(text);
+
+// One chip per source page: the same source reporting the value from the same
+// page twice says nothing new.
+const seen = new Set<string>();
+const sources = claims.filter((claim) => {
+  const key = `${claim.source}|${claim.source_url ?? ""}`;
+  if (seen.has(key)) return false;
+  seen.add(key);
+  return true;
+});
+const visible = sources.slice(0, VISIBLE_SOURCES);
+const hidden = sources.slice(VISIBLE_SOURCES);
 ---
 
 <div class="fact-value">
   {isUrl ? <a href={text}>{text}</a> : <span>{text}</span>}
-  <SourceChip
-    source={claim.source}
-    sourceUrl={claim.source_url}
-    sourceExternalId={claim.source_external_id}
-  />
+  {
+    visible.map((claim) => (
+      <SourceChip
+        source={claim.source}
+        sourceUrl={claim.source_url}
+        sourceExternalId={claim.source_external_id}
+      />
+    ))
+  }
+  {
+    hidden.length > 0 && (
+      <details class="fold more-sources">
+        <summary>
+          <span class="when-closed">+{hidden.length} more</span>
+          <span class="when-open">show less</span>
+        </summary>
+        <span class="more-sources-chips">
+          {hidden.map((claim) => (
+            <SourceChip
+              source={claim.source}
+              sourceUrl={claim.source_url}
+              sourceExternalId={claim.source_external_id}
+            />
+          ))}
+        </span>
+      </details>
+    )
+  }
 </div>

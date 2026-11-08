@@ -8,11 +8,21 @@ import hashlib
 import uuid
 from dataclasses import dataclass, field
 
-from composer_models import Claim, Entity, EntityRecord, IngestRun, RawWorkMention, Source, Work, WorkTitle
+from composer_models import (
+    Claim,
+    Entity,
+    EntityRecord,
+    IngestRun,
+    RawWorkMention,
+    Source,
+    Work,
+    WorkIdentifier,
+    WorkTitle,
+)
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..works import Candidate, extract_features
+from ..works import WorkCandidates, load_candidates
 
 
 def content_hash(*parts: str | None) -> str:
@@ -40,9 +50,15 @@ class IngestState:
     existing_mentions: dict[str, tuple[int, str]]
     # (work id, title key) aliases already stored for this source
     existing_work_titles: set[tuple[uuid.UUID, str]]
-    # Candidate works keyed by composer, so the matcher only compares within a
-    # composer's catalogue. Refreshed as new works are created during the run.
-    work_candidates: dict[uuid.UUID | None, list[Candidate]]
+    # Candidate works grouped by canonical composer, so the matcher only
+    # compares within one composer's catalogue, however many entities that
+    # composer is filed under. Refreshed as works are created, or gain an
+    # identifier, during the run.
+    work_candidates: WorkCandidates
+    # (work id, scheme, value) identifiers already stored for this source
+    existing_work_identifiers: set[tuple[uuid.UUID, str, str]] = field(default_factory=set)
+    # work id -> the premiere date it carries, for works that carry one
+    work_premieres: dict[uuid.UUID, str] = field(default_factory=dict)
     seen: int = 0
     new: int = 0
     seen_entity_ids: set[uuid.UUID] = field(default_factory=set)
@@ -92,11 +108,18 @@ def load_state(session: Session, source: Source, run: IngestRun) -> IngestState:
             select(WorkTitle.work_id, WorkTitle.title_key).where(WorkTitle.source_id == source.id)
         ).tuples()
     )
-    work_candidates: dict[uuid.UUID | None, list[Candidate]] = {}
-    for work in session.scalars(select(Work)):
-        work_candidates.setdefault(work.composer_entity_id, []).append(
-            Candidate(work.id, extract_features(work.canonical_title))
-        )
+    existing_work_identifiers = set(
+        session.execute(
+            select(WorkIdentifier.work_id, WorkIdentifier.scheme, WorkIdentifier.value).where(
+                WorkIdentifier.source_id == source.id
+            )
+        ).tuples()
+    )
+    work_premieres: dict[uuid.UUID, str] = {
+        work_id: date
+        for work_id, date in session.execute(select(Work.id, Work.premiere_date)).tuples()
+        if date is not None
+    }
 
     return IngestState(
         session=session,
@@ -107,5 +130,7 @@ def load_state(session: Session, source: Source, run: IngestRun) -> IngestState:
         existing_claims=existing_claims,
         existing_mentions=existing_mentions,
         existing_work_titles=existing_work_titles,
-        work_candidates=work_candidates,
+        work_candidates=load_candidates(session),
+        existing_work_identifiers=existing_work_identifiers,
+        work_premieres=work_premieres,
     )

@@ -42,7 +42,8 @@ from .parse import METRICS, RELATIONS, _literal
 SPARQL_URL = "https://query.wikidata.org/sparql"
 PAGE_SIZE = 500
 REQUEST_DELAY_S = 1.0
-#: A 500-item detail query is slow to build server-side.
+#: A 500-item detail query is slow to build server-side. This bounds the whole
+#: request (``new_client`` makes it a total deadline), not just each read.
 TIMEOUT_S = 90.0
 # 5 attempts back off 2+4+8+16s — long enough to ride out a laptop
 # sleep/wake network blip, not just a WDQS hiccup
@@ -64,9 +65,11 @@ SELECT ?item WHERE { ?item wdt:P106 wd:Q36834 . }
 
 # The single-valued fields, plus the label. Each item contributes a handful of
 # rows here: the truthy date/place/id properties have one best value apiece.
+# Places are returned as items as well as labels, so their claims can be pinned
+# to the QID (see ``_PINNED_KINDS`` in ``parse``).
 QUERY = """\
 SELECT ?item ?itemLabel ?birth ?birthPrecision ?death ?deathPrecision
-       ?birthPlaceLabel ?deathPlaceLabel ?musicbrainz
+       ?birthPlace ?birthPlaceLabel ?deathPlace ?deathPlaceLabel ?musicbrainz
 WHERE {{
   VALUES ?item {{ {values} }}
   # Take the truthy (best-rank) date via wdt:, then join the statement value
@@ -95,10 +98,12 @@ WHERE {{
 # the cross product ran to tens of thousands of rows per item -- 57MB of JSON
 # that WDQS truncates mid-stream at its 60s cap. UNION adds instead of
 # multiplies, so a page costs the sum of the values, not the product. Each row
-# binds exactly one of the four variables; ``_fold_rows`` reads whichever is
-# present, so these rows concatenate onto the QUERY rows above.
+# binds exactly one of the four properties (a country, genre or movement as
+# item and label); ``_fold_rows`` reads whichever is present, so these rows
+# concatenate onto the QUERY rows above. The items are what the claims are
+# pinned to: see ``_PINNED_KINDS`` and ``ITEM_FIELDS`` in ``parse``.
 MULTI_QUERY = """\
-SELECT ?item ?countryLabel ?genreLabel ?movementLabel ?alias
+SELECT ?item ?country ?countryLabel ?genre ?genreLabel ?movement ?movementLabel ?alias
 WHERE {{
   VALUES ?item {{ {values} }}
   {{ ?item wdt:P27 ?country . }}

@@ -119,6 +119,11 @@ UNFOLD = {
                         "link": reverse_lazy("entities"),
                     },
                     {
+                        "title": "Ensembles",
+                        "icon": "groups",
+                        "link": reverse_lazy("ensembles"),
+                    },
+                    {
                         "title": "Works",
                         "icon": "library_music",
                         "link": reverse_lazy("works"),

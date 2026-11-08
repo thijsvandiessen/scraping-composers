@@ -1,8 +1,8 @@
 """The migration tree, and the guarantee that it still matches the models.
 
-SQLite silver is created by ``create_all`` and rebuilt from bronze, so these
-only run against Postgres — the backend where an existing database has to be
-migrated rather than replayed.
+SQLite silver is created by ``create_all`` and rebuilt from bronze, so most of
+these only run against Postgres — the backend where an existing database has to
+be migrated rather than replayed. The single-head check needs no database.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from __future__ import annotations
 from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from composer_models import Base
 from composer_models.alembic_support import alembic_config
 from composer_models.db import get_engine
@@ -50,3 +51,12 @@ def test_head_matches_the_models(pg_url: str) -> None:
             assert compare_metadata(context, Base.metadata) == []
     finally:
         engine.dispose()
+
+
+def test_the_tree_has_a_single_head() -> None:
+    """Two PRs that each add a revision on the same parent pass CI apart and
+    leave ``main`` with two heads, where ``upgrade head`` refuses to run. This
+    needs no database, so the plain test run catches it, not only Postgres CI."""
+    heads = ScriptDirectory.from_config(alembic_config("sqlite://")).get_heads()
+
+    assert len(heads) == 1, f"merge the heads with `alembic merge`: {heads}"

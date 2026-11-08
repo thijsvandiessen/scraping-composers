@@ -106,6 +106,18 @@ def test_people_come_from_the_filter_vocabularies(monkeypatch: pytest.MonkeyPatc
     ]
 
 
+def test_a_compound_composer_entry_becomes_one_record_per_person(monkeypatch: pytest.MonkeyPatch) -> None:
+    landing = _landing_with(3).replace('"Arnold Sch&ouml;nberg"', '"Franz Liszt, Ludwig van Beethoven"', 1)
+    _serve(monkeypatch, landing, FRAGMENT)
+    composers = [
+        doc.id
+        for doc in WienerPhilAdapter().fetch()
+        if isinstance(doc, EntityDocument) and doc.id.startswith("komponist:")
+    ]
+    # no "Franz Liszt, Ludwig van Beethoven" person, and Beethoven only once
+    assert composers == ["komponist:Ludwig van Beethoven", "komponist:Franz Liszt"]
+
+
 def test_conducting_in_the_archive_decides_the_profession(monkeypatch: pytest.MonkeyPatch) -> None:
     _serve(monkeypatch, _landing_with(3), FRAGMENT)
     entities = {doc.name: doc for doc in WienerPhilAdapter().fetch() if isinstance(doc, EntityDocument)}

@@ -2,27 +2,31 @@ import uuid
 
 from composer_models import (
     Claim,
+    ComposerProgramme,
     ConcertParticipant,
     Entity,
     EntityRecord,
     RecordingParticipant,
     Source,
-    Work,
 )
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
-from ..deps import Filters, Pagination
+from ..deps import Pagination, PeopleFilters
 from ..errors import NotFoundError
 from ..schemas import ComposerDetail, ComposerPage, ComposerSummary
 from .common import outgoing_claims
+from .genres import genre_filter
 
-# Works a person needs to count as a composer. Not the ``composer`` profession
-# claim: wikidata's occupation tags pop stars, poets and conductors as
-# composers, while thousands of real composers in the work sources carry no
-# profession at all. One or two works is mostly a conductor's or arranger's
-# stray piece.
-COMPOSER_MIN_WORKS = 3
+# Concerts plus recordings a person's works must be programmed on for them to
+# count as a composer. Not the ``composer`` profession claim: wikidata's
+# occupation tags pop stars, poets and conductors as composers, while thousands
+# of real composers in the work sources carry no profession at all. Not a work
+# count either: catalogue-only work lists (IMSLP, wikidata_works) credit
+# self-publishers and celebrities with hundreds of works nobody programmes.
+# Those people stay in gold (as performers, or for entity resolution); they are
+# just not listed as composers.
+COMPOSER_MIN_PROGRAMMES = 3
 
 
 def _profession_id(db: Session, profession: str) -> uuid.UUID | None:
@@ -39,17 +43,6 @@ def profession_filter(prof_id: uuid.UUID) -> ColumnElement[bool]:
     )
 
 
-def works_filter(min_works: int) -> ColumnElement[bool]:
-    # Uncorrelated IN for the same reason as ``profession_filter``: one grouped
-    # pass over works (indexed on composer_entity_id), probed per person.
-    return Entity.id.in_(
-        select(Work.composer_entity_id)
-        .where(Work.composer_entity_id.is_not(None))
-        .group_by(Work.composer_entity_id)
-        .having(func.count() >= min_works)
-    )
-
-
 def source_filter(source: str) -> ColumnElement[bool]:
     # Uncorrelated IN for the same reason as ``profession_filter``, and so the
     # outer query keeps one row per person: joining entity_records in directly
@@ -63,18 +56,25 @@ def source_filter(source: str) -> ColumnElement[bool]:
 
 def list_people(
     db: Session,
-    filters: Filters,
+    filters: PeopleFilters,
     pager: Pagination,
     role: str,
     sort: str = "label",
 ) -> ComposerPage:
-    """People in ``role``: "composer" by work count, any other role by its
-    ``has_profession`` claim."""
+    """People in ``role``: "composer" by how often their works are programmed,
+    any other role by its ``has_profession`` claim.
+
+    Concert and recording counts are the person's own credits, except for
+    composers, where they count the concerts and recordings of their works.
+    """
     base = select(Entity).where(Entity.kind == "person")
     if filters.source:
         base = base.where(source_filter(filters.source))
     if role == "composer":
-        base = base.where(works_filter(COMPOSER_MIN_WORKS))
+        # precomputed by the derive passes and promote (see composer_models.programmes)
+        base = base.join(ComposerProgramme, ComposerProgramme.entity_id == Entity.id).where(
+            ComposerProgramme.programme_count >= COMPOSER_MIN_PROGRAMMES
+        )
     else:
         prof_id = _profession_id(db, role)
         if prof_id is None:
@@ -82,38 +82,46 @@ def list_people(
         base = base.where(profession_filter(prof_id))
     if filters.q:
         base = base.where(Entity.label.ilike(f"%{filters.q}%"))
+    if filters.genre is not None:
+        base = base.where(genre_filter(filters.genre))
 
     total = db.scalar(select(func.count()).select_from(base.subquery()))
 
-    # concerts per person as an uncorrelated aggregate, outer-joined in
-    concert_counts = (
-        select(
-            ConcertParticipant.entity_id.label("entity_id"),
-            func.count(func.distinct(ConcertParticipant.concert_id)).label("concert_count"),
+    if role == "composer":
+        concert_count = ComposerProgramme.concert_count
+        recording_count = ComposerProgramme.recording_count
+        query = base.add_columns(concert_count, recording_count)
+    else:
+        # concerts per person as an uncorrelated aggregate, outer-joined in
+        concert_counts = (
+            select(
+                ConcertParticipant.entity_id.label("entity_id"),
+                func.count(func.distinct(ConcertParticipant.concert_id)).label("concert_count"),
+            )
+            .group_by(ConcertParticipant.entity_id)
+            .subquery()
         )
-        .group_by(ConcertParticipant.entity_id)
-        .subquery()
-    )
 
-    # recordings per person as an uncorrelated aggregate, outer-joined in
-    recording_counts = (
-        select(
-            RecordingParticipant.entity_id.label("entity_id"),
-            func.count(func.distinct(RecordingParticipant.recording_id)).label("recording_count"),
+        # recordings per person as an uncorrelated aggregate, outer-joined in
+        recording_counts = (
+            select(
+                RecordingParticipant.entity_id.label("entity_id"),
+                func.count(func.distinct(RecordingParticipant.recording_id)).label("recording_count"),
+            )
+            .group_by(RecordingParticipant.entity_id)
+            .subquery()
         )
-        .group_by(RecordingParticipant.entity_id)
-        .subquery()
-    )
-
-    query = (
-        base.add_columns(concert_counts.c.concert_count, recording_counts.c.recording_count)
-        .outerjoin(concert_counts, concert_counts.c.entity_id == Entity.id)
-        .outerjoin(recording_counts, recording_counts.c.entity_id == Entity.id)
-    )
+        concert_count = concert_counts.c.concert_count
+        recording_count = recording_counts.c.recording_count
+        query = (
+            base.add_columns(concert_count, recording_count)
+            .outerjoin(concert_counts, concert_counts.c.entity_id == Entity.id)
+            .outerjoin(recording_counts, recording_counts.c.entity_id == Entity.id)
+        )
     if sort == "concerts":
-        query = query.order_by(concert_counts.c.concert_count.desc().nulls_last(), Entity.label)
+        query = query.order_by(concert_count.desc().nulls_last(), Entity.label)
     elif sort == "recordings":
-        query = query.order_by(recording_counts.c.recording_count.desc().nulls_last(), Entity.label)
+        query = query.order_by(recording_count.desc().nulls_last(), Entity.label)
     else:
         query = query.order_by(Entity.label)
     rows = db.execute(query.offset(pager.offset).limit(pager.limit)).all()
@@ -142,7 +150,14 @@ def get_person(
     if entity is None or entity.kind != "person":
         raise NotFoundError(not_found_detail)
 
-    if profession is not None:
+    if profession == "composer":
+        # the list's rule, so a page exists for exactly the people the list shows
+        programmes = db.scalar(
+            select(ComposerProgramme.programme_count).where(ComposerProgramme.entity_id == entity.id)
+        )
+        if (programmes or 0) < COMPOSER_MIN_PROGRAMMES:
+            raise NotFoundError(not_found_detail)
+    elif profession is not None:
         prof_id = db.scalar(select(Entity.id).where(Entity.kind == "profession", Entity.label == profession))
         has_prof = prof_id is not None and db.scalar(
             select(func.count()).where(

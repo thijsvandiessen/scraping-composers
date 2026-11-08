@@ -3,22 +3,30 @@ its promoted copy — no network. Silver is in-memory SQLite; every gold fixture
 runs twice, promoted into a SQLite file and into Postgres (the latter only
 with ``COMPOSER_TEST_POSTGRES_URL`` set)."""
 
+import os
 import uuid
+from collections import Counter
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from composer_api import create_app
+from composer_api.crud.common import deep_link
 from composer_gold import gold_engine, promote
+from composer_graph import load_graph, snapshot_connections
+from composer_models import ConnectionEdge, EntityConnections
 from composer_models.db import init_db
 from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
 from composer_models.testing import requires_postgres
-from composer_schema import EntityDocument, SourceAdapter, SourceClaim
+from composer_schema import EntityDocument, SourceAdapter, SourceClaim, WorkMentionDocument
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.recordings import derive_recordings
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
+from composer_warehouse.works.links import link_works
 from fastapi.testclient import TestClient
+from neo4j import Driver, GraphDatabase
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -259,7 +267,8 @@ def test_person_with_both_roles_appears_in_both_lists(client: TestClient) -> Non
 
 @pytest.fixture
 def composers_client() -> Iterator[TestClient]:
-    """Silver client where composer status hinges on work counts, not professions."""
+    """Silver client where composer status hinges on concerts of the works, not
+    professions or work counts."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -269,38 +278,77 @@ def composers_client() -> Iterator[TestClient]:
     people = _FakeSource(
         [
             _person("Bach, Johann", SourceClaim("has_profession", "profession", "composer")),
-            # tagged composer, but only two works: a conductor's stray pieces
-            _person("Maestro, Some", SourceClaim("has_profession", "profession", "composer")),
+            # tagged composer and on every concert, but his works are on only two
+            _person(
+                "Maestro, Some",
+                SourceClaim("has_profession", "profession", "composer"),
+                SourceClaim("has_profession", "profession", "conductor"),
+            ),
             _person("Doe, Jane", SourceClaim("has_profession", "profession", "soloist")),
         ]
     )
-    works = [
-        ("Bach, Johann", ("Mass in B minor", "Goldberg Variations", "St Matthew Passion")),
-        # no profession claim at all, yet three works
-        ("Hensel, Fanny", ("Das Jahr", "Piano Trio in D minor", "Easter Sonata")),
-        ("Maestro, Some", ("Fanfare for Orchestra", "Lullaby for Strings")),
+    programme = [
+        # Bach: three concerts; the second piece on concert 1 counts it once
+        ("1", "Bach, Johann", "Mass in B minor"),
+        ("1", "Bach, Johann", "Goldberg Variations"),
+        ("2", "Bach, Johann", "Goldberg Variations"),
+        ("3", "Bach, Johann", "St Matthew Passion"),
+        # no profession claim and a single work, yet on four concerts
+        *((concert, "Hensel, Fanny", "Easter Sonata") for concert in ("1", "2", "3", "4")),
+        ("1", "Maestro, Some", "Fanfare for Orchestra"),
+        ("2", "Maestro, Some", "Lullaby for Strings"),
     ]
-    programmes = FakeSource(
+    concerts = FakeSource(
         records=tuple(
-            mention(title, composer, f"m:{composer}:{title}")
-            for composer, titles in works
-            for title in titles
+            perf_mention(
+                f"perf:{concert}:{title}",
+                title,
+                composer,
+                {"concert_id": concert, "date": f"1990-01-0{concert}", "conductors": ["Maestro, Some"]},
+            )
+            for concert, composer, title in programme
         ),
-        name="programmes",
-        base_url="https://programmes.example",
+        name="berlinphil",
+        base_url="https://bp.example",
+    )
+    # hundreds of works in a catalogue, none of them ever programmed
+    catalogue = FakeSource(
+        records=tuple(
+            mention(title, "Rondeau, Michel", f"imslp:{title}")
+            for title in ("Prelude", "Toccata", "Chorale", "Fugue")
+        ),
+        name="imslp_works",
+        base_url="https://imslp.org",
     )
     with factory() as s:
         ingest_source(s, people)
-        ingest_source(s, programmes)
+        ingest_source(s, concerts)
+        ingest_source(s, catalogue)
+        derive_concerts(s)
     yield TestClient(create_app("test-silver-composers", lambda: factory))
 
 
-def test_list_composers_takes_three_works_not_the_profession(composers_client: TestClient) -> None:
+def test_list_composers_takes_performed_works_not_the_profession(composers_client: TestClient) -> None:
     r = composers_client.get("/v1/composers")
     assert r.status_code == 200
     data = r.json()
-    assert {item["label"] for item in data["items"]} == {"Bach, Johann", "Hensel, Fanny"}
+    # Maestro: own concerts don't count, and his works reach only two;
+    # Rondeau: four catalogue works, none performed
+    assert [(i["label"], i["concert_count"], i["recording_count"]) for i in data["items"]] == [
+        ("Bach, Johann", 3, 0),
+        ("Hensel, Fanny", 4, 0),
+    ]
     assert data["total"] == 2
+
+
+def test_list_composers_sorts_by_concerts_of_their_works(composers_client: TestClient) -> None:
+    data = composers_client.get("/v1/composers?sort=concerts").json()
+    assert [i["label"] for i in data["items"]] == ["Hensel, Fanny", "Bach, Johann"]
+
+
+def test_non_composers_keep_their_own_concert_counts(composers_client: TestClient) -> None:
+    items = composers_client.get("/v1/conductors").json()["items"]
+    assert [(i["label"], i["concert_count"]) for i in items] == [("Maestro, Some", 4)]
 
 
 def test_list_composers_search_filter(composers_client: TestClient) -> None:
@@ -331,8 +379,8 @@ def test_list_composers_invalid_limit_returns_422(client: TestClient) -> None:
     assert client.get("/v1/composers?limit=101").status_code == 422
 
 
-def test_get_composer_returns_detail_with_claims(client: TestClient) -> None:
-    r = client.get(f"/v1/composers/{_person_id(client, 'Bach, Johann')}")
+def test_get_composer_returns_detail_with_claims(composers_client: TestClient) -> None:
+    r = composers_client.get(f"/v1/composers/{_person_id(composers_client, 'Bach, Johann')}")
     assert r.status_code == 200
     data = r.json()
     assert data["label"] == "Bach, Johann"
@@ -341,20 +389,44 @@ def test_get_composer_returns_detail_with_claims(client: TestClient) -> None:
     assert "has_profession" in predicates
 
 
+@pytest.mark.parametrize("label", ["Maestro, Some", "Doe, Jane"])
+def test_get_composer_404s_for_people_the_list_leaves_out(composers_client: TestClient, label: str) -> None:
+    """A composer page exists only for people /v1/composers lists: a soloist, or
+    someone tagged composer whose works are barely programmed, gets a 404."""
+    person_id = _person_id(composers_client, label)
+    assert composers_client.get(f"/v1/composers/{person_id}").status_code == 404
+    assert composers_client.get(f"/v1/entities/{person_id}").status_code == 200
+
+
 def test_claim_source_url_is_record_page(client: TestClient) -> None:
     """Claims point at the exact source page they came from, not the source homepage."""
-    data = client.get(f"/v1/composers/{_person_id(client, 'Beethoven, Ludwig van')}").json()
+    data = client.get(f"/v1/entities/{_person_id(client, 'Beethoven, Ludwig van')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
     assert profession["source"] == "fake"
     assert profession["source_url"] == "https://fake.example/wiki/Q255"
     assert profession["source_external_id"] == "Q255"
 
 
-def test_claim_source_url_falls_back_to_base_url(client: TestClient) -> None:
-    """Records without a page URL fall back to the source homepage."""
-    data = client.get(f"/v1/composers/{_person_id(client, 'Bach, Johann')}").json()
+def test_claim_source_url_is_none_without_record_page(client: TestClient) -> None:
+    """Records without a page URL carry no link, not the source homepage."""
+    data = client.get(f"/v1/entities/{_person_id(client, 'Bach, Johann')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
-    assert profession["source_url"] == "https://fake.example"
+    assert profession["source_url"] is None
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://src.example/work/1", "https://src.example/work/1"),
+        ("https://src.example", None),
+        ("https://src.example/", None),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_deep_link_drops_the_source_homepage(url: str | None, expected: str | None) -> None:
+    """A record whose URL is just the source's homepage (Open Opus) gets no link either."""
+    assert deep_link(url, "https://src.example") == expected
 
 
 def test_get_composer_not_found(client: TestClient) -> None:
@@ -611,9 +683,78 @@ def test_work_detail_returns_metadata_aliases_and_proof(client: TestClient) -> N
     assert work["opus_number"] == "67"
     assert work["mention_count"] == 2
     assert work["aliases"] == ["Sinfonie Nr. 5, op. 67"]
-    assert work["premiere_date"] is None  # nothing populates it yet — see #244
+    assert work["premiere_date"] is None  # no fixture mention carries raw["premiere"]
+    assert work["premiere_place"] is None
     assert [p["source"] for p in work["proof"]] == ["programmes"]
-    assert work["proof"][0]["source_url"] == "https://programmes.example"
+    assert work["proof"][0]["source_url"] is None
+
+
+def test_gold_work_detail_carries_the_premiere(promote_gold: PromoteGold) -> None:
+    factory = _seeded_factory()
+    with factory() as s:
+        ingest_source(
+            s,
+            FakeSource(
+                records=(
+                    perf_mention(
+                        "Q1:Q255",
+                        "Symphony No. 5, Op. 67",
+                        "Beethoven, Ludwig van",
+                        {"premiere": {"date": "1808-12-22", "place": "Theater an der Wien"}},
+                    ),
+                ),
+                name="wikidata_works",
+            ),
+        )
+        gold_factory = promote_gold(s)
+    gold = TestClient(create_app("test-gold", lambda: gold_factory))
+
+    work_id = gold.get("/v1/works").json()["items"][0]["id"]
+    work = gold.get(f"/v1/works/{work_id}").json()
+    assert (work["premiere_date"], work["premiere_place"]) == ("1808-12-22", "Theater an der Wien")
+
+
+def test_gold_work_carries_identifiers_links_and_derived_works(promote_gold: PromoteGold) -> None:
+    bach = "Bach, Johann Sebastian"
+    concerto = "Brandenburg Concerto No. 3, BWV 1048"
+    movement = "Allegro (from Brandenburg Concerto No. 3, BWV 1048)"
+    factory = _seeded_factory()
+    with factory() as s:
+        ingest_source(
+            s,
+            FakeSource(
+                records=(
+                    perf_mention("Q1:Q1339", concerto, bach, {"item": "http://www.wikidata.org/entity/Q1"}),
+                    mention(movement, bach, "m2"),
+                ),
+                name="wikidata_works",
+            ),
+        )
+        link_works(s)
+        gold_factory = promote_gold(s)
+    gold = TestClient(create_app("test-gold", lambda: gold_factory))
+
+    by_title = {
+        w["canonical_title"]: w for w in gold.get("/v1/works", params={"q": "Brandenburg"}).json()["items"]
+    }
+    listed = by_title[concerto]
+    assert listed["identifiers"] == [
+        {"scheme": "BWV", "value": "1048"},
+        {"scheme": "wikidata", "value": "Q1"},
+    ]
+    assert listed["wikidata_id"] == "Q1"
+
+    parent = gold.get(f"/v1/works/{listed['id']}").json()
+    part_id = by_title[movement]["id"]
+    assert parent["derived"] == [{"relation": "part_of", "work_id": part_id, "title": movement}]
+    assert parent["links"] == []
+    part = gold.get(f"/v1/works/{part_id}").json()
+    assert part["links"] == [{"relation": "part_of", "work_id": listed["id"], "title": concerto}]
+    assert part["identifiers"] == []  # BWV 1048 is its parent's number, not its own
+
+    composer_id = parent["composer_id"]
+    composer_works = gold.get(f"/v1/composers/{composer_id}/works").json()["items"]
+    assert {w["wikidata_id"] for w in composer_works} == {"Q1", None}
 
 
 def test_work_detail_unknown_id_is_404(client: TestClient) -> None:
@@ -630,6 +771,13 @@ def test_work_detail_rejects_a_non_uuid(client: TestClient) -> None:
 @pytest.fixture
 def concerts_client(promote_gold: PromoteGold) -> Iterator[TestClient]:
     """Gold client over a dataset with derived concerts."""
+    gold_factory = _concerts_gold(promote_gold)
+    yield TestClient(create_app("test-gold-concerts", lambda: gold_factory))
+
+
+def _concerts_gold(promote_gold: PromoteGold) -> sessionmaker[Session]:
+    """Karajan conducts Strauss (with Mutter as soloist) and Berlioz; Abbado
+    conducts Mahler. Promoted, and a factory over the result."""
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -683,8 +831,7 @@ def concerts_client(promote_gold: PromoteGold) -> Iterator[TestClient]:
     with factory() as s:
         ingest_source(s, berlinphil)
         derive_concerts(s)
-        gold_factory = promote_gold(s)
-    yield TestClient(create_app("test-gold-concerts", lambda: gold_factory))
+        return promote_gold(s)
 
 
 def test_conductors_sortable_by_concert_count(concerts_client: TestClient) -> None:
@@ -744,7 +891,9 @@ def test_concert_detail_has_participants_and_programme(concerts_client: TestClie
 
 
 def test_concert_detail_404(concerts_client: TestClient) -> None:
-    assert concerts_client.get("/v1/concerts/999").status_code == 404
+    assert concerts_client.get(f"/v1/concerts/{uuid.uuid4()}").status_code == 404
+    # ids are uuids; the old integer form is rejected rather than looked up
+    assert concerts_client.get("/v1/concerts/999").status_code == 422
 
 
 def test_person_concerts_404_and_invalid_sort(concerts_client: TestClient) -> None:
@@ -832,7 +981,7 @@ def test_composer_works_includes_concert_and_catalogue_proof(composer_works_clie
     assert zarathustra["proof"] != []
     proof = zarathustra["proof"][0]
     assert proof["source"] == "imslp_works"
-    assert proof["source_url"] == "https://imslp.org"
+    assert proof["source_url"] is None
     assert proof["date"] is None
 
     # a catalogue-only proof links to the work's own page, not the homepage
@@ -954,7 +1103,9 @@ def test_recording_detail_has_artists_and_works(recordings_client: TestClient) -
 
 
 def test_recording_detail_404(recordings_client: TestClient) -> None:
-    assert recordings_client.get("/v1/recordings/999").status_code == 404
+    assert recordings_client.get(f"/v1/recordings/{uuid.uuid4()}").status_code == 404
+    # ids are uuids; the old integer form is rejected rather than looked up
+    assert recordings_client.get("/v1/recordings/999").status_code == 422
 
 
 def test_person_recordings_lists_credits(recordings_client: TestClient) -> None:
@@ -1017,7 +1168,7 @@ def test_gold_hides_people_without_performance_evidence(gold_client: TestClient)
 
 def test_gold_claim_source_url_survives_promotion(gold_client: TestClient) -> None:
     """Promotion copies entity records, so gold claims still link the exact source page."""
-    data = gold_client.get(f"/v1/composers/{_person_id(gold_client, 'Beethoven, Ludwig van')}").json()
+    data = gold_client.get(f"/v1/entities/{_person_id(gold_client, 'Beethoven, Ludwig van')}").json()
     profession = next(c for c in data["claims"] if c["predicate"] == "has_profession")
     assert profession["source_url"] == "https://fake.example/wiki/Q255"
     assert profession["source_external_id"] == "Q255"
@@ -1034,3 +1185,432 @@ def test_gold_stats_reflect_curation(gold_client: TestClient) -> None:
     stats = gold_client.get("/v1/stats").json()
     assert stats["entities_by_kind"]["person"] == 1
     assert stats["entities_by_kind"].get("profession") == 1  # only the referenced "composer" survives
+
+
+# --- /v1/entities/{id}/connections ---
+#
+# Served from the snapshot export-neo4j stores in gold. The graph fixtures take
+# it the real way: load the promoted gold into the server at
+# COMPOSER_TEST_NEO4J_URL (emptying it first), snapshot it back into gold, and
+# skip when that is unset. The tests further down seed snapshots by hand and
+# always run, as do the 404, 422 and 503 paths.
+
+NEO4J_URL = os.environ.get("COMPOSER_TEST_NEO4J_URL") or None
+
+
+@pytest.fixture
+def graph() -> Iterator[Driver]:
+    if NEO4J_URL is None:
+        pytest.skip("COMPOSER_TEST_NEO4J_URL not set")
+    user = os.environ.get("COMPOSER_TEST_NEO4J_USER", "neo4j")
+    password = os.environ.get("COMPOSER_TEST_NEO4J_PASSWORD", "composers")
+    with GraphDatabase.driver(NEO4J_URL, auth=(user, password)) as driver:
+        yield driver
+
+
+def _graph_client(title: str, gold_factory: sessionmaker[Session], graph: Driver) -> TestClient:
+    """A gold client serving the snapshot of its own graph projection."""
+    with gold_factory() as gold:
+        load_graph(gold, graph)
+        snapshot_connections(gold, graph)
+    return TestClient(create_app(title, lambda: gold_factory))
+
+
+def _connections(client: TestClient, entity_id: str, query: str = "") -> dict[str, Any]:
+    r = client.get(f"/v1/entities/{entity_id}/connections{query}")
+    assert r.status_code == 200
+    return r.json()
+
+
+def _entity_id(client: TestClient, label: str) -> str:
+    listing = client.get(f"/v1/entities?q={label}").json()
+    return next(i["id"] for i in listing["items"] if i["label"] == label)
+
+
+@pytest.fixture
+def concerts_graph(promote_gold: PromoteGold, graph: Driver) -> TestClient:
+    return _graph_client("test-gold-concerts-graph", _concerts_gold(promote_gold), graph)
+
+
+def test_connections_composer_reaches_its_performers(concerts_graph: TestClient) -> None:
+    strauss = _entity_id(concerts_graph, "Richard Strauss")
+    data = _connections(concerts_graph, strauss)
+    performed_by = {i["label"]: i for i in data["items"] if i["relation"] == "performed_by"}
+    assert set(performed_by) == {"Karajan, Herbert von", "Mutter, Anne-Sophie"}
+    assert performed_by["Karajan, Herbert von"]["weight"] == 1
+    assert performed_by["Karajan, Herbert von"]["roles"] == ["conductor"]
+    assert performed_by["Karajan, Herbert von"]["direction"] == "in"
+
+
+def test_connections_performer_reaches_its_composers(concerts_graph: TestClient) -> None:
+    karajan = _entity_id(concerts_graph, "Karajan, Herbert von")
+    data = _connections(concerts_graph, karajan)
+    performed = {i["label"]: i for i in data["items"] if i["relation"] == "performed"}
+    # Abbado's Mahler concert is not Karajan's, so Mahler must not appear
+    assert set(performed) == {"Richard Strauss", "Hector Berlioz"}
+    assert performed["Richard Strauss"]["relations"] == ["performed"]
+
+
+def test_connections_carry_the_works_that_prove_them(concerts_graph: TestClient) -> None:
+    karajan = _entity_id(concerts_graph, "Karajan, Herbert von")
+    data = _connections(concerts_graph, karajan)
+    strauss = next(i for i in data["items"] if i["label"] == "Richard Strauss")
+    assert strauss["via"] == ["Ein Heldenleben (1985)"]
+    assert strauss["roles"] == ["conductor"]
+
+
+def test_connections_include_stage_partners(concerts_graph: TestClient) -> None:
+    karajan = _entity_id(concerts_graph, "Karajan, Herbert von")
+    data = _connections(concerts_graph, karajan)
+    partners = {i["label"]: i for i in data["items"] if i["relation"] == "appeared_with"}
+    assert set(partners) == {"Mutter, Anne-Sophie"}
+    assert partners["Mutter, Anne-Sophie"]["roles"] == ["soloist"]
+
+
+def test_connections_never_link_an_entity_to_itself(concerts_graph: TestClient) -> None:
+    karajan = _entity_id(concerts_graph, "Karajan, Herbert von")
+    data = _connections(concerts_graph, karajan)
+    assert all(i["entity_id"] != karajan for i in data["items"])
+
+
+def test_connections_drop_the_profession_hub(concerts_graph: TestClient) -> None:
+    karajan = _entity_id(concerts_graph, "Karajan, Herbert von")
+    data = _connections(concerts_graph, karajan)
+    assert all(i["relation"] != "has_profession" for i in data["items"])
+
+
+def test_connections_min_weight_drops_one_off_pairings(concerts_graph: TestClient) -> None:
+    karajan = _entity_id(concerts_graph, "Karajan, Herbert von")
+    data = _connections(concerts_graph, karajan, "?min_weight=2")
+    assert data["items"] == []
+    assert data["total"] == 0
+
+
+def test_connections_per_relation_budget_is_per_relation(concerts_graph: TestClient) -> None:
+    karajan = _entity_id(concerts_graph, "Karajan, Herbert von")
+    data = _connections(concerts_graph, karajan, "?per_relation=1")
+    by_relation = Counter(i["relation"] for i in data["items"])
+    # the budget is spent per relation, so both kinds of edge survive it
+    assert by_relation == {"performed": 1, "appeared_with": 1}
+
+
+def test_connections_limit_caps_the_whole_graph(concerts_graph: TestClient) -> None:
+    karajan = _entity_id(concerts_graph, "Karajan, Herbert von")
+    data = _connections(concerts_graph, karajan, "?limit=1")
+    assert len(data["items"]) == 1
+    # total counts what cleared min_weight, so a caller can see it was truncated
+    assert data["total"] == 3
+
+
+def test_connections_relation_filter(concerts_graph: TestClient) -> None:
+    karajan = _entity_id(concerts_graph, "Karajan, Herbert von")
+    data = _connections(concerts_graph, karajan, "?relation=performed")
+    assert {i["relation"] for i in data["items"]} == {"performed"}
+    assert data["total"] == 2
+
+
+def test_connections_rank_is_rejected_when_unknown(concerts_client: TestClient) -> None:
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    assert concerts_client.get(f"/v1/entities/{karajan}/connections?rank=magic").status_code == 422
+
+
+def test_connections_404_for_unknown_entity(concerts_client: TestClient) -> None:
+    r = concerts_client.get("/v1/entities/00000000-0000-0000-0000-000000000000/connections")
+    assert r.status_code == 404
+
+
+def test_connections_503_without_a_snapshot(concerts_client: TestClient) -> None:
+    """A gold with no snapshot still knows the entity; it just can't draw it."""
+    karajan = _entity_id(concerts_client, "Karajan, Herbert von")
+    r = concerts_client.get(f"/v1/entities/{karajan}/connections")
+    assert r.status_code == 503
+
+
+def _edge(
+    family: str,
+    neighbour: tuple[str, str],
+    weight: int,
+    affinity: float,
+    *relations: str,
+    direction: str = "out",
+) -> ConnectionEdge:
+    relations = relations or (family,)
+    return ConnectionEdge(
+        family=family,
+        entity_id=neighbour[0],
+        label=neighbour[1],
+        kind="person",
+        relations=list(relations),
+        directions=dict.fromkeys(relations, direction),
+        weight=weight,
+        scores={"affinity": affinity, "weight": float(weight)},
+        roles=[],
+        via=[],
+    )
+
+
+@pytest.fixture
+def seeded_client(promote_gold: PromoteGold) -> TestClient:
+    """The concerts gold with a hand-made snapshot for Karajan: two performed
+    edges the rankings order differently, a stage partner, and a place linked
+    by two claims. The weight counts include edges the pool did not keep."""
+    factory = _concerts_gold(promote_gold)
+    client = TestClient(create_app("test-gold-seeded", lambda: factory))
+    karajan = _entity_id(client, "Karajan, Herbert von")
+    ids = {
+        label: _entity_id(client, label)
+        for label in ("Richard Strauss", "Hector Berlioz", "Mutter, Anne-Sophie")
+    }
+    edges = [
+        _edge("performed", (ids["Richard Strauss"], "Richard Strauss"), 5, 0.5),
+        _edge("performed", (ids["Hector Berlioz"], "Hector Berlioz"), 2, 0.9),
+        _edge("appeared_with", (ids["Mutter, Anne-Sophie"], "Mutter, Anne-Sophie"), 1, 0.7),
+        _edge("claims", (str(uuid.uuid4()), "Salzburg"), 2, 0.6, "born_in", "died_in"),
+    ]
+    weights = {
+        "performed": {"1": 4, "2": 1, "5": 1},  # four one-off composers fell out of the pool
+        "appeared_with": {"1": 1},
+        "claims": {"2": 1},
+        "born_in": {"2": 1},
+        "died_in": {"2": 1},
+    }
+    with factory() as gold:
+        gold.add(
+            EntityConnections(entity_id=uuid.UUID(karajan), payload={"edges": edges, "weights": weights})
+        )
+        gold.commit()
+    return client
+
+
+def test_snapshot_is_ranked_by_affinity_by_default(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan)
+    assert [i["label"] for i in data["items"]] == [
+        "Hector Berlioz",
+        "Mutter, Anne-Sophie",
+        "Salzburg",
+        "Richard Strauss",
+    ]
+    assert data["items"][0]["score"] == 0.9
+    # total counts every edge, kept in the pool or not
+    assert data["total"] == 8
+
+
+def test_snapshot_rank_weight_reorders(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan, "?rank=weight")
+    assert [i["label"] for i in data["items"]][:1] == ["Richard Strauss"]
+    assert all(i["score"] == i["weight"] for i in data["items"])
+
+
+def test_snapshot_min_weight_filters_edges_and_total(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan, "?min_weight=2")
+    assert [i["label"] for i in data["items"]] == ["Hector Berlioz", "Salzburg", "Richard Strauss"]
+    assert data["total"] == 3
+
+
+def test_snapshot_relation_filter_names_the_claim_asked_for(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan, "?relation=died_in")
+    assert [(i["label"], i["relation"], i["relations"]) for i in data["items"]] == [
+        ("Salzburg", "died_in", ["born_in", "died_in"])
+    ]
+    assert data["total"] == 1
+    performed = _connections(seeded_client, karajan, "?relation=performed")
+    assert {i["relation"] for i in performed["items"]} == {"performed"}
+    assert performed["total"] == 6
+
+
+def test_snapshot_budgets_apply(seeded_client: TestClient) -> None:
+    karajan = _entity_id(seeded_client, "Karajan, Herbert von")
+    data = _connections(seeded_client, karajan, "?per_relation=1")
+    assert Counter(i["relation"] for i in data["items"]) == {"performed": 1, "appeared_with": 1, "born_in": 1}
+    assert len(_connections(seeded_client, karajan, "?limit=2")["items"]) == 2
+
+
+def test_snapshot_without_a_row_has_no_neighbours(seeded_client: TestClient) -> None:
+    """Once a snapshot exists, an entity missing from it simply has none."""
+    abbado = _entity_id(seeded_client, "Abbado, Claudio")
+    data = _connections(seeded_client, abbado)
+    assert data["items"] == []
+    assert data["total"] == 0
+
+
+def _concert(cid: str, title: str, composer: str, conductor: str, **extra: Any) -> WorkMentionDocument:
+    return perf_mention(
+        f"perf:{cid}",
+        title,
+        composer,
+        {"concert_id": cid, "date": f"20{cid.zfill(2)}-01-01", "conductors": [conductor], **extra},
+    )
+
+
+def _conductor(name: str) -> EntityDocument:
+    # conductors become entities through their own records, not through the
+    # billing on a mention
+    return _person(name, SourceClaim("has_profession", "profession", "conductor"))
+
+
+def _promoted(promote_gold: PromoteGold, *records: Any) -> sessionmaker[Session]:
+    """Ingest ``records`` as one berlinphil source, derive concerts, promote.
+
+    "berlinphil" because derive_concerts dispatches its payload parsing on the
+    source name — an invented source's mentions never become concerts.
+    """
+    factory = init_db(
+        create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    )
+    with factory() as s:
+        ingest_source(s, FakeSource(records=records, name="berlinphil", base_url="https://bp.example"))
+        derive_concerts(s)
+        return promote_gold(s)
+
+
+@pytest.fixture
+def affinity_graph(promote_gold: PromoteGold, graph: Driver) -> TestClient:
+    """A hub composer who also performs, to exercise the affinity discount.
+
+    One conductor programmes two Beethoven works and two by an unknown; three
+    other conductors programme nothing but Beethoven. Both edges out of the
+    focused conductor therefore weigh the same, and only the discount can tell
+    the distinctive pairing from the unremarkable one. Beethoven is also billed
+    once as a soloist — the case where the first read path divided his
+    performances by his single appearance and ranked him top.
+    """
+    gold = _promoted(
+        promote_gold,
+        _concert("1", "Symphony No. 5", "Ludwig van Beethoven", "Focus, Conductor"),
+        _concert("2", "Symphony No. 7", "Ludwig van Beethoven", "Focus, Conductor"),
+        _concert("3", "Nocturne in Grey", "Obscure, Anna", "Focus, Conductor"),
+        _concert("4", "Prelude in Dust", "Obscure, Anna", "Focus, Conductor"),
+        # the same Beethoven works again, under other batons: the hub forms
+        _concert("5", "Symphony No. 5", "Ludwig van Beethoven", "Other, One"),
+        _concert("6", "Symphony No. 7", "Ludwig van Beethoven", "Other, Two"),
+        _concert("7", "Symphony No. 5", "Ludwig van Beethoven", "Other, Three"),
+        _concert(
+            "8",
+            "Rondo a capriccio",
+            "Ludwig van Beethoven",
+            "Other, One",
+            soloists=[{"name": "Ludwig van Beethoven", "discipline": "piano"}],
+        ),
+        _conductor("Focus, Conductor"),
+        _conductor("Other, One"),
+        _conductor("Other, Two"),
+        _conductor("Other, Three"),
+        _person("Ludwig van Beethoven"),
+    )
+    return _graph_client("test-gold-affinity", gold, graph)
+
+
+def test_connections_weight_ranking_cannot_separate_the_two(affinity_graph: TestClient) -> None:
+    """Both composers were programmed twice, so raw weight calls it a tie."""
+    focus = _entity_id(affinity_graph, "Focus, Conductor")
+    data = _connections(affinity_graph, focus, "?rank=weight&relation=performed")
+    weights = {i["label"]: i["weight"] for i in data["items"]}
+    assert weights == {"Ludwig van Beethoven": 2, "Obscure, Anna": 2}
+    assert all(i["score"] == i["weight"] for i in data["items"])
+
+
+def test_connections_affinity_demotes_the_most_performed(affinity_graph: TestClient) -> None:
+    """The discount breaks that tie in favour of the distinctive pairing."""
+    focus = _entity_id(affinity_graph, "Focus, Conductor")
+    data = _connections(affinity_graph, focus, "?relation=performed")
+    assert [i["label"] for i in data["items"]] == ["Obscure, Anna", "Ludwig van Beethoven"]
+    # the weights it is ranking are untouched — only the ordering changed
+    assert {i["label"]: i["weight"] for i in data["items"]} == {
+        "Obscure, Anna": 2,
+        "Ludwig van Beethoven": 2,
+    }
+
+
+def test_connections_affinity_holds_for_a_composer_who_performs(affinity_graph: TestClient) -> None:
+    """Beethoven's one appearance must not stand in for his six performances."""
+    beethoven = _entity_id(affinity_graph, "Ludwig van Beethoven")
+    other = _entity_id(affinity_graph, "Other, One")
+    # the fixture really does bill him as a performer...
+    partners = _connections(affinity_graph, other, "?relation=appeared_with")["items"]
+    assert [i["entity_id"] for i in partners] == [beethoven]
+    # ...and his performed edge is still discounted by his performances (6):
+    # 2 / sqrt(6), not 2 / sqrt(1)
+    focus = _entity_id(affinity_graph, "Focus, Conductor")
+    data = _connections(affinity_graph, focus, "?relation=performed")
+    scores = {i["label"]: i["score"] for i in data["items"]}
+    assert scores["Ludwig van Beethoven"] == pytest.approx(2 / 6**0.5, abs=1e-4)
+
+
+@pytest.fixture
+def wide_graph(promote_gold: PromoteGold, graph: Driver) -> TestClient:
+    """One conductor, eight composers, one concert each: more than one
+    relation's reservation."""
+    gold = _promoted(
+        promote_gold,
+        *(_concert(str(n), f"Piece {n}", f"Composer, No{n}", "Wide, Conductor") for n in range(1, 9)),
+        _conductor("Wide, Conductor"),
+    )
+    return _graph_client("test-gold-wide", gold, graph)
+
+
+def test_connections_reserve_then_fill_when_per_relation_is_unset(wide_graph: TestClient) -> None:
+    """Six per relation is a reservation, not a cap: the rest of ``limit`` is
+    shared out, so a page asking for more nodes gets them."""
+    wide = _entity_id(wide_graph, "Wide, Conductor")
+    assert len(_connections(wide_graph, wide)["items"]) == 8
+    assert len(_connections(wide_graph, wide, "?limit=7")["items"]) == 7
+    # set explicitly, it is a hard cap
+    assert len(_connections(wide_graph, wide, "?per_relation=6")["items"]) == 6
+
+
+@pytest.fixture
+def place_graph(promote_gold: PromoteGold, graph: Driver) -> TestClient:
+    """Two people linked to Vienna: Xaver, born there and performed ten
+    times; Yvonne, born and died there, and billed once as a soloist (gold
+    prunes a person nothing refers to)."""
+    gold = _promoted(
+        promote_gold,
+        _concert(
+            "1",
+            "Donauwalzer",
+            "Composer, Xaver",
+            "Some, Conductor",
+            soloists=[{"name": "Singer, Yvonne", "discipline": "soprano"}],
+        ),
+        *(_concert(str(n), "Donauwalzer", "Composer, Xaver", "Some, Conductor") for n in range(2, 11)),
+        _conductor("Some, Conductor"),
+        _person("Composer, Xaver", SourceClaim("born_in", "place", "Vienna")),
+        _person(
+            "Singer, Yvonne",
+            SourceClaim("born_in", "place", "Vienna"),
+            SourceClaim("died_in", "place", "Vienna"),
+        ),
+    )
+    return _graph_client("test-gold-place", gold, graph)
+
+
+def test_connections_collapse_a_neighbour_linked_by_several_claims(place_graph: TestClient) -> None:
+    vienna = _entity_id(place_graph, "Vienna")
+    data = _connections(place_graph, vienna)
+    yvonne = next(i for i in data["items"] if i["label"] == "Singer, Yvonne")
+    assert yvonne["relations"] == ["born_in", "died_in"]
+    assert yvonne["relation"] == "born_in"
+    assert yvonne["direction"] == "in"  # Vienna is the claim's object
+    assert yvonne["weight"] == 2  # one source per claim
+    assert yvonne["via"] == ["berlinphil"]  # the sources asserting it
+    assert [i["label"] for i in data["items"]].count("Singer, Yvonne") == 1
+
+
+def test_connections_rank_a_place_by_its_people_reach(place_graph: TestClient) -> None:
+    """On a place, the much-performed composer comes before the better-attested
+    singer (1 x ln 12 against 2 x ln 3); raw weight puts them the other way round."""
+    vienna = _entity_id(place_graph, "Vienna")
+    by_affinity = [i["label"] for i in _connections(place_graph, vienna)["items"]]
+    assert by_affinity == ["Composer, Xaver", "Singer, Yvonne"]
+    by_weight = [i["label"] for i in _connections(place_graph, vienna, "?rank=weight")["items"]]
+    assert by_weight == ["Singer, Yvonne", "Composer, Xaver"]
+
+
+def test_connections_a_person_reaches_their_birthplace(place_graph: TestClient) -> None:
+    xaver = _entity_id(place_graph, "Composer, Xaver")
+    data = _connections(place_graph, xaver, "?relation=born_in")
+    assert [(i["label"], i["direction"], i["kind"]) for i in data["items"]] == [("Vienna", "out", "place")]

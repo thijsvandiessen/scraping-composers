@@ -56,6 +56,21 @@ def vocabularies(landing: str) -> dict[str, list[str]]:
     return found
 
 
+def credited(name: str) -> tuple[str, ...]:
+    """The composers one entry of the composer list names, in its order.
+
+    The list spells everyone "First Last", so a comma there joins two people:
+    an arrangement credits original and arranger together ("Franz Liszt, Franz
+    Schubert"), a joint work both authors ("Johann Strauß II., Josef Strauß"),
+    and in no fixed order. A part of one word is a suffix, not a person, so a
+    name that would split into one ("Josef Hellmesberger, Jr.") stays whole.
+    """
+    parts = [part.strip() for part in name.split(",")]
+    if len(parts) < 2 or any(len(part.split()) < 2 for part in parts):
+        return (name,)
+    return tuple(dict.fromkeys(parts))
+
+
 def composer_record(name: str) -> SourceRecord:
     """A composer, asserted as one by the archive listing them under Composer."""
     return SourceRecord(

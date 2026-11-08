@@ -12,16 +12,23 @@ everything after that (bucket, ingest, matching) is shared.
 | `imslp` | IMSLP people API | yearly | [imslp](docs/imslp.md) |
 | `imslp_works` | IMSLP work catalogue — all of it | yearly | [imslp](docs/imslp.md) |
 | `imslp_recordings` | IMSLP's commercial recordings of the catalogue | yearly | [imslp](docs/imslp.md) |
-| `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | yearly | |
+| `wikidata` | every Wikidata item with occupation composer (Wikidata SPARQL) | yearly | genres (P136) and movements (P135) are claimed with their QID, which their entities are keyed on |
+| `wikidata_places` | every place a Wikidata composer was born, died or held citizenship in, then the places containing those | yearly | place records with `place_type`, `located_in`, `in_country`, coordinates, GeoNames id and ISO 3166 code; see [`composer-warehouse`](../composer-warehouse/README.md#places) |
+| `wikidata_works` | every Wikidata work with a date of first performance (P1191) and a composer, with its premiere place (P4647) | yearly | work mentions carrying `raw["premiere"]`, which fills `Work.premiere_date` |
+| `wikidata_genres` | every genre and movement the composers are tagged with, and their `subclass of` (P279) ancestors | yearly | `subclass_of` claims make the hierarchy; parents outside music genre / art or cultural movement are dropped, and the walk stops after 15 levels; a seed left with no parent climbs through its same-named `different from` (P1889) music item instead (the dance "waltz" → the genre "waltz"), and a musical form (P31 musical form / type of composition) gets a `genre_type` claim |
+| `wikidata_ensembles` | every Wikidata orchestra (Q42998), choir (Q131186), string quartet (Q207338), chamber ensemble (Q9390516, Q19191604) and opera company (Q20819922), subclasses included, plus the plain musical groups (Q215380, Q2088357) with a classical genre or name, with their names in the sources' languages, headquarters city, MusicBrainz id and the groups they are part of | yearly | the anchors `anchor-ensembles` folds name-keyed ensembles onto; see below |
+| `wikidata_catalogue` | every Wikidata work with a composer and a catalogue code (a P528 value qualified by P972), with its MusicBrainz work ids (P435), ISWCs (P1827) and the works it is part of (P361) | yearly | work mentions the warehouse matches on their QID and catalogue numbers; P361 becomes a `part_of` work link |
+| `wikidata_instrumentation` | every Wikidata work with a composer and an instrumentation (P870, deprecated statements left out), with each statement's quantity (P1114) and role (P3831) | yearly | a work mention matched on its QID and a `work` entity with `written_for`/`includes_instrument` claims; the parts and their counts in `raw["instrumentation"]`; see below |
 | `openopus` | Open Opus work catalogue | yearly | |
 | `classicalmusiconline` | classical-music-online.net composer catalogue and works | yearly | two levels: 26 index pages, then ~11.6k composer pages (a couple of hours); `--max-pages` caps the composer pages |
+| `classicapedia` | Classicapedia biographies, teacher and pupil links, works, venues and orchestras | yearly | lower-trust; ~22.8k pages (about 6.5 hours); venues and orchestras pinned through their Wikipedia article; [classicapedia](docs/classicapedia.md) |
 | `classicfm` | composer and artist name lists from classicfm.com | yearly | |
 | `concertgebouw_archive` | Concertgebouworkest concert archive | static | |
 | `rco` | Royal Concertgebouw Orchestra live calendar | yearly | |
 | `nyphil` | New York Philharmonic performance history (Kaggle dataset) | static | |
 | `berlinphil` | Berliner Philharmoniker Digital Concert Hall archive | static | |
 | `wienerphil` | Vienna Philharmonic concert archive | static | |
-| `laphil` | Los Angeles Philharmonic concert programmes | yearly | |
+| `laphil` | Los Angeles Philharmonic concert programmes | yearly | a walk over the event and person pages, seeded from the home page: robots.txt disallows the files `sitemap.xml` indexes |
 | `roh` | Royal Opera House Collections performance database | static | [roh](docs/roh.md) |
 | `decca` | Decca Classics recorded catalogue | yearly | |
 | `harmoniamundi` | harmonia mundi label catalogue | yearly | [harmoniamundi](docs/harmoniamundi.md) |
@@ -32,6 +39,49 @@ everything after that (bucket, ingest, matching) is shared.
 The cadence decides when a source is *due* again in the admin API and how long
 its page mirror serves a page (see below). `static` is for archives of things
 already given: scraped once, re-run on demand.
+
+`wikidata_ensembles` is paged like `wikidata`: three live id queries, then a
+mirrored detail query and a mirrored multi-valued query per 500 items, the
+detail page checked for coverage. The id queries are the population classes'
+instances (about 10,700), the direct instances of musical group or musical
+ensemble with a genre under classical music, opera or choral music (about
+580: the London and Royal Philharmonic, the Budapest Symphony are typed only
+that way), and the ones whose label or alias carries a name cue such as
+`Orchestra`, `Philharmoniker`, `Chor` or `Quartet` and that have no genre
+outside those trees but "art music" (about 1,600, found through the search
+index: a label scan over all 115,000 musical groups times out). A musical
+group with a non-classical genre, and every subclass of musical group (rock
+band, boy band, ...), stays out. The cues are `CLASSICAL_NAME_CUES` in
+`composer_schema.kinds`, the list the name typer reads too. Each id query must
+answer at least about half its live count, and every search in the name query
+must return as many items as it reports hits (the search service answers a
+failed search with an empty 200, and its continuation now and then drops an
+item; that query is asked up to four times); otherwise the run fails rather
+than let `anchor-ensembles` unlink a missing slice. Each ensemble record
+carries an `ensemble_type` (from its class: chamber ensemble over choir over
+orchestra over opera company; else from name cues such as `Quartet`, `Chor`
+or `Zenekar` in its label, then in its other names; else `other`), a
+`based_in` city (the headquarters if it is a settlement, else the
+headquarters' P131) pinned to the city's QID, an `also_known_as` per label and
+alias in English, `mul`, German, French, Italian, Dutch, Spanish, Czech,
+Swedish, Danish, Polish and Hungarian, and `part_of` only towards another
+ensemble in the population. An item with no English or `mul` label is named by
+its label in the first of those languages it has one in; only an item with no
+label in any of them is skipped.
+
+`wikidata_instrumentation` is paged like `wikidata_catalogue`. Each P870 value
+is read by its item's label through the shared category table
+(`composer_schema.instrumentation`), so Wikidata's "cello" and Bärenreiter's
+"Violoncello" are one `instrumentation` entity; a label the table does not know
+claims nothing, keeps its QID in `raw["instrumentation"]["unmatched"]`, and is
+counted in the fetch log so the table can grow. Wikidata does not say what a
+work is *for* as against what it *includes*, so that is read from the list's
+shape: an ensemble (`ENSEMBLES`: orchestra, choir, string quartet, …) and an
+instrument with a solo role are `written_for`; the other instruments are
+`written_for` only in a short list of forces ("violin, piano"; "violin,
+orchestra"), and only `includes_instrument` once the list carries a count, an
+orchestral section ("string section") or more than four instruments, which is
+an orchestra's parts: Brahms's Second is not a work for flute.
 
 ## Adding a source
 
@@ -146,6 +196,7 @@ Most sources are tested in three layers, one file each:
 | `berlinphil` | ✓ | — | ✓ |
 | `boosey` | ✓ | ✓ | ✓ |
 | `classicalmusiconline` | `test_classicalmusiconline.py` covers all three | | |
+| `classicapedia` | ✓ | ✓ | ✓ |
 | `classicfm` | ✓ | ✓ | ✓ |
 | `concertgebouw_archive` | `test_concertgebouw.py` | — | `test_concertgebouw_fetch.py` |
 | `decca` | ✓ | ✓ | ✓ |
@@ -160,11 +211,22 @@ Most sources are tested in three layers, one file each:
 | `rco` | ✓ | — | `test_rco_fetch.py` (calendar slugs only) |
 | `roh` | ✓ | ✓ | ✓ |
 | `wienerphil` | `test_wienerphil.py`, `test_wienerphil_details.py` | ✓ | ✓ |
-| `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror | | |
+| `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror and QID-pinned place claims | | |
+| `wikidata_places` | `test_wikidata_places.py` covers all three: type precedence, parent rounds, coordinates | | |
+| `wikidata_works` | `test_wikidata_works.py` covers all three | | |
+| `wikidata_genres` | `test_wikidata_genres.py` covers all three: seeds, paging, cycles, the class filter, the depth cap, `max_pages`, the mirror, counterparts for stranded seeds (same name or name + "music", of the kind, already kept or fetched, a classless kept parent still stranding a seed, asked only for stranded seeds), the musical-form claim | | |
+| `wikidata_ensembles` | `test_wikidata_ensembles.py` covers all three, including the mirror, the union of the three id queries and their floors, the name query's short-search retry, the musical-group signals, typing from every name and the label fallback for items with no English label | | |
+| `wikidata_catalogue` | `test_wikidata_catalogue.py` covers all three, including a P528 statement with no value | | |
+| `wikidata_instrumentation` | `test_wikidata_instrumentation.py` covers all three: a symphony's parts with counts only included, a concerto's soloist and orchestra, a soloist role, a short list of forces, an ensemble and its members, combination categories, the three parts-list signals, unknown labels kept, quantities, collaborations, unnameable works | | |
 
 `test_base.py` covers what every source shares: the session carries the
 adapter's manners, the mirror's lifetime follows the cadence, and every
 `REGISTRY` entry has the same shape.
+
+`test_wikidata_query_shapes.py` guards the SPARQL text of every Wikidata
+adapter, which the fake WDQS above never runs: no id query walks
+`?item wdt:P31/wdt:P279* ?class` with `?item` unbound (it times out live), and
+no `UNION` branch holds a `|` property path (Blazegraph fails it with a 500).
 
 A — marks a layer with no test file. For `berlinphil`, `nyphil` and `rco` that
 means nothing exercises `scrape()` end to end, nor `rco`'s concert-detail

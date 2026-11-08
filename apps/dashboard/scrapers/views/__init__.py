@@ -2,7 +2,7 @@
 and the curated gold pages."""
 
 from . import data, gold, pipeline
-from .data import data_overview, entities, entity_detail, review, works
+from .data import data_overview, ensembles, entities, entity_detail, review, works
 from .gold import (
     concert_detail,
     concerts_list,
@@ -15,6 +15,7 @@ from .gold import (
     recordings_list,
 )
 from .pipeline import (
+    abandon_snapshot,
     fetch_due,
     index,
     load_index,
@@ -27,10 +28,12 @@ from .pipeline import (
 )
 
 __all__ = [
+    "abandon_snapshot",
     "concert_detail",
     "concerts_list",
     "data",
     "data_overview",
+    "ensembles",
     "entities",
     "entity_detail",
     "fetch_due",

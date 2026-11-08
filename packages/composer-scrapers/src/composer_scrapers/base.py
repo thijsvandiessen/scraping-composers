@@ -47,7 +47,7 @@ class HttpSourceAdapter(SourceAdapter, Generic[Doc]):
 
     #: Minimum gap between two network requests (mirror hits cost nothing).
     request_delay_s: ClassVar[float] = 0.5
-    #: Per-request timeout; raise it for a source whose payload is a dump.
+    #: Per-request timeout, and each request's total deadline; raise it for a source whose payload is a dump.
     timeout_s: ClassVar[float] = DEFAULT_TIMEOUT_S
     #: Extra request headers, merged over the contact User-Agent.
     headers: ClassVar[Mapping[str, str]] = {}

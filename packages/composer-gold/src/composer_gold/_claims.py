@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from composer_models import Claim, Entity
+from composer_models import Claim, Entity, WorkEntity
 from sqlalchemy import Connection, insert, select
 
 from ._copy import INSERT_BATCH, chunked
@@ -46,28 +46,51 @@ def collect_person_claims(build: GoldBuild) -> set[uuid.UUID]:
     return {obj for obj, subjects in referrers.items() if len(subjects) >= threshold}
 
 
+def collect_work_entities(build: GoldBuild) -> set[uuid.UUID]:
+    """Rule 3's second seed: every source's ``work`` entity linked to a work.
+
+    Nothing kept points at such an entity — a publisher states ``composed_by``
+    from the work, not ``composed`` from the composer — yet it is what carries
+    a work's instrumentation, and gold keeps every work. So the link stands in
+    for the reference: a work entity is kept because its work is."""
+    return {build.root(e) for e in build.silver.scalars(select(WorkEntity.entity_id).distinct())}
+
+
 def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
     """Rule 3: keep referenced non-person entities (to a fixpoint),
-    collecting the discovery-edge claims along the way."""
+    collecting their claims about each other along the way.
+
+    A claim is kept whether it discovers its object or points at one already
+    kept: a place's ``in_country`` names a country some composer's
+    ``citizen_of`` reached first, and that edge is the hierarchy. The same
+    holds for genres: a person tagged with "waltz" and "dance music" seeds
+    both, and ``subclass_of`` between them is what rolls one up into the
+    other (#349)."""
     build.all_other = set(build.silver.scalars(select(Entity.id).where(Entity.kind != "person")))
     # Ensembles are judged by rule 1 (credits), not by being referenced: an
     # ensemble a kept person points at but that never played a concert or
-    # recording stays out, and the walk does not expand through it.
-    frontier = {r for r in referenced if r not in build.kept_roots and r not in build.unevidenced_ensembles}
+    # recording stays out, and the walk does not expand through it. A kept
+    # ensemble seeds the walk itself, so its own object claims (``based_in``,
+    # ``part_of``) are copied and the places they name are kept.
+    seeds = referenced | (build.kept_ensembles - build.kept_roots)
+    # A venue is a building, not a credit: nothing points at one and rule 1 has
+    # nothing to judge it by, so each seeds the walk, keeping its city with it.
+    seeds |= {build.root(v) for v in build.silver.scalars(select(Entity.id).where(Entity.kind == "venue"))}
+    # Persons are rule 1's alone: a kept entity's claim about one (a work's
+    # ``composed_by``, ``arranged_by``) must not bring back a person rule 1
+    # dropped. Claims to kept persons are not walked either, as before.
+    persons = {build.root(p) for p in build.all_persons}
+    frontier = {r for r in seeds if r not in build.kept_roots and r not in build.unevidenced_ensembles}
     while frontier:
         build.kept_other |= frontier
         next_frontier: set[uuid.UUID] = set()
         for chunk in chunked(sorted(frontier, key=str)):
             for c in build.silver.execute(select(Claim).where(Claim.subject_id.in_(chunk))).scalars():
                 obj = build.root(c.object_id) if c.object_id is not None else None
-                if (
-                    obj is None
-                    or obj in build.kept_roots
-                    or obj in build.kept_other
-                    or obj in build.unevidenced_ensembles
-                ):
+                if obj is None or obj in persons or obj in build.unevidenced_ensembles:
                     continue
-                next_frontier.add(obj)
+                if obj not in build.kept_other:
+                    next_frontier.add(obj)
                 build.claim_rows.append(
                     {
                         "subject_id": c.subject_id,
@@ -94,14 +117,15 @@ def walk_referenced(build: GoldBuild, referenced: set[uuid.UUID]) -> None:
 
 
 def collect_other_literal_claims(build: GoldBuild) -> None:
-    """Own claims of kept non-person entities (literals, e.g. mentioned_in)."""
-    for chunk in chunked(sorted(build.kept_other, key=str)):
+    """Own claims of kept non-person entities (literals, e.g. mentioned_in),
+    plus those of the name variants folded onto a kept ensemble, re-pointed."""
+    for chunk in chunked(sorted(build.kept_other | build.ensemble_members(), key=str)):
         for c in build.silver.execute(
             select(Claim).where(Claim.subject_id.in_(chunk), Claim.object_id.is_(None))
         ).scalars():
             build.claim_rows.append(
                 {
-                    "subject_id": c.subject_id,
+                    "subject_id": build.root(c.subject_id),
                     "predicate": c.predicate,
                     "object_id": None,
                     "value": c.value,

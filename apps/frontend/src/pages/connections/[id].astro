@@ -1,0 +1,153 @@
+---
+import ConnectionGraph from "../../components/ConnectionGraph.astro";
+import Base from "../../layouts/Base.astro";
+import { GRAPH_LIMIT, getComposer, getConnections, type ConnectionRank } from "../../lib/api";
+import { layout, relationsLabel, weightLabel } from "../../lib/graph";
+import type { Connections } from "../../lib/schemas";
+
+const { id } = Astro.params;
+
+// Three knobs, read from the query string and deliberately not surfaced as
+// controls: the defaults are the view worth looking at, and a page about who a
+// composer worked with shouldn't open by asking the reader to tune a ranking.
+// They stay parsed so a hand-written or shared URL still works.
+const rankParam = Astro.url.searchParams.get("rank");
+const rank: ConnectionRank = rankParam === "weight" ? "weight" : "affinity";
+
+const rawMinWeight = Number(Astro.url.searchParams.get("min") ?? "1");
+const minWeight = Number.isInteger(rawMinWeight) && rawMinWeight >= 1 ? Math.min(rawMinWeight, 50) : 1;
+
+const rawLimit = Number(Astro.url.searchParams.get("limit") ?? String(GRAPH_LIMIT));
+const limit = Number.isInteger(rawLimit) && rawLimit >= 1 ? Math.min(rawLimit, 60) : GRAPH_LIMIT;
+
+let connections: Connections | null = null;
+// Only composers have a page to go back to; a soloist or conductor doesn't.
+let isComposer = false;
+let error: string | null = null;
+try {
+  [connections, isComposer] = id
+    ? await Promise.all([
+        getConnections(id, { rank, minWeight, limit }),
+        getComposer(id).then((composer) => composer !== null),
+      ])
+    : [null, false];
+} catch (err) {
+  error = err instanceof Error ? err.message : String(err);
+}
+
+if (!connections && !error) {
+  return new Response("Entity not found", { status: 404 });
+}
+
+// Only people get a neighbourhood of their own. A place or an ensemble is
+// context on someone else's page — "born in Salzburg" is worth showing — but
+// centring the graph on Vienna produces a page about nothing this site is
+// about, and a dead end for whoever clicked into it.
+if (connections && connections.kind !== "person") {
+  return new Response("Entity not found", { status: 404 });
+}
+
+const graph = connections ? layout(connections.items) : null;
+// The drawing groups nodes by sector; the list reads best-first.
+const ranked = graph ? [...graph.nodes].sort((a, b) => a.rank - b.rank) : [];
+const truncated = connections ? connections.total > connections.items.length : false;
+
+// Neighbour pages inherit the current view, so walking the graph from a shared
+// URL doesn't silently reset what that URL asked for.
+function neighbourUrl(entityId: string): string {
+  const params = new URLSearchParams();
+  if (rank !== "affinity") params.set("rank", rank);
+  if (minWeight > 1) params.set("min", String(minWeight));
+  if (limit !== GRAPH_LIMIT) params.set("limit", String(limit));
+  const query = params.toString();
+  return query ? `/connections/${entityId}?${query}` : `/connections/${entityId}`;
+}
+
+// A neighbour that isn't a person has no page to go to; it reads as plain text.
+function isWalkable(kind: string): boolean {
+  return kind === "person";
+}
+
+const title = connections ? `${connections.label} — Connections` : "Connections";
+---
+
+<Base title={title}>
+  {error && (
+    <div class="error-box">
+      <strong>The composer API is unavailable.</strong>
+      <p>{error}</p>
+    </div>
+  )}
+
+  {connections && graph && (
+    <>
+      {isComposer && (
+        <p class="back-link">
+          <a href={`/composers/${connections.entity_id}`}>← {connections.label}</a>
+        </p>
+      )}
+      <h1>{connections.label}</h1>
+      <p class="meta">
+        {connections.total > 0
+          ? `${connections.total} connection${connections.total === 1 ? "" : "s"} found, showing the strongest ${connections.items.length}.`
+          : minWeight > 1
+            ? `Nothing reaches ${minWeight} — lower the threshold to see the weaker connections.`
+            : "No connections recorded yet."}
+      </p>
+
+      <p class="rank-note">
+        {rank === "affinity"
+          ? "Ranked by distinctiveness: each connection is discounted by how widely performed or referenced the other end is, so the pairings particular to this figure rise above the ones everybody shares."
+          : "Ranked by raw count: the most performances or shared events, undiscounted. Expect the household names to dominate."}
+      </p>
+
+      {graph.nodes.length === 0 && (
+        <p class="empty">
+          Nothing to draw{minWeight > 1 ? " at this threshold — try lowering it" : " yet"}.
+        </p>
+      )}
+
+      {graph.nodes.length > 0 && (
+        <>
+          <ConnectionGraph
+            graph={graph}
+            label={connections.label}
+            href={(entityId, kind) => (isWalkable(kind) ? neighbourUrl(entityId) : null)}
+          />
+
+          <h2>The evidence</h2>
+          <ul class="connection-list">
+            {ranked.map((node) => (
+              <li>
+                {isWalkable(node.connection.kind)
+                  ? (
+                    <a class="connection-name" href={neighbourUrl(node.connection.entity_id)}>
+                      {node.connection.label}
+                    </a>
+                  )
+                  : <span class="connection-name">{node.connection.label}</span>}
+                <span class="connection-relation" data-group={node.group}>
+                  {relationsLabel(node.connection)}
+                </span>
+                <span class="connection-weight">
+                  {weightLabel(node.connection.relation, node.connection.weight)}
+                  {node.connection.roles.length > 0 && ` · ${node.connection.roles.join(", ")}`}
+                </span>
+                {node.connection.via.length > 0 && (
+                  <span class="connection-via">{node.connection.via.join(" · ")}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          {truncated && (
+            <p class="meta">
+              {connections.total - connections.items.length} further connection
+              {connections.total - connections.items.length === 1 ? "" : "s"} did not make the cut.
+            </p>
+          )}
+        </>
+      )}
+    </>
+  )}
+</Base>

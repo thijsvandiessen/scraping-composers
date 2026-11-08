@@ -17,7 +17,7 @@ passes over it; curation happens when it is promoted into gold.
   `(source, external_id)`. Stores the original payload as JSON plus
   `first_seen_at`/`last_seen_at` timestamps and run ids. Re-ingesting is idempotent.
 - **`entities`** — canonical, deduplicated nodes. `kind` says what a node is:
-  `person`, `profession`, `period`, `genre`, `place`, `work`, `ensemble`,
+  `person`, `profession`, `period`, `genre`, `movement`, `place`, `work`, `ensemble`,
   `publisher`, `instrumentation` (an open set — `kind` is a plain string column,
   and a claim naming a new one creates it). Records from different sources link
   here via `(kind, dedup_key)` — a normalized label (`normalize.py`:
@@ -26,7 +26,14 @@ passes over it; curation happens when it is promoted into gold.
   them. Entity ids are `uuid5(kind + dedup_key)`, so they are stable across
   rebuilds; a label guarded into `ensemble` by
   [`composer_schema.kinds`](../composer-schema/README.md) gets a different id.
-  `canonical_entity_id` points a duplicate person at its cluster canonical.
+  A Wikidata QID joins the key as `label|QID` for most kinds; a `genre` or
+  `movement` (`QID_KEYED_KINDS`) with a QID is keyed on `wikidata:QID` alone,
+  so a renamed Wikidata label stays one entity (`entity_key`).
+  `canonical_entity_id` points a duplicate person at its cluster canonical, and
+  a label-only genre or movement at the QID-keyed one it names.
+  `genres.py` holds the vocabulary's fixed points: the top-level genres and
+  movements (by QID) that facets and the orphan report measure against, and
+  the `genre_type` value that marks a musical form.
 - **`claims`** — typed edges between entities, e.g.
   `person --has_profession--> profession`, `person --born_in--> place`,
   `person --composed--> work`. The object is either another entity
@@ -39,10 +46,36 @@ passes over it; curation happens when it is promoted into gold.
   (`auto_matched`/`needs_review`/`created`/`manual_matched`), score and method.
 - **`works`** and **`work_titles`** — canonical compositions and every title a
   work was seen under. Work ids are assigned at creation.
+  `works.premiere_date`/`premiere_place` hold the world premiere from any
+  mention stating one under `raw["premiere"]` (`composer_schema.premiere`;
+  today `wikidata_works` and the ROH's operas). The earliest date wins, a full
+  date refines a bare year of the same premiere, and `premiere_source_id` names
+  the source that won. House and production premieres never land here.
+- **`work_identifiers`** — a work's strong keys as each source stated them:
+  catalogue numbers (scheme `BWV`, `KV`, `KV6`, `Hob`, `D`...) and external ids
+  (`wikidata`, `musicbrainz`, `iswc`), unique per `(work, scheme, value,
+  source)` and indexed on `(scheme, value)`. `works.catalogue_prefix`/
+  `catalogue_number` keep the title's first one, for display.
+- **`work_links`** — a part, arrangement or version pointing at the work it
+  derives from (`relation` `part_of`/`arrangement_of`/`version_of`, `method`
+  `catalogue`/`wikidata`). Derived state, rebuilt by `link_works`.
+- **`work_entities`** — a canonical work's links to the source `work` entities
+  that describe it (a Bärenreiter edition, a Wikidata item), one row per
+  `(work, entity, source)`: the way from a work to its `written_for` /
+  `includes_instrument` claims and the parts in the entity's records. Derived
+  state, rebuilt by `link_work_entities`.
 - **`person_matches`** — scored person pairs and review decisions from
   `dedupe-persons`.
 - **`concerts`** and **`recordings`** (with their participants and
   programmes) — derived from the mentions in silver, copied into gold.
+- **`composer_programmes`** — per composer, the concerts and recordings their
+  works are on (`programmes.py`). Derived state, refreshed by the two derive
+  passes in silver and recomputed by promote in gold; `/v1/composers` reads it
+  instead of aggregating the event tables on every request.
+- **`entity_connections`** — gold only: each entity's neighbourhood in the
+  Neo4j graph as one JSON row (`connections.py`), written by `export-neo4j`
+  after the graph is loaded and emptied by every promote.
+  `/v1/entities/{id}/connections` serves it, so production runs no Neo4j.
 
 ## Schema and migrations
 
@@ -84,16 +117,17 @@ and nothing more.
 uv run --directory packages/composer-models pytest --rootdir . --cov=composer_models
 ```
 
-`test_migrations.py` only runs against Postgres (`COMPOSER_TEST_POSTGRES_URL`),
-the backend where a database is migrated rather than replayed. `testing.py`
+`test_migrations.py` runs against Postgres (`COMPOSER_TEST_POSTGRES_URL`), the
+backend where a database is migrated rather than replayed, apart from its
+single-head check. `testing.py`
 provides the Postgres fixtures the other members use.
 
 | File | Covers |
 | --- | --- |
-| `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, and reading a QID back out of a key. |
-| `test_db.py` | `init_db` creating every table, an entity round-trip, unbounded scraper-sourced columns, unique key columns, and rejecting a schema name that cannot be escaped. |
-| `test_migrations.py` | Postgres only: `upgrade head` creating the schema from nothing, and head matching the models. |
+| `test_normalize.py` | Dedup keys (name order, digits, commas, Wikidata suffixes, the Postgres index length bound), stable entity UUIDs per kind and key, stable concert/recording UUIDs per kind, source and key, reading a QID back out of a key in either form, and `entity_key` keying genres, movements and ensembles on the QID alone. |
+| `test_db.py` | `init_db` creating every table, an entity round-trip, unbounded scraper-sourced columns (`work_identifiers.value` among them), unique key columns, and rejecting a schema name that cannot be escaped. |
+| `test_migrations.py` | The tree having a single head (no database needed). Postgres only: `upgrade head` creating the schema from nothing, and head matching the models. |
 
 This package's tests don't reach `stamp_head` in `alembic_support.py` or the
-Postgres sequence resync in `db.py`; both run under the Postgres tests of
-`composer-warehouse` (rebuild) and `composer-gold` (promote).
+Postgres sequence resync in `db.py`; the first runs under the Postgres tests of
+`composer-warehouse` (rebuild), the second under `composer-gold` (promote).

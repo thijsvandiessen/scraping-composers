@@ -7,7 +7,7 @@ dependencies = [
     "composer-gold",
     "composer-models",
     "neo4j>=6.4.1",
-    "sqlalchemy>=2.1.4",
+    "sqlalchemy>=2.1.6",
 ]
 
 [build-system]

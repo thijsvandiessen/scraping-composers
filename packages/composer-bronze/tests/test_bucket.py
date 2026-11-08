@@ -92,6 +92,19 @@ def test_manifest_round_trip(tmp_path: Path) -> None:
     assert bucket.read_manifest("rco", "run-1") == manifest
 
 
+def test_read_manifest_ignores_keys_it_does_not_define(tmp_path: Path) -> None:
+    """A manifest written by other code (here with a ``duration_s``) still reads,
+    rather than failing every snapshot listing that reaches it."""
+    bucket = LocalBucket(tmp_path)
+    manifest = SnapshotManifest.start("rco", "run-1").completed(record_count=7)
+    bucket.write_manifest(manifest)
+    path = tmp_path / "rco" / "run-1" / "manifest.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "duration_s": 78.3}))
+
+    assert bucket.read_manifest("rco", "run-1") == manifest
+    assert [s.manifest for s in bucket.list_snapshots("rco")] == [manifest]
+
+
 def test_read_manifest_returns_none_when_absent(tmp_path: Path) -> None:
     assert LocalBucket(tmp_path).read_manifest("rco", "missing") is None
 

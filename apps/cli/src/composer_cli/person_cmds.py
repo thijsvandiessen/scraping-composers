@@ -43,7 +43,10 @@ def cmd_dedupe_persons(args: argparse.Namespace) -> int:
             print(f"reset {deleted} machine match(es), unlinked {unlinked} entity/ies")
         result = dedupe_persons(session)
         summary = _partition_summary(result.partition)
-    print(f"auto-linked {result.auto} duplicate(s), {result.review} pair(s) need review")
+    print(
+        f"auto-linked {result.auto} duplicate(s) ({result.catalogue} on shared catalogue numbers), "
+        f"{result.review} pair(s) need review"
+    )
     print(summary)
     return 0
 

@@ -17,10 +17,19 @@ from enum import StrEnum
 from typing import Any, ClassVar
 
 from .kinds import (
+    CLASSICAL_NAME_CUES as CLASSICAL_NAME_CUES,
+)
+from .kinds import (
     ENSEMBLE_KIND as ENSEMBLE_KIND,
 )
 from .kinds import (
+    ENSEMBLE_TYPES as ENSEMBLE_TYPES,
+)
+from .kinds import (
     PERSON_KIND as PERSON_KIND,
+)
+from .kinds import (
+    ensemble_type_from_name as ensemble_type_from_name,
 )
 from .kinds import (
     looks_like_ensemble as looks_like_ensemble,

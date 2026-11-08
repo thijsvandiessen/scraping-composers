@@ -70,8 +70,11 @@ npx openapi-ts -i http://localhost:8000/openapi.json -o src/lib/generated
   `parse()` every response — malformed data fails loudly instead of rendering
   garbage. Unknown fields are stripped rather than rejected, so additive API
   changes don't break the frontend (re-run `npm run gen` to pick them up).
-- No client-side JavaScript: search, sort, and pagination are plain GET forms
-  and links.
+- Search, sort, and pagination are plain GET forms and links, so they work
+  without JavaScript. The only script is a progressive enhancement in the
+  layout: on any paginated page (the composer list, a composer's works) ← / →
+  follow the previous/next page links (ignored while typing in a form field or
+  with a modifier key held).
 
 ## Checks
 

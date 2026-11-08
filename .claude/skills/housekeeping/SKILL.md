@@ -7,8 +7,11 @@ description: Weekly repo check-up — open PRs, dependency updates and open issu
 
 Report only: don't push, comment, approve, merge, close or label anything.
 The one exception is the self-review PR in step 4, which touches only this
-file. Repo: `thijsvandiessen/scraping-composers`. Use the GitHub MCP tools
-(`mcp__github__*`), not `gh`.
+file. Repo: `thijsvandiessen/scraping-composers`. Talk to GitHub only
+through `gh api` (REST), not the GitHub MCP tools or other `gh` commands:
+cloud sessions block GraphQL, so `gh pr list`, `gh pr create` and the like
+fail. If `gh api` fails, stop and say so; don't produce a partial report.
+Use `--jq` to keep only the fields you need, so listings stay small.
 
 ## 1. Open PRs
 
@@ -20,10 +23,16 @@ Put it in one bucket:
   what blocked it: a failing check (with the root cause from its log), a
   conflict, or a major bump that needs a human. Also read the `dependabot`
   job on every bump PR, whatever its age: if it failed, auto-merge was never
-  enabled and the PR won't merge itself even once CI is green.
+  enabled and the PR won't merge itself even once CI is green. If all bump PRs
+  share the failure, name it once (e.g. "Auto merge is not allowed for this
+  repository", a repo setting) instead of per PR.
 - **Red or conflicted**: any other PR with a failing check or a conflict.
 - **Stale**: no update in 30+ days.
 - **Fine**: everything else.
+
+For a failing check, read the log of the failed job itself
+(`gh api .../actions/jobs/<id>/logs`) and grep it for `##[error]`: the
+log's tail is usually checkout cleanup, not the failure.
 
 ## 2. Dependencies
 
@@ -31,16 +40,33 @@ Dependabot handles updates (`.github/dependabot.yml`).
 
 - Run the dependency audit from `CLAUDE.md`, and `npm audit --omit=dev` in
   `apps/frontend` after `npm ci`.
-- For each advisory: package, advisory id, fixed version, and whether an open
-  Dependabot PR already bumps it.
+  Also run `git ls-files | grep -E 'lock'`: a lockfile CI never installs from
+  (e.g. `pnpm-lock.yaml` beside an `npm ci` workflow) is worth a line.
+- List the open Dependabot alerts
+  (`gh api 'repos/{owner}/{repo}/dependabot/alerts?state=open&per_page=100'`).
+  They cover more than the audits: dev and transitive dependencies, and
+  every lockfile in the repo, including ones CI never installs from. For an
+  alert in a lockfile nothing uses, say so: the fix is deleting the file.
+  If this one call is refused (it needs Dependabot alerts read access),
+  say so in the report and carry on with the rest.
+- For each advisory or alert: package, advisory id, severity, fixed version,
+  the lockfile, and whether an open Dependabot PR already bumps it.
 - List any bump PR closed without merging in the past week.
 
 ## 3. Open issues
 
-List open issues with `fields: ["number","title","updated_at"]` first, then
-read each body with `issue_read`; a listing with bodies overflows the tool
-output. For each open issue, read it, then look for merged PRs and commits
-that mention it (`git log --grep`, `mcp__github__search_pull_requests`) and
+List open issues with `gh api --paginate repos/{owner}/{repo}/issues` and
+drop entries with a `pull_request` key. Write
+  the bodies file in the first pass (`--jq` with `.body[0:1800]`) so the
+  subagent can start straight away, and give it every issue number so none are
+  silently skipped; check its report covers them all. Keep only number, title and
+`updated_at` first; a listing with bodies overflows the tool output (100k+
+characters at 30 issues). With more than about ten issues, write the
+bodies to a file and hand it to a subagent to triage; otherwise read each
+with `gh api .../issues/<n>`. The cloud checkout is shallow, so run
+`git fetch --unshallow` before searching history. For each open issue, read
+it, then look for merged PRs and commits that mention it (`git log --grep`,
+`gh api 'search/issues?q=repo:{owner}/{repo}+is:pr+is:merged+<n>'`) and
 check whether the code it describes still exists and still behaves that way.
 Start by checking that the packages and files the issue names still exist
 (`ls packages apps`); an issue about a removed package is obsolete.
@@ -69,7 +95,9 @@ Otherwise open a draft PR with them:
 - Branch from the latest `main`. Use the branch the session names, if it
   names one, else `housekeeping/self-review-<YYYY-MM-DD>`.
 - Edit only this file. Commit and title the PR as
-  `docs(housekeeping): <what changes>` (commitlint checks both).
+  `docs(housekeeping): <what changes>` (commitlint checks both). Push with
+  `git push`, then open it with `gh api repos/{owner}/{repo}/pulls -f
+  draft=true -f head=<branch> -f base=main -f title=... -f body=...`.
 - In the PR body, list each change with its one-line reason, taken from
   what this run ran into.
 - Don't merge it, mark it ready or request reviewers: the owner decides.

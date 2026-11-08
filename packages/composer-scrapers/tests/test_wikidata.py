@@ -23,6 +23,8 @@ from composer_scrapers.wikidata.query import (
     _run_query,
 )
 
+ENTITY = "http://www.wikidata.org/entity/"
+
 
 def row(qid: str, label: str | None = None, **vars: str) -> dict[str, Any]:
     """A SPARQL JSON result row; ``vars`` are bound result variables."""
@@ -42,9 +44,16 @@ def test_rows_for_one_composer_fold_into_one_record() -> None:
             birth="1770-12-16T00:00:00Z",
             death="1827-03-26T00:00:00Z",
             birthPlaceLabel="Bonn",
+            genre=f"{ENTITY}Q1344",
             genreLabel="opera",
         ),
-        row("Q255", "Ludwig van Beethoven", birth="1770-12-16T00:00:00Z", genreLabel="symphony"),
+        row(
+            "Q255",
+            "Ludwig van Beethoven",
+            birth="1770-12-16T00:00:00Z",
+            genre=f"{ENTITY}Q9734",
+            genreLabel="symphony",
+        ),
     ]
     (record,) = _records_from_rows(rows)
 
@@ -56,10 +65,13 @@ def test_rows_for_one_composer_fold_into_one_record() -> None:
         SourceClaim("born_on", value="1770-12-16"),  # time part stripped
         SourceClaim("died_on", value="1827-03-26"),
         SourceClaim("born_in", "place", "Bonn"),
-        SourceClaim("has_genre", "genre", "opera"),  # duplicates folded
-        SourceClaim("has_genre", "genre", "symphony"),
+        SourceClaim("has_genre", "genre", "opera", object_wikidata_id="Q1344"),  # duplicates folded
+        SourceClaim("has_genre", "genre", "symphony", object_wikidata_id="Q9734"),
     )
-    assert record.raw["genreLabel"] == ["opera", "symphony"]
+    assert record.raw["genre"] == [
+        {"item": "Q1344", "label": "opera"},
+        {"item": "Q9734", "label": "symphony"},
+    ]
 
 
 def test_minimal_composer_still_claims_the_profession() -> None:
@@ -204,7 +216,7 @@ def test_multi_valued_fields_are_unioned_not_optional() -> None:
     response. UNION makes a page cost the sum, not the product."""
     assert "OPTIONAL" not in MULTI_QUERY
     assert MULTI_QUERY.count("UNION") == 3
-    for var in ("?countryLabel", "?genreLabel", "?movementLabel", "?alias"):
+    for var in ("?countryLabel", "?genre", "?genreLabel", "?movement", "?movementLabel", "?alias"):
         assert var in MULTI_QUERY
         assert var not in QUERY  # split out of the single-valued query
 
@@ -214,7 +226,7 @@ def test_fetch_page_concatenates_both_queries_label_bearing_rows_first() -> None
     labelled QUERY rows have to lead the MULTI_QUERY rows."""
     responses = {
         "?itemLabel": [row("Q7294", "Johannes Brahms", birth="1833-05-07T00:00:00Z")],
-        "UNION": [row("Q7294", genreLabel="symphony"), row("Q7294", alias="Brahms")],
+        "UNION": [row("Q7294", genre=f"{ENTITY}Q9734", genreLabel="symphony"), row("Q7294", alias="Brahms")],
         "?relation": [relation("Q7294", "P1066", "Q61658", "Eduard Marxsen")],
     }
 
@@ -230,8 +242,8 @@ def test_fetch_page_concatenates_both_queries_label_bearing_rows_first() -> None
     assert record.claims == (
         SourceClaim("has_profession", "profession", "composer"),
         SourceClaim("born_on", value="1833-05-07"),
-        SourceClaim("has_genre", "genre", "symphony"),
         SourceClaim("also_known_as", value="Brahms"),
+        SourceClaim("has_genre", "genre", "symphony", object_wikidata_id="Q9734"),
         SourceClaim("student_of", "person", "Eduard Marxsen", object_wikidata_id="Q61658"),
     )
 
@@ -304,9 +316,81 @@ def test_aliases_are_stored_verbatim_not_date_truncated() -> None:
     assert SourceClaim("also_known_as", value="Peter Tschaikowsky") in record.claims
 
 
-def test_movement_becomes_an_in_movement_claim() -> None:
-    (record,) = _records_from_rows([row("Q8", "Baroque Person", movementLabel="Baroque music")])
-    assert SourceClaim("in_movement", "movement", "Baroque music") in record.claims
+def test_movement_becomes_an_in_movement_claim_pinned_to_its_qid() -> None:
+    (record,) = _records_from_rows(
+        [row("Q8", "Baroque Person", movement=f"{ENTITY}Q8361", movementLabel="Baroque music")]
+    )
+    assert (
+        SourceClaim("in_movement", "movement", "Baroque music", object_wikidata_id="Q8361") in record.claims
+    )
+    assert record.raw["movement"] == [{"item": "Q8361", "label": "Baroque music"}]
+
+
+def test_genres_and_movements_without_a_label_or_an_item_are_skipped() -> None:
+    """A label alone is no longer enough: the QID is the entity's key. And a
+    bare-QID label means the label service had nothing to name it with."""
+    (record,) = _records_from_rows(
+        [
+            row("Q8", "Someone", genreLabel="opera"),  # no ?genre
+            row("Q8", "Someone", genre=f"{ENTITY}Q123", genreLabel="Q123"),
+            row("Q8", "Someone", movement=f"{ENTITY}Q8361", movementLabel="Baroque music"),
+        ]
+    )
+    assert [c.predicate for c in record.claims if c.object_kind in ("genre", "movement")] == ["in_movement"]
+    assert "genre" not in record.raw
+
+
+def entity(qid: str) -> str:
+    return f"http://www.wikidata.org/entity/{qid}"
+
+
+def test_place_claims_are_pinned_to_the_item_they_name() -> None:
+    (record,) = _records_from_rows(
+        [
+            row("Q255", "Ludwig van Beethoven", birthPlace=entity("Q586"), birthPlaceLabel="Bonn"),
+            row("Q255", "Ludwig van Beethoven", deathPlace=entity("Q1741"), deathPlaceLabel="Vienna"),
+            row("Q255", country=entity("Q27306"), countryLabel="Electorate of Cologne"),
+        ]
+    )
+    assert SourceClaim("born_in", "place", "Bonn", object_wikidata_id="Q586") in record.claims
+    assert SourceClaim("died_in", "place", "Vienna", object_wikidata_id="Q1741") in record.claims
+    assert (
+        SourceClaim("citizen_of", "place", "Electorate of Cologne", object_wikidata_id="Q27306")
+        in record.claims
+    )
+    assert record.raw["birthPlace"] == ["Q586"]
+    assert record.raw["country"] == ["Q27306"]
+    assert "?birthPlace ?birthPlaceLabel" in QUERY and "?country ?countryLabel" in MULTI_QUERY
+
+
+def test_two_places_sharing_a_label_stay_two_claims() -> None:
+    (record,) = _records_from_rows(
+        [
+            row("Q1", "A", country=entity("Q230"), countryLabel="Georgia"),
+            row("Q1", "A", country=entity("Q1428"), countryLabel="Georgia"),
+        ]
+    )
+    assert [c.object_wikidata_id for c in record.claims if c.predicate == "citizen_of"] == ["Q1428", "Q230"]
+
+
+def test_a_place_label_without_its_item_is_claimed_unpinned() -> None:
+    (record,) = _records_from_rows([row("Q255", "Ludwig van Beethoven", birthPlaceLabel="Bonn")])
+    assert SourceClaim("born_in", "place", "Bonn") in record.claims
+
+
+def test_an_unknown_value_place_is_not_a_place() -> None:
+    genid = "http://www.wikidata.org/.well-known/genid/fe048b58a583dff76d1ac48db02c39be"
+    (record,) = _records_from_rows([row("Q255", "L", deathPlace=genid, deathPlaceLabel=genid)])
+    assert not [c for c in record.claims if c.predicate == "died_in"]
+
+
+def test_genres_are_pinned_once_alongside_places() -> None:
+    """Genres are pinned through ``ITEM_FIELDS`` (#349), places through the
+    pins; the two don't double up a genre claim."""
+    (record,) = _records_from_rows([row("Q255", "L", genre=entity("Q1344"), genreLabel="opera")])
+    assert [c for c in record.claims if c.predicate == "has_genre"] == [
+        SourceClaim("has_genre", "genre", "opera", object_wikidata_id="Q1344")
+    ]
 
 
 def test_metrics_become_literal_claims_and_land_in_raw() -> None:

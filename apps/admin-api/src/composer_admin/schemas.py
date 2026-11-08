@@ -32,6 +32,9 @@ class ScraperOut(BaseModel):
     cadence: str  # yearly | static (weekly | monthly unused by the adapters)
     due: bool  # raw data stale enough to be worth re-fetching now
     last_snapshot: SnapshotOut | None
+    # Every snapshot still marked running, oldest first. Usually empty or just the
+    # last one; an older entry is a killed fetch that still blocks new ones.
+    running_snapshots: list[SnapshotOut]
 
 
 class FetchStarted(BaseModel):

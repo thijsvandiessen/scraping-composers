@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 import pytest
 from composer_scrapers.wienerphil.details import ConcertDetail
@@ -12,6 +13,7 @@ from composer_scrapers.wienerphil.dropdowns import (
     VENUES,
     WORKS,
     composer_record,
+    credited,
     performer_record,
     vocabularies,
 )
@@ -213,6 +215,38 @@ def test_vocabularies_are_read_once_each() -> None:
     # the mobile copy of the composer filter must not double the list
     assert vocabulary[COMPOSERS] == ["Ludwig van Beethoven", "Arnold Schönberg"]
     assert vocabulary[PERFORMERS] == ["Otto Nicolai", "Jenny Lutzer", "Vienna Philharmonic"]
+
+
+def test_a_compound_composer_entry_names_each_person() -> None:
+    # an arrangement credits arranger and original together, in no fixed order
+    assert credited("Franz Liszt, Franz Schubert") == ("Franz Liszt", "Franz Schubert")
+    assert credited("Eduard Strauß, Josef Strauß, Johann Strauß II.") == (
+        "Eduard Strauß",
+        "Josef Strauß",
+        "Johann Strauß II.",
+    )
+    assert credited("Richard Wagner, Richard Wagner") == ("Richard Wagner",)
+
+
+def test_a_comma_before_a_suffix_does_not_split_a_name() -> None:
+    assert credited("Josef Hellmesberger, Jr.") == ("Josef Hellmesberger, Jr.",)
+    assert credited("Ludwig van Beethoven") == ("Ludwig van Beethoven",)
+
+
+def test_a_work_credited_to_several_composers_is_attributed_to_none() -> None:
+    concert = replace(
+        parsed()[0],
+        programme=(
+            ("Franz Liszt, Franz Schubert", "Die Allmacht, Fassung von Liszt"),
+            ("Richard Wagner, Richard Wagner", "Tannhäuser, Ouvertüre und Bacchanal"),
+        ),
+    )
+    arranged, repeated = mentions(concert)
+    # which of the two is the arranger the credit does not say
+    assert arranged.composer is None
+    assert arranged.raw["composer"] == "Franz Liszt, Franz Schubert"
+    # a credit that names one person twice still names that person
+    assert repeated.composer == "Richard Wagner"
 
 
 def test_composer_record_claims_the_profession() -> None:

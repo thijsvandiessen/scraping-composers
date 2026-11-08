@@ -7,6 +7,7 @@ consumer API (``/v1``).
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -169,6 +170,21 @@ class DataAPI(_BaseAPI):
         params = filters.add_to({"page": page, "limit": limit, "sort": sort})
         return self._json_dict("GET", f"/v1/{role}", params=params)
 
+    def list_ensembles(
+        self,
+        filters: Filters = NO_FILTERS,
+        anchored: bool | None = None,
+        page: int = 1,
+        limit: int = 20,
+        sort: str = "label",
+    ) -> dict[str, Any]:
+        """Ensembles with type and home city; ``anchored=False`` keeps the ones
+        no Wikidata item accounts for."""
+        params = filters.add_to({"page": page, "limit": limit, "sort": sort})
+        if anchored is not None:
+            params["anchored"] = "true" if anchored else "false"
+        return self._json_dict("GET", "/v1/ensembles", params=params)
+
     def person_concerts(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
         params = {"page": page, "limit": limit}
         return self._json_dict("GET", f"/v1/people/{person_id}/concerts", params=params)
@@ -177,7 +193,7 @@ class DataAPI(_BaseAPI):
         params = filters.add_to({"page": page, "limit": limit})
         return self._json_dict("GET", "/v1/concerts", params=params)
 
-    def get_concert(self, concert_id: int) -> dict[str, Any]:
+    def get_concert(self, concert_id: uuid.UUID) -> dict[str, Any]:
         return self._json_dict("GET", f"/v1/concerts/{concert_id}")
 
     def person_recordings(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
@@ -190,7 +206,7 @@ class DataAPI(_BaseAPI):
         params = filters.add_to({"page": page, "limit": limit})
         return self._json_dict("GET", "/v1/recordings", params=params)
 
-    def get_recording(self, recording_id: int) -> dict[str, Any]:
+    def get_recording(self, recording_id: uuid.UUID) -> dict[str, Any]:
         return self._json_dict("GET", f"/v1/recordings/{recording_id}")
 
     def list_works(

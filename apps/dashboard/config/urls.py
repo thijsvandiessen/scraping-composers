@@ -9,6 +9,11 @@ urlpatterns = [
     path("admin/scrapers/", admin.site.admin_view(views.index), name="scrapers_index"),
     path("admin/scrapers/fetch-due", admin.site.admin_view(views.fetch_due), name="fetch_due"),
     path("admin/scrapers/<str:name>/fetch", admin.site.admin_view(views.start_fetch), name="start_fetch"),
+    path(
+        "admin/scrapers/<str:source>/<str:snapshot_id>/abandon",
+        admin.site.admin_view(views.abandon_snapshot),
+        name="abandon_snapshot",
+    ),
     path("admin/load/", admin.site.admin_view(views.load_index), name="load_index"),
     path("admin/promote/", admin.site.admin_view(views.promote_page), name="promote"),
     path("admin/promote/start", admin.site.admin_view(views.start_promote), name="start_promote"),
@@ -40,6 +45,7 @@ urlpatterns = [
         admin.site.admin_view(views.entities),
         name="entities_by_kind",
     ),
+    path("admin/data/ensembles/", admin.site.admin_view(views.ensembles), name="ensembles"),
     path("admin/data/works/", admin.site.admin_view(views.works), name="works"),
     path("admin/data/gold/works/", admin.site.admin_view(views.gold_works), name="gold_works"),
     path(
@@ -50,13 +56,13 @@ urlpatterns = [
     path("admin/data/review/", admin.site.admin_view(views.review), name="review"),
     path("admin/data/concerts/", admin.site.admin_view(views.concerts_list), name="concerts_list"),
     path(
-        "admin/data/concerts/<int:concert_id>/",
+        "admin/data/concerts/<uuid:concert_id>/",
         admin.site.admin_view(views.concert_detail),
         name="concert_detail",
     ),
     path("admin/data/recordings/", admin.site.admin_view(views.recordings_list), name="recordings_list"),
     path(
-        "admin/data/recordings/<int:recording_id>/",
+        "admin/data/recordings/<uuid:recording_id>/",
         admin.site.admin_view(views.recording_detail),
         name="recording_detail",
     ),

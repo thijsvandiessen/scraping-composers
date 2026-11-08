@@ -8,7 +8,7 @@ from composer_gold import promote
 from composer_models.db import init_db
 from composer_schema import SourceClaim
 from composer_warehouse.concerts import derive_concerts
-from composer_warehouse.testing import FakeSource, ingest_source, perf_mention, person
+from composer_warehouse.testing import FakeSource, genre, ingest_source, perf_mention, person
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -67,6 +67,7 @@ def _seed_silver(session: Session) -> None:
                 SourceClaim("program_count", value="12"),
                 SourceClaim("statement_count", value="40"),
                 SourceClaim("student_of", "person", "Mengelberg, Willem"),
+                SourceClaim("has_genre", "genre", "waltz", object_wikidata_id="Q215"),
                 external_id="a:beinum",
             ),
             person("Mengelberg, Willem", external_id="a:mengelberg"),
@@ -76,6 +77,13 @@ def _seed_silver(session: Session) -> None:
         base_url="https://archive.example",
     )
     ingest_source(session, archive)
+    ingest_source(
+        session,
+        FakeSource(
+            records=(genre("Q215", "waltz", ("Q316930", "dance music")), genre("Q316930", "dance music")),
+            name="wikidata_genres",
+        ),
+    )
     derive_concerts(session)
     session.commit()
 

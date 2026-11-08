@@ -300,6 +300,39 @@ def _wikidata(label: str, qid: str, *claims: SourceClaim) -> EntityDocument:
     return person(label, *claims, external_id=qid, url=f"https://www.wikidata.org/wiki/{qid}")
 
 
+def test_the_authority_anchored_member_is_canonical_over_a_fuller_name(session: Session) -> None:
+    """#379: catalogue links pulled "Wolfgang Amadeus A. Mozart" into Mozart's
+    cluster, and its extra initial made it the fullest name there. Gold shows
+    the canonical's label, so the Q254 entity has to win however it is spelled."""
+    _ingest(
+        session,
+        _wikidata("Wolfgang Amadeus Mozart", "Q254", *_dates("1756-01-27", "1791-12-05")),
+        person("Wolfgang Amadeus A. Mozart", *_dates("1756", "1791")),
+        *_crowd(),
+    )
+    dedupe_persons(session)
+
+    people = _by_label(session)
+    canonical = people["Wolfgang Amadeus Mozart"]
+    assert canonical.canonical_entity_id is None
+    assert people["Wolfgang Amadeus A. Mozart"].canonical_entity_id == canonical.id
+
+
+def test_without_an_anchor_the_member_with_more_sources_is_canonical(session: Session) -> None:
+    """Below the authorities, corroboration outranks spelling: the name two
+    sources agree on beats a fuller one only a single source wrote."""
+    corroborated = person("Mozart, Wolfgang Amadeus", *_dates("1756", "1791"))
+    for name in ("one", "two"):
+        ingest_source(session, FakeSource(records=(corroborated,), name=name))
+    _ingest(session, person("Mozart, Wolfgang Amadeus Chrysostomus", *_dates("1756", "1791")), *_crowd())
+    dedupe_persons(session)
+
+    people = _by_label(session)
+    canonical = people["Mozart, Wolfgang Amadeus"]
+    assert canonical.canonical_entity_id is None
+    assert people["Mozart, Wolfgang Amadeus Chrysostomus"].canonical_entity_id == canonical.id
+
+
 def test_distinct_qids_are_not_merged(session: Session) -> None:
     """The #204 defect: 862 clusters spanned two or more QIDs.
 

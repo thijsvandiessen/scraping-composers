@@ -56,6 +56,7 @@ from composer_schema.kinds import looks_like_ensemble
 
 from .. import SourceWorkMention
 from .details import ConcertDetail
+from .dropdowns import credited
 from .fetch import BASE_URL
 
 log = logging.getLogger(__name__)
@@ -294,12 +295,17 @@ def mentions(concert: Concert) -> Iterator[SourceWorkMention]:
     The concert-level fields are repeated on every work because that is what the
     warehouse groups on: :mod:`composer_warehouse.concerts.derive` rebuilds a
     concert from the payloads of its mentions.
+
+    A work credited to several composers is attributed to none of them: the
+    credit gives original and arranger in no fixed order, and a wrong composer
+    is worse than a missing one. ``raw["composer"]`` keeps the credit as given.
     """
     for index, (composer, title) in enumerate(concert.programme):
+        named = credited(composer) if composer else ()
         yield SourceWorkMention(
             external_id=f"perf:{concert.concert_id}:{index}",
             title=title,
-            composer=composer,
+            composer=named[0] if len(named) == 1 else None,
             raw={
                 "concert_id": concert.concert_id,
                 "url": concert.url,
