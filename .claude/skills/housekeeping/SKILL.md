@@ -16,7 +16,9 @@ Use `--jq` to keep only the fields you need, so listings stay small.
 ## 1. Open PRs
 
 For each open PR, check CI on the head commit, mergeable state and reviews.
-Put it in one bucket:
+`mergeable` comes back `null` (state `unknown`) until GitHub has computed it,
+usually on the first read after `main` moves; query that PR again before
+bucketing it. Put it in one bucket:
 
 - **Stuck bump**: a Dependabot PR open for more than a day. Minor and patch
   bumps auto-merge (`.github/workflows/dependabot-auto-merge.yml`), so say
@@ -48,8 +50,10 @@ Dependabot handles updates (`.github/dependabot.yml`).
   They cover more than the audits: dev and transitive dependencies, and
   every lockfile in the repo, including ones CI never installs from. For an
   alert in a lockfile nothing uses, say so: the fix is deleting the file.
-  If this one call is refused (it needs Dependabot alerts read access),
-  say so in the report and carry on with the rest.
+  If this one call is refused (it needs Dependabot alerts read access; cloud
+  sessions get "Resource not accessible by integration"), say so in the
+  report and carry on with the rest. Then nothing has audited a lockfile CI
+  never installs from, so say that in its line too.
 - For each advisory or alert: package, advisory id, severity, fixed version,
   the lockfile, and whether an open Dependabot PR already bumps it.
 - List any bump PR closed without merging in the past week.
@@ -70,7 +74,10 @@ it, then look for merged PRs and commits that mention it (`git log --grep`,
 check whether the code it describes still exists and still behaves that way.
 Start by checking that the packages and files the issue names still exist
 (`ls packages apps`); an issue about a removed package is obsolete.
-Put it in one bucket, with the evidence (PR, commit or `file:line`):
+An issue an open PR closes (`Fixes #<n>` in its body, or the issue number in
+its branch name) goes under that PR's bucket, not here: name the issue in the
+PR's line. Put every other issue in one bucket, with the evidence (PR, commit
+or `file:line`):
 
 - **Done**: all of it is on `main`; can be closed.
 - **Partly done**: a short checklist of what's done and what's left.
