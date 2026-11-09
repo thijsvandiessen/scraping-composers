@@ -1,5 +1,6 @@
 """Tests for extracting structured features from raw work titles."""
 
+import pytest
 from composer_warehouse.works.extract import extract_features
 
 
@@ -85,6 +86,61 @@ def test_german_title_number_and_key() -> None:
     assert f.work_type == "symphony"
     assert f.number == 5
     assert f.musical_key == "c minor"
+
+
+@pytest.mark.parametrize(
+    ("title", "key"),
+    [
+        ("Sinfonie Nr. 5 Es-Dur", "e flat major"),
+        ("Klavierkonzert fis-Moll", "f sharp minor"),
+        ("Sinfonie Nr. 4 B-Dur", "b flat major"),  # German B is B flat ...
+        ("Messe h-Moll, BWV 232", "b minor"),  # ... and H is B natural
+        ("Streichquartett cis-moll", "c sharp minor"),
+        ("Klaviertrio As-Dur", "a flat major"),
+        ("Sonate E-Dur", "e major"),
+    ],
+)
+def test_german_keys_keep_their_accidentals(title: str, key: str) -> None:
+    assert extract_features(title).musical_key == key
+
+
+def test_german_and_english_spellings_of_a_key_agree() -> None:
+    assert extract_features("Messe h-Moll").musical_key == extract_features("Mass in B minor").musical_key
+    assert (
+        extract_features("Sinfonie Es-Dur").musical_key
+        == extract_features("Symphony in E-flat major").musical_key
+    )
+
+
+def test_a_german_spelling_outside_the_notation_has_no_key() -> None:
+    assert extract_features("Sonate hes-Dur").musical_key is None
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Symphonie n° 5 en ut mineur",
+        "Sinfonia n. 5 in do minore",
+        "Symfonie nr. 5 in c klein",
+        "Sinfonía n.º 5 en do menor",
+        "Симфония № 5 до минор, соч. 67",
+        "Concerto for piano 4 hands",
+        "Sonate pour piano à 4 mains",
+        "Konzert für Klavier zu 4 Händen",
+        "Fantasia in fa minore",
+        "Concerto in a groot",
+        "Mass in B",
+        "Casino 3",
+    ],
+)
+def test_a_title_the_parser_does_not_understand_yields_no_wrong_values(title: str) -> None:
+    # A missing value is neutral to the matcher; a wrong one pulls unrelated works
+    # together. So whatever the language, a feature is either right or absent:
+    # none of these titles is in some other key, and none is No. 3 or No. 4.
+    f = extract_features(title)
+    assert f.musical_key is None
+    assert f.number in {None, 5}
+    assert f.opus_number in {None, "67"}
 
 
 def test_opus_with_sub_number() -> None:
