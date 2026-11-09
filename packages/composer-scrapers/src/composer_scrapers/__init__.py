@@ -55,6 +55,8 @@ class SourceRecord:
     raw: dict[str, Any]
     kind: str = "person"
     claims: tuple[SourceClaim, ...] = ()
+    #: the language the source states for ``name`` (see ``ScrapedDocument``)
+    language: str | None = None
 
 
 @dataclass(frozen=True)

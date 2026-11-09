@@ -80,9 +80,38 @@ _DERIVATION_CUES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 _OPUS = re.compile(r"\bop(?:us|\.)?\s*(\d+)\s*(?:(?:no|nr|n°|n)\.?\s*(\d+))?", re.I)
-_NUMBER = re.compile(r"(?:no|nr|n°)\.?\s*(\d+)", re.I)
+# The word boundary keeps "piano 4 hands" and "casino 3" from reading as No. 4 / No. 3.
+_NUMBER = re.compile(r"\b(?:no|nr|n°)\.?\s*(\d+)", re.I)
 _KEY_EN = re.compile(r"\bin\s+([a-g])(?:[-\s]+(sharp|flat))?[-\s]+(major|minor)\b", re.I)
-_KEY_DE = re.compile(r"\b([a-h])(?:is|es|s)?-(dur|moll)\b", re.I)
+_KEY_DE = re.compile(r"\b([a-h](?:is|es|s)?)-(dur|moll)\b", re.I)
+
+# German pitch names, a closed set of notation rather than vocabulary: "-is"
+# sharpens, "-es" (or "-s" after a vowel) flattens, H is B natural and B is B
+# flat. A spelling outside this table ("hes", "ees") is not read as some other
+# key: the title then has no key, which the matcher treats as no evidence.
+_GERMAN_PITCHES: dict[str, tuple[str, str | None]] = {
+    "c": ("c", None),
+    "cis": ("c", "sharp"),
+    "ces": ("c", "flat"),
+    "d": ("d", None),
+    "dis": ("d", "sharp"),
+    "des": ("d", "flat"),
+    "e": ("e", None),
+    "eis": ("e", "sharp"),
+    "es": ("e", "flat"),
+    "f": ("f", None),
+    "fis": ("f", "sharp"),
+    "fes": ("f", "flat"),
+    "g": ("g", None),
+    "gis": ("g", "sharp"),
+    "ges": ("g", "flat"),
+    "a": ("a", None),
+    "ais": ("a", "sharp"),
+    "as": ("a", "flat"),
+    "h": ("b", None),
+    "his": ("b", "sharp"),
+    "b": ("b", "flat"),
+}
 
 _TYPES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("symphony", ("symphony", "symphonie", "sinfonie", "sinfonia")),
@@ -181,9 +210,9 @@ def _find_key(text: str, spans: list[tuple[int, int]]) -> str | None:
         spans.append(key_m.span())
         return _normalize_key(key_m.group(1), key_m.group(2), key_m.group(3))
     key_m = _KEY_DE.search(text)
-    if key_m:
+    if key_m and (pitch := _GERMAN_PITCHES.get(key_m.group(1).lower())):
         spans.append(key_m.span())
-        return _normalize_key(key_m.group(1), None, key_m.group(2))
+        return _normalize_key(*pitch, key_m.group(2))
     return None
 
 

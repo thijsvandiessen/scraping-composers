@@ -39,7 +39,8 @@ log's tail is usually checkout cleanup, not the failure.
 Dependabot handles updates (`.github/dependabot.yml`).
 
 - Run the dependency audit from `CLAUDE.md`, and `npm audit --omit=dev` in
-  `apps/frontend` after `npm ci`.
+  `apps/frontend` after `npm ci` (run it in the background: it exceeds the
+  120 s tool timeout).
   Also run `git ls-files | grep -E 'lock'`: a lockfile CI never installs from
   (e.g. `pnpm-lock.yaml` beside an `npm ci` workflow) is worth a line.
 - List the open Dependabot alerts
@@ -56,14 +57,13 @@ Dependabot handles updates (`.github/dependabot.yml`).
 ## 3. Open issues
 
 List open issues with `gh api --paginate repos/{owner}/{repo}/issues` and
-drop entries with a `pull_request` key. Write
-  the bodies file in the first pass (`--jq` with `.body[0:1800]`) so the
-  subagent can start straight away, and give it every issue number so none are
-  silently skipped; check its report covers them all. Keep only number, title and
-`updated_at` first; a listing with bodies overflows the tool output (100k+
-characters at 30 issues). With more than about ten issues, write the
-bodies to a file and hand it to a subagent to triage; otherwise read each
-with `gh api .../issues/<n>`. The cloud checkout is shallow, so run
+drop entries with a `pull_request` key. Keep only number, title and
+`updated_at` in the first listing: with bodies it overflows the tool output
+(100k+ characters at 30 issues). With more than about ten issues, write the
+bodies to a file in a second pass (`--jq` with `.body[0:1800]`) and hand it to
+a subagent to triage, giving it every issue number so none are silently
+skipped; check its report covers them all. Otherwise read each with
+`gh api .../issues/<n>`. The cloud checkout is shallow, so run
 `git fetch --unshallow` before searching history. For each open issue, read
 it, then look for merged PRs and commits that mention it (`git log --grep`,
 `gh api 'search/issues?q=repo:{owner}/{repo}+is:pr+is:merged+<n>'`) and

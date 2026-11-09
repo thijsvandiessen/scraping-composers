@@ -33,7 +33,7 @@ from composer_http import SourceSession
 from composer_schema import CLASSICAL_NAME_CUES, ensemble_type_from_name
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
-from .parse import _BARE_QID, BASE_URL, _literal
+from .parse import _BARE_QID, BASE_URL, _language, _literal
 from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
 
 log = logging.getLogger(__name__)
@@ -315,6 +315,7 @@ def _fold_ensemble_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
             _qid(row),
             {
                 "label": _literal(row, "itemLabel") or "",
+                "language": _language(row, "itemLabel"),
                 "classes": set(),
                 "names": set(),
                 "labels": {},
@@ -355,15 +356,16 @@ def ensemble_type(classes: set[str], label: str, names: Iterable[str] = ()) -> s
     return next((t for t in (*TYPE_PRIORITY, "band") if t in from_names), "other")
 
 
-def _display_label(item: dict[str, Any]) -> str | None:
+def _display_label(item: dict[str, Any]) -> tuple[str, str | None] | None:
     """The en/mul label the label service gave, else the label in the first of
     ``NAME_LANGUAGES`` the item has one in (a third of the items have names
-    only in German, French, Czech, ..., #363), else None."""
+    only in German, French, Czech, ..., #363), else None -- with the language
+    of whichever was picked."""
     label: str = item["label"]
     if label and not _BARE_QID.match(label):
-        return label
+        return label, item["language"]
     labels: dict[str, str] = item["labels"]
-    return next((labels[lang] for lang in NAME_LANGUAGES if lang in labels), None)
+    return next(((labels[lang], lang) for lang in NAME_LANGUAGES if lang in labels), None)
 
 
 def _distinct_names(label: str, names: set[str]) -> list[str]:
@@ -386,10 +388,11 @@ def _documents_from_rows(
     ``raw``."""
     documents: list[EntityDocument] = []
     for qid, item in _fold_ensemble_rows(rows).items():
-        label = _display_label(item)
-        if label is None:
+        display = _display_label(item)
+        if display is None:
             log.debug("skipping %s: no label", qid)
             continue
+        label, language = display
         kind_of = ensemble_type(item["classes"], label, item["names"])
         claims = [SourceClaim("ensemble_type", value=kind_of)]
         # several headquarters are rare; the lowest QID is the stable pick
@@ -413,6 +416,7 @@ def _documents_from_rows(
                 ingested_at=ingested_at,
                 name=label,
                 kind="ensemble",
+                language=language,
                 raw={
                     "item": f"http://www.wikidata.org/entity/{qid}",
                     "label": label,

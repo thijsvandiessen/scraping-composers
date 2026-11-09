@@ -169,6 +169,12 @@ def test_list_sources_enumerates_bucket_dirs(tmp_path: Path) -> None:
     assert LocalBucket(tmp_path / "missing").list_sources() == []
 
 
+def test_repr_names_the_absolute_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Errors name the bucket by its repr; a relative root must say where it resolved."""
+    monkeypatch.chdir(tmp_path)
+    assert repr(LocalBucket("raw-data")) == f"LocalBucket({str(tmp_path / 'raw-data')!r})"
+
+
 def test_all_document_run_ids_includes_failed_excludes_running_and_pages(tmp_path: Path) -> None:
     bucket = LocalBucket(tmp_path)
     _complete(bucket, "henle", "2026-01-01T00:00:00-docs-1", {"_type": "entity", "id": "1"})

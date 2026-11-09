@@ -9,47 +9,139 @@ composer-ingest person-train --dataset-out packages/composer-warehouse/tests/dat
 composer-ingest person-eval packages/composer-warehouse/tests/data/person_eval_pairs.jsonl.gz
 ```
 
-Fitted 2026-08-25 against `composers.db` (211,153 person entities, 1,969,041
-candidate pairs after surname blocking).
+Fitted 2026-11-08 against `composers.db` (290,608 person entities, 3,416,675
+candidate pairs after surname blocking), after #202 split the surname-only
+given-name level in two.
 
 ## Results
 
-Held-out test split, 28,649 labelled pairs. "Names only" hides the birth and
+Held-out test split, 31,986 labelled pairs. "Names only" hides the birth and
 death years from the scorer but keeps the term-frequency adjustment.
 
 | scorer | threshold | precision | recall | F1 | false positives |
 |---|---|---|---|---|---|
-| Fellegi-Sunter | 0.99 | **0.978** | **0.793** | 0.876 | 65 |
-| Fellegi-Sunter, names only | 0.99 | 0.898 | 0.293 | 0.441 | 122 |
-| pre-#173 scorer (baseline) | 0.90 | 0.782 | 0.778 | 0.780 | 798 |
-| pre-#173 scorer, names only | 0.90 | 0.176 | 0.778 | 0.287 | 13,380 |
+| Fellegi-Sunter | 0.99 | **0.991** | **0.796** | 0.883 | 51 |
+| Fellegi-Sunter, names only | 0.99 | 0.932 | 0.282 | 0.433 | 145 |
+| pre-#173 scorer (baseline) | 0.90 | 0.841 | 0.793 | 0.816 | 1,048 |
+| pre-#173 scorer, names only | 0.90 | 0.244 | 0.793 | 0.373 | 17,232 |
 
 The model beats the baseline on precision *and* recall at once, cutting false
-positives by 92%. The names-only rows are the sharper comparison, because the
-labels there are independent of everything the scorer can see: 0.898 against
-0.176 is the size of the defect #173 reported.
+positives by 95%. The names-only rows are the sharper comparison, because the
+labels there are independent of everything the scorer can see: 0.932 against
+0.244 is the size of the defect #173 reported. Splitting the surname-only level
+changed none of the overall figures: the same code with the old single null
+level, refitted on the same corpus, scores 0.9909 / 0.7960 at 0.99 and
+0.880 / 0.876 at 0.50, identical to three places.
 
-Run over the whole warehouse, the pass now auto-links **15,826** pairs where
-the old scorer linked 364,389 — and none of them on initials alone, which
-accounted for 340,650 of the old total. Another 13,405 land in the review
-queue.
+On the 2026-08-25 database the pass auto-linked **15,826** pairs where the
+old scorer linked 364,389 — and none of them on initials alone, which
+accounted for 340,650 of the old total. Another 13,405 landed in the review
+queue. For the 2026-11-08 figures see "Surname-only pairs" below.
 
 Operating points on the full model, for choosing a different cut-point:
 
 | threshold | precision | recall |
 |---|---|---|
-| 0.50 | 0.773 | 0.849 |
-| 0.90 | 0.911 | 0.836 |
-| 0.95 | 0.927 | 0.811 |
-| 0.99 | 0.978 | 0.793 |
-| 0.995 | 0.987 | 0.778 |
-| 0.999 | 0.994 | 0.715 |
-| 0.9999 | 1.000 | 0.675 |
+| 0.50 | 0.880 | 0.876 |
+| 0.90 | 0.953 | 0.850 |
+| 0.95 | 0.965 | 0.822 |
+| 0.99 | 0.991 | 0.796 |
+| 0.995 | 0.993 | 0.772 |
+| 0.999 | 0.997 | 0.705 |
+| 0.9999 | 1.000 | 0.646 |
 
 `AUTO_THRESHOLD = 0.99` is the point where the model dominates the old scorer
 on both axes; `REVIEW_THRESHOLD = 0.50` catches the rest for `person-review`.
-Raise the auto cut-point to 0.999 if 99% precision is wanted and a third of
-the true links can wait in the review queue.
+Neither applies to a surname-only pair, which has its own policy below.
+
+## Surname-only pairs (#202)
+
+A record that is nothing but a surname ("Mozart", "Brahms") used to land on a
+single `ABSENT` given-name level that was the column's null level: zero bits,
+so with no years either the pair scored the prior plus the surname's rarity,
+and 1,617 of the 1,749 bare surnames sharing a block with a full name had no
+`person_matches` row at all. The level is now two, both fitted like any other:
+
+| level | meaning | weight |
+|---|---|---|
+| `ONE_SURNAME_ONLY` | one side bare, the other has given names | -0.13 bits |
+| `BOTH_SURNAME_ONLY` | neither side has given names | +0.21 bits |
+
+The fit says what intuition does: a bare surname, on its own, is no evidence
+for identity. What still moves such a pair is the surname's rarity
+(`tf_bits`) and any years.
+
+They are kept out of the prior's moment bound (`training.PRIOR_LEVELS`):
+whether a record has given names at all is not distributed alike over random
+and blocked pairs, matches or not, so the prior is recovered from the four
+levels that compare two given-name sequences, exactly as before.
+
+### Precision and recall, by surname rarity
+
+`ONE_SURNAME_ONLY` pairs in the held-out split (1,725 rows standing for 374
+matches and 22,166 non-matches after reweighting), cut by the posterior.
+Rarity is the size of the surname's block.
+
+| cut | all P / R | block <= 5 | 6-20 | 21-100 | > 100 |
+|---|---|---|---|---|---|
+| 0.03 | 0.396 / 0.532 | 0.257 / 0.506 | 0.701 / 0.848 | 0.269 / 0.355 | 0 / 0 (37 fp) |
+| **0.04** | **0.425 / 0.508** | 0.257 / 0.506 | 0.701 / 0.848 | 0.289 / 0.258 | 0 / 0 (21 fp) |
+| 0.05 | 0.472 / 0.487 | 0.283 / 0.506 | 0.701 / 0.848 | 0.432 / 0.172 | 0 / 0 (21 fp) |
+| 0.10 | 0.408 / 0.353 | 0.283 / 0.506 | 0.651 / 0.600 | 0.118 / 0.022 | 0 / 0 (21 fp) |
+| 0.50 | 0.163 / 0.056 | 0.200 / 0.165 | 0.238 / 0.034 | 0.118 / 0.022 | 0 / 0 (21 fp) |
+| 0.99 | 1.000 / 0.016 | 1.000 / 0.047 | 1.000 / 0.014 | — | — |
+
+The labelled stratum flatters these numbers. Its matches are `alias_identity`
+rows (wikidata listing the bare name as an alias of one item), and the
+namesakes the same bare record faces are mostly unlabelled. A label-free bound
+over *every* candidate pair says more: a bare record whose candidates above the
+cut carry `k` distinct QIDs is right about at most one of those `k` people.
+
+| cut | bare records | pairs | facing >= 2 QIDs | precision at most |
+|---|---|---|---|---|
+| 0.04 | 1,731 | 8,701 | 794 | 0.632 |
+| 0.10 | 1,441 | 4,208 | 523 | 0.712 |
+| 0.50 | 49 | 52 | 1 | 0.981 |
+| 0.99 | 8 | 9 | 0 | 1.000 |
+
+### Policy
+
+- **Never auto-linked.** Nowhere is precision clearly high except at 0.99,
+  where the measurement rests on six held-out pairs and recall is 1.6%. Every
+  namesake in a block scores alike against a bare surname, so a link would be
+  a guess between them. `classify` sends a surname-only pair to review
+  whatever its score.
+- **Queued from `SURNAME_ONLY_REVIEW_THRESHOLD = 0.04`**, measured precision
+  0.425 at recall 0.508 on the held-out split. Precision is flat to within
+  five points between 0.03 and 0.05 (it peaks at 0.05, 0.472), and 0.04 is
+  the highest cut at which `Mozart` -> `Mozart, Wolfgang Amadeus` (0.0486)
+  reaches a decision. Above 100 namesakes nothing is right at any cut.
+- **A bare alias does not count for a record that has given names.** A bare
+  surname cannot conflict, so "Leopold Mozart" with the alias "Mozart" would
+  otherwise beat his own given-name conflict against Wolfgang Amadeus.
+- **No record joins two namesakes' authority items.** Separately from the
+  score, a record whose machine links reach two distinct, uncorroborated QIDs
+  or MusicBrainz ids it holds none of (an undated "Johann Strauss" against
+  Johann Strauss I, II and III) has every machine link sent back to review
+  (`dedupe._demote_ambiguous_links`), rather than joining whichever scored
+  highest. The cannot-links still keep the items apart as before.
+
+Run on a copy of the 2026-11-08 database (`dedupe-persons --reset`):
+
+| | before | after |
+|---|---|---|
+| bare surnames sharing a block with a full name | 1,749 | 1,749 |
+| ... with no `person_matches` row | 1,617 | **206** |
+| ... linked | 34 | 17 |
+| auto_linked / needs_review | 25,781 / 23,096 | 26,835 / 30,422 |
+| `given:one_surname_only` in review | — | 9,053 |
+| links held back as ambiguous between namesakes | — | 476 |
+| surname-only auto-links | — | 0 |
+
+"Before" is the live database, from the pass the previous model ran; "after"
+is the refit model and this policy on a copy of it. Fewer bare surnames are
+linked because none is auto-linked on its surname any more; the review queue
+now holds them instead.
 
 ## What the authority ids refuse
 

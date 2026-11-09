@@ -34,7 +34,7 @@ uv run --directory apps/cli pytest --rootdir . --cov=composer_cli
 | Area | Covers |
 | --- | --- |
 | Queries | `claims` (per-source attribution, filters, record provenance, collapsing repeats, unknown names), `stats` (empty, entities, works, person dedupe counts), `runs` (and the rows only failed runs saw), `works`, `ensembles` (all, and `--unanchored`). |
-| Ingest | `fetch` → `process` round trip, a failing source, `process` loading every loadable run, no runs to load, `anchor-ensembles`, `derive-concerts`, and `rebuild-silver` (every bucket source, rejecting a URL with nothing to swap). |
+| Ingest | `fetch` → `process` round trip, a failing source, `process` loading every loadable run, no runs to load, `anchor-ensembles`, `derive-concerts`, and `rebuild-silver` (every bucket source, rejecting a URL with nothing to swap, refusing an empty bucket with silver left as it was). |
 | Works | `review` listing and `--new`, `rematch` (including a source's structured catalogue field), `work-identity` shares per source. |
 | Genres | `link-genres` linking a label-only genre, `genres` printing the counts, the orphan and musical-form counts and the share of tags reached for one kind, and `main` routing `genres` to both kinds. |
 | People | `dedupe-persons` (links, reviews, refused merges, `--reset`, `--recluster-only`), `person-review` accept and reject, `person-train` (model and dataset written, no dataset unless asked), `person-eval`. |

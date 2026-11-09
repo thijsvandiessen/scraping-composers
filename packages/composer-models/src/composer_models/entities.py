@@ -50,6 +50,8 @@ class EntityRecord(Base):
     entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
     external_id: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
+    # the language tag the source states for ``name``; None when it states none
+    language: Mapped[str | None] = mapped_column(String(35))
     url: Mapped[str | None] = mapped_column(Text)
     raw: Mapped[str] = mapped_column(Text)  # original payload as JSON
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
