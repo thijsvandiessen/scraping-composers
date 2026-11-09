@@ -23,7 +23,7 @@ from composer_http import SourceSession
 from composer_schema.premiere import PREMIERE_KEY, supersedes
 
 from .. import HttpSourceAdapter, RefreshCadence, WorkMentionDocument
-from .parse import _BARE_QID, BASE_URL, _format_time, _literal
+from .parse import _BARE_QID, BASE_URL, _format_time, _language, _literal
 from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
 
 log = logging.getLogger(__name__)
@@ -84,7 +84,14 @@ def _fold_work_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     for row in rows:
         qid = _qid(row)
         work = works.setdefault(
-            qid, {"label": _literal(row, "itemLabel") or "", "composers": {}, "dates": set(), "places": set()}
+            qid,
+            {
+                "label": _literal(row, "itemLabel") or "",
+                "language": _language(row, "itemLabel"),
+                "composers": {},
+                "dates": set(),
+                "places": set(),
+            },
         )
         composer = row.get("composer") or {}
         composer_label = _literal(row, "composerLabel")
@@ -134,6 +141,7 @@ def _mentions_from_rows(rows: list[dict[str, Any]], ingested_at: datetime) -> li
                     ingested_at=ingested_at,
                     title=title,
                     composer=composer,
+                    language=work["language"],
                     raw={
                         "item": f"http://www.wikidata.org/entity/{qid}",
                         "composer_item": f"http://www.wikidata.org/entity/{composer_qid}",

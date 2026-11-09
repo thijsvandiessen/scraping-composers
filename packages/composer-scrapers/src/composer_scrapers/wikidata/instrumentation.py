@@ -60,7 +60,7 @@ from composer_schema.instrumentation import (
 )
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
-from .parse import _BARE_QID, BASE_URL, _literal
+from .parse import _BARE_QID, BASE_URL, _language, _literal
 from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
 
 log = logging.getLogger(__name__)
@@ -186,6 +186,7 @@ def scoring(parts: list[Part]) -> Scoring:
 @dataclass
 class _Work:
     label: str | None
+    language: str | None = None
     composers: dict[str, str] = field(default_factory=dict[str, str])
     parts: dict[str, Part] = field(default_factory=dict[str, Part])
 
@@ -194,7 +195,9 @@ def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, _Work]:
     """Group rows by work QID: label, composers (QID -> label), and parts by statement."""
     works: dict[str, _Work] = {}
     for row in rows:
-        work = works.setdefault(_qid(row), _Work(label=_label(row, "itemLabel")))
+        work = works.setdefault(
+            _qid(row), _Work(label=_label(row, "itemLabel"), language=_language(row, "itemLabel"))
+        )
         if (composer := _entity_qid(row, "composer")) and (name := _label(row, "composerLabel")):
             work.composers[composer] = name
         # An "unknown value" instrument is no item, and says nothing to keep.
@@ -260,6 +263,7 @@ def _documents(
             ingested_at=ingested_at,
             title=work.label,
             composer=composer,
+            language=work.language,
             raw={**raw, "composer_item": f"{ENTITY}{composer_qid}"},
         )
     claims = [_edge("composed_by", "person", name, composer_qid) for composer_qid, name in composers]
@@ -273,6 +277,7 @@ def _documents(
         # composer-qualified, as the publisher sources' work entities are
         name=f"{work.label} ({' / '.join(name for _, name in composers)})",
         kind="work",
+        language=work.language,
         raw=raw,
         claims=tuple(claims),
     )

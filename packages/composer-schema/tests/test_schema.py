@@ -1,5 +1,6 @@
 """Contract tests: refresh-cadence staleness logic and the document/adapter factories."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -87,3 +88,32 @@ def test_serialize_tags_type() -> None:
 def test_deserialize_rejects_unknown_type() -> None:
     with pytest.raises(ValueError, match="unknown _type"):
         deserialize_document({"_type": "bogus", "ingested_at": "2024-01-01T00:00:00+00:00"})
+
+
+def test_a_document_states_no_language_unless_given_one() -> None:
+    assert person("Beethoven").language is None
+    assert mention("Symphony No. 5", "Beethoven").language is None
+
+
+@pytest.mark.parametrize("tag", ["en", "de", "mul", "zh-hans", "de-ch"])
+def test_language_round_trips(tag: str) -> None:
+    for doc in (replace(person("x"), language=tag), replace(mention("t", "c"), language=tag)):
+        assert deserialize_document(serialize_document(doc)).language == tag
+
+
+def test_a_document_written_before_languages_reads_as_unknown() -> None:
+    # bronze written before the field existed has no "language" key
+    payload = serialize_document(mention("Sinfonie Nr. 5", "Beethoven"))
+    del payload["language"]
+    assert deserialize_document(payload).language is None
+
+
+@pytest.mark.parametrize("tag", ["", "EN", "english", "de_DE", "e"])
+def test_a_language_that_is_not_a_tag_is_refused(tag: str) -> None:
+    with pytest.raises(ValueError, match="not a language tag"):
+        replace(person("x"), language=tag)
+
+
+def test_language_is_keyword_only_so_positional_fields_keep_their_place() -> None:
+    doc = WorkMentionDocument("m1", None, "fake", NOW, "Symphony No. 5", "Beethoven")
+    assert (doc.title, doc.composer, doc.language) == ("Symphony No. 5", "Beethoven", None)

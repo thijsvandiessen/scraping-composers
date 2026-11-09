@@ -57,7 +57,7 @@ import httpx
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
-from .parse import _BARE_QID, BASE_URL, _literal
+from .parse import _BARE_QID, BASE_URL, _language, _literal
 from .query import (
     LABEL_LANGUAGES,
     PAGE_SIZE,
@@ -166,6 +166,7 @@ class Node:
     qid: str
     label: str
     depth: int
+    language: str | None = None
     classes: set[str] = field(default_factory=set[str])
     forms: set[str] = field(default_factory=set[str])
     aliases: set[str] = field(default_factory=set[str])
@@ -239,8 +240,11 @@ def _fetch_nodes(
     rows = _run_query(session, query, f"nodes for {len(qids)} items", mirror=True, complete=covered)
     found: dict[str, dict[str, Any]] = {}
     for row in rows:
-        node = found.setdefault(_qid(row), {"label": "", "classes": set(), "forms": set(), "aliases": set()})
-        node["label"] = node["label"] or _literal(row, "itemLabel") or ""
+        node = found.setdefault(
+            _qid(row), {"label": "", "language": None, "classes": set(), "forms": set(), "aliases": set()}
+        )
+        if not node["label"] and (label := _literal(row, "itemLabel")):
+            node["label"], node["language"] = label, _language(row, "itemLabel")
         if (cls := _uri_qid(row.get("class"))) is not None:
             node["classes"].add(cls)
         if (form := _uri_qid(row.get("form"))) is not None:
@@ -391,7 +395,17 @@ class _Walk:
             if depth > 0 and not found["classes"]:
                 log.debug("%s %s (%s): not of the kind's classes, dropped", kind, qid, label)
                 continue
-            nodes.append(Node(qid, label, depth, found["classes"], found["forms"], found["aliases"]))
+            nodes.append(
+                Node(
+                    qid,
+                    label,
+                    depth,
+                    found["language"],
+                    found["classes"],
+                    found["forms"],
+                    found["aliases"],
+                )
+            )
         if nodes:
             parents = _fetch_parents(self.session, [node.qid for node in nodes])
             for node in nodes:
@@ -439,6 +453,7 @@ class WikidataGenresAdapter(HttpSourceAdapter[EntityDocument]):
             ingested_at=ingested_at,
             name=node.label,
             kind=kind,
+            language=node.language,
             raw={
                 "item": node.qid,
                 "label": node.label,

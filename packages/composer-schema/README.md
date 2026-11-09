@@ -7,7 +7,11 @@ or the scraper stack.
 
 - `__init__.py` — `ScrapedDocument`, `EntityDocument`, `WorkMentionDocument`,
   `SourceClaim`, `SourceAdapter` and `RefreshCadence` (when a source is due
-  again), plus document serialization for the bucket.
+  again), plus document serialization for the bucket. A document's optional
+  `language` is the language tag the source *states* for its name or title
+  (a Wikidata label's `en`, `mul` or `de`), and `None` when it states none. It
+  is never guessed: a page's language says nothing about a title printed on it
+  ("Adagio in g-moll" on an English page), and titles are too short to detect.
 - `ontology.py` — the claim vocabulary. Every predicate a claim may carry is
   listed once, with the kind of object it points at (an entity kind or a
   literal), one line on what it asserts, and a theme (`life`, `relation`,
@@ -77,7 +81,7 @@ uv run --directory packages/composer-schema pytest --rootdir . --cov=composer_sc
 
 | File | Covers |
 | --- | --- |
-| `test_schema.py` | Refresh-cadence staleness (static never due, never-run always due, naive timestamps as UTC), the document factories and `FakeSource`, and serialization round-trips. |
+| `test_schema.py` | Refresh-cadence staleness (static never due, never-run always due, naive timestamps as UTC), the document factories and `FakeSource`, and serialization round-trips; a document's `language`: unknown unless given, round-tripping, unknown in bronze written before it existed, refused when it is not a language tag, and keyword-only so positional fields keep their place. |
 | `test_ontology.py` | The claim vocabulary: every predicate has a meaning and an object kind, names are unique, themes cover the vocabulary exactly once, `relation` is person-to-person, and `check_claim` rejects unknown predicates and wrong object kinds. |
 | `test_premiere.py` | The `raw["premiere"]` convention: ISO dates at year, month or day precision (BCE too), anything else ignored rather than guessed, and the precedence rule (earliest date wins, a full date refines a bare year). |
 | `test_catalogues.py` | Catalogue normalisation: K/KV as one Köchel number, sixth-edition KV6 numbers (both from `K. 183/173dB`), Scarlatti's Kirkpatrick and Longo, relatives excluded, Hoboken separators, bare letters with and without the matching composer, Liszt's S vs LW, universal catalogues, appendices, WoO, structured fields with an opus, and ranges and lists (#358): `-`/`–`/`—`/`to` alike, the same form across BWV, HWV, TWV and Hob, never the first piece, list and range agreeing, what only looks like one (a movement `BWV 825-4`, a year, `BWV 57, 8`) keeping its first number, and `catalogue_members` (oversized, backwards and hyphenated external ids refused, #378); the composer-scoped catalogues of #361 with each ambiguous letter (`H`, `B`, `F`, `Z`, `LV`, `MH`, `KK`) refused for anyone else, the Bach sons told apart, Purcell's `Z.802-811` as a set, C.P.E. Bach's numbers within a collection (`Wq 117:39`, `H 542.5`, `BR-CPEB C 48.1`), a letter that is no reference not hiding the one after it, and Wikidata codes read by their catalogue item: mapped QIDs (the Köchel editions, Helm, Terry, a code in another catalogue than its item) and the `wd:<QID>` fallback (a range kept a set, a hyphenated number not, Rinaldi's `R. op.` and `op.` no opus, `deest` nothing). The #373 review cases: the Wikidata map reusing the parser's scheme objects, a sibling catalogue's prefix in a mapped item (`Wq 117` in BR-CPEB, `Ty 238` in Warburton's) while a section that looks like one stays a section (`Fp 12`), the Köchel edition marker (`KV6`/`KV⁶`/`K6 173dB`), a bare `Anh.` as the item's appendix (`KV Anh`, `BWV Anh`, `KK Anh`, lettered `KV6 Anh`, also in a title, each in `CATALOGUE_SCHEMES`), an opus-spelled code keeping its opus, rights-society, record-label and library codes read as nothing, Hoboken dropping a work's part (`I 104.2`), the dotted part kept only for Helm, and initials standing for the given names (`C.P.E.`, `J.C.`, `W.F.`, `R.`) but never the wrong ones (`J.S.`, `J.C.F.`, `J.`). |

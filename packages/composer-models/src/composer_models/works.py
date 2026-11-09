@@ -88,6 +88,8 @@ class RawWorkMention(Base):
     external_id: Mapped[str] = mapped_column(Text)
     raw_composer: Mapped[str | None] = mapped_column(Text)
     raw_title: Mapped[str] = mapped_column(Text)
+    # the language tag the source states for ``raw_title``; None when it states none
+    language: Mapped[str | None] = mapped_column(String(35))
     raw: Mapped[str] = mapped_column(Text)  # original payload as JSON
     composer_entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("entities.id"))
     work_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, ForeignKey("works.id"))
