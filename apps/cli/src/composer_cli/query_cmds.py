@@ -16,6 +16,7 @@ from composer_models import (
 )
 from composer_models.db import get_engine, init_db
 from composer_models.normalize import dedup_key, wikidata_id
+from composer_warehouse.ingestion import unconfirmed_counts
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
 
@@ -207,4 +208,11 @@ def cmd_runs(args: argparse.Namespace) -> int:
             )
             if run.error:
                 print(f"      error: {run.error}")
+        unconfirmed = unconfirmed_counts(session)
+        if unconfirmed:
+            print(
+                "\nunconfirmed rows (only seen by failed runs; a completed run that sees them confirms them):"
+            )
+            for source_name, (records, mentions) in unconfirmed.items():
+                print(f"  {source_name:<24} {records:>7} records {mentions:>7} mentions")
     return 0

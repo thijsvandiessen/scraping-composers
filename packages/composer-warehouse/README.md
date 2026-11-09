@@ -18,7 +18,7 @@ source's protocol.
 2. **Load** — the ingest loop (`ingestion/`) opens an `IngestRun` and consumes a
    snapshot:
    - A document already known for this source — matched on
-     `(source, external_id)` — always gets its `last_seen` timestamp and run id
+     `(source, external_id)` — always gets its `last_seen` timestamp
      touched; if its content (title/composer/raw, or name/url/raw plus claims)
      differs from what's stored, that's updated too. A changed work mention is
      also re-run through the matching pipeline, so a corrected title doesn't
@@ -36,6 +36,17 @@ source's protocol.
    Existing keys are preloaded up front and commits happen in 1000-record
    batches, so the per-record loop needs no queries. A mid-run failure commits
    what was ingested so far and marks the run `failed` with partial counts.
+
+   **Run ids only advance on completion** (#195). The loop does not touch an
+   existing row's `last_run_id`; when the run completes, `ingestion/confirm.py`
+   points every row of the source it saw (`last_seen_at` at or after the run's
+   start) at it, in the same transaction that marks it `completed`. So
+   `last_run_id` is the last completed run that saw the row, and `last_seen_at`
+   still records a failed run's sighting. A row a failed run *created* keeps
+   that run's id until a completed run sees it: such rows are kept rather than
+   deleted (claims, titles and concert links point at them, and a run that loads
+   one snapshot of a source does not prove the others' rows gone), and
+   `composer-ingest runs` lists them per source (`unconfirmed_counts`).
 3. **Record** — the finished run's status, seen/new counts, and timestamps land
    in `ingest_runs` (shown by `composer-ingest runs` and the admin API).
 
@@ -345,6 +356,7 @@ factories) come from `composer_warehouse.testing`.
 | File | Covers |
 | --- | --- |
 | `test_ingest.py` | Entities, records and claims from a fake source; a second source attaching to the same entity; claim objects as deduplicated entities; QID-pinned claims; a venue keyed on its QID; `mentioned_in` URLs; 1000-record batch commits; a failing source marking the run failed; ensemble-named credits landing as ensembles. |
+| `test_ingest_confirm.py` | `last_run_id` advancing only on completion: a run failing partway leaves re-sighted rows on the last completed run and flags the rows it created, a later completed run confirms them, a row no completed run sees again stays flagged, confirmation stays within its source, and the same on Postgres. |
 | `test_ingest_reingest.py` | Re-sighted entity records: idempotency, content changes, label updates, and the `last_*` timestamps. |
 | `test_ingest_premieres.py` | A mention's world premiere carried onto its work: a new work, a later source backfilling a NULL, an earlier date winning across sources and within one run, a later one not, a full date refining a year, a corrected mention, the winning source recorded, and house premieres ignored. |
 | `test_ingest_language.py` | The language a source states stored with entity records and work mentions, and filled in on a re-sighting of a record stored without one, without re-matching the mention. |

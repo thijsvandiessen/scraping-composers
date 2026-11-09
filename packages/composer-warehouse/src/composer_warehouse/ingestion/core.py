@@ -53,7 +53,6 @@ def _ingest_work_mention(state: IngestState, item: WorkMentionDocument, now: dat
         # before sources stated one gets it, without re-matching the mention
         values: dict[str, object] = {
             "last_seen_at": now,
-            "last_run_id": state.run.id,
             "language": item.language,
         }
         if new_hash != existing_hash:
@@ -176,7 +175,6 @@ def _ingest_entity_record(state: IngestState, record: EntityDocument, now: datet
     # language outside the hash, as for mentions (see _ingest_work_mention)
     values: dict[str, object] = {
         "last_seen_at": now,
-        "last_run_id": state.run.id,
         "language": record.language,
     }
     if new_hash != existing_hash:

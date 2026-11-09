@@ -16,6 +16,9 @@ passes over it; curation happens when it is promoted into gold.
 - **`entity_records`** — raw records per source, unique on
   `(source, external_id)`. Stores the original payload as JSON plus
   `first_seen_at`/`last_seen_at` timestamps and run ids. Re-ingesting is idempotent.
+  `last_run_id` (here and on `raw_work_mentions`) is the last *completed* run
+  that saw the row; one pointing at a `failed` run marks a row only failed runs
+  have seen (see [composer-warehouse](../composer-warehouse/README.md#ingest-flow)).
   `language` is the language tag the source stated for the name, or null; it is
   rewritten on every sighting, so a record stored before its source stated one
   gains it on the next run.
