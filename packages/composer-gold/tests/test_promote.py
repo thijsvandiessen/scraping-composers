@@ -42,7 +42,7 @@ from composer_warehouse.testing import (
     person,
 )
 from composer_warehouse.works.links import link_works
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, update
 from sqlalchemy.orm import Session
 
 
@@ -170,6 +170,19 @@ def test_promote_repoints_claims_and_mentions_to_canonical(session: Session, tmp
         assert work.composer_entity_id == beethoven.id
         assert set(gold.scalars(select(RawWorkMention.composer_entity_id))) == {beethoven.id}
         assert gold.scalar(select(RawWorkMention.id).where(RawWorkMention.id == 1)) is not None
+
+
+def test_promote_keeps_the_language_a_source_stated(session: Session, tmp_path: Path) -> None:
+    _seed_silver(session)
+    session.execute(update(EntityRecord).values(language="de"))
+    session.execute(update(RawWorkMention).values(language="mul"))
+    session.commit()
+    gold_path = tmp_path / "gold.db"
+    promote(session, _url(gold_path))
+
+    with _gold_session(gold_path) as gold:
+        assert set(gold.scalars(select(EntityRecord.language))) == {"de"}
+        assert set(gold.scalars(select(RawWorkMention.language))) == {"mul"}
 
 
 def _seed_concert_silver(session: Session) -> None:

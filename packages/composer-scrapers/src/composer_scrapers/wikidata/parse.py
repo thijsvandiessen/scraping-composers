@@ -128,6 +128,16 @@ def _literal(row: dict[str, Any], var: str) -> str | None:
     return value
 
 
+def _language(row: dict[str, Any], var: str) -> str | None:
+    """The language tag of the row's literal for ``var`` ("en", "mul", "de"),
+    or None when it has none: the label service echoes a bare QID untagged."""
+    binding = row.get(var)
+    if not binding or binding.get("type") != "literal":
+        return None
+    lang: str | None = binding.get("xml:lang")
+    return lang or None
+
+
 def _relation(row: dict[str, Any]) -> tuple[str, str, str] | None:
     """A RELATIONS_QUERY row as (predicate, other QID, other label), or None
     for any other row -- or one whose other end the label service cannot name."""
@@ -150,6 +160,7 @@ def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             qid,
             {
                 "label": _literal(row, "itemLabel") or "",
+                "language": _language(row, "itemLabel"),
                 "values": {},
                 "pins": {},
                 "items": {},
@@ -234,6 +245,7 @@ def _records_from_rows(
                 url=f"{BASE_URL}/wiki/{qid}",
                 raw=raw,
                 claims=_item_claims(item, item_metrics),
+                language=item["language"],
             )
         )
     return records
