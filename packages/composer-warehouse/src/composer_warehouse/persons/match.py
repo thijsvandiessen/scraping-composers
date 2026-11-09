@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-from .compare import GivenLevel, YearLevel, given_level, year_level
+from .compare import SURNAME_ONLY, GivenLevel, YearLevel, given_level, year_level
 from .extract import PersonName
 from .fellegi_sunter import Comparison, LinkageModel, TermFrequencyTable
 
@@ -27,6 +27,9 @@ MODEL_PATH = Path(__file__).with_name("model.json")
 # the precision/recall each operating point buys.
 AUTO_THRESHOLD = 0.99
 REVIEW_THRESHOLD = 0.50
+# A pair on a surname-only given level is never auto-linked, and is queued for
+# review from this cut-point rather than REVIEW_THRESHOLD (#202).
+SURNAME_ONLY_REVIEW_THRESHOLD = 0.04
 
 GIVEN = "given"
 BIRTH_YEAR = "birth_year"
@@ -46,7 +49,8 @@ def person_comparisons() -> tuple[Comparison, ...]:
         Comparison(
             name=GIVEN,
             levels=tuple(level.name for level in GivenLevel),
-            null_level=GivenLevel.ABSENT.name,
+            # No null level: a bare surname is evidence of *something*, and
+            # what it is worth is fitted like any other level (#202).
         ),
         Comparison(
             name=BIRTH_YEAR,
@@ -120,6 +124,20 @@ def _method(levels: tuple[str, ...]) -> str:
     return "+".join(parts)[:50]
 
 
+def _names(profile: PersonProfile) -> tuple[PersonName, ...]:
+    """The names a profile is compared under: its primary name and aliases.
+
+    A bare-surname alias of a record that has given names is left out. It says
+    nothing the primary name does not, and since a bare surname cannot
+    conflict, it would otherwise win over the primary name's comparison and
+    turn "Leopold Mozart" (alias "Mozart") against "Wolfgang Amadeus Mozart"
+    from a given-name conflict into a surname-only pair (#202).
+    """
+    if not profile.name.given:
+        return (profile.name, *profile.aliases)
+    return (profile.name, *(alias for alias in profile.aliases if alias.given))
+
+
 @dataclass(frozen=True)
 class PersonScorer:
     """A trained model plus the corpus frequencies it needs to apply."""
@@ -154,8 +172,8 @@ class PersonScorer:
         """
         best_score = 0.0
         best_levels: tuple[str, ...] = ()
-        for an in (a.name, *a.aliases):
-            for bn in (b.name, *b.aliases):
+        for an in _names(a):
+            for bn in _names(b):
                 if not an.surname or an.surname != bn.surname:
                     continue
                 levels = comparison_levels(an, bn, a, b)
@@ -182,7 +200,25 @@ def score(a: PersonProfile, b: PersonProfile) -> tuple[float, str]:
     return PersonScorer(default_model()).score(a, b)
 
 
-def classify(value: float) -> str:
+def _given_level(method: str) -> GivenLevel | None:
+    """The given-name level a :func:`_method` string records, if any."""
+    head = method.split("+", 1)[0]
+    if not head.startswith("given:"):
+        return None
+    return GivenLevel.__members__.get(head.removeprefix("given:").upper())
+
+
+def classify(value: float, method: str = "") -> str:
+    """The decision for a pair's score, given the method that produced it.
+
+    A pair decided on a bare surname (``given:one_surname_only`` or
+    ``given:both_surname_only``) is never auto-linked, however rare the
+    surname: every namesake in the block scores the same, so a link would be a
+    guess between them (#202). It is queued for review from its own, lower
+    cut-point instead — see ``MODEL.md`` for what each one measured.
+    """
+    if _given_level(method) in SURNAME_ONLY:
+        return "needs_review" if value >= SURNAME_ONLY_REVIEW_THRESHOLD else "distinct"
     if value >= AUTO_THRESHOLD:
         return "auto_linked"
     if value >= REVIEW_THRESHOLD:

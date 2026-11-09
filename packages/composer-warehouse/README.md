@@ -144,6 +144,16 @@ the gap **non-destructively**:
   clustered with those incompatibilities as cannot-links. They are recorded as
   `auto_linked` with method `shared_catalogue:<count>`.
 
+A bare surname is a comparison level of its own (`one_surname_only`, or
+`both_surname_only` when neither side has given names), fitted like the others
+rather than scored at the prior (#202). Such a pair is **never** auto-linked,
+since every namesake in the block scores alike against it; it goes to review
+from its own cut-point. The same goes for any record without an authority id
+whose links would reach two distinct, uncorroborated QIDs or MusicBrainz ids
+(an undated "Johann Strauss" against Johann Strauss I, II and III): all its
+machine links are held back for review rather than attaching it to whichever
+namesake scored highest.
+
 High-confidence pairs and human `accepted` reviews are recorded in
 **`person_matches`**; ambiguous ones wait there for `person-review`. The links
 are then derived from those pairs as *clusters*, not pair by pair:
@@ -347,14 +357,14 @@ factories) come from `composer_warehouse.testing`.
 | File | Covers |
 | --- | --- |
 | `test_person_extract.py` | Parsing name labels: comma and plain forms, initials, particles. |
-| `test_person_compare.py` | Reducing a pair to comparison levels; the regression suite for #173 (initials vs spelled-out names). |
+| `test_person_compare.py` | Reducing a pair to comparison levels; the regression suite for #173 (initials vs spelled-out names), and one vs both sides surname-only (#202). |
 | `test_fellegi_sunter.py` | The linkage engine: weights as log2 Bayes factors, term frequency, the prior estimate, supervised fitting, JSON round-trip. |
-| `test_person_matching.py` | Scoring and classifying a pair with the shipped model: dates, generations, rare surnames, aliases, cut-points. |
+| `test_person_matching.py` | Scoring and classifying a pair with the shipped model: dates, generations, rare surnames, aliases, cut-points, and a bare surname scoring as evidence but never auto-linking (#202). |
 | `test_person_constraints.py` | Cannot-links from distinct QIDs and MusicBrainz ids, and when corroboration discharges them. |
 | `test_person_cluster.py` | Turning scored pairs into clusters: chains, cannot-links (also transitive), edge-order independence. |
-| `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals (an authority-anchored member over a fuller name, then more sources over a fuller name, #379), reviewer decisions, QID twins. |
+| `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals (an authority-anchored member over a fuller name, then more sources over a fuller name, #379), reviewer decisions, QID twins, and a namesake family (Johann Strauss I/II/III) never collapsed onto one member by a bare or undated record (#202). |
 | `test_person_catalogues.py` | Catalogue evidence (#362): a surname-only entity linked to the composer whose Köchel numbers it shares; conflicting given names, different surnames, rivals, years a generation apart and per-composer schemes (`WoO`) never linked; a dominant partner beating a weak rival; a review-queued pair upgraded; cluster compatibility; cannot-links honoured. |
-| `test_person_training.py` | Fitting the model: automatic labels, comparison vectors, non-match sampling, the prior, and `train()` end to end (including an empty warehouse). |
+| `test_person_training.py` | Fitting the model: automatic labels, comparison vectors, non-match sampling, the prior (and that bare surnames leave it alone, #202), and `train()` end to end (including an empty warehouse). |
 | `test_person_evaluation.py` | The labelling rules, the deterministic split, downsampling weights, metrics, and that the shipped model beats the pre-#173 scorer on the committed dataset. |
 
 **Ensembles**

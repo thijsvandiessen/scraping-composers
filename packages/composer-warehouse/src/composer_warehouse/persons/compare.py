@@ -25,19 +25,34 @@ class GivenLevel(IntEnum):
     CONFLICT = 0
     """At least one aligned position disagrees ("Jules" vs "Jochen")."""
 
-    ABSENT = 1
-    """One or both sides are surname-only — no evidence either way."""
+    BOTH_SURNAME_ONLY = 1
+    """Neither side has a given name ("Mozart" vs "Mozart")."""
 
-    INITIALS = 2
+    ONE_SURNAME_ONLY = 2
+    """One side is a bare surname, the other has given names ("Mozart" vs
+    "Mozart, Wolfgang Amadeus").
+
+    Not a null level (#202). It used to share a single zero-weight ``ABSENT``
+    level with the both-bare case, which left a bare surname's pairs at the
+    prior whatever the corpus said about them. Nothing on the bare side can
+    contradict the other, but nothing picks one namesake over another either,
+    so what this level is worth — and what a pair landing on it is allowed to
+    become — is measured, not assumed: see ``MODEL.md``."""
+
+    INITIALS = 3
     """Every aligned position is compatible, at least one via an
     abbreviation ("J. S." vs "Johann Sebastian")."""
 
-    PREFIX = 3
+    PREFIX = 4
     """Every aligned position is spelled out and equal, but one side carries
     extra given names ("Johann" vs "Johann Sebastian")."""
 
-    EXACT = 4
+    EXACT = 5
     """Identical given-name sequences, all spelled out."""
+
+
+SURNAME_ONLY = frozenset({GivenLevel.BOTH_SURNAME_ONLY, GivenLevel.ONE_SURNAME_ONLY})
+"""The given levels where at least one side is a bare surname."""
 
 
 class YearLevel(IntEnum):
@@ -84,8 +99,10 @@ def _token_agrees(a: str, b: str) -> bool | None:
 
 def given_level(a: PersonName, b: PersonName) -> GivenLevel:
     """The :class:`GivenLevel` for two parsed names."""
+    if not a.given and not b.given:
+        return GivenLevel.BOTH_SURNAME_ONLY
     if not a.given or not b.given:
-        return GivenLevel.ABSENT
+        return GivenLevel.ONE_SURNAME_ONLY
 
     abbreviated = False
     for token_a, token_b in zip(a.given, b.given, strict=False):
