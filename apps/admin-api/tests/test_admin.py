@@ -546,6 +546,28 @@ def test_rebuild_silver_replays_bucket_sources_with_no_adapter(
     assert alpha.base_url == ""
 
 
+def test_rebuild_silver_refuses_a_bucket_with_nothing_to_replay(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, bucket_path: Path
+) -> None:
+    """#192: 400 up front, not a 202 whose failure only reaches the server log.
+
+    Raw ``pages`` snapshots don't count: their directories exist, but nothing
+    in them loads. Nothing is started, so no manifest is written.
+    """
+    silver_path = tmp_path / "silver.db"
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{silver_path}")
+    bucket = LocalBucket(bucket_path)
+    bucket.write_records("crawled-only", "run-1", [{"_type": "crawl", "url": "https://x.example"}])
+    bucket.write_manifest(SnapshotManifest.start("crawled-only", "run-1").completed(record_count=1))
+
+    r = client.post("/admin/v1/rebuild-silver")
+
+    assert r.status_code == 400
+    assert "no source in" in r.json()["detail"]
+    assert client.get("/admin/v1/silver").json()["status"] is None
+    assert not silver_path.exists()
+
+
 def test_rebuild_silver_conflicts_while_running(
     client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

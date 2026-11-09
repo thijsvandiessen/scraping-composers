@@ -32,7 +32,7 @@ from typing import Any
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
-from .parse import _BARE_QID, BASE_URL, _literal
+from .parse import _BARE_QID, BASE_URL, _language, _literal
 from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
 
 log = logging.getLogger(__name__)
@@ -156,6 +156,7 @@ def _fold_place_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             _qid(row),
             {
                 "label": "",
+                "language": None,
                 "types": set(),
                 "coordinates": set(),
                 "geonames": set(),
@@ -164,7 +165,8 @@ def _fold_place_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
                 "countries": {},
             },
         )
-        place["label"] = place["label"] or _literal(row, "itemLabel") or ""
+        if not place["label"] and (label := _literal(row, "itemLabel")):
+            place["label"], place["language"] = label, _language(row, "itemLabel")
         if (cls := _literal(row, "class")) is not None and (
             kind := _TYPE_OF_CLASS.get(cls.rsplit("/", 1)[-1])
         ):
@@ -209,6 +211,7 @@ def _place_document(qid: str, place: dict[str, Any], ingested_at: datetime) -> E
         ingested_at=ingested_at,
         name=place["label"],
         kind="place",
+        language=place["language"],
         raw={
             "item": f"http://www.wikidata.org/entity/{qid}",
             "label": place["label"],

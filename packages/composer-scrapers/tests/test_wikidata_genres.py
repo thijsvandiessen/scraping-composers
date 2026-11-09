@@ -29,6 +29,7 @@ class Item:
     aliases: tuple[str, ...] = ()
     forms: set[str] = field(default_factory=set[str])
     different: tuple[str, ...] = ()
+    lang: str | None = None
 
 
 @dataclass
@@ -48,7 +49,8 @@ class FakeWdqs:
             rows: list[dict[str, Any]] = []
             for qid in items:
                 item = self.items[qid]
-                rows.append({**_item(qid), "itemLabel": _lit(item.label)})
+                label = _lit(item.label) if item.lang is None else {**_lit(item.label), "xml:lang": item.lang}
+                rows.append({**_item(qid), "itemLabel": label})
                 rows += [{**_item(qid), "class": _uri(c)} for c in sorted(item.classes & wanted)]
                 rows += [
                     {**_item(qid), "form": _uri(f)} for f in sorted(item.forms & set(_values(query, "form")))
@@ -354,3 +356,22 @@ def test_registered() -> None:
     adapter = REGISTRY["wikidata_genres"]
     assert isinstance(adapter, WikidataGenresAdapter)
     assert adapter.name == "wikidata_genres"
+
+
+# the walk needs a movement seed as well as a genre one
+_MOVEMENT = {"Q10": Item("Romanticism", classes={ART_MOVEMENT}, lang="en")}
+_MOVEMENT_SEED = {"P135": ["Q10"]}
+
+
+def test_a_genre_carries_its_labels_language(monkeypatch: pytest.MonkeyPatch) -> None:
+    graph = {"Q1": Item("waltz", lang="en"), "Q2": Item("Ländler", lang="mul"), **_MOVEMENT}
+    docs = _fetch(monkeypatch, FakeWdqs(graph, {"P136": ["Q1", "Q2"], **_MOVEMENT_SEED}))
+    assert docs["genre:Q1"].language == "en"
+    assert docs["genre:Q2"].language == "mul"
+
+
+def test_a_genre_whose_label_states_no_language_has_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    docs = _fetch(
+        monkeypatch, FakeWdqs({"Q1": Item("waltz"), **_MOVEMENT}, {"P136": ["Q1"], **_MOVEMENT_SEED})
+    )
+    assert docs["genre:Q1"].language is None

@@ -9,6 +9,7 @@ sqlalchemy, or the scraper stack.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass, field
@@ -66,14 +67,32 @@ class SourceClaim:
 # ---------------------------------------------------------------------------
 
 
+#: A BCP 47 language tag as Wikidata writes one: a primary subtag ("en", "de",
+#: "mul" for a name spelled the same in every language) and optional subtags
+#: ("zh-hans", "de-ch").
+_LANGUAGE_TAG = re.compile(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$")
+
+
 @dataclass(frozen=True)
 class ScrapedDocument:
-    """Envelope common to every document produced by a source adapter."""
+    """Envelope common to every document produced by a source adapter.
+
+    ``language`` is the language the source *states* for the document's name or
+    title, such as a Wikidata label's language tag, and None when it states none.
+    Never a guess: a source's page language says nothing about a title printed
+    on it (an English page lists "Adagio in g-moll"), and titles are too short to
+    detect reliably.
+    """
 
     id: str
     url: str | None
     source_name: str
     ingested_at: datetime
+    language: str | None = field(default=None, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if self.language is not None and not _LANGUAGE_TAG.match(self.language):
+            raise ValueError(f"not a language tag: {self.language!r}")
 
 
 @dataclass(frozen=True)

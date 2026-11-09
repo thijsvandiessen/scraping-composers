@@ -16,6 +16,9 @@ passes over it; curation happens when it is promoted into gold.
 - **`entity_records`** — raw records per source, unique on
   `(source, external_id)`. Stores the original payload as JSON plus
   `first_seen_at`/`last_seen_at` timestamps and run ids. Re-ingesting is idempotent.
+  `language` is the language tag the source stated for the name, or null; it is
+  rewritten on every sighting, so a record stored before its source stated one
+  gains it on the next run.
 - **`entities`** — canonical, deduplicated nodes. `kind` says what a node is:
   `person`, `profession`, `period`, `genre`, `movement`, `place`, `work`, `ensemble`,
   `publisher`, `instrumentation` (an open set — `kind` is a plain string column,
@@ -44,6 +47,9 @@ passes over it; curation happens when it is promoted into gold.
   with the full performance context kept in `raw`, idempotent on
   `(source, external_id)`. Each carries the matcher's decision: `match_status`
   (`auto_matched`/`needs_review`/`created`/`manual_matched`), score and method.
+  `language` is the language tag the source stated for the title, or null,
+  rewritten on every sighting like `entity_records.language` without re-matching
+  the mention.
 - **`works`** and **`work_titles`** — canonical compositions and every title a
   work was seen under. Work ids are assigned at creation.
   `works.premiere_date`/`premiere_place` hold the world premiere from any

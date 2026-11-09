@@ -6,7 +6,7 @@ sharing a first letter agreed.
 """
 
 import pytest
-from composer_warehouse.persons.compare import GivenLevel, YearLevel, given_level, year_level
+from composer_warehouse.persons.compare import SURNAME_ONLY, GivenLevel, YearLevel, given_level, year_level
 from composer_warehouse.persons.extract import parse_name
 
 
@@ -61,9 +61,14 @@ def test_extra_given_names_are_a_prefix_not_an_exact_match() -> None:
     assert _given("Bach, Johann", "Bach, Johann Sebastian") is GivenLevel.PREFIX
 
 
-def test_missing_given_names_are_absent_not_a_conflict() -> None:
-    assert _given("Beethoven", "Beethoven, Ludwig van") is GivenLevel.ABSENT
-    assert _given("Beethoven", "Beethoven") is GivenLevel.ABSENT
+def test_missing_given_names_are_surname_only_not_a_conflict() -> None:
+    # #202: one bare side and two bare sides are different evidence, and both
+    # used to be a single zero-weight ABSENT level.
+    assert _given("Beethoven", "Beethoven, Ludwig van") is GivenLevel.ONE_SURNAME_ONLY
+    assert _given("Beethoven, Ludwig van", "Beethoven") is GivenLevel.ONE_SURNAME_ONLY
+    assert _given("Bach", "Bach, J.S.") is GivenLevel.ONE_SURNAME_ONLY
+    assert _given("Beethoven", "Beethoven") is GivenLevel.BOTH_SURNAME_ONLY
+    assert SURNAME_ONLY == {GivenLevel.ONE_SURNAME_ONLY, GivenLevel.BOTH_SURNAME_ONLY}
 
 
 @pytest.mark.parametrize(

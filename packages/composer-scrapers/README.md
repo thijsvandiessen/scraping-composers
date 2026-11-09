@@ -156,7 +156,10 @@ bypasses it for a run; deleting the file is the hard reset. The mirror itself
 lives in [`composer-http`](../composer-http/README.md).
 
 Every document inherits the `ScrapedDocument` base: `id` (source-local identifier),
-`url`, `source_name`, and `ingested_at` (UTC timestamp set at fetch time). Use
+`url`, `source_name`, `ingested_at` (UTC timestamp set at fetch time), and an
+optional keyword-only `language`: set it only when the source states the
+language of the name or title (the Wikidata adapters pass on each label's
+language tag), never from the page's language. Use
 `EntityDocument` for named entities (people, places, …) and `WorkMentionDocument`
 for concert-programme entries (a `(composer, title)` pair) — a source yielding both
 subclasses `HttpSourceAdapter[EntityDocument | WorkMentionDocument]`. Attach typed
@@ -214,7 +217,7 @@ Most sources are tested in three layers, one file each:
 | `wikidata` | `test_wikidata.py` covers all three, including the SPARQL mirror and QID-pinned place claims | | |
 | `wikidata_places` | `test_wikidata_places.py` covers all three: type precedence, parent rounds, coordinates | | |
 | `wikidata_works` | `test_wikidata_works.py` covers all three | | |
-| `wikidata_genres` | `test_wikidata_genres.py` covers all three: seeds, paging, cycles, the class filter, the depth cap, `max_pages`, the mirror, counterparts for stranded seeds (same name or name + "music", of the kind, already kept or fetched, a classless kept parent still stranding a seed, asked only for stranded seeds), the musical-form claim | | |
+| `wikidata_genres` | `test_wikidata_genres.py` covers all three: seeds, paging, cycles, the class filter, the depth cap, `max_pages`, the mirror, counterparts for stranded seeds (same name or name + "music", of the kind, already kept or fetched, a classless kept parent still stranding a seed, asked only for stranded seeds), the musical-form claim, the label's language | | |
 | `wikidata_ensembles` | `test_wikidata_ensembles.py` covers all three, including the mirror, the union of the three id queries and their floors, the name query's short-search retry, the musical-group signals, typing from every name and the label fallback for items with no English label | | |
 | `wikidata_catalogue` | `test_wikidata_catalogue.py` covers all three, including a P528 statement with no value | | |
 | `wikidata_instrumentation` | `test_wikidata_instrumentation.py` covers all three: a symphony's parts with counts only included, a concerto's soloist and orchestra, a soloist role, a short list of forces, an ensemble and its members, combination categories, the three parts-list signals, unknown labels kept, quantities, collaborations, unnameable works | | |
@@ -222,6 +225,11 @@ Most sources are tested in three layers, one file each:
 `test_base.py` covers what every source shares: the session carries the
 adapter's manners, the mirror's lifetime follows the cadence, and every
 `REGISTRY` entry has the same shape.
+
+`test_wikidata_language.py` covers the label language every Wikidata adapter
+passes on: `en` and `mul` labels, none for an echoed QID, a place keeping the
+language of the label it kept, and an ensemble named from another language
+(`de`) carrying that language. The genre walk's is in `test_wikidata_genres.py`.
 
 `test_wikidata_query_shapes.py` guards the SPARQL text of every Wikidata
 adapter, which the fake WDQS above never runs: no id query walks

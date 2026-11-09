@@ -136,6 +136,7 @@ def ingest_mention(state: IngestState, mention: WorkMentionDocument) -> tuple[in
         external_id=mention.id,
         raw_composer=mention.composer,
         raw_title=mention.title,
+        language=mention.language,
         raw=raw_json,
         composer_entity_id=composer_id,
         work_id=matched_work_id,

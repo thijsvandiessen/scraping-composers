@@ -88,4 +88,5 @@ class WikidataAdapter(HttpSourceAdapter[EntityDocument]):
                     kind=record.kind,
                     raw=record.raw,
                     claims=record.claims,
+                    language=record.language,
                 )

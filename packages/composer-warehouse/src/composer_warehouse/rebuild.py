@@ -237,14 +237,43 @@ def replayable_sources(bucket: Bucket) -> list[tuple[str, list[str]]]:
     return [(name, run_ids) for name, run_ids in with_runs if run_ids]
 
 
+class NothingToReplayError(ValueError):
+    """The bucket has no loadable snapshot, so a rebuild would empty silver."""
+
+
+def require_replayable_sources(bucket: Bucket) -> list[tuple[str, list[str]]]:
+    """:func:`replayable_sources`, refusing a bucket with nothing to replay.
+
+    Replaying zero sources builds a schema-only database, and the swap would put
+    it in place of silver and report success (#192). That is never what was
+    meant: the bucket path is relative by default, so running from the wrong
+    directory, a stale ``BUCKET_PATH`` or an unmounted volume all look like an
+    empty bucket. So is one whose sources only hold raw ``pages`` snapshots,
+    which is why this asks :func:`replayable_sources` rather than
+    ``list_sources``.
+    """
+    sources = replayable_sources(bucket)
+    if not sources:
+        raise NothingToReplayError(
+            f"refusing to rebuild silver: no source in {bucket!r} has a loadable documents snapshot, "
+            "so the rebuild would replace the database with an empty one"
+        )
+    return sources
+
+
 def _replay(
     engine: Engine,
     bucket: Bucket,
+    sources: Sequence[tuple[str, list[str]]],
     base_url_for: Callable[[str], str],
-    person_decisions: Sequence[PersonDecision],
-    work_decisions: Sequence[WorkDecision],
+    decisions: tuple[Sequence[PersonDecision], Sequence[WorkDecision]],
 ) -> RebuildStats:
-    """Build a complete silver database on ``engine`` from the bucket."""
+    """Build a complete silver database on ``engine`` from ``sources`` in the bucket.
+
+    ``decisions`` are the human review decisions to re-apply, as
+    :func:`collect_decisions` returns them.
+    """
+    person_decisions, work_decisions = decisions
     if engine.dialect.name != "sqlite":
         # init_db only creates tables on SQLite. Build the staging schema from
         # the models and stamp it at head, so what the swap promotes looks
@@ -255,7 +284,7 @@ def _replay(
     factory = init_db(engine)
     with factory() as session:
         replayed = seen = new = 0
-        for name, run_ids in replayable_sources(bucket):
+        for name, run_ids in sources:
             log.info("replaying %s: %d run(s) %s", name, len(run_ids), ", ".join(run_ids))
             records = iter_all_from_bucket(name, run_ids, bucket)
             run = ingest_documents(session, name, base_url_for(name), records)
@@ -295,6 +324,7 @@ def rebuild_silver(
     bucket: Bucket,
     base_url_for: Callable[[str], str] | None = None,
     database_url: str | None = None,
+    sources: Sequence[tuple[str, list[str]]] | None = None,
 ) -> RebuildStats:
     """Rebuild the silver database at ``database_url`` from the bucket.
 
@@ -303,7 +333,12 @@ def rebuild_silver(
     row's ``base_url`` for a source name — the scraper registry and the crawl
     configs both live in packages this one does not depend on, so the caller
     resolves it; the default leaves it empty, as it already is for the bucket
-    sources that have neither.
+    sources that have neither. ``sources`` is a caller's own
+    :func:`require_replayable_sources` result, to spare a second sweep of the
+    bucket; by default it is computed here.
+
+    Raises :class:`NothingToReplayError` (a ``ValueError``) before anything is
+    touched — no staging area, no manifest — when there is nothing to replay.
 
     Builds into a staging area and atomically swaps it in; progress and outcome
     land in the target's manifest. The old database is only replaced when every
@@ -313,9 +348,12 @@ def rebuild_silver(
 
     url = database_url or settings.database_url
     target = silver_target(url)
+    # Before run_build: a refused rebuild must leave even the manifest alone.
+    to_replay = require_replayable_sources(bucket) if sources is None else list(sources)
+    if not to_replay:
+        raise NothingToReplayError(f"refusing to rebuild silver: no sources to replay from {bucket!r}")
 
-    person_decisions: list[PersonDecision] = []
-    work_decisions: list[WorkDecision] = []
+    decisions: tuple[list[PersonDecision], list[WorkDecision]] = ([], [])
     # Ask the target first: connecting to a sqlite URL creates the file, so a
     # first-ever rebuild would leave an empty database beside the real one.
     if target.exists():
@@ -323,13 +361,11 @@ def rebuild_silver(
         try:
             if inspect(old_engine).has_table(PersonMatch.__tablename__):
                 with Session(old_engine) as old:
-                    person_decisions, work_decisions = collect_decisions(old)
+                    decisions = collect_decisions(old)
         finally:
             old_engine.dispose()
 
     resolve = base_url_for if base_url_for is not None else lambda _name: ""
-    stats = run_build(
-        target, lambda engine: _replay(engine, bucket, resolve, person_decisions, work_decisions)
-    )
+    stats = run_build(target, lambda engine: _replay(engine, bucket, to_replay, resolve, decisions))
     log.info("silver rebuilt at %s: %s", target.describe(), stats)
     return stats

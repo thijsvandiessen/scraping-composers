@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 
 from . import catalogues
 from .cluster import Clustering, Edge, build_clusters
-from .constraints import Constraints, authority_constraints
+from .constraints import Constraints, authorities_in_conflict, authority_constraints, corroborated
 from .corpus import PersonRecord, build_corpus, candidate_pairs, load_records
 from .extract import PersonName
 from .match import PersonScorer, classify, default_model
@@ -84,8 +84,12 @@ class _DedupeState:
     review: int = 0
     catalogue: int = 0
     pending: int = 0
+    ambiguous: int = 0
     # pairs this pass queued for review, so an upgrade can take one back
     queued: set[tuple[uuid.UUID, uuid.UUID]] = field(default_factory=set[tuple[uuid.UUID, uuid.UUID]])
+    # pairs this pass linked, by score and by catalogue, so a demotion can be counted
+    linked: set[tuple[uuid.UUID, uuid.UUID]] = field(default_factory=set[tuple[uuid.UUID, uuid.UUID]])
+    catalogued: set[tuple[uuid.UUID, uuid.UUID]] = field(default_factory=set[tuple[uuid.UUID, uuid.UUID]])
 
 
 def _record_decision(
@@ -94,7 +98,7 @@ def _record_decision(
     canonical, duplicate = _canonical_and_duplicate(a, b)
     if (duplicate.entity_id, canonical.entity_id) in state.decided:
         return
-    status = classify(value)
+    status = classify(value, method)
     state.session.add(
         PersonMatch(
             entity_id=duplicate.entity_id,
@@ -107,6 +111,7 @@ def _record_decision(
     state.decided.add((duplicate.entity_id, canonical.entity_id))
     if status == "auto_linked":
         state.auto += 1
+        state.linked.add((duplicate.entity_id, canonical.entity_id))
     else:
         state.review += 1
         state.queued.add((duplicate.entity_id, canonical.entity_id))
@@ -120,7 +125,7 @@ def _decide_pair(state: _DedupeState, a: PersonRecord, b: PersonRecord) -> None:
     if (a.entity_id, b.entity_id) in state.decided or (b.entity_id, a.entity_id) in state.decided:
         return
     value, method = state.scorer.score(a.profile(), b.profile())
-    if classify(value) == "distinct":
+    if classify(value, method) == "distinct":
         return
     _record_decision(state, a, b, value, method)
 
@@ -256,6 +261,7 @@ def _link_shared_catalogues(state: _DedupeState, records: list[PersonRecord]) ->
             existing.status, existing.score, existing.method = "auto_linked", catalogues.SCORE, method
             if (existing.entity_id, existing.canonical_entity_id) in state.queued:
                 state.review -= 1
+            state.catalogued.add((existing.entity_id, existing.canonical_entity_id))
         else:
             state.session.add(
                 PersonMatch(
@@ -267,7 +273,73 @@ def _link_shared_catalogues(state: _DedupeState, records: list[PersonRecord]) ->
                 )
             )
             state.decided.add((duplicate.entity_id, canonical.entity_id))
+            state.catalogued.add((duplicate.entity_id, canonical.entity_id))
         state.catalogue += 1
+    state.session.commit()
+
+
+def _rival_authorities(record: PersonRecord, partners: list[PersonRecord]) -> bool:
+    """Whether ``partners`` hold two authority ids ``record`` cannot both be.
+
+    Only an authority ``record`` carries no id of its own counts: a record with
+    its own QID is already kept apart from a second QID by the cannot-links.
+    """
+    for i, p in enumerate(partners):
+        for q in partners[i + 1 :]:
+            authorities = authorities_in_conflict(p, q)
+            if not authorities or corroborated(p, q):
+                continue
+            if any(not _ids(record, authority) for authority in authorities):
+                return True
+    return False
+
+
+def _ids(record: PersonRecord, authority: str) -> frozenset[str]:
+    return record.wikidata_ids if authority == "wikidata" else record.musicbrainz_ids
+
+
+def _demote_ambiguous_links(state: _DedupeState, records: list[PersonRecord]) -> None:
+    """Queue, rather than link, a record that would link to two authority items.
+
+    A bare "Strauss" or an undated "Johann Strauss" scores alike against
+    Johann Strauss I, II and III. The cannot-links keep the three apart, but
+    left alone the record would still be attached to whichever scored highest
+    — a guess between namesakes, which is exactly what an auto-link must not
+    be. So when a record's machine links reach two distinct, uncorroborated
+    QIDs (or MusicBrainz ids) it holds none of, every machine link it has goes
+    back to the review queue, and only a human can pick the namesake (#202).
+    """
+    by_id = {record.entity_id: record for record in records}
+    rows = list(state.session.scalars(select(PersonMatch).where(PersonMatch.status == "auto_linked")))
+    partners: dict[uuid.UUID, list[PersonMatch]] = {}
+    for row in rows:
+        partners.setdefault(row.entity_id, []).append(row)
+        partners.setdefault(row.canonical_entity_id, []).append(row)
+    demoted: set[int] = set()
+    for entity_id, links in partners.items():
+        record = by_id.get(entity_id)
+        if record is None or len(links) < 2:
+            continue
+        others = [
+            by_id[other]
+            for row in links
+            if (other := row.canonical_entity_id if row.entity_id == entity_id else row.entity_id) in by_id
+        ]
+        if _rival_authorities(record, others):
+            demoted.update(row.id for row in links)
+    for row in rows:
+        if row.id not in demoted:
+            continue
+        row.status = "needs_review"
+        key = (row.entity_id, row.canonical_entity_id)
+        if key in state.catalogued:
+            state.catalogue -= 1
+        elif key in state.linked:
+            state.auto -= 1
+        else:
+            continue  # an earlier pass's link: not in this pass's counts
+        state.review += 1
+    state.ambiguous = len(demoted)
     state.session.commit()
 
 
@@ -293,6 +365,8 @@ class DedupeResult:
     partition: Partition
     # of ``auto``, the links catalogue evidence made (see :mod:`.catalogues`)
     catalogue: int = 0
+    # links sent back to review because they reached two namesakes' authority ids
+    ambiguous: int = 0
 
 
 def apply_clusters(session: Session) -> Partition:
@@ -357,13 +431,20 @@ def dedupe_persons(session: Session) -> DedupeResult:
 
     session.commit()
     _link_shared_catalogues(state, records)
+    _demote_ambiguous_links(state, records)
     partition = apply_clusters(session)
     log.info(
-        "auto-linked %d (%d on shared catalogue numbers), queued %d for review",
+        "auto-linked %d (%d on shared catalogue numbers), queued %d for review "
+        "(%d link(s) held back as ambiguous between namesakes)",
         state.auto + state.catalogue,
         state.catalogue,
         state.review,
+        state.ambiguous,
     )
     return DedupeResult(
-        auto=state.auto + state.catalogue, review=state.review, partition=partition, catalogue=state.catalogue
+        auto=state.auto + state.catalogue,
+        review=state.review,
+        partition=partition,
+        catalogue=state.catalogue,
+        ambiguous=state.ambiguous,
     )

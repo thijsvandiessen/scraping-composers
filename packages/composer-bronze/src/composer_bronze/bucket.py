@@ -137,6 +137,11 @@ class LocalBucket:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
 
+    def __repr__(self) -> str:
+        # Absolute, because the default root is relative: an error naming the
+        # bucket searched should show which directory that actually was.
+        return f"LocalBucket({os.path.abspath(self.root)!r})"
+
     def _run_dir(self, source: str, run_id: str) -> Path:
         _validated_segment(source, "source")
         _validated_segment(run_id, "run_id")

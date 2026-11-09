@@ -86,7 +86,7 @@ def _distinct(a: frozenset[str], b: frozenset[str]) -> bool:
     return bool(a and b and not (a & b))
 
 
-def _authorities_in_conflict(a: PersonRecord, b: PersonRecord) -> tuple[str, ...]:
+def authorities_in_conflict(a: PersonRecord, b: PersonRecord) -> tuple[str, ...]:
     found: list[str] = []
     if _distinct(a.wikidata_ids, b.wikidata_ids):
         found.append(WIKIDATA)
@@ -129,6 +129,6 @@ def authority_constraints(records: Sequence[PersonRecord], edges: Iterable[Edge]
             ra, rb = by_id.get(a), by_id.get(b)
             if ra is None or rb is None:
                 continue
-            if authorities := _authorities_in_conflict(ra, rb):
+            if authorities := authorities_in_conflict(ra, rb):
                 conflicts.append(Conflict(a, b, authorities, corroborated(ra, rb)))
     return Constraints(tuple(conflicts))

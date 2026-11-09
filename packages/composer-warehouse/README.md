@@ -158,6 +158,16 @@ the gap **non-destructively**:
   clustered with those incompatibilities as cannot-links. They are recorded as
   `auto_linked` with method `shared_catalogue:<count>`.
 
+A bare surname is a comparison level of its own (`one_surname_only`, or
+`both_surname_only` when neither side has given names), fitted like the others
+rather than scored at the prior (#202). Such a pair is **never** auto-linked,
+since every namesake in the block scores alike against it; it goes to review
+from its own cut-point. The same goes for any record without an authority id
+whose links would reach two distinct, uncorroborated QIDs or MusicBrainz ids
+(an undated "Johann Strauss" against Johann Strauss I, II and III): all its
+machine links are held back for review rather than attaching it to whichever
+namesake scored highest.
+
 High-confidence pairs and human `accepted` reviews are recorded in
 **`person_matches`**; ambiguous ones wait there for `person-review`. The links
 are then derived from those pairs as *clusters*, not pair by pair:
@@ -309,6 +319,14 @@ That includes any LLM-extracted snapshots the retired crawl → extract pipeline
 wrote: delete their directories from the bucket to keep them out. Raw
 crawled-page snapshots are never loaded.
 
+A bucket with nothing to replay — a path that doesn't exist (the default
+`./raw-data` is relative to where you run it), or one whose sources hold only
+raw pages — is refused before anything is touched: the rebuild raises
+`NothingToReplayError` (a `ValueError`), `composer-ingest rebuild-silver`
+exits 1 and `POST /admin/v1/rebuild-silver` answers 400. The database and its
+manifest stay exactly as they were, rather than an empty database being
+swapped in and reported `completed` (#192).
+
 Human review decisions survive the rebuild: accepted/rejected person pairs
 carry over directly (entity ids are deterministic), and manual work matches
 are re-resolved by the work's composer + title (created again if matching no
@@ -343,13 +361,14 @@ factories) come from `composer_warehouse.testing`.
 | `test_ingest.py` | Entities, records and claims from a fake source; a second source attaching to the same entity; claim objects as deduplicated entities; QID-pinned claims; a venue keyed on its QID; `mentioned_in` URLs; 1000-record batch commits; a failing source marking the run failed; ensemble-named credits landing as ensembles. |
 | `test_ingest_reingest.py` | Re-sighted entity records: idempotency, content changes, label updates, and the `last_*` timestamps. |
 | `test_ingest_premieres.py` | A mention's world premiere carried onto its work: a new work, a later source backfilling a NULL, an earlier date winning across sources and within one run, a later one not, a full date refining a year, a corrected mention, the winning source recorded, and house premieres ignored. |
+| `test_ingest_language.py` | The language a source states stored with entity records and work mentions, and filled in on a re-sighting of a record stored without one, without re-matching the mention. |
 | `test_ingest_mentions.py` | Work mentions: creating a work and alias, matching an existing work, the same title under two composers, re-ingesting with a corrected title or composer, and mentions kept when a source fails. |
 
 **Works**
 
 | File | Covers |
 | --- | --- |
-| `test_work_extract.py` | Extracting catalogue numbers (BWV, K., Op.), key, type and number from titles, including German titles; numbers read for the composer (a bare `K` only for Mozart or Scarlatti), structured catalogue fields and pairs a source already normalised (`stated`), and the part/arrangement/version cues that make a parent's number the parent's, a range as one identifier, and a set dropped when the title also gives its own number. |
+| `test_work_extract.py` | Extracting catalogue numbers (BWV, K., Op.), key, type and number from titles, including German titles and their keys (`Es-Dur`, `fis-Moll`, `B` as B flat and `H` as B natural); titles in languages the parser doesn't read giving no key or number rather than a wrong one (`piano 4 hands` is not No. 4); numbers read for the composer (a bare `K` only for Mozart or Scarlatti), structured catalogue fields and pairs a source already normalised (`stated`), and the part/arrangement/version cues that make a parent's number the parent's, a range as one identifier, and a set dropped when the title also gives its own number. |
 | `test_work_matching.py` | Scoring candidates and deciding auto-match, review or create; K and KV as one Köchel number, catalogue and Wikidata conflicts, old and new Köchel kept apart, derived works never matching their parent, a range or list conflicting with a piece inside it (#358), and the pruned candidate search giving exactly what scoring every candidate gives, with a fraction of the title comparisons (#366). |
 | `test_work_identity.py` | Identity end to end (#351): the four Mozart No. 40 titles resolving to one work plus a version linked to it, a Brandenburg movement and arrangement linked to BWV 1048 without merging, an ambiguous parent left unlinked, IMSLP's structured catalogue field and a shared Wikidata item as strong keys (a `wikidata_instrumentation` mention matching on its item too), stored identifiers matching in the next run, Wikidata ids normalised, Wikidata codes read by their catalogue item (Terry's `238/3`, a `wd:<QID>` fallback two items match on, #361), P361 links, `link_works` rebuilding rather than accumulating, and catalogue ranges (#358): pieces linked `part_of` their range rather than merged into it, IMSLP's structured range kept apart from its first piece, a number inside nested sets linked to the smallest, one inside overlapping sets left unlinked, and only known catalogue schemes with bounded ranges expanded (#378). |
 | `test_work_entities.py` | Work entities linked to their work: through a mention under the same id, through a Wikidata mention per composer (`Q1:Q7294`) to every work it resolved, not through an anthology item or another source's id, nothing for an unmatched mention, the link following a re-matched mention and rebuilt rather than kept, one entity two sources share linked once per source, and a folded work's links removed by `merge_works` and restored on the merged work by `refresh_derived`. |
@@ -361,14 +380,14 @@ factories) come from `composer_warehouse.testing`.
 | --- | --- |
 | `test_person_extract.py` | Parsing name labels: comma and plain forms, initials, particles. |
 | `test_person_readings.py` | Alternate readings (#201): surname-first and run-together surnames, none for a comma form or a generational suffix; blocking and scoring a reversed pair (`Ye Xiaogang` / `Xiaogang Ye`) and a run-together one (`Adrian Le Roy` / `Adrian Leroy`) that were gated out before; no pairing on a shared first name, on an initial, through an alias read backwards, or for a name of three words; every pair blocked before still blocked; the Strauss family gaining no auto-link; the dedupe pass proposing a reversed pair. |
-| `test_person_compare.py` | Reducing a pair to comparison levels; the regression suite for #173 (initials vs spelled-out names). |
+| `test_person_compare.py` | Reducing a pair to comparison levels; the regression suite for #173 (initials vs spelled-out names), and one vs both sides surname-only (#202). |
 | `test_fellegi_sunter.py` | The linkage engine: weights as log2 Bayes factors, term frequency, the prior estimate, supervised fitting, JSON round-trip. |
-| `test_person_matching.py` | Scoring and classifying a pair with the shipped model: dates, generations, rare surnames, aliases, cut-points. |
+| `test_person_matching.py` | Scoring and classifying a pair with the shipped model: dates, generations, rare surnames, aliases, cut-points, and a bare surname scoring as evidence but never auto-linking (#202). |
 | `test_person_constraints.py` | Cannot-links from distinct QIDs and MusicBrainz ids, and when corroboration discharges them. |
 | `test_person_cluster.py` | Turning scored pairs into clusters: chains, cannot-links (also transitive), edge-order independence. |
-| `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals (an authority-anchored member over a fuller name, then more sources over a fuller name, #379), reviewer decisions, QID twins. |
+| `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals (an authority-anchored member over a fuller name, then more sources over a fuller name, #379), reviewer decisions, QID twins, and a namesake family (Johann Strauss I/II/III) never collapsed onto one member by a bare or undated record (#202). |
 | `test_person_catalogues.py` | Catalogue evidence (#362): a surname-only entity linked to the composer whose Köchel numbers it shares; conflicting given names, different surnames, rivals, years a generation apart and per-composer schemes (`WoO`) never linked; a dominant partner beating a weak rival; a review-queued pair upgraded; cluster compatibility; cannot-links honoured. |
-| `test_person_training.py` | Fitting the model: automatic labels, comparison vectors, non-match sampling, the prior, and `train()` end to end (including an empty warehouse). |
+| `test_person_training.py` | Fitting the model: automatic labels, comparison vectors, non-match sampling, the prior (and that bare surnames leave it alone, #202), and `train()` end to end (including an empty warehouse). |
 | `test_person_evaluation.py` | The labelling rules, the deterministic split, downsampling weights, metrics, and that the shipped model beats the pre-#173 scorer on the committed dataset. |
 
 **Ensembles**
@@ -385,7 +404,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_derive_concerts.py` | Grouping mentions into concerts per source, resolving conductors, soloists and the orchestra, choirs credited as soloists, a credit resolved through an ensemble anchor's alias, re-running, each composer's concert count, and ids derived from source + key that a new concert sorting first doesn't move. |
 | `test_derive_recordings.py` | Grouping release payloads into recordings, merging one album across pages, keeping different performers or catalogue numbers apart, IMSLP and scraper payloads, each composer's recording count, and ids derived from source + key. |
 | `test_build.py` | The SQLite atomic swap: the manifest, and a failed or interrupted build leaving the old database in place. |
-| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, work links recreated on every rebuild, works split across a composer's duplicate entities folded after the dedupe (#362), and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
+| `test_rebuild.py` | `rebuild-silver`: replaying every bucket source and run, preserving human decisions, skipping raw-page snapshots, failure keeping the old database, refusing a missing or pages-only bucket with the database and manifest untouched while one loadable source still rebuilds (#192), work links recreated on every rebuild, works split across a composer's duplicate entities folded after the dedupe (#362), and the same genre entities and links as a live ingest when old label-only runs are replayed. Two cases also run on Postgres, one checking the rebuilt concert keeps its derived id. |
 | `test_genres.py` | Genres and movements keyed on their QID across label changes, the record and claim paths meeting on one entity, label keys without a QID, linking label-only genres by label or alias (and not when ambiguous), relinking from scratch, the same genre set for any ingest order, and the orphan report's counts and ranking, musical forms counted apart from the orphans, and the share of person tags reached. |
 | `test_postgres_target.py` | Postgres only: the schema swap, readers across it, the manifest table (also created safely by builds starting together), and the locks that keep a rebuild and a reader apart. |
 

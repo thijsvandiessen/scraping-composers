@@ -36,7 +36,7 @@ from typing import Any
 from composer_http import SourceSession
 
 from .. import HttpSourceAdapter, RefreshCadence, WorkMentionDocument
-from .parse import _BARE_QID, BASE_URL, _literal
+from .parse import _BARE_QID, BASE_URL, _language, _literal
 from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
 
 log = logging.getLogger(__name__)
@@ -120,6 +120,7 @@ def _fold_catalogue_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]
             _qid(row),
             {
                 "label": _label(row, "itemLabel"),
+                "language": _language(row, "itemLabel"),
                 "composers": {},
                 "codes": {},
                 "mbids": set(),
@@ -177,6 +178,7 @@ def _mentions_from_rows(rows: list[dict[str, Any]], ingested_at: datetime) -> li
                     ingested_at=ingested_at,
                     title=title,
                     composer=composer,
+                    language=work["language"],
                     raw={**raw, "composer_item": f"{ENTITY}{composer_qid}"},
                 )
             )

@@ -28,6 +28,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from .compare import SURNAME_ONLY, GivenLevel
 from .corpus import PersonRecord, build_corpus, candidate_pairs, load_records
 from .evaluation import MATCH, LabelledPair, build_labels, profiles, split
 from .fellegi_sunter import (
@@ -116,13 +117,34 @@ def sample_non_match_levels(
     ]
 
 
+PRIOR_LEVELS: tuple[str, ...] = tuple(level.name for level in GivenLevel if level not in SURNAME_ONLY)
+"""The given levels the prior is recovered from: both sides have given names.
+
+The moment bound assumes a random pair lands on a level as often as a blocked
+non-match does. That holds for how two given-name sequences compare, but not
+for whether a record has given names at all: a bare surname is usually a
+mononym or a one-word label, rarely shares its block, and so is rarer among
+blocked pairs than among random ones *whether or not* anything matches. Left
+in, the surname-only levels could bind the bound on that artefact instead of
+on ``CONFLICT`` (#202). Restricting to these levels reproduces the prior the
+model had while the surname-only case was a null level.
+"""
+
+
+def _restrict(distribution: dict[str, float], levels: Sequence[str]) -> dict[str, float]:
+    """``distribution`` conditioned on landing on one of ``levels``."""
+    total = sum(distribution.get(level, 0.0) for level in levels)
+    return {level: distribution.get(level, 0.0) / total for level in levels} if total else {}
+
+
 def estimate_prior(records: Sequence[PersonRecord], corpus: Corpus) -> float:
     """P(match) among blocked pairs, without using any label."""
     comparisons = person_comparisons()
     observed = observed_distribution(collect_patterns(records, corpus), comparisons)
     sampled = sample_non_match_levels(records)
-    given = comparisons[0]
-    return estimate_prior_by_moments(observed[0], sampled[0], given.informative_levels())
+    return estimate_prior_by_moments(
+        _restrict(observed[0], PRIOR_LEVELS), _restrict(sampled[0], PRIOR_LEVELS), PRIOR_LEVELS
+    )
 
 
 def to_vectors(pairs: Sequence[LabelledPair]) -> list[LabelledVector]:
