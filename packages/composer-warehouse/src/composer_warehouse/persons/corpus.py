@@ -18,9 +18,9 @@ from composer_models.normalize import wikidata_id
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .extract import PersonName, parse_name
+from .extract import REORDERED, PersonName, parse_name
 from .fellegi_sunter import TermFrequencyTable
-from .match import Corpus, PersonProfile
+from .match import Corpus, PersonProfile, profile_readings
 
 _YEAR = re.compile(r"\d{4}")
 
@@ -61,10 +61,51 @@ class PersonRecord:
         )
 
     def surnames(self) -> set[str]:
-        """Every surname this record can be blocked under (primary + aliases)."""
+        """Every surname this record is written under (primary + aliases).
+
+        Alternate readings are left out: they are guesses at how a label might
+        be meant, not surnames anyone wrote, so they don't count towards how
+        common a surname is (see :func:`build_corpus`).
+        """
         found = {self.name.surname}
         found.update(alias.surname for alias in self.aliases)
         return {surname for surname in found if surname}
+
+    def block_keys(self) -> dict[str, bool]:
+        """Every key this record is blocked under, mapped to whether it holds
+        the key as written (``True``) or only read surname-first (``False``).
+
+        A surname key comes from every reading that keeps the surname where it
+        was written: the primary parse, an alias, a run-together surname. A
+        surname-first reading gets a narrower key instead, its surname plus its
+        given name (:func:`_reordered_key`), and every written reading gets
+        that key too so the two can meet. The keys mirror
+        :func:`~.extract.comparable` exactly: a pair blocked only under such a
+        key is one the scorer will actually compare.
+
+        That narrowing is what keeps the extra keys cheap. Under the surname
+        alone, "Thomas Mann" read surname-first lands beside the 277 people
+        actually surnamed Thomas, and crossing every such reading with every
+        holder of the surname doubled the candidate pairs; only "Mann Thomas"
+        could be him.
+        """
+        keys: dict[str, bool] = {}
+        for reading in profile_readings(self.profile()):
+            if not reading.surname:
+                continue
+            written = reading.reading != REORDERED
+            if written:
+                keys[reading.surname] = True
+            if reading.given:
+                key = _reordered_key(reading)
+                keys[key] = keys.get(key, False) or written
+        return keys
+
+
+def _reordered_key(name: PersonName) -> str:
+    """The block a surname-first reading is paired in. ``|`` cannot occur in a
+    tokenised name, so these never collide with a surname key."""
+    return f"{name.surname}|{name.given[0]}"
 
 
 def _year(value: str) -> int | None:
@@ -209,33 +250,59 @@ def build_corpus(records: Sequence[PersonRecord]) -> Corpus:
     )
 
 
-def surname_blocks(records: Sequence[PersonRecord]) -> dict[str, list[PersonRecord]]:
-    """Group records by every surname they can be found under."""
-    blocks: dict[str, list[PersonRecord]] = defaultdict(list)
-    seen: dict[str, set[uuid.UUID]] = defaultdict(set)
+@dataclass
+class Block:
+    """The records filed under one blocking key, split by how they got there."""
+
+    anchored: list[PersonRecord] = field(default_factory=list[PersonRecord])
+    """Records with the key under a reading that keeps the surname in place."""
+    reordered: list[PersonRecord] = field(default_factory=list[PersonRecord])
+    """Records with the key only when read surname-first."""
+
+
+def surname_blocks(records: Sequence[PersonRecord]) -> dict[str, Block]:
+    """Group records by every key they can be found under (see
+    :meth:`PersonRecord.block_keys`)."""
+    blocks: dict[str, Block] = defaultdict(Block)
     for record in records:
-        for surname in record.surnames():
-            if record.entity_id not in seen[surname]:
-                seen[surname].add(record.entity_id)
-                blocks[surname].append(record)
+        for key, anchored in record.block_keys().items():
+            block = blocks[key]
+            (block.anchored if anchored else block.reordered).append(record)
     return dict(blocks)
+
+
+def _block_pairs(key: str, block: Block) -> Iterator[tuple[PersonRecord, PersonRecord]]:
+    """A surname block pairs its records with each other; a surname-first
+    block pairs each reordered record with each anchored one, and nothing else
+    (the anchored ones already met in their surname block).
+
+    The cap applies per side. On the anchored side of a surname block it is
+    the size :func:`build_corpus` counts the surname at.
+    """
+    anchored, reordered = block.anchored, block.reordered
+    if len(anchored) > MAX_BLOCK or len(reordered) > MAX_BLOCK:
+        return
+    if "|" not in key:
+        for i in range(len(anchored)):
+            for j in range(i + 1, len(anchored)):
+                yield anchored[i], anchored[j]
+        return
+    for a in anchored:
+        for b in reordered:
+            yield a, b
 
 
 def candidate_pairs(records: Sequence[PersonRecord]) -> Iterator[tuple[PersonRecord, PersonRecord]]:
     """Every pair worth scoring, deduplicated across blocks.
 
     Blocking on surname is what keeps this from being 22 billion comparisons.
-    A pair reachable under two different surnames (via an alias) is yielded
-    once.
+    A pair reachable under two different surnames (via an alias or another
+    reading of a name) is yielded once.
     """
     emitted: set[tuple[uuid.UUID, uuid.UUID]] = set()
-    for block in surname_blocks(records).values():
-        if len(block) > MAX_BLOCK:
-            continue
-        for i in range(len(block)):
-            for j in range(i + 1, len(block)):
-                a, b = block[i], block[j]
-                key = (a.entity_id, b.entity_id) if a.entity_id < b.entity_id else (b.entity_id, a.entity_id)
-                if key not in emitted:
-                    emitted.add(key)
-                    yield a, b
+    for block_key, block in surname_blocks(records).items():
+        for a, b in _block_pairs(block_key, block):
+            key = (a.entity_id, b.entity_id) if a.entity_id < b.entity_id else (b.entity_id, a.entity_id)
+            if key not in emitted:
+                emitted.add(key)
+                yield a, b

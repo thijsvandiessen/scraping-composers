@@ -47,7 +47,7 @@ from pathlib import Path
 
 from .corpus import PersonRecord, alias_identity, candidate_pairs
 from .extract import parse_name
-from .match import PersonProfile, PersonScorer, comparison_levels
+from .match import PersonProfile, PersonScorer, comparison_levels, deciding_names
 
 MATCH = "match"
 NON_MATCH = "non_match"
@@ -305,14 +305,17 @@ def model_scorer(scorer: PersonScorer, *, with_years: bool = True) -> ScoreFn:
 
     The row's stored ``tf_bits`` is reused rather than recomputed: it is a
     snapshot of the corpus the labels were drawn from, which keeps the frozen
-    dataset self-contained. It survives the ablation — surname rarity is a
-    property of the names, and hiding it would measure something the scorer is
-    never actually asked to do.
+    dataset self-contained. The names are compared on the same pairing the
+    stored bits were computed for (:func:`~.match.deciding_names`), so a pair
+    that only agrees under an alternate reading of a name is scored under it.
+    The bits survive the ablation — surname rarity is a property of the names,
+    and hiding it would measure something the scorer is never actually asked
+    to do.
     """
 
     def run(pair: LabelledPair) -> float:
         a, b = profiles(pair, with_years=with_years)
-        levels = comparison_levels(a.name, b.name, a, b)
+        levels = comparison_levels(*deciding_names(a, b), a, b)
         return scorer.model.match_probability(levels, pair.tf_bits)
 
     return run

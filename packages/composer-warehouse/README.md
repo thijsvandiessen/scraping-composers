@@ -135,9 +135,23 @@ misses surname-only ("Beethoven"), initials ("Bach, J.S." vs "Bach, Johann
 Sebastian"), and other variants. The `dedupe-persons` pass (`persons/`) closes
 the gap **non-destructively**:
 
-- `extract` parses each name into surname, given names, initials and particles;
+- `extract` parses each name into surname, given names, initials and particles,
+  plus its alternate readings (#201): a plain "Ye Xiaogang" read surname-first,
+  and "Adrian Le Roy" or "Agathe Backer Grøndahl" with the surname as one word.
+  A label with a generational suffix (`I`, `II`, `Jr`, ...) gets none, so the
+  readings never make a namesake family easier to merge. The readings live in
+  the matcher, not in the dedup key, so a guess is a scored, reversible
+  decision rather than a fusion at ingest;
+- `corpus` blocks every record under the surname of each reading. A
+  surname-first reading (only for a two-word primary label, never an alias) is
+  blocked on its surname plus its given name, and pairs only with a reading
+  that keeps the surname where it was written and has the same first given
+  name: two surname-first readings agreeing means a shared first name, and on
+  the surname alone "Thomas Mann" would be crossed with everyone surnamed
+  Thomas;
 - `compare` reduces a pair blocked on surname to comparison levels (given
-  names, birth year, death year);
+  names, birth year, death year). The scorer tries every pairing of readings
+  (and aliases) that agree on a surname and keeps the strongest;
 - `fellegi_sunter` turns those levels into a match probability, with a
   term-frequency adjustment so a shared rare surname counts for more than a
   common one. The fitted parameters are in `persons/model.json`;
@@ -377,6 +391,7 @@ factories) come from `composer_warehouse.testing`.
 | File | Covers |
 | --- | --- |
 | `test_person_extract.py` | Parsing name labels: comma and plain forms, initials, particles. |
+| `test_person_readings.py` | Alternate readings (#201): surname-first and run-together surnames, none for a comma form or a generational suffix; blocking and scoring a reversed pair (`Ye Xiaogang` / `Xiaogang Ye`) and a run-together one (`Adrian Le Roy` / `Adrian Leroy`) that were gated out before; no pairing on a shared first name, on an initial, through an alias read backwards, or for a name of three words; every pair blocked before still blocked; the Strauss family gaining no auto-link; the dedupe pass proposing a reversed pair. |
 | `test_person_compare.py` | Reducing a pair to comparison levels; the regression suite for #173 (initials vs spelled-out names), and one vs both sides surname-only (#202). |
 | `test_fellegi_sunter.py` | The linkage engine: weights as log2 Bayes factors, term frequency, the prior estimate, supervised fitting, JSON round-trip. |
 | `test_person_matching.py` | Scoring and classifying a pair with the shipped model: dates, generations, rare surnames, aliases, cut-points, and a bare surname scoring as evidence but never auto-linking (#202). |
