@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-postgres = ["psycopg[binary]>=3.3.6", "alembic>=1.20.1"]
+postgres = ["psycopg[binary]>=3.3.8", "alembic>=1.20.1"]
 # Pulled in by consumers that use the Postgres test fixtures.
 testing = ["pytest>=9.2.0"]
 
