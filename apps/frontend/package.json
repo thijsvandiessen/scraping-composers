@@ -17,7 +17,7 @@
     "gen": "npm run gen:openapi && npm run gen:api"
   },
   "dependencies": {
-    "@astrojs/node": "^11.1.9",
+    "@astrojs/node": "^11.1.11",
     "astro": "^7.4.7",
     "zod": "^4.6.7"
   },
