@@ -27,14 +27,18 @@ bucketing it. Put it in one bucket:
   job on every bump PR, whatever its age: if it failed, auto-merge was never
   enabled and the PR won't merge itself even once CI is green. If all bump PRs
   share the failure, name it once (e.g. "Auto merge is not allowed for this
-  repository", a repo setting) instead of per PR.
+  repository", a repo setting) instead of per PR. If only some failed, check
+  the `dependabot` job of bumps merged in the same batch: when those passed,
+  the setting is on and the failure was transient, so the next step is to
+  re-run that one job, not to change the repo setting.
 - **Red or conflicted**: any other PR with a failing check or a conflict.
 - **Stale**: no update in 30+ days.
 - **Fine**: everything else.
 
 For a failing check, read the log of the failed job itself
-(`gh api .../actions/jobs/<id>/logs`) and grep it for `##[error]`: the
-log's tail is usually checkout cleanup, not the failure.
+(`gh api .../actions/jobs/<id>/logs`) and grep it with `-B3 '##\[error\]'`:
+the log's tail is usually checkout cleanup, and the `##[error]` line itself is
+often just "Process completed with exit code 1"; the cause is the line above.
 
 ## 2. Dependencies
 
@@ -53,7 +57,9 @@ Dependabot handles updates (`.github/dependabot.yml`).
   If this one call is refused (it needs Dependabot alerts read access; cloud
   sessions get "Resource not accessible by integration"), say so in the
   report and carry on with the rest. Then nothing has audited a lockfile CI
-  never installs from, so say that in its line too.
+  never installs from, so say that in its line too, and grep that lockfile
+  for each package `npm audit` flagged, so its line can say whether it pins
+  the same vulnerable version.
 - For each advisory or alert: package, advisory id, severity, fixed version,
   the lockfile, and whether an open Dependabot PR already bumps it.
 - List any bump PR closed without merging in the past week.
