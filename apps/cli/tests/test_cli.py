@@ -385,6 +385,8 @@ def test_cmd_dedupe_persons_reports_links_and_reviews(
     out = capsys.readouterr().out
     assert "auto-linked 1" in out
     assert "1 pair(s) need review" in out
+    assert "wikidata anchors: 0 link(s)" in out
+    assert "persons without a QID: 0 resolved to an item, 2 pairwise only" in out
 
     factory = init_db(get_engine(db_url))
     with factory() as session:

@@ -47,6 +47,14 @@ def cmd_dedupe_persons(args: argparse.Namespace) -> int:
         f"auto-linked {result.auto} duplicate(s) ({result.catalogue} on shared catalogue numbers), "
         f"{result.review} pair(s) need review"
     )
+    anchor, resolved = result.anchor, result.anchor.resolution
+    print(
+        f"wikidata anchors: {anchor.linked} link(s), {anchor.queued} queued, "
+        f"{anchor.ambiguous} name(s) held by several items left unlinked, "
+        f"{anchor.unmatched} naming no item\n"
+        f"persons without a QID: {resolved.authority} resolved to an item, "
+        f"{resolved.pairwise} pairwise only, {resolved.unresolved} unresolved"
+    )
     print(summary)
     return 0
 

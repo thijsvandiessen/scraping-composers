@@ -17,6 +17,9 @@ The pipeline is four layers, each testable on its own:
 ``cluster``
     turns the recorded pairs into disjoint duplicate groups, so a link is one
     hop to a cluster canonical and a constraint has a group to apply to.
+``authority``
+    anchors records on Wikidata: a name or alias of exactly one item makes a
+    candidate pair with it, a name several items share holds the record back.
 ``constraints``
     derives the cannot-links from authority ids — two Wikidata QIDs are two
     people unless corroboration says otherwise.
@@ -28,6 +31,7 @@ current parameters and their measured operating points.
 
 from __future__ import annotations
 
+from .authority import AnchorReport, AuthorityIndex, Resolution, authority_candidates
 from .cluster import Clustering, Edge, build_clusters
 from .compare import GivenLevel, YearLevel, given_level, year_level
 from .constraints import Conflict, Constraints, authority_constraints
@@ -49,6 +53,10 @@ from .match import (
 from .training import train
 
 __all__ = [
+    "AnchorReport",
+    "AuthorityIndex",
+    "Resolution",
+    "authority_candidates",
     "AUTO_THRESHOLD",
     "MODEL_PATH",
     "REVIEW_THRESHOLD",
