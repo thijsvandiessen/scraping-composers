@@ -11,7 +11,13 @@ recorded the pass rebuilds the whole partition from the surviving links and
 writes one canonical per cluster, so ``Entity.canonical_entity_id`` is always a
 single hop to a cluster canonical and never a link in a chain.
 
-Before that, :mod:`catalogues` adds the links the names alone cannot make: two
+The pairwise pass is preceded by an anchor pass (:mod:`authority`, #205): a
+record whose names hit exactly one Wikidata item's label or alias is scored
+against that item first, and one whose names hit several is held back from
+every machine link, since picking one namesake would be a guess. The pairwise
+pass still runs over everything, for the records no item names.
+
+Before clustering, :mod:`catalogues` adds the links the names alone cannot make: two
 compatible entities holding the same number in one composer's catalogue (the
 surname-only "Mozart" and "Wolfgang Amadeus Mozart" both holding K. 550).
 
@@ -40,6 +46,8 @@ from sqlalchemy import CursorResult, Delete, Update, delete, select, update
 from sqlalchemy.orm import Session
 
 from . import catalogues
+from .authority import METHOD as AUTHORITY_METHOD
+from .authority import AnchorReport, authority_candidates, resolution
 from .cluster import Clustering, Edge, build_clusters
 from .constraints import Constraints, authorities_in_conflict, authority_constraints, corroborated
 from .corpus import PersonRecord, build_corpus, candidate_pairs, load_records
@@ -90,13 +98,21 @@ class _DedupeState:
     # pairs this pass linked, by score and by catalogue, so a demotion can be counted
     linked: set[tuple[uuid.UUID, uuid.UUID]] = field(default_factory=set[tuple[uuid.UUID, uuid.UUID]])
     catalogued: set[tuple[uuid.UUID, uuid.UUID]] = field(default_factory=set[tuple[uuid.UUID, uuid.UUID]])
+    # pairs the anchor pass decided, so a demotion can be counted
+    anchored: set[tuple[uuid.UUID, uuid.UUID]] = field(default_factory=set[tuple[uuid.UUID, uuid.UUID]])
+    anchor_linked: int = 0
+    anchor_queued: int = 0
+    # records whose names hit several Wikidata items: no machine link may stand
+    held: frozenset[uuid.UUID] = frozenset()
 
 
 def _record_decision(
-    state: _DedupeState, a: PersonRecord, b: PersonRecord, value: float, method: str
+    state: _DedupeState, a: PersonRecord, b: PersonRecord, scored: tuple[float, str], *, anchor: bool = False
 ) -> None:
+    value, method = scored
     canonical, duplicate = _canonical_and_duplicate(a, b)
-    if (duplicate.entity_id, canonical.entity_id) in state.decided:
+    key = (duplicate.entity_id, canonical.entity_id)
+    if key in state.decided:
         return
     status = classify(value, method)
     state.session.add(
@@ -104,30 +120,38 @@ def _record_decision(
             entity_id=duplicate.entity_id,
             canonical_entity_id=canonical.entity_id,
             score=value,
-            method=method,
+            # The prefix says how the pair was found; classify() has already
+            # read the levels, so it may cost the tail of a long method.
+            method=f"{AUTHORITY_METHOD}+{method}"[:50] if anchor else method,
             status=status,
         )
     )
-    state.decided.add((duplicate.entity_id, canonical.entity_id))
+    state.decided.add(key)
     if status == "auto_linked":
         state.auto += 1
-        state.linked.add((duplicate.entity_id, canonical.entity_id))
+        state.linked.add(key)
     else:
         state.review += 1
-        state.queued.add((duplicate.entity_id, canonical.entity_id))
+        state.queued.add(key)
+    if anchor:
+        state.anchored.add(key)
+        if status == "auto_linked":
+            state.anchor_linked += 1
+        else:
+            state.anchor_queued += 1
     state.pending += 1
     if state.pending % COMMIT_BATCH == 0:
         state.session.commit()
 
 
-def _decide_pair(state: _DedupeState, a: PersonRecord, b: PersonRecord) -> None:
+def _decide_pair(state: _DedupeState, a: PersonRecord, b: PersonRecord, *, anchor: bool = False) -> None:
     """Score one pair and record the decision (link, queue for review, or skip)."""
     if (a.entity_id, b.entity_id) in state.decided or (b.entity_id, a.entity_id) in state.decided:
         return
     value, method = state.scorer.score(a.profile(), b.profile())
     if classify(value, method) == "distinct":
         return
-    _record_decision(state, a, b, value, method)
+    _record_decision(state, a, b, (value, method), anchor=anchor)
 
 
 def _rows_affected(session: Session, statement: Delete | Update) -> int:
@@ -298,6 +322,37 @@ def _ids(record: PersonRecord, authority: str) -> frozenset[str]:
     return record.wikidata_ids if authority == "wikidata" else record.musicbrainz_ids
 
 
+def _held_back(
+    state: _DedupeState, entity_id: uuid.UUID, links: list[PersonMatch], by_id: dict[uuid.UUID, PersonRecord]
+) -> bool:
+    """Whether every machine link of ``entity_id`` must go back to review."""
+    if entity_id in state.held:
+        return True
+    record = by_id.get(entity_id)
+    if record is None or len(links) < 2:
+        return False
+    others = [
+        by_id[other]
+        for row in links
+        if (other := row.canonical_entity_id if row.entity_id == entity_id else row.entity_id) in by_id
+    ]
+    return _rival_authorities(record, others)
+
+
+def _count_demotion(state: _DedupeState, key: tuple[uuid.UUID, uuid.UUID]) -> None:
+    """Move a demoted link from this pass's link counts to its review count."""
+    if key in state.anchored and key in state.linked:
+        state.anchor_linked -= 1
+        state.anchor_queued += 1
+    if key in state.catalogued:
+        state.catalogue -= 1
+    elif key in state.linked:
+        state.auto -= 1
+    else:
+        return  # an earlier pass's link: not in this pass's counts
+    state.review += 1
+
+
 def _demote_ambiguous_links(state: _DedupeState, records: list[PersonRecord]) -> None:
     """Queue, rather than link, a record that would link to two authority items.
 
@@ -308,6 +363,10 @@ def _demote_ambiguous_links(state: _DedupeState, records: list[PersonRecord]) ->
     be. So when a record's machine links reach two distinct, uncorroborated
     QIDs (or MusicBrainz ids) it holds none of, every machine link it has goes
     back to the review queue, and only a human can pick the namesake (#202).
+
+    The same goes for a record whose names alone hit several Wikidata items
+    (``state.held``, #205), whatever its links happen to reach: a link to one
+    of them, or to a spelling linked to one, is that same guess.
     """
     by_id = {record.entity_id: record for record in records}
     rows = list(state.session.scalars(select(PersonMatch).where(PersonMatch.status == "auto_linked")))
@@ -317,28 +376,12 @@ def _demote_ambiguous_links(state: _DedupeState, records: list[PersonRecord]) ->
         partners.setdefault(row.canonical_entity_id, []).append(row)
     demoted: set[int] = set()
     for entity_id, links in partners.items():
-        record = by_id.get(entity_id)
-        if record is None or len(links) < 2:
-            continue
-        others = [
-            by_id[other]
-            for row in links
-            if (other := row.canonical_entity_id if row.entity_id == entity_id else row.entity_id) in by_id
-        ]
-        if _rival_authorities(record, others):
+        if _held_back(state, entity_id, links, by_id):
             demoted.update(row.id for row in links)
     for row in rows:
-        if row.id not in demoted:
-            continue
-        row.status = "needs_review"
-        key = (row.entity_id, row.canonical_entity_id)
-        if key in state.catalogued:
-            state.catalogue -= 1
-        elif key in state.linked:
-            state.auto -= 1
-        else:
-            continue  # an earlier pass's link: not in this pass's counts
-        state.review += 1
+        if row.id in demoted:
+            row.status = "needs_review"
+            _count_demotion(state, (row.entity_id, row.canonical_entity_id))
     state.ambiguous = len(demoted)
     state.session.commit()
 
@@ -363,6 +406,8 @@ class DedupeResult:
     auto: int
     review: int
     partition: Partition
+    # what anchoring on Wikidata did (see :mod:`.authority`)
+    anchor: AnchorReport
     # of ``auto``, the links catalogue evidence made (see :mod:`.catalogues`)
     catalogue: int = 0
     # links sent back to review because they reached two namesakes' authority ids
@@ -426,6 +471,17 @@ def dedupe_persons(session: Session) -> DedupeResult:
         decided=set(session.execute(select(PersonMatch.entity_id, PersonMatch.canonical_entity_id))),
     )
 
+    candidates = authority_candidates(records)
+    state.held = frozenset(candidates.ambiguous)
+    for record, anchor, _qid in candidates.pairs:
+        _decide_pair(state, record, anchor, anchor=True)
+    log.info(
+        "anchor pass: %d record(s) name one wikidata item, %d several, %d none",
+        candidates.resolved,
+        len(candidates.ambiguous),
+        candidates.unmatched,
+    )
+
     for a, b in candidate_pairs(records):
         _decide_pair(state, a, b)
 
@@ -433,6 +489,23 @@ def dedupe_persons(session: Session) -> DedupeResult:
     _link_shared_catalogues(state, records)
     _demote_ambiguous_links(state, records)
     partition = apply_clusters(session)
+    anchor = AnchorReport(
+        linked=state.anchor_linked,
+        queued=state.anchor_queued,
+        ambiguous=len(candidates.ambiguous),
+        unmatched=candidates.unmatched,
+        resolution=resolution(records, partition.clustering.clusters),
+    )
+    log.info(
+        "anchored %d link(s) on wikidata (%d queued, %d record(s) ambiguous); "
+        "without a QID: %d resolved to an item, %d pairwise only, %d unresolved",
+        anchor.linked,
+        anchor.queued,
+        anchor.ambiguous,
+        anchor.resolution.authority,
+        anchor.resolution.pairwise,
+        anchor.resolution.unresolved,
+    )
     log.info(
         "auto-linked %d (%d on shared catalogue numbers), queued %d for review "
         "(%d link(s) held back as ambiguous between namesakes)",
@@ -447,4 +520,5 @@ def dedupe_persons(session: Session) -> DedupeResult:
         partition=partition,
         catalogue=state.catalogue,
         ambiguous=state.ambiguous,
+        anchor=anchor,
     )

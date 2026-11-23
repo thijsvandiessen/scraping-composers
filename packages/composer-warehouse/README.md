@@ -142,6 +142,20 @@ the gap **non-destructively**:
   readings never make a namesake family easier to merge. The readings live in
   the matcher, not in the dedup key, so a guess is a scored, reversible
   decision rather than a fusion at ingest;
+- `authority` anchors records on Wikidata before any pairwise matching (#205).
+  A Wikidata person entity is keyed on its QID, so it is a stable identity
+  whose `also_known_as` aliases already list the spellings the matcher would
+  otherwise guess at. Every QID entity is indexed under its label and aliases,
+  each under its readings, keyed on surname plus given names (word order and
+  particles ignored, initials not expanded, a bare surname never indexed). A
+  record without a QID whose names hit exactly one item becomes a candidate
+  pair with it, scored by the same model and linked on the same threshold, with
+  method `authority+<levels>`. One whose names hit several items (two John
+  Williamses) is held back: every machine link it has, anchored or pairwise,
+  goes to review. The pairwise pass below still runs over every record, for
+  the names no item carries. `dedupe-persons` reports the anchored links, the
+  held-back names, and how the persons without a QID came out: resolved to an
+  item (by either route), resolved pairwise only, or not at all;
 - `corpus` blocks every record under the surname of each reading. A
   surname-first reading (only for a two-word primary label, never an alias) is
   blocked on its surname plus its given name, and pairs only with a reading
@@ -395,6 +409,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_person_compare.py` | Reducing a pair to comparison levels; the regression suite for #173 (initials vs spelled-out names), and one vs both sides surname-only (#202). |
 | `test_fellegi_sunter.py` | The linkage engine: weights as log2 Bayes factors, term frequency, the prior estimate, supervised fitting, JSON round-trip. |
 | `test_person_matching.py` | Scoring and classifying a pair with the shipped model: dates, generations, rare surnames, aliases, cut-points, and a bare surname scoring as evidence but never auto-linking (#202). |
+| `test_person_authority.py` | Anchoring on Wikidata (#205): index keys ignoring word order and particles but not initials, no lookup on a bare surname, an item found by alias and by a reversed reading, a name two items hold finding both; a spelling anchored to its one item, an anchor the model scores as distinct left unlinked, a name held by two items (John Williams) staying unlinked even when its date fits one of them, and the authority / pairwise / unresolved report. |
 | `test_person_constraints.py` | Cannot-links from distinct QIDs and MusicBrainz ids, and when corroboration discharges them. |
 | `test_person_cluster.py` | Turning scored pairs into clusters: chains, cannot-links (also transitive), edge-order independence. |
 | `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals (an authority-anchored member over a fuller name, then more sources over a fuller name, #379), reviewer decisions, QID twins, and a namesake family (Johann Strauss I/II/III) never collapsed onto one member by a bare or undated record (#202). |
