@@ -30,7 +30,9 @@ bucketing it. Put it in one bucket:
   repository", a repo setting) instead of per PR. If only some failed, check
   the `dependabot` job of bumps merged in the same batch: when those passed,
   the setting is on and the failure was transient, so the next step is to
-  re-run that one job, not to change the repo setting.
+  re-run that one job, not to change the repo setting. Compare the jobs'
+  `completed_at`: a failure between two passes rules out a setting change.
+  With CI green and the bot's approval in place, merging by hand works too.
 - **Red or conflicted**: any other PR with a failing check or a conflict.
 - **Stale**: no update in 30+ days.
 - **Fine**: everything else.
@@ -62,7 +64,8 @@ Dependabot handles updates (`.github/dependabot.yml`).
   the same vulnerable version.
 - For each advisory or alert: package, advisory id, severity, fixed version,
   the lockfile, and whether an open Dependabot PR already bumps it.
-- List any bump PR closed without merging in the past week.
+- List any bump PR closed without merging in the past week. One Dependabot
+  closed with "Superseded by #<n>" goes in #<n>'s line, not its own.
 
 ## 3. Open issues
 
@@ -72,7 +75,11 @@ drop entries with a `pull_request` key. Keep only number, title and
 (100k+ characters at 30 issues). With more than about ten issues, write the
 bodies to a file in a second pass (`--jq` with `.body[0:1800]`) and hand it to
 a subagent to triage, giving it every issue number so none are silently
-skipped; check its report covers them all. Otherwise read each with
+skipped; check its report covers them all. Past about fifteen issues, split
+them over two subagents run in parallel. Tell them which workspace members
+were removed (`git log --diff-filter=D --name-only --format='%h %s' --
+'packages/*/pyproject.toml' 'apps/*/pyproject.toml'`), since
+several issues may be obsolete for that one reason. Otherwise read each with
 `gh api .../issues/<n>`. The cloud checkout is shallow, so run
 `git fetch --unshallow` before searching history. For each open issue, read
 it, then look for merged PRs and commits that mention it (`git log --grep`,
