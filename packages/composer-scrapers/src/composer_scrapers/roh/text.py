@@ -63,6 +63,8 @@ _PAIR_RE = re.compile(r"<th\b[^>]*>(.*?)</th\s*>\s*<td\b[^>]*>(.*?)</td\s*>", re
 #: A ``<td>`` cell, for the listing tables whose columns are positional.
 _CELL_RE = re.compile(r"<td\b[^>]*>(.*?)</td\s*>", re.DOTALL | re.IGNORECASE)
 _ROW_RE = re.compile(r"<tr\b[^>]*>(.*?)(?=<tr\b|</table|\Z)", re.DOTALL | re.IGNORECASE)
+_TITLE_RE = re.compile(r"<h1\b[^>]*>(.*?)</h1\s*>", re.DOTALL | re.IGNORECASE)
+_HEADING_RE = re.compile(r"<h2\b[^>]*>(.*?)</h2\s*>", re.DOTALL | re.IGNORECASE)
 
 
 def text(fragment: str) -> str:
@@ -192,3 +194,23 @@ def credit(value: str) -> tuple[str, str | None]:
     if not parts:
         return "", None
     return parts[0], " ".join(parts[1:]) or None
+
+
+def title(panel: str) -> str:
+    """The first ``<h1>`` heading in *panel* as rendered text, or ``""`` if absent."""
+    match = _TITLE_RE.search(panel)
+    return text(match.group(1)) if match else ""
+
+
+def genre(panel: str, kind: str) -> str | None:
+    """The genre from the ``"<Genre>: <kind> details"`` heading, or None if absent.
+
+    Scans every ``<h2>`` rather than taking the first: pages with archival
+    objects emit a "Related Records" heading ahead of the details one.
+    """
+    pattern = re.compile(rf"^(.*?):\s*{re.escape(kind)} details$", re.IGNORECASE)
+    for heading in _HEADING_RE.findall(panel):
+        match = pattern.match(text(heading))
+        if match is not None:
+            return match.group(1).strip()
+    return None

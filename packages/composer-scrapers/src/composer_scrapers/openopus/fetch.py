@@ -11,7 +11,7 @@ The dump is the whole source, so it is fetched fresh each run, never mirrored.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from composer_http import SourceSession
 
@@ -26,11 +26,15 @@ log = logging.getLogger(__name__)
 TIMEOUT_S = 120.0
 
 
-def _fetch_dump(session: SourceSession) -> list[dict[str, Any]]:
+def fetch_dump(session: SourceSession) -> list[dict[str, Any]]:
     """Download the full work dump and return its ``composers`` list."""
     data = session.get_json(DUMP_URL, label="work dump")
-    composers = data.get("composers")
-    if not isinstance(composers, list):
+    raw_composers = data.get("composers")
+    if not isinstance(raw_composers, list):
         raise ValueError("work dump has no 'composers' list")
+    composers = cast(list[dict[str, Any]], raw_composers)
     log.info("openopus: dump lists %d composers", len(composers))
     return composers
+
+
+_fetch_dump = fetch_dump

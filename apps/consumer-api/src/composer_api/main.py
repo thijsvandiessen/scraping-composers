@@ -11,7 +11,7 @@ database. Same routes, different databases:
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 
-from composer_gold import gold_engine
+from composer_config import settings
 from composer_models.db import get_engine, init_db
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -62,7 +62,7 @@ def create_app(title: str, factory_provider: Callable[[], sessionmaker[Session]]
     app.add_exception_handler(NotFoundError, _not_found_handler)
     app.add_exception_handler(GraphUnavailableError, _graph_unavailable_handler)
 
-    @app.get("/health")
+    @app.get("/health", tags=["health"])
     def health(db: DbSession) -> dict[str, str]:
         db.execute(text("SELECT 1"))
         return {"status": "ok"}
@@ -71,9 +71,9 @@ def create_app(title: str, factory_provider: Callable[[], sessionmaker[Session]]
 
 
 def _gold_factory() -> sessionmaker[Session]:
-    # GOLD_DATABASE_URL, SQLite file or Postgres; gold_engine picks the pooling
-    # that lets every request see a new promote without restarting the app.
-    return init_db(gold_engine())
+    # GOLD_DATABASE_URL, SQLite file or Postgres; follow_swap=True picks the
+    # pooling that lets every request see a new promote without restarting the app.
+    return init_db(get_engine(settings.gold_database_url, schema=settings.gold_schema, follow_swap=True))
 
 
 def _silver_factory() -> sessionmaker[Session]:
@@ -82,9 +82,6 @@ def _silver_factory() -> sessionmaker[Session]:
 
 gold_app = create_app("Composer API (gold — curated)", _gold_factory)
 silver_app = create_app("Composer API (silver — staging)", _silver_factory)
-
-# Deprecated alias: deployments may still reference composer_api:bronze_app.
-bronze_app = silver_app
 
 # The unqualified app is the product API: gold.
 app = gold_app

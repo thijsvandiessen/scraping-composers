@@ -30,13 +30,13 @@ import time
 from collections.abc import Callable
 from datetime import timedelta
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Self, cast
 
 import httpx
 
 from .pages import PageCache
 
-__all__ = ["SourceSession", "Validator"]
+__all__ = ["SourceSession", "Validator", "parse_json_object"]
 
 log = logging.getLogger(__name__)
 
@@ -234,9 +234,20 @@ class SourceSession:
         return f"{self.requests} requests; page mirror: {mirror}"
 
 
+def parse_json_object(text: str) -> dict[str, Any] | None:
+    """Decode *text* as a JSON object, or ``None`` if it is invalid JSON or not an object."""
+    try:
+        data: object = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return cast(dict[str, Any], data)
+
+
 def _json_object(text: str, label: str) -> dict[str, Any]:
     """*text* decoded as a JSON object; ``ValueError`` when it is anything else."""
-    data = json.loads(text)
-    if not isinstance(data, dict):
-        raise ValueError(f"{label}: expected a JSON object, got {type(data).__name__}")
-    return data  # pyright: ignore[reportUnknownVariableType]
+    data = parse_json_object(text)
+    if data is None:
+        raise ValueError(f"{label}: expected a JSON object")
+    return data

@@ -365,7 +365,10 @@ def rebuild_silver(
         finally:
             old_engine.dispose()
 
-    resolve = base_url_for if base_url_for is not None else lambda _name: ""
+    def _no_base_url(_name: str) -> str:
+        return ""
+
+    resolve = base_url_for if base_url_for is not None else _no_base_url
     stats = run_build(target, lambda engine: _replay(engine, bucket, to_replay, resolve, decisions))
     log.info("silver rebuilt at %s: %s", target.describe(), stats)
     return stats

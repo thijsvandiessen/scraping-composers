@@ -32,7 +32,7 @@ _DISCIPLINE = re.compile(r"\(([^()]+)\)$")
 _OPTION = re.compile(r'<option[^>]*\bvalue="?(\d+)"?[^>]*>(.*?)</option>', re.DOTALL)
 
 
-def _options(page: str, select_id: str) -> Iterator[tuple[str, str]]:
+def options(page: str, select_id: str) -> Iterator[tuple[str, str]]:
     """Yield (value, unescaped label) for each real option of the select."""
     block = re.search(rf'<select id="{select_id}".*?</select>', page, re.DOTALL)
     if block is None:
@@ -43,7 +43,7 @@ def _options(page: str, select_id: str) -> Iterator[tuple[str, str]]:
         yield value, html.unescape(label).strip()
 
 
-def _record(select_id: str, profession: str, value: str, label: str) -> SourceRecord | None:
+def record(select_id: str, profession: str, value: str, label: str) -> SourceRecord | None:
     claims = [SourceClaim("has_profession", "profession", profession)]
     name = label
     if select_id == "componistcode":
@@ -68,3 +68,7 @@ def _record(select_id: str, profession: str, value: str, label: str) -> SourceRe
         raw={"select": select_id, "value": value, "label": label},
         claims=tuple(claims),
     )
+
+
+_options = options
+_record = record

@@ -40,6 +40,29 @@ failed and corrects its record count to what is on disk, deleting nothing.
 Fetch status lives in the snapshot's manifest on disk; loads are recorded in
 `ingest_runs` (the same log the CLI `runs` command shows).
 
+## Background jobs & deployment
+
+Fetch, snapshot load, promote, and rebuild-silver endpoints run in-process via
+FastAPI `BackgroundTasks`. This is intentional for single-process local dev and
+single-operator deployments:
+
+- Job status is persisted outside the HTTP process (bucket `manifest.json`,
+  `ingest_runs` rows, and silver/gold build manifests).
+- Each background task opens its own DB session via `session_scope()` rather
+  than sharing a request-scoped `DbSession`.
+- In-process locks plus eager `running` manifests prevent duplicate triggers
+  (including across `fetch-due`'s sequential task list).
+
+**When deploying remotely or scaling beyond one uvicorn worker**, replace
+`BackgroundTasks` with an external job queue (e.g. Postgres-backed
+Procrastinate/pgqueuer or Redis-backed ARQ/Dramatiq) because:
+
+- `BackgroundTasks` executes tasks sequentially per request (so `fetch-due`
+  runs due scrapers one after another).
+- Multi-worker uvicorn (`--workers > 1`) does not share in-process locks.
+- Process restarts or container redeploys terminate in-flight tasks without
+  graceful cancellation (requiring `abandon` for stuck snapshots).
+
 ## Tests
 
 ```sh

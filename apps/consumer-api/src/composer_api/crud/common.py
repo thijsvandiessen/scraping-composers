@@ -1,5 +1,6 @@
 import json
 import uuid
+from typing import cast
 
 from composer_models import Claim, Entity, EntityRecord, Source
 from sqlalchemy import select
@@ -22,10 +23,12 @@ def mention_url(raw: str) -> str | None:
     falls back to it rather than to no link at all.
     """
     try:
-        payload = json.loads(raw)
+        payload: object = json.loads(raw)
     except ValueError:
         return None
-    url = payload.get("url") if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    url = cast(dict[object, object], payload).get("url")
     return url if isinstance(url, str) and url else None
 
 

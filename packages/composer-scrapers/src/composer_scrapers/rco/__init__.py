@@ -24,9 +24,9 @@ from datetime import UTC, datetime
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, WorkMentionDocument
-from .artists import _Credit, collect_credits, credit_record, iter_conductor_records
+from .artists import Credit, collect_credits, credit_record, iter_conductor_records
 from .fetch import BASE_URL, REQUEST_DELAY_S, fetch_conductors, iter_concerts
-from .performances import _performances
+from .performances import performances
 
 log = logging.getLogger(__name__)
 
@@ -73,11 +73,11 @@ class RcoAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
             )
 
         # Pass 2: concert credits + work mentions
-        credit_registry: dict[str, _Credit] = {}
+        credit_registry: dict[str, Credit] = {}
         works = 0
         for concert in iter_concerts(session, max_pages=max_pages):
             collect_credits(concert, credit_registry)
-            for mention in _performances(concert):
+            for mention in performances(concert):
                 works += 1
                 yield WorkMentionDocument(
                     id=mention.external_id,

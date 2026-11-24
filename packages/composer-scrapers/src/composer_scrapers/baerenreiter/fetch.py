@@ -18,13 +18,12 @@ resumes, and the raw JSON stays on disk for re-parsing without the network.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from collections.abc import Iterable, Iterator
 from typing import Any
 
-from composer_http import SourceSession
+from composer_http import SourceSession, parse_json_object
 
 log = logging.getLogger(__name__)
 
@@ -61,14 +60,6 @@ def fetch_sitemap(session: SourceSession) -> str:
     return session.get_text(SITEMAP_URL, label="sitemap")
 
 
-def _json_object(body: str) -> dict[str, Any] | None:
-    try:
-        payload = json.loads(body)
-    except ValueError:
-        return None
-    return payload if isinstance(payload, dict) else None  # pyright: ignore[reportUnknownVariableType]
-
-
 def fetch_product(session: SourceSession, product_id: str) -> dict[str, Any] | None:
     """One product's JSON, from the mirror when it holds it.
 
@@ -77,11 +68,11 @@ def fetch_product(session: SourceSession, product_id: str) -> dict[str, Any] | N
     Only a readable answer is mirrored, so a failure is retried on the next run.
     """
     body = session.try_get_text(
-        api_url(product_id), label=product_id, mirror=True, valid=lambda b: _json_object(b) is not None
+        api_url(product_id), label=product_id, mirror=True, valid=lambda b: parse_json_object(b) is not None
     )
     if body is None:
         return None
-    payload = _json_object(body)
+    payload = parse_json_object(body)
     if payload is None:
         log.warning("baerenreiter: %s did not answer JSON", product_id)
     return payload

@@ -11,6 +11,30 @@ import pytest
 import scrapers.views as views
 from django.test import Client
 from scrapers.api import NO_FILTERS, AdminAPI, AdminAPIError, DataAPI, Filters
+from scrapers.schemas import (
+    ConcertDetail,
+    ConcertListPage,
+    EnsemblePage,
+    EntityDetail,
+    EntityPage,
+    FetchStarted,
+    GoldStatus,
+    MentionPage,
+    PersonConcertsPage,
+    PersonPage,
+    PersonRecordingsPage,
+    PromoteOptions,
+    RecordingDetail,
+    RecordingListPage,
+    Rule1Config,
+    RunOut,
+    RunStarted,
+    ScraperOut,
+    SnapshotOut,
+    StatsOut,
+    WorkDetail,
+    WorkPage,
+)
 
 # ---------------------------------------------------------------------------
 # AdminAPI client
@@ -57,7 +81,8 @@ def test_client_list_scrapers() -> None:
         assert request.url.path == "/admin/v1/scrapers"
         return httpx.Response(200, json=SCRAPERS_PAYLOAD)
 
-    assert _api(handler).list_scrapers() == SCRAPERS_PAYLOAD
+    scrapers = _api(handler).list_scrapers()
+    assert [s.model_dump() for s in scrapers] == SCRAPERS_PAYLOAD
 
 
 def test_client_fetch_scraper_posts_to_named_scraper() -> None:
@@ -65,7 +90,7 @@ def test_client_fetch_scraper_posts_to_named_scraper() -> None:
         assert (request.method, request.url.path) == ("POST", "/admin/v1/scrapers/imslp/fetch")
         return httpx.Response(202, json={"source": "imslp", "snapshot_id": "snap-1", "status": "running"})
 
-    assert _api(handler).fetch_scraper("imslp")["snapshot_id"] == "snap-1"
+    assert _api(handler).fetch_scraper("imslp").snapshot_id == "snap-1"
 
 
 def test_client_abandon_snapshot_posts_to_the_snapshot() -> None:
@@ -73,7 +98,7 @@ def test_client_abandon_snapshot_posts_to_the_snapshot() -> None:
         assert (request.method, request.url.path) == ("POST", "/admin/v1/snapshots/imslp/snap-1/abandon")
         return httpx.Response(200, json={**SNAPSHOT_PAYLOAD, "source": "imslp", "status": "failed"})
 
-    assert _api(handler).abandon_snapshot("imslp", "snap-1")["status"] == "failed"
+    assert _api(handler).abandon_snapshot("imslp", "snap-1").status == "failed"
 
 
 def test_client_snapshots_process_and_runs() -> None:
@@ -90,10 +115,18 @@ def test_client_snapshots_process_and_runs() -> None:
         return httpx.Response(200, json=[])
 
     api = _api(handler)
-    assert api.fetch_due()[0]["source"] == "imslp"
-    assert api.list_snapshots() == [SNAPSHOT_PAYLOAD]
-    assert api.process_snapshot("wikidata", "snap-1")["run_id"] == 15
+    assert api.fetch_due()[0].source == "imslp"
+    assert [s.model_dump() for s in api.list_snapshots()] == [SNAPSHOT_PAYLOAD]
+    assert api.process_snapshot("wikidata", "snap-1").run_id == 15
     assert api.list_runs(limit=5) == []
+
+
+def test_client_rejects_malformed_response_as_api_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"unexpected": "shape"})
+
+    with pytest.raises(AdminAPIError, match="Unexpected API response"):
+        _api(handler).fetch_scraper("imslp")
 
 
 def test_client_surfaces_api_error_detail() -> None:
@@ -148,80 +181,82 @@ class StubAPI:
         error: str | None = None,
         rule1_config: dict[str, Any] | None = None,
     ) -> None:
-        self._scrapers = scrapers or []
-        self._snapshots = snapshots or []
-        self._runs = runs or []
+        self._scrapers = [ScraperOut.model_validate(s) for s in (scrapers or [])]
+        self._snapshots = [SnapshotOut.model_validate(s) for s in (snapshots or [])]
+        self._runs = [RunOut.model_validate(r) for r in (runs or [])]
         self._error = error
-        self._rule1_config = rule1_config or RULE1_CONFIG_PAYLOAD
+        self._rule1_config = Rule1Config.model_validate(rule1_config or RULE1_CONFIG_PAYLOAD)
 
     def _maybe_fail(self) -> None:
         if self._error:
             raise AdminAPIError(self._error)
 
-    def list_scrapers(self) -> list[dict[str, Any]]:
+    def list_scrapers(self) -> list[ScraperOut]:
         self._maybe_fail()
         return self._scrapers
 
-    def list_snapshots(self) -> list[dict[str, Any]]:
+    def list_snapshots(self) -> list[SnapshotOut]:
         self._maybe_fail()
         return self._snapshots
 
-    def list_runs(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_runs(self, limit: int = 20) -> list[RunOut]:
         self._maybe_fail()
         return self._runs
 
-    def fetch_scraper(self, name: str) -> dict[str, Any]:
+    def fetch_scraper(self, name: str) -> FetchStarted:
         self._maybe_fail()
-        return {"source": name, "snapshot_id": "snap-1", "status": "running"}
+        return FetchStarted(source=name, snapshot_id="snap-1", status="running")
 
-    def fetch_due(self) -> list[dict[str, Any]]:
+    def fetch_due(self) -> list[FetchStarted]:
         self._maybe_fail()
-        return [{"source": "imslp", "snapshot_id": "snap-2", "status": "running"}]
+        return [FetchStarted(source="imslp", snapshot_id="snap-2", status="running")]
 
-    def process_snapshot(self, source: str, snapshot_id: str) -> dict[str, Any]:
+    def process_snapshot(self, source: str, snapshot_id: str) -> RunStarted:
         self._maybe_fail()
-        return {"run_id": 12, "source": source, "status": "running"}
+        return RunStarted(run_id=12, source=source, status="running")
 
-    def abandon_snapshot(self, source: str, snapshot_id: str) -> dict[str, Any]:
+    def abandon_snapshot(self, source: str, snapshot_id: str) -> SnapshotOut:
         self._maybe_fail()
-        return {
-            **SNAPSHOT_PAYLOAD,
-            "source": source,
-            "id": snapshot_id,
-            "status": "failed",
-            "record_count": 7,
-        }
+        return SnapshotOut.model_validate(
+            {
+                **SNAPSHOT_PAYLOAD,
+                "source": source,
+                "id": snapshot_id,
+                "status": "failed",
+                "record_count": 7,
+            }
+        )
 
-    def gold_status(self) -> dict[str, Any]:
+    def gold_status(self) -> GoldStatus:
         self._maybe_fail()
-        return {
-            "exists": True,
-            "status": "completed",
-            "started_at": "2026-07-02T15:00:00+00:00",
-            "finished_at": "2026-07-02T15:00:40+00:00",
-            "error": None,
-            "stats": {"persons_kept": 15387, "persons_dropped": 130192},
-        }
+        return GoldStatus(
+            exists=True,
+            status="completed",
+            started_at="2026-07-02T15:00:00+00:00",
+            finished_at="2026-07-02T15:00:40+00:00",
+            error=None,
+            stats={"persons_kept": 15387, "persons_dropped": 130192},
+        )
 
-    def start_promote(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
+    def start_promote(self, options: PromoteOptions | None = None) -> GoldStatus:
         self._maybe_fail()
         self.promote_options = options
-        return {
-            "exists": True,
-            "status": "running",
-            "started_at": None,
-            "finished_at": None,
-            "error": None,
-            "stats": {},
-        }
+        return GoldStatus(
+            exists=True,
+            status="running",
+            started_at=None,
+            finished_at=None,
+            error=None,
+            stats={},
+        )
 
-    def get_rule1_config(self) -> dict[str, Any]:
+    def get_rule1_config(self) -> Rule1Config:
         self._maybe_fail()
         return self._rule1_config
 
-    def put_rule1_config(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def put_rule1_config(self, payload: Rule1Config) -> Rule1Config:
         self._maybe_fail()
-        self.rule1_config_payload = payload
+        self.rule1_config_payload = payload.model_dump()
         self._rule1_config = payload
         return payload
 
@@ -514,10 +549,10 @@ def test_data_client_endpoints_and_params() -> None:
         return httpx.Response(200, json=WORKS_PAYLOAD)
 
     api = _data_api(handler)
-    assert api.stats() == STATS_PAYLOAD
-    assert api.list_entities(q="bach", kind="person", page=2)["total"] == 0
-    assert api.get_entity(ENTITY_ID)["label"] == "Bach, Johann Sebastian"
-    assert api.list_works(Filters(q="symphony"))["items"][0]["mention_count"] == 12
+    assert api.stats().model_dump() == STATS_PAYLOAD
+    assert api.list_entities(q="bach", kind="person", page=2).total == 0
+    assert api.get_entity(ENTITY_ID).label == "Bach, Johann Sebastian"
+    assert api.list_works(Filters(q="symphony")).items[0].mention_count == 12
 
 
 def test_data_client_wraps_errors() -> None:
@@ -541,9 +576,9 @@ class StubDataAPI:
         if self._error:
             raise AdminAPIError(self._error)
 
-    def stats(self) -> dict[str, Any]:
+    def stats(self) -> StatsOut:
         self._maybe_fail()
-        return STATS_PAYLOAD
+        return StatsOut.model_validate(STATS_PAYLOAD)
 
     def list_entities(
         self,
@@ -552,16 +587,16 @@ class StubDataAPI:
         page: int = 1,
         limit: int = 20,
         order: str = "label",
-    ) -> dict[str, Any]:
+    ) -> EntityPage:
         self._maybe_fail()
         items = [
             {"id": ENTITY_ID, "label": "Bach, Johann Sebastian", "kind": "person", "created_at": "2026-06-11"}
         ]
-        return {"items": items, "total": 45, "page": page, "limit": limit}
+        return EntityPage.model_validate({"items": items, "total": 45, "page": page, "limit": limit})
 
-    def get_entity(self, entity_id: str) -> dict[str, Any]:
+    def get_entity(self, entity_id: str) -> EntityDetail:
         self._maybe_fail()
-        return ENTITY_DETAIL_PAYLOAD
+        return EntityDetail.model_validate(ENTITY_DETAIL_PAYLOAD)
 
     def list_ensembles(
         self,
@@ -570,7 +605,7 @@ class StubDataAPI:
         page: int = 1,
         limit: int = 20,
         sort: str = "label",
-    ) -> dict[str, Any]:
+    ) -> EnsemblePage:
         self._maybe_fail()
         assert (anchored, sort) == (False, "appearances")
         items = [
@@ -585,11 +620,11 @@ class StubDataAPI:
                 "recording_count": 1,
             }
         ]
-        return {"items": items, "total": 21, "page": page, "limit": limit}
+        return EnsemblePage.model_validate({"items": items, "total": 21, "page": page, "limit": limit})
 
     def list_people(
         self, role: str, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20, sort: str = "label"
-    ) -> dict[str, Any]:
+    ) -> PersonPage:
         self._maybe_fail()
         items = [
             {
@@ -600,9 +635,9 @@ class StubDataAPI:
                 "recording_count": 9,
             }
         ]
-        return {"items": items, "total": 1, "page": page, "limit": limit}
+        return PersonPage.model_validate({"items": items, "total": 1, "page": page, "limit": limit})
 
-    def person_concerts(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
+    def person_concerts(self, person_id: str, page: int = 1, limit: int = 20) -> PersonConcertsPage:
         self._maybe_fail()
         items = [
             {
@@ -624,14 +659,16 @@ class StubDataAPI:
                 "works": ["Symfonie nr. 5", "Egmont Ouverture"],
             },
         ]
-        return {
-            "person_id": person_id,
-            "person_label": "Bach, Johann Sebastian",
-            "items": items,
-            "total": 2,
-            "page": page,
-            "limit": limit,
-        }
+        return PersonConcertsPage.model_validate(
+            {
+                "person_id": person_id,
+                "person_label": "Bach, Johann Sebastian",
+                "items": items,
+                "total": 2,
+                "page": page,
+                "limit": limit,
+            }
+        )
 
     def list_works(
         self,
@@ -640,15 +677,15 @@ class StubDataAPI:
         limit: int = 20,
         performed_only: bool = False,
         sort: str = "label",
-    ) -> dict[str, Any]:
+    ) -> WorkPage:
         self._maybe_fail()
-        return WORKS_PAYLOAD
+        return WorkPage.model_validate(WORKS_PAYLOAD)
 
-    def get_work(self, work_id: str) -> dict[str, Any]:
+    def get_work(self, work_id: str) -> WorkDetail:
         self._maybe_fail()
-        return WORK_DETAIL_PAYLOAD
+        return WorkDetail.model_validate(WORK_DETAIL_PAYLOAD)
 
-    def list_concerts(self, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20) -> dict[str, Any]:
+    def list_concerts(self, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20) -> ConcertListPage:
         self._maybe_fail()
         items = [
             {
@@ -664,31 +701,38 @@ class StubDataAPI:
                 "work_count": 3,
             }
         ]
-        return {"items": items, "total": 1, "page": page, "limit": limit}
+        return ConcertListPage.model_validate({"items": items, "total": 1, "page": page, "limit": limit})
 
-    def get_concert(self, concert_id: uuid.UUID) -> dict[str, Any]:
+    def get_concert(self, concert_id: uuid.UUID) -> ConcertDetail:
         self._maybe_fail()
-        return {
-            "id": str(concert_id),
-            "source": "nyphil",
-            "date": "1989-10-31",
-            "venue": "Avery Fisher Hall, Manhattan, NY",
-            "season": "1989-90",
-            "event_type": "Subscription Season",
-            "url": None,
-            "participants": [
-                {
-                    "role": "conductor",
-                    "name": "Bernstein, Leonard",
-                    "discipline": None,
-                    "entity_id": ENTITY_ID,
-                },
-                {"role": "soloist", "name": "Pavarotti, Luciano", "discipline": "Tenor", "entity_id": None},
-            ],
-            "works": [{"title": "LUISA MILLER", "composer": "Verdi, Giuseppe"}],
-        }
+        return ConcertDetail.model_validate(
+            {
+                "id": str(concert_id),
+                "source": "nyphil",
+                "date": "1989-10-31",
+                "venue": "Avery Fisher Hall, Manhattan, NY",
+                "season": "1989-90",
+                "event_type": "Subscription Season",
+                "url": None,
+                "participants": [
+                    {
+                        "role": "conductor",
+                        "name": "Bernstein, Leonard",
+                        "discipline": None,
+                        "entity_id": ENTITY_ID,
+                    },
+                    {
+                        "role": "soloist",
+                        "name": "Pavarotti, Luciano",
+                        "discipline": "Tenor",
+                        "entity_id": None,
+                    },
+                ],
+                "works": [{"title": "LUISA MILLER", "composer": "Verdi, Giuseppe"}],
+            }
+        )
 
-    def person_recordings(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
+    def person_recordings(self, person_id: str, page: int = 1, limit: int = 20) -> PersonRecordingsPage:
         self._maybe_fail()
         items = [
             {
@@ -704,18 +748,20 @@ class StubDataAPI:
                 "works": ["Symphony No. 9"],
             }
         ]
-        return {
-            "person_id": person_id,
-            "person_label": "Bach, Johann Sebastian",
-            "items": items,
-            "total": 1,
-            "page": page,
-            "limit": limit,
-        }
+        return PersonRecordingsPage.model_validate(
+            {
+                "person_id": person_id,
+                "person_label": "Bach, Johann Sebastian",
+                "items": items,
+                "total": 1,
+                "page": page,
+                "limit": limit,
+            }
+        )
 
     def list_recordings(
         self, filters: Filters = NO_FILTERS, page: int = 1, limit: int = 20
-    ) -> dict[str, Any]:
+    ) -> RecordingListPage:
         self._maybe_fail()
         items = [
             {
@@ -732,27 +778,34 @@ class StubDataAPI:
                 "work_count": 3,
             }
         ]
-        return {"items": items, "total": 1, "page": page, "limit": limit}
+        return RecordingListPage.model_validate({"items": items, "total": 1, "page": page, "limit": limit})
 
-    def get_recording(self, recording_id: uuid.UUID) -> dict[str, Any]:
+    def get_recording(self, recording_id: uuid.UUID) -> RecordingDetail:
         self._maybe_fail()
-        return {
-            "id": str(recording_id),
-            "source": "deutschegrammophon",
-            "title": "Beethoven: Symphony No. 9",
-            "release_date": "2024-03-15",
-            "label": "Deutsche Grammophon",
-            "catalogue_number": "486 1234",
-            "format": "CD",
-            "url": "https://dg.example/album",
-            "participants": [
-                {"role": "conductor", "name": "Rattle, Simon", "discipline": None, "entity_id": ENTITY_ID},
-                {"role": "soloist", "name": "Jansen, Janine", "discipline": "violin", "entity_id": None},
-            ],
-            "works": [{"title": "Symphony No. 9", "composer": "Beethoven"}],
-        }
+        return RecordingDetail.model_validate(
+            {
+                "id": str(recording_id),
+                "source": "deutschegrammophon",
+                "title": "Beethoven: Symphony No. 9",
+                "release_date": "2024-03-15",
+                "label": "Deutsche Grammophon",
+                "catalogue_number": "486 1234",
+                "format": "CD",
+                "url": "https://dg.example/album",
+                "participants": [
+                    {
+                        "role": "conductor",
+                        "name": "Rattle, Simon",
+                        "discipline": None,
+                        "entity_id": ENTITY_ID,
+                    },
+                    {"role": "soloist", "name": "Jansen, Janine", "discipline": "violin", "entity_id": None},
+                ],
+                "works": [{"title": "Symphony No. 9", "composer": "Beethoven"}],
+            }
+        )
 
-    def list_mentions(self, status: str | None = None, page: int = 1, limit: int = 20) -> dict[str, Any]:
+    def list_mentions(self, status: str | None = None, page: int = 1, limit: int = 20) -> MentionPage:
         self._maybe_fail()
         items = [
             {
@@ -769,7 +822,7 @@ class StubDataAPI:
                 "candidate_title": "Songs of a Wayfarer",
             }
         ]
-        return {"items": items, "total": 1, "page": page, "limit": limit}
+        return MentionPage.model_validate({"items": items, "total": 1, "page": page, "limit": limit})
 
 
 def _install_data(monkeypatch: pytest.MonkeyPatch, stub: StubDataAPI) -> None:
@@ -849,7 +902,7 @@ def test_data_client_lists_ensembles() -> None:
         return httpx.Response(200, json={"items": [], "total": 0, "page": 1, "limit": 20})
 
     api = _data_api(handler)
-    assert api.list_ensembles(Filters(q="wien"), anchored=False, sort="appearances")["total"] == 0
+    assert api.list_ensembles(Filters(q="wien"), anchored=False, sort="appearances").total == 0
 
 
 def test_entities_page_tolerates_junk_page_param(
@@ -970,7 +1023,7 @@ def test_entity_kind_page_random_order_forwarded(
             page: int = 1,
             limit: int = 20,
             order: str = "label",
-        ) -> dict[str, Any]:
+        ) -> EntityPage:
             calls.append(f"{kind}:{order}")
             return super().list_entities(q=q, kind=kind, page=page, limit=limit)
 
@@ -999,7 +1052,7 @@ def test_data_client_list_people_hits_role_endpoint() -> None:
         assert request.url.params["q"] == "doe"
         return httpx.Response(200, json={"items": [], "total": 0, "page": 1, "limit": 20})
 
-    assert _data_api(handler).list_people("soloists", Filters(q="doe"))["total"] == 0
+    assert _data_api(handler).list_people("soloists", Filters(q="doe")).total == 0
 
 
 def test_people_page_shows_concert_counts_and_sort_toggle(
@@ -1023,7 +1076,7 @@ def test_people_page_forwards_sort_and_source(monkeypatch: pytest.MonkeyPatch, s
             page: int = 1,
             limit: int = 20,
             sort: str = "label",
-        ) -> dict[str, Any]:
+        ) -> PersonPage:
             calls.append(f"{role}:{sort}:{filters.source}")
             return super().list_people(role, filters, page=page, limit=limit, sort=sort)
 
@@ -1056,8 +1109,8 @@ def test_entity_detail_no_concerts_link_for_places(
     monkeypatch: pytest.MonkeyPatch, staff_client: Client
 ) -> None:
     class PlaceStub(StubDataAPI):
-        def get_entity(self, entity_id: str) -> dict[str, Any]:
-            return {**ENTITY_DETAIL_PAYLOAD, "kind": "place"}
+        def get_entity(self, entity_id: str) -> EntityDetail:
+            return EntityDetail.model_validate({**ENTITY_DETAIL_PAYLOAD, "kind": "place"})
 
     _install_data(monkeypatch, PlaceStub())
     page = staff_client.get(f"/admin/data/entities/{ENTITY_ID}/").content.decode()
@@ -1068,7 +1121,7 @@ def test_entity_detail_renders_when_gold_is_down(
     monkeypatch: pytest.MonkeyPatch, staff_client: Client
 ) -> None:
     class GoldDownStub(StubDataAPI):
-        def person_concerts(self, person_id: str, page: int = 1, limit: int = 20) -> dict[str, Any]:
+        def person_concerts(self, person_id: str, page: int = 1, limit: int = 20) -> PersonConcertsPage:
             raise AdminAPIError("API unreachable at http://localhost:8000")
 
     _install_data(monkeypatch, GoldDownStub())

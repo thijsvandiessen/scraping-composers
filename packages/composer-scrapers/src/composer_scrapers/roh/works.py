@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 
 from .credits import Credit, read, unknown_labels
 from .listings import PerformanceRef, ProductionRef, performances, productions
-from .text import body, table, text
+from .text import body, genre, table, text, title
 
 #: Labels on a work page that credit a person. See :mod:`.credits` on why this
 #: is an allowlist and how it was built.
@@ -93,13 +93,10 @@ FIELDS = frozenset(
     }
 )
 
-_HEADING_RE = re.compile(r"<h2\b[^>]*>(.*?)</h2\s*>", re.DOTALL | re.IGNORECASE)
-_TITLE_RE = re.compile(r"<h1\b[^>]*>(.*?)</h1\s*>", re.DOTALL | re.IGNORECASE)
 _COLLECTION_RE = re.compile(
     r"""<a\b[^>]*\bhref\s*=\s*["']?relatedobjects\.aspx[^"'>]*["']?[^>]*>(.*?)</a\s*>\s*\((\d+)\)""",
     re.DOTALL | re.IGNORECASE,
 )
-_DETAILS_RE = re.compile(r"^(.*?):\s*work details$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -110,7 +107,7 @@ class WorkPage:
     title: str
     genre: str | None
     credits: tuple[Credit, ...] = ()
-    fields: dict[str, str] = field(default_factory=dict)
+    fields: dict[str, str] = field(default_factory=dict[str, str])
     productions: tuple[ProductionRef, ...] = ()
     #: Performances hanging off the work with no production between — see
     #: :mod:`.listings`. Not the work's performances in general.
@@ -158,8 +155,8 @@ def parse(work_id: int, page: str) -> WorkPage:
     credits, fields = read(detail, ROLES) if detail is not None else ((), {})
     return WorkPage(
         work_id=work_id,
-        title=_title(panel),
-        genre=_genre(panel),
+        title=title(panel),
+        genre=genre(panel, "work"),
         credits=credits,
         fields=fields,
         productions=productions(panel),
@@ -167,24 +164,6 @@ def parse(work_id: int, page: str) -> WorkPage:
         collections=_collections(panel),
         unknown=frozenset(unknown_labels(detail, ROLES, FIELDS)) if detail is not None else frozenset(),
     )
-
-
-def _title(panel: str) -> str:
-    match = _TITLE_RE.search(panel)
-    return text(match.group(1)) if match else ""
-
-
-def _genre(panel: str) -> str | None:
-    """The genre from the "<Genre>: Work details" heading, or None if absent.
-
-    Scans every ``<h2>`` rather than taking the first: works with archival
-    objects emit a "Related Records" heading ahead of the details one.
-    """
-    for heading in _HEADING_RE.findall(panel):
-        match = _DETAILS_RE.match(text(heading))
-        if match is not None:
-            return match.group(1).strip()
-    return None
 
 
 def _collections(panel: str) -> tuple[tuple[str, int], ...]:

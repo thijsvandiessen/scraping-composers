@@ -41,7 +41,7 @@ class Person:
     name: str
     artist_id: int | None = None
     kind: str = "person"
-    functions: set[str] = field(default_factory=set)
+    functions: set[str] = field(default_factory=set[str])
     url_alias: str | None = None
     flagged_composer: bool = False
     composer: bool = False

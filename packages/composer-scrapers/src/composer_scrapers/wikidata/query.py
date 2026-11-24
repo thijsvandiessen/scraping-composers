@@ -34,13 +34,13 @@ bound item is never mirrored (see :func:`_fetch_page`).
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import httpx
 from composer_http import SourceSession, call_with_retries, request_fingerprint
 
-from .parse import METRICS, RELATIONS, _literal
+from .parse import METRICS, RELATIONS, literal
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
 PAGE_SIZE = 500
@@ -176,7 +176,7 @@ def _bindings(text: str) -> list[dict[str, Any]]:
     return bindings
 
 
-def _run_query(
+def run_query(
     session: SourceSession,
     query: str,
     desc: str,
@@ -215,25 +215,49 @@ def _run_query(
     return _bindings(session.mirrored(key, produce, valid=valid))
 
 
-def _qid(row: dict[str, Any]) -> str:
+def qid(row: dict[str, Any]) -> str:
     """The QID from a row's ?item binding."""
     item: str = row["item"]["value"]
     return item.rsplit("/", 1)[-1]
 
 
-def _values(qids: list[str]) -> str:
+def values(qids: list[str]) -> str:
     """QIDs as the body of a SPARQL VALUES block."""
-    return " ".join(f"wd:{qid}" for qid in qids)
+    return " ".join(f"wd:{item_qid}" for item_qid in qids)
 
 
-def _numeric(qids: set[str]) -> list[str]:
-    # numeric, not lexicographic: QIDs carry no leading zeros, so (length,
-    # string) is numeric order. It keeps the low -- and therefore best known --
-    # QIDs in the first batches, which is what a max_pages smoke run sees.
-    return sorted(qids, key=lambda qid: (len(qid), qid))
+def numeric_qids(qids: Iterable[str]) -> list[str]:
+    """QIDs in numeric order: QIDs carry no leading zeros, so ``(len, str)``
+    orders them numerically and keeps the best-known low QIDs in early batches."""
+    return sorted(qids, key=lambda item_qid: (len(item_qid), item_qid))
 
 
-def _fetch_population(session: SourceSession) -> dict[str, frozenset[str]]:
+def run_covered_query(
+    session: SourceSession,
+    query: str,
+    qids: list[str],
+    desc: str,
+    *,
+    item_label: str = "items",
+) -> list[dict[str, Any]]:
+    """Run a mirrored VALUES-batch query and fail if any bound QID is missing.
+
+    A short answer is never mirrored and raises ``RuntimeError`` (issue #181)."""
+
+    def covered(rows: list[dict[str, Any]]) -> bool:
+        return not set(qids) - {qid(row) for row in rows}
+
+    rows = run_query(session, query, desc, mirror=True, complete=covered)
+    missing = set(qids) - {qid(row) for row in rows}
+    if missing:
+        raise RuntimeError(
+            f"wikidata page returned {len(qids) - len(missing)} of {len(qids)} requested {item_label}; "
+            f"missing e.g. {sorted(missing)[:5]}"
+        )
+    return rows
+
+
+def fetch_population(session: SourceSession) -> dict[str, frozenset[str]]:
     """Every QID in the population with the professions it holds, in paging
     order: each occupation's new holders numerically, after the previous
     occupation's (see ``OCCUPATIONS``).
@@ -244,22 +268,22 @@ def _fetch_population(session: SourceSession) -> dict[str, frozenset[str]]:
     holders: dict[str, set[str]] = {}
     for occupation, profession in OCCUPATIONS.items():
         query = ID_QUERY.format(occupation=occupation)
-        holders[profession] = {_qid(row) for row in _run_query(session, query, f"{profession} id list")}
+        holders[profession] = {qid(row) for row in run_query(session, query, f"{profession} id list")}
         if not holders[profession]:
             raise RuntimeError(f"wikidata returned no {profession} ids")
     population: dict[str, frozenset[str]] = {}
     for qids in holders.values():
-        for qid in _numeric(qids - population.keys()):
-            population[qid] = frozenset(p for p, held in holders.items() if qid in held)
+        for item_qid in numeric_qids(qids - population.keys()):
+            population[item_qid] = frozenset(p for p, held in holders.items() if item_qid in held)
     return population
 
 
-def _fetch_qids(session: SourceSession) -> list[str]:
-    """Every QID in the population, in paging order (see :func:`_fetch_population`)."""
-    return list(_fetch_population(session))
+def fetch_qids(session: SourceSession) -> list[str]:
+    """Every QID in the population, in paging order (see :func:`fetch_population`)."""
+    return list(fetch_population(session))
 
 
-def _fetch_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
+def fetch_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
     """Fetch the detail rows for one batch of composers: the single-valued
     fields, then the multi-valued ones (see MULTI_QUERY for why they are a
     separate query), then the relations. The row lists concatenate --
@@ -271,37 +295,37 @@ def _fetch_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]
     item must produce at least one row; a short answer means rows went missing
     in transit rather than an item having no properties. Raising here is what
     stops a silent hole from quietly halving the dataset (issue #181)."""
-    page = QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
-
-    def covered(rows: list[dict[str, Any]]) -> bool:
-        return not set(qids) - {_qid(row) for row in rows}
-
-    rows = _run_query(session, page, f"page of {len(qids)} items", mirror=True, complete=covered)
-    missing = set(qids) - {_qid(row) for row in rows}
-    if missing:
-        raise RuntimeError(
-            f"wikidata page returned {len(qids) - len(missing)} of {len(qids)} requested items; "
-            f"missing e.g. {sorted(missing)[:5]}"
-        )
+    page = QUERY.format(values=values(qids), languages=LABEL_LANGUAGES)
+    rows = run_covered_query(session, page, qids, f"page of {len(qids)} items")
     # no coverage check here: an item with none of these properties, and so no
     # row at all, is ordinary
-    multi = MULTI_QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
+    multi = MULTI_QUERY.format(values=values(qids), languages=LABEL_LANGUAGES)
     relations = RELATIONS_QUERY.format(
-        values=_values(qids),
+        values=values(qids),
         relations=" ".join(f"wdt:{prop}" for prop, _ in RELATIONS),
         languages=LABEL_LANGUAGES,
     )
     return (
         rows
-        + _run_query(session, multi, f"multi for {len(qids)} items", mirror=True)
-        + _run_query(session, relations, f"relations for {len(qids)} items", mirror=True)
+        + run_query(session, multi, f"multi for {len(qids)} items", mirror=True)
+        + run_query(session, relations, f"relations for {len(qids)} items", mirror=True)
     )
 
 
-def _fetch_metrics(session: SourceSession, qids: list[str]) -> dict[str, dict[str, str]]:
+def fetch_metrics(session: SourceSession, qids: list[str]) -> dict[str, dict[str, str]]:
     """Popularity metrics keyed by QID for the given items."""
-    query = METRICS_QUERY.format(values=_values(qids))
+    query = METRICS_QUERY.format(values=values(qids))
     metrics: dict[str, dict[str, str]] = {}
-    for row in _run_query(session, query, f"metrics for {len(qids)} items", mirror=True):
-        metrics[_qid(row)] = {var: value for var, _ in METRICS if (value := _literal(row, var)) is not None}
+    for row in run_query(session, query, f"metrics for {len(qids)} items", mirror=True):
+        metrics[qid(row)] = {var: value for var, _ in METRICS if (value := literal(row, var)) is not None}
     return metrics
+
+
+_run_query = run_query
+_qid = qid
+_values = values
+_numeric = numeric_qids
+_fetch_population = fetch_population
+_fetch_qids = fetch_qids
+_fetch_page = fetch_page
+_fetch_metrics = fetch_metrics

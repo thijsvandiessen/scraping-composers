@@ -1,14 +1,21 @@
 """Helpers shared by the dashboard views."""
 
 import math
-from typing import Any
+from typing import Protocol
 from urllib.parse import urlencode
 
 from django.http import HttpRequest
 
+from ..schemas import PaginatedResponse
 
-def is_running(item: object) -> bool:
-    return isinstance(item, dict) and item.get("status") == "running"
+
+class _HasStatus(Protocol):
+    @property
+    def status(self) -> str | None: ...
+
+
+def is_running(item: _HasStatus | None) -> bool:
+    return item is not None and item.status == "running"
 
 
 def page_number(request: HttpRequest) -> int:
@@ -19,11 +26,13 @@ def page_number(request: HttpRequest) -> int:
         return 1
 
 
-def page_context(page_data: dict[str, Any], base_path: str, params: dict[str, str]) -> dict[str, object]:
+def page_context(
+    page_data: PaginatedResponse | None, base_path: str, params: dict[str, str]
+) -> dict[str, object]:
     """Prev/next links and page count for a paginated API response."""
-    total = int(page_data.get("total", 0) or 0)
-    page = int(page_data.get("page", 1) or 1)
-    limit = int(page_data.get("limit", 20) or 20)
+    total = page_data.total if page_data is not None else 0
+    page = page_data.page if page_data is not None else 1
+    limit = page_data.limit if page_data is not None and page_data.limit > 0 else 20
     pages = max(1, math.ceil(total / limit))
 
     def url_for(target: int) -> str:

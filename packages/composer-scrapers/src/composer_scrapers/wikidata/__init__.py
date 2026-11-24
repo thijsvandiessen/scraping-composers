@@ -29,9 +29,9 @@ from .catalogue import WikidataCatalogueAdapter
 from .ensembles import WikidataEnsemblesAdapter
 from .genres import WikidataGenresAdapter
 from .instrumentation import WikidataInstrumentationAdapter
-from .parse import BASE_URL, _records_from_rows
+from .parse import BASE_URL, records_from_rows
 from .places import WikidataPlacesAdapter
-from .query import PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _fetch_metrics, _fetch_page, _fetch_population
+from .query import PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, fetch_metrics, fetch_page, fetch_population
 from .works import WikidataWorksAdapter
 
 log = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class WikidataAdapter(HttpSourceAdapter[EntityDocument]):
         cursor. ``max_pages`` caps the number of batches, for test runs; ids
         are numerically ordered, so a capped run still covers the best-known
         composers."""
-        population = _fetch_population(session)
+        population = fetch_population(session)
         qids = list(population)
         batches = [qids[i : i + PAGE_SIZE] for i in range(0, len(qids), PAGE_SIZE)]
         if max_pages is not None and max_pages < len(batches):
@@ -73,9 +73,9 @@ class WikidataAdapter(HttpSourceAdapter[EntityDocument]):
         log.info("wikidata: %d persons in %d pages", len(qids), len(batches))
 
         for page, batch in enumerate(batches, start=1):
-            rows = _fetch_page(session, batch)
-            metrics = _fetch_metrics(session, batch)
-            records = _records_from_rows(rows, metrics, population)
+            rows = fetch_page(session, batch)
+            metrics = fetch_metrics(session, batch)
+            records = records_from_rows(rows, metrics, population)
             ingested_at = datetime.now(UTC)
             log.info("wikidata page %d/%d: %d persons", page, len(batches), len(records))
             for record in records:

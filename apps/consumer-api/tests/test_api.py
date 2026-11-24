@@ -1628,3 +1628,14 @@ def test_health_endpoint_and_lifespan_cleanup() -> None:
         assert response.json() == {"status": "ok"}
         assert app.state.session_factory is factory
     assert app.state.session_factory is None
+
+
+def test_openapi_routes_have_tags_and_no_bronze_alias() -> None:
+    import composer_api
+
+    assert not hasattr(composer_api, "bronze_app")
+    schema = composer_api.gold_app.openapi()
+    for path, methods in schema["paths"].items():
+        for method, operation in methods.items():
+            tags = operation.get("tags")
+            assert tags, f"{method.upper()} {path} is missing OpenAPI tags"

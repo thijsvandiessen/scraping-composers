@@ -166,7 +166,9 @@ class _Snapshotter:
     def run(self, query: LiteralString, **params: Any) -> list[dict[str, Any]]:
         # Notifications off: a claim type no node uses yet draws an "unknown
         # relationship type" warning, which would repeat for every entity.
-        with self.driver.session(database=self.database, notifications_min_severity="OFF") as session:
+        with self.driver.session(  # pyright: ignore[reportUnknownMemberType]
+            database=self.database, notifications_min_severity="OFF"
+        ) as session:
             return [record.data() for record in session.run(query, params)]
 
     def performance_edges(

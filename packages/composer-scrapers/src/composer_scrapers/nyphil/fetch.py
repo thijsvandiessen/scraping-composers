@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import kagglehub
 
@@ -23,8 +23,12 @@ DATASET = "nyphil/perf-history"
 RAW_FILE = "raw_nyc_phil.json"
 
 
-def _load_programs() -> list[dict[str, Any]]:
-    path = Path(kagglehub.dataset_download(DATASET)) / RAW_FILE
+def load_programs() -> list[dict[str, Any]]:
+    dataset_dir = cast(str, kagglehub.dataset_download(DATASET))  # pyright: ignore[reportUnknownMemberType]
+    path = Path(dataset_dir) / RAW_FILE
     with open(path, encoding="utf-8") as handle:
         programs: list[dict[str, Any]] = json.load(handle)["programs"]
     return programs
+
+
+_load_programs = load_programs

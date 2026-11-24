@@ -30,7 +30,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from .text import text
 from .urls import BASE_URL, canonical, person_url
@@ -95,12 +95,14 @@ def _person_node(page_html: str) -> dict[str, Any]:
         except ValueError as exc:
             log.debug("unreadable JSON-LD block (%s); falling back to the header", exc)
             continue
-        nodes = graph.get("@graph", [graph]) if isinstance(graph, dict) else graph
+        nodes: Any = cast(dict[str, Any], graph).get("@graph", [graph]) if isinstance(graph, dict) else graph
         if not isinstance(nodes, list):
             continue
-        for node in nodes:
-            if isinstance(node, dict) and node.get("@type") == "Person":
-                return node
+        for node in cast(list[object], nodes):
+            if isinstance(node, dict):
+                node_map = cast(dict[str, Any], node)
+                if node_map.get("@type") == "Person":
+                    return node_map
     return {}
 
 

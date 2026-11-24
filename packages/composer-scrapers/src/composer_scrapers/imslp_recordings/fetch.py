@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 from composer_http import SourceSession
@@ -171,13 +171,15 @@ def _read(raw: str, listed_title: str, *, quiet: bool = False) -> tuple[str, str
     except ValueError as exc:
         warn("imslp_recordings: unreadable API response for %r (%s)", listed_title, exc)
         return None
-    parse = body.get("parse") if isinstance(body, dict) else None
-    if not isinstance(parse, dict):
-        error = body.get("error") if isinstance(body, dict) else None
+    body_map = cast(dict[str, Any], body) if isinstance(body, dict) else None
+    raw_parse = body_map.get("parse") if body_map is not None else None
+    if not isinstance(raw_parse, dict):
+        error = body_map.get("error") if body_map is not None else None
         warn("imslp_recordings: no parse output for %r (%s)", listed_title, error)
         return None
-    text = parse.get("text")
-    document = text.get("*") if isinstance(text, dict) else None
+    parse = cast(dict[str, Any], raw_parse)
+    raw_text = parse.get("text")
+    document = cast(dict[str, Any], raw_text).get("*") if isinstance(raw_text, dict) else None
     if not isinstance(document, str):
         warn("imslp_recordings: empty parser output for %r", listed_title)
         return None
@@ -187,13 +189,17 @@ def _read(raw: str, listed_title: str, *, quiet: bool = False) -> tuple[str, str
 
 def _members(body: dict[str, Any]) -> list[dict[str, Any]]:
     query = body.get("query")
-    members = query.get("categorymembers") if isinstance(query, dict) else None
-    return [member for member in members if isinstance(member, dict)] if isinstance(members, list) else []
+    members = cast(dict[str, Any], query).get("categorymembers") if isinstance(query, dict) else None
+    if not isinstance(members, list):
+        return []
+    return [
+        cast(dict[str, Any], member) for member in cast(list[object], members) if isinstance(member, dict)
+    ]
 
 
 def _cmcontinue(body: dict[str, Any]) -> str | None:
     """The continuation token, under MediaWiki 1.18's ``query-continue``."""
     section = body.get("query-continue")
-    members = section.get("categorymembers") if isinstance(section, dict) else None
-    token = members.get("cmcontinue") if isinstance(members, dict) else None
+    members = cast(dict[str, Any], section).get("categorymembers") if isinstance(section, dict) else None
+    token = cast(dict[str, Any], members).get("cmcontinue") if isinstance(members, dict) else None
     return token if isinstance(token, str) and token else None

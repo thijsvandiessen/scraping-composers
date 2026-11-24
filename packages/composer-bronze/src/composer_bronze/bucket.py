@@ -246,7 +246,7 @@ class LocalBucket:
         return "pages"
 
     def list_snapshots(self, source: str) -> list[Snapshot]:
-        snapshots = []
+        snapshots: list[Snapshot] = []
         for run_id in self.list_runs(source):
             manifest = self.read_manifest(source, run_id) or self._fallback_manifest(source, run_id)
             ndjson = self._ndjson_path(source, run_id)

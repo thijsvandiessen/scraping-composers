@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 _DDMMYYYY = re.compile(r"^(\d{2})-(\d{2})-(\d{4})$")
 
@@ -43,11 +43,14 @@ class ConcertFields:
 
 def _soloists(raw: dict[str, Any]) -> tuple[tuple[str, str | None], ...]:
     # every source reports soloists as {"name": ..., "discipline": ...}
-    return tuple(
-        (s["name"], s.get("discipline"))
-        for s in raw.get("soloists") or []
-        if isinstance(s, dict) and s.get("name")
-    )
+    result: list[tuple[str, str | None]] = []
+    raw_soloists: list[Any] = raw.get("soloists") or []
+    for item in raw_soloists:
+        if isinstance(item, dict):
+            s = cast(dict[str, Any], item)
+            if s.get("name"):
+                result.append((s["name"], s.get("discipline")))
+    return tuple(result)
 
 
 def _concertgebouw_fields(raw: dict[str, Any]) -> ConcertFields | None:

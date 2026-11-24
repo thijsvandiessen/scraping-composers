@@ -44,7 +44,7 @@ def cmd_export_kumu(args: argparse.Namespace) -> int:
 
 def _neo4j_driver(args: argparse.Namespace) -> Driver | None:
     """A driver for ``--neo4j-url``, or None (reported) when it can't be reached."""
-    driver = GraphDatabase.driver(
+    driver = GraphDatabase.driver(  # pyright: ignore[reportUnknownMemberType]
         args.neo4j_url,
         auth=(args.neo4j_user, args.neo4j_password),
         # The load re-asserts its constraints every run; the server's "already
@@ -52,7 +52,7 @@ def _neo4j_driver(args: argparse.Namespace) -> Driver | None:
         notifications_min_severity="WARNING",
     )
     try:
-        driver.verify_connectivity()
+        driver.verify_connectivity()  # pyright: ignore[reportUnknownMemberType]
     except (ServiceUnavailable, Neo4jError) as exc:
         print(f"cannot reach neo4j at {args.neo4j_url} ({exc}) — is `docker compose up -d neo4j` running?")
         driver.close()

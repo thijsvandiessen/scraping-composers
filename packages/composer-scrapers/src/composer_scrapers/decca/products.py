@@ -42,7 +42,7 @@ import re
 from collections import Counter
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from composer_schema import resolve_entity_kind
 
@@ -185,7 +185,9 @@ class Recording:
     participants: tuple[Credit, ...] = ()
     composers: tuple[Credit, ...] = ()
     production: tuple[Credit, ...] = ()
-    life_dates: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
+    life_dates: dict[str, tuple[str | None, str | None]] = field(
+        default_factory=dict[str, tuple[str | None, str | None]]
+    )
 
     @property
     def url(self) -> str:
@@ -272,8 +274,12 @@ def _heading_composers(track: dict[str, Any], credits: list[Credit]) -> list[Cre
         for credit in credits
         if not _is_authoring(credit.function) and not _is_production(credit.function)
     }
-    for heading in track.get("headings") or []:
-        if not isinstance(heading, dict) or heading.get("type") != "COMPOSER":
+    headings: list[Any] = track.get("headings") or []
+    for raw_heading in headings:
+        if not isinstance(raw_heading, dict):
+            continue
+        heading = cast(dict[str, Any], raw_heading)
+        if heading.get("type") != "COMPOSER":
             continue
         name = _text(heading.get("name"))
         if name is None:
@@ -289,8 +295,12 @@ def _heading_composers(track: dict[str, Any], credits: list[Credit]) -> list[Cre
 def heading_life_dates(track: dict[str, Any]) -> dict[str, tuple[str | None, str | None]]:
     """Birth and death years the track's ``COMPOSER`` heading states, by name."""
     dates: dict[str, tuple[str | None, str | None]] = {}
-    for heading in track.get("headings") or []:
-        if not isinstance(heading, dict) or heading.get("type") != "COMPOSER":
+    headings: list[Any] = track.get("headings") or []
+    for raw_heading in headings:
+        if not isinstance(raw_heading, dict):
+            continue
+        heading = cast(dict[str, Any], raw_heading)
+        if heading.get("type") != "COMPOSER":
             continue
         name = _text(heading.get("name"))
         if name is None:
@@ -304,12 +314,15 @@ def heading_life_dates(track: dict[str, Any]) -> dict[str, tuple[str | None, str
 def _credits(track: dict[str, Any]) -> list[Credit]:
     """Every contributor on a track that names an artist and a function."""
     found: list[Credit] = []
-    for entry in track.get("contributors") or []:
-        if not isinstance(entry, dict):
+    contributors: list[Any] = track.get("contributors") or []
+    for raw_entry in contributors:
+        if not isinstance(raw_entry, dict):
             continue
-        artist = entry.get("artist")
-        if not isinstance(artist, dict):
+        entry = cast(dict[str, Any], raw_entry)
+        raw_artist = entry.get("artist")
+        if not isinstance(raw_artist, dict):
             continue
+        artist = cast(dict[str, Any], raw_artist)
         name = _text(artist.get("screenname"))
         artist_id = artist.get("idRaw")
         if name is None or not isinstance(artist_id, int):
@@ -368,9 +381,16 @@ def _level_one_work(track: dict[str, Any]) -> tuple[int, str] | None:
     Level 1 is the work; deeper levels are its acts and movements, which is the
     grouping that keeps a whole opera as one mention.
     """
-    for edge in (track.get("works") or {}).get("edges") or []:
-        node = edge.get("node") if isinstance(edge, dict) else None
-        if not isinstance(node, dict) or node.get("level") != 1:
+    works_obj: dict[str, Any] = track.get("works") or {}
+    edges: list[Any] = works_obj.get("edges") or []
+    for raw_edge in edges:
+        if not isinstance(raw_edge, dict):
+            continue
+        raw_node = cast(dict[str, Any], raw_edge).get("node")
+        if not isinstance(raw_node, dict):
+            continue
+        node = cast(dict[str, Any], raw_node)
+        if node.get("level") != 1:
             continue
         work_id = node.get("idRaw")
         title = _text(node.get("name"))
@@ -390,11 +410,15 @@ def recordings(family: dict[str, Any], slug: str) -> Iterator[Recording]:
     if not isinstance(family_id, int):
         return
     family_title = _text(family.get("headline"))
-    for edge in (family.get("products") or {}).get("edges") or []:
-        node = edge.get("node") if isinstance(edge, dict) else None
-        if not isinstance(node, dict):
+    products_obj: dict[str, Any] = family.get("products") or {}
+    edges: list[Any] = products_obj.get("edges") or []
+    for raw_edge in edges:
+        if not isinstance(raw_edge, dict):
             continue
-        recording = _recording(node, family, family_id, slug, family_title)
+        raw_node = cast(dict[str, Any], raw_edge).get("node")
+        if not isinstance(raw_node, dict):
+            continue
+        recording = _recording(cast(dict[str, Any], raw_node), family, family_id, slug, family_title)
         if recording is not None:
             yield recording
 
@@ -442,11 +466,13 @@ def _sort_credits(credits: list[Credit]) -> tuple[list[Credit], list[Credit]]:
 class _Product:
     """What one product's tracks add up to, accumulated as they are read."""
 
-    by_work: dict[int, tuple[str, list[Track]]] = field(default_factory=dict)
-    participants: list[Credit] = field(default_factory=list)
-    composers: list[Credit] = field(default_factory=list)
-    production: list[Credit] = field(default_factory=list)
-    life_dates: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
+    by_work: dict[int, tuple[str, list[Track]]] = field(default_factory=dict[int, tuple[str, list[Track]]])
+    participants: list[Credit] = field(default_factory=list[Credit])
+    composers: list[Credit] = field(default_factory=list[Credit])
+    production: list[Credit] = field(default_factory=list[Credit])
+    life_dates: dict[str, tuple[str | None, str | None]] = field(
+        default_factory=dict[str, tuple[str | None, str | None]]
+    )
 
     def read(self, raw_track: dict[str, Any], carrier_name: str | None) -> None:
         """Fold one track in, or ignore it if it names no work."""
@@ -475,15 +501,20 @@ def _recording(
     if not isinstance(product_id, int):
         return None
     read = _Product()
-    for carrier in (product.get("playlist") or {}).get("carriers") or []:
-        if not isinstance(carrier, dict):
+    playlist: dict[str, Any] = product.get("playlist") or {}
+    carriers: list[Any] = playlist.get("carriers") or []
+    for raw_carrier in carriers:
+        if not isinstance(raw_carrier, dict):
             continue
+        carrier = cast(dict[str, Any], raw_carrier)
         carrier_name = _text(carrier.get("name"))
-        for raw_track in carrier.get("tracks") or []:
+        tracks: list[Any] = carrier.get("tracks") or []
+        for raw_track in tracks:
             if isinstance(raw_track, dict):
-                read.read(raw_track, carrier_name)
+                read.read(cast(dict[str, Any], raw_track), carrier_name)
     if not read.by_work:
         return None
+    category_obj: dict[str, Any] = product.get("productCategory") or {}
     return Recording(
         product_id=product_id,
         family_id=family_id,
@@ -493,7 +524,7 @@ def _recording(
         label=_text(product.get("label")),
         catalogue_number=_text(product.get("sku")),
         format=_text(product.get("configuration")),
-        category=_text((product.get("productCategory") or {}).get("name")),
+        category=_text(category_obj.get("name")),
         mentions=tuple(_mention(work_id, title, tracks) for work_id, (title, tracks) in read.by_work.items()),
         participants=tuple(_unique(read.participants)),
         composers=tuple(_unique(read.composers)),

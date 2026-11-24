@@ -16,7 +16,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import replace
-from typing import Any
+from typing import Any, cast
 
 from composer_schema.catalogues import OPUS, normalize_wikidata_code
 
@@ -70,13 +70,17 @@ def _wikidata_catalogue(raw: dict[str, Any], composer: str | None) -> list[tuple
     Köchel catalogue, short name "KV") on others, and Terry 238/3 as "238/3"
     in a catalogue with no short name at all."""
     pairs: list[tuple[str, str]] = []
-    for entry in raw.get("catalogue_codes") or []:
-        if not isinstance(entry, dict) or (code := _text(entry, "code")) is None:  # pyright: ignore[reportUnknownArgumentType]
+    entries: list[Any] = raw.get("catalogue_codes") or []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        entry_map = cast(dict[str, Any], entry)
+        if (code := _text(entry_map, "code")) is None:
             continue
         pairs += normalize_wikidata_code(
             code,
-            _text(entry, "catalogue_item"),  # pyright: ignore[reportUnknownArgumentType]
-            _text(entry, "catalogue_short"),  # pyright: ignore[reportUnknownArgumentType]
+            _text(entry_map, "catalogue_item"),
+            _text(entry_map, "catalogue_short"),
             composer,
         )
     return pairs

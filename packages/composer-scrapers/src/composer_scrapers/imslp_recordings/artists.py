@@ -31,7 +31,7 @@ class Person:
 
     name: str
     kind: str = PERSON_KIND
-    disciplines: set[str] = field(default_factory=set)
+    disciplines: set[str] = field(default_factory=set[str])
     conducted: bool = False
     albums: int = 0
 

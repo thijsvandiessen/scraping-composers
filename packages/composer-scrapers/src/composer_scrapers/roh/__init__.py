@@ -157,16 +157,18 @@ class _Sweep:
     session: SourceSession
     max_pages: int | None
     pages: int = 0
-    works: dict[int, WorkPage] = field(default_factory=dict)
+    works: dict[int, WorkPage] = field(default_factory=dict[int, WorkPage])
     #: ``(production_id, work_id)`` — a production page never says which work it
     #: stages, so the parent is carried down with it. See :mod:`.productions`.
-    productions: list[tuple[int, int]] = field(default_factory=list)
+    productions: list[tuple[int, int]] = field(default_factory=list[tuple[int, int]])
     #: ``(work_id, production_id | None, ref)`` for each night still to read.
-    performances: list[tuple[int, int | None, PerformanceRef]] = field(default_factory=list)
+    performances: list[tuple[int, int | None, PerformanceRef]] = field(
+        default_factory=list[tuple[int, int | None, PerformanceRef]]
+    )
     stubs: int = 0
     unreadable: int = 0
     mentions: int = 0
-    unknown: set[str] = field(default_factory=set)
+    unknown: set[str] = field(default_factory=set[str])
 
     @property
     def exhausted(self) -> bool:

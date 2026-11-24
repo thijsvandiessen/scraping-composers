@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from composer_models import (
     Entity,
@@ -66,11 +66,14 @@ class _RecordingFields:
 
 
 def _participants(raw: dict[str, Any]) -> tuple[tuple[str, str, str | None], ...]:
-    return tuple(
-        (a["name"], _role(a.get("role")), a.get("discipline"))
-        for a in raw.get("artists") or []
-        if isinstance(a, dict) and a.get("name")
-    )
+    result: list[tuple[str, str, str | None]] = []
+    raw_artists: list[Any] = raw.get("artists") or []
+    for item in raw_artists:
+        if isinstance(item, dict):
+            a = cast(dict[str, Any], item)
+            if a.get("name"):
+                result.append((a["name"], _role(a.get("role")), a.get("discipline")))
+    return tuple(result)
 
 
 def _recording_fields(source_name: str, raw: dict[str, Any]) -> _RecordingFields | None:
@@ -173,11 +176,11 @@ def _merge_cluster(grouped: dict[Key, dict[str, Any]], members: list[Key]) -> tu
 class _RowBatch(ParticipantResolver):
     """Accumulates the insert rows plus participant-resolution stats."""
 
-    recordings: list[dict[str, Any]] = field(default_factory=list)
-    participants: list[dict[str, Any]] = field(default_factory=list)
-    works: list[dict[str, Any]] = field(default_factory=list)
+    recordings: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    participants: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    works: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     participant_links: int = 0
-    unresolved_names: set[str] = field(default_factory=set)
+    unresolved_names: set[str] = field(default_factory=set[str])
 
     def add_participant(self, recording_id: uuid.UUID, role: str, name: str, discipline: str | None) -> None:
         resolved = self._resolve_name(role, name)

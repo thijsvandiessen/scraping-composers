@@ -13,7 +13,7 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 #: A credit joins several people with " / " and may end "et al.".
 _COMPOSER_SEPARATOR = " / "
@@ -228,5 +228,9 @@ def parse_product(payload: dict[str, Any]) -> ParsedProduct | None:
         binding=_text(payload, "artAppearDispl"),
         digital=payload.get("digital") is True,
         searchable=payload.get("artAnzeigeSuche") is not False,
-        items=tuple(item for item in items if isinstance(item, dict)) if isinstance(items, list) else (),
+        items=(
+            tuple(cast(dict[str, Any], item) for item in cast(list[object], items) if isinstance(item, dict))
+            if isinstance(items, list)
+            else ()
+        ),
     )

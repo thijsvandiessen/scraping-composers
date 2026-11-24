@@ -110,7 +110,7 @@ class EntityDocument(ScrapedDocument):
 
     name: str = ""
     kind: str = "person"
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict[str, Any])
     claims: tuple[SourceClaim, ...] = ()
 
 
@@ -120,7 +120,7 @@ class WorkMentionDocument(ScrapedDocument):
 
     title: str = ""
     composer: str | None = None
-    raw: dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 def serialize_document(doc: EntityDocument | WorkMentionDocument) -> dict[str, Any]:
