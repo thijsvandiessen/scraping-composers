@@ -2,7 +2,7 @@
 name = "composer-models"
 version = "0.1.0"
 description = "Shared database schema: the ORM models behind the silver and gold DBs, engine helpers, and dedup identity"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "composer-config",
     "sqlalchemy>=2.1.8",

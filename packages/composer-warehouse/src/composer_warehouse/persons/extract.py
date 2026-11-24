@@ -18,8 +18,9 @@ dedup key instead would fuse the names at ingest, with no score and no way back.
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass, field, replace
+
+from composer_schema.text import collapse_ws, strip_diacritics
 
 # Lowercased nobiliary particles that bind to the surname rather than stand as
 # given names. Kept small on purpose; extend as needed.
@@ -80,16 +81,11 @@ def comparable(a: PersonName, b: PersonName) -> bool:
     return bool(a.given) and bool(b.given) and a.given[0] == b.given[0]
 
 
-def _strip_diacritics(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in text if not unicodedata.combining(c))
-
-
 def _tokens(text: str) -> list[str]:
     """Lowercased, diacritic-stripped word tokens (punctuation dropped)."""
-    text = _strip_diacritics(text).lower()
+    text = strip_diacritics(text).lower()
     text = re.sub(r"[^\w\s]", " ", text)
-    return re.sub(r"\s+", " ", text).strip().split()
+    return collapse_ws(text).split()
 
 
 def _initials(tokens: tuple[str, ...]) -> tuple[str, ...]:

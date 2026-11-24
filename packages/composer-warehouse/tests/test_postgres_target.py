@@ -10,7 +10,7 @@ from dataclasses import dataclass
 import pytest
 from composer_config import settings
 from composer_models.db import get_engine
-from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import pg_url as pg_url
 from composer_models.testing import requires_postgres
 from composer_warehouse import postgres
 from composer_warehouse.build import build_target, run_build

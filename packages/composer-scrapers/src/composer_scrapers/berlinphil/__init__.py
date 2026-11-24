@@ -17,8 +17,9 @@ kinds of record in one pass over every archived concert:
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
+from typing import ClassVar
 
 from composer_http import SourceSession
 
@@ -38,7 +39,7 @@ class BerlinPhilAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument])
     # an archive of concerts already given: scraped once
     cadence = RefreshCadence.STATIC
     request_delay_s = REQUEST_DELAY_S
-    headers = {"Accept-Language": "en"}
+    headers: ClassVar[Mapping[str, str]] = {"Accept-Language": "en"}
 
     def scrape(
         self, session: SourceSession, max_pages: int | None = None

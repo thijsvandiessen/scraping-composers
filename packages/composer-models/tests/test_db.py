@@ -84,3 +84,13 @@ def test_get_engine_rejects_a_schema_name_that_cannot_be_escaped() -> None:
 
 def test_get_engine_ignores_the_schema_for_sqlite() -> None:
     assert get_engine("sqlite://", schema="silver").dialect.name == "sqlite"
+
+
+def test_get_engine_follow_swap_uses_null_pool_on_sqlite(tmp_path: object) -> None:
+    from sqlalchemy.pool import NullPool
+
+    engine = get_engine(f"sqlite:///{tmp_path}/swap.db", follow_swap=True)
+    try:
+        assert isinstance(engine.pool, NullPool)
+    finally:
+        engine.dispose()

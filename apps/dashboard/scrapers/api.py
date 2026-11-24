@@ -7,13 +7,26 @@ consumer API (``/v1``).
 
 from __future__ import annotations
 
+import atexit
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, cast
 
 import httpx
 
 TIMEOUT = 10.0
+
+_CLIENTS: dict[tuple[str, str | None], httpx.Client] = {}
+
+
+def _close_clients() -> None:
+    for client in list(_CLIENTS.values()):
+        if not client.is_closed:
+            client.close()
+    _CLIENTS.clear()
+
+
+atexit.register(_close_clients)
 
 
 class AdminAPIError(Exception):
@@ -45,14 +58,30 @@ class _BaseAPI:
     base_url: str
     api_key: str | None = None
     transport: httpx.BaseTransport | None = None
+    _client: httpx.Client | None = field(default=None, init=False, repr=False, compare=False)
+
+    def _get_client(self) -> httpx.Client:
+        headers = {"X-Admin-Key": self.api_key} if self.api_key else {}
+        if self.transport is not None:
+            if self._client is None or self._client.is_closed:
+                self._client = httpx.Client(
+                    base_url=self.base_url, headers=headers, timeout=TIMEOUT, transport=self.transport
+                )
+            return self._client
+        key = (self.base_url, self.api_key)
+        client = _CLIENTS.get(key)
+        if client is None or client.is_closed:
+            client = httpx.Client(base_url=self.base_url, headers=headers, timeout=TIMEOUT)
+            _CLIENTS[key] = client
+        return client
+
+    def close(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            self._client.close()
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        headers = {"X-Admin-Key": self.api_key} if self.api_key else {}
         try:
-            with httpx.Client(
-                base_url=self.base_url, headers=headers, timeout=TIMEOUT, transport=self.transport
-            ) as client:
-                response = client.request(method, path, **kwargs)
+            response = self._get_client().request(method, path, **kwargs)
         except httpx.HTTPError as exc:
             raise AdminAPIError(f"API unreachable at {self.base_url}: {exc}") from exc
         if response.is_error:

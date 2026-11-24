@@ -8,34 +8,45 @@ database. Same routes, different databases:
     uv run uvicorn composer_api:silver_app --port 8003
 """
 
-from collections.abc import Callable, Generator
+from collections.abc import AsyncGenerator, Callable
+from contextlib import asynccontextmanager
 
-from composer_config import settings
 from composer_gold import gold_engine
 from composer_models.db import get_engine, init_db
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine, make_url
+from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import NullPool
 
-from .deps import get_db
+from .deps import DbSession
 from .errors import GraphUnavailableError, NotFoundError
 from .routes import v1
 
 
 def _not_found_handler(request: Request, exc: Exception) -> JSONResponse:
-    # Typed (Request, Exception) because Starlette's add_exception_handler
-    # expects Callable[[Request, Exception], Response]; the registration
-    # below guarantees exc is a NotFoundError.
-    assert isinstance(exc, NotFoundError)
+    if not isinstance(exc, NotFoundError):
+        raise exc
     return JSONResponse(status_code=404, content={"detail": exc.detail})
 
 
 def _graph_unavailable_handler(request: Request, exc: Exception) -> JSONResponse:
     # The gold endpoints keep working, only the connections are missing.
-    assert isinstance(exc, GraphUnavailableError)
+    if not isinstance(exc, GraphUnavailableError):
+        raise exc
     return JSONResponse(status_code=503, content={"detail": exc.detail})
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
+    try:
+        yield
+    finally:
+        factory: sessionmaker[Session] | None = getattr(app.state, "session_factory", None)
+        if factory is not None:
+            bind = factory.kw.get("bind")
+            if isinstance(bind, Engine):
+                bind.dispose()
+            app.state.session_factory = None
 
 
 def create_app(title: str, factory_provider: Callable[[], sessionmaker[Session]]) -> FastAPI:
@@ -44,20 +55,18 @@ def create_app(title: str, factory_provider: Callable[[], sessionmaker[Session]]
     The provider is called lazily on the first request, so importing this
     module never touches (or creates) a database file.
     """
-    app = FastAPI(title=title)
+    app = FastAPI(title=title, lifespan=_lifespan)
+    app.state.factory_provider = factory_provider
+    app.state.session_factory = None
     app.include_router(v1)
     app.add_exception_handler(NotFoundError, _not_found_handler)
     app.add_exception_handler(GraphUnavailableError, _graph_unavailable_handler)
-    cached: sessionmaker[Session] | None = None
 
-    def _get_db() -> Generator[Session, None, None]:
-        nonlocal cached
-        if cached is None:
-            cached = factory_provider()
-        with cached() as session:
-            yield session
+    @app.get("/health")
+    def health(db: DbSession) -> dict[str, str]:
+        db.execute(text("SELECT 1"))
+        return {"status": "ok"}
 
-    app.dependency_overrides[get_db] = _get_db
     return app
 
 
@@ -68,13 +77,7 @@ def _gold_factory() -> sessionmaker[Session]:
 
 
 def _silver_factory() -> sessionmaker[Session]:
-    # NullPool for SQLite only: there the swap replaces the file, so a pooled
-    # connection still points at the old inode. A Postgres rebuild renames
-    # schemas instead, and name resolution happens per statement, so pooled
-    # connections follow the swap on their own.
-    if make_url(settings.database_url).drivername.partition("+")[0] == "sqlite":
-        return init_db(create_engine(settings.database_url, poolclass=NullPool))
-    return init_db(get_engine())
+    return init_db(get_engine(follow_swap=True))
 
 
 gold_app = create_app("Composer API (gold — curated)", _gold_factory)

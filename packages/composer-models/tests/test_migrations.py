@@ -14,7 +14,7 @@ from alembic.script import ScriptDirectory
 from composer_models import Base
 from composer_models.alembic_support import alembic_config
 from composer_models.db import get_engine
-from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import pg_url as pg_url
 from composer_models.testing import requires_postgres
 from sqlalchemy import inspect
 

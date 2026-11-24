@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 from abc import abstractmethod
 from collections.abc import Iterator, Mapping
-from typing import ClassVar, Generic, TypeVar
+from typing import ClassVar
 
 from composer_http import DEFAULT_TIMEOUT_S, SourceSession, new_client, open_page_cache
 from composer_schema import EntityDocument, SourceAdapter, WorkMentionDocument
@@ -34,11 +34,8 @@ __all__ = ["HttpSourceAdapter"]
 
 log = logging.getLogger(__name__)
 
-#: What a source yields: most sources both kinds, a few only entities.
-Doc = TypeVar("Doc", bound=EntityDocument | WorkMentionDocument)
 
-
-class HttpSourceAdapter(SourceAdapter, Generic[Doc]):
+class HttpSourceAdapter[Doc: EntityDocument | WorkMentionDocument](SourceAdapter):
     """A :class:`~composer_schema.SourceAdapter` that fetches over HTTP.
 
     Parametrised by the documents it yields, so a source that yields only

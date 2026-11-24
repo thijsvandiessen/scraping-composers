@@ -221,10 +221,12 @@ class LinkageModel:
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> LinkageModel:
         raw_comparisons = data["comparisons"]
-        assert isinstance(raw_comparisons, list)
+        if not isinstance(raw_comparisons, list):
+            raise ValueError(f"expected 'comparisons' to be a list, got {type(raw_comparisons).__name__}")
         comparisons: list[Comparison] = []
         for raw in raw_comparisons:
-            assert isinstance(raw, dict)
+            if not isinstance(raw, dict):
+                raise ValueError(f"expected each comparison to be a dict, got {type(raw).__name__}")
             comparisons.append(
                 Comparison(
                     name=str(raw["name"]),

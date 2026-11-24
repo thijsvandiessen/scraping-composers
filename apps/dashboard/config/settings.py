@@ -10,12 +10,18 @@ defines no models.
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from django.urls import reverse_lazy
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DASHBOARD_SECRET_KEY", "dev-only-insecure-key")
 DEBUG = os.environ.get("DASHBOARD_DEBUG", "0") == "1"
+_secret_key = os.environ.get("DASHBOARD_SECRET_KEY")
+if not _secret_key:
+    if not DEBUG:
+        raise ImproperlyConfigured("DASHBOARD_SECRET_KEY must be set when DASHBOARD_DEBUG is off")
+    _secret_key = "dev-only-insecure-key"  # noqa: S105 - DEBUG-only fallback; fail-closed when not DEBUG
+SECRET_KEY = _secret_key
 ALLOWED_HOSTS = os.environ.get("DASHBOARD_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 # Where the FastAPI apps live; everything the dashboard shows comes from
@@ -77,6 +83,12 @@ DATABASES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 STATIC_URL = "static/"
 USE_TZ = True
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 UNFOLD = {
     "SITE_TITLE": "composer-ingest",

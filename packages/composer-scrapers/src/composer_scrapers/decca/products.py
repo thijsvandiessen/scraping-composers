@@ -46,6 +46,7 @@ from typing import Any
 
 from composer_schema import resolve_entity_kind
 
+from .._parse import text as _text
 from .urls import product_url
 
 #: Not people. The catalogue uses these where a composer is unknown, and they
@@ -198,14 +199,6 @@ class Recording:
         than one per work.
         """
         return f"product:{self.product_id}"
-
-
-def _text(value: Any) -> str | None:
-    """A non-empty trimmed string, or None — the API returns both '' and null."""
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    return stripped or None
 
 
 def _placeholder(name: str) -> bool:

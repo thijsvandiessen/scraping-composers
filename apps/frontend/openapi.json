@@ -2760,6 +2760,28 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health"
+      }
+    },
     "/v1/composers": {
       "get": {
         "description": "People whose works are on at least three concerts and recordings combined, whatever their\nprofession claims say. Counts and sorts are of those performances, not the person's own credits.",
@@ -2771,7 +2793,11 @@
             "required": false,
             "schema": {
               "default": "label",
-              "pattern": "^(label|concerts|recordings)$",
+              "enum": [
+                "label",
+                "concerts",
+                "recordings"
+              ],
               "title": "Sort",
               "type": "string"
             }
@@ -2935,7 +2961,10 @@
             "required": false,
             "schema": {
               "default": "label",
-              "pattern": "^(label|mentions)$",
+              "enum": [
+                "label",
+                "mentions"
+              ],
               "title": "Sort",
               "type": "string"
             }
@@ -3126,7 +3155,11 @@
             "required": false,
             "schema": {
               "default": "label",
-              "pattern": "^(label|concerts|recordings)$",
+              "enum": [
+                "label",
+                "concerts",
+                "recordings"
+              ],
               "title": "Sort",
               "type": "string"
             }
@@ -3367,7 +3400,10 @@
             "required": false,
             "schema": {
               "default": "label",
-              "pattern": "^(label|appearances)$",
+              "enum": [
+                "label",
+                "appearances"
+              ],
               "title": "Sort",
               "type": "string"
             }
@@ -3481,7 +3517,10 @@
             "required": false,
             "schema": {
               "default": "label",
-              "pattern": "^(label|random)$",
+              "enum": [
+                "label",
+                "random"
+              ],
               "title": "Order",
               "type": "string"
             }
@@ -3637,7 +3676,10 @@
             "required": false,
             "schema": {
               "default": "affinity",
-              "pattern": "^(affinity|weight)$",
+              "enum": [
+                "affinity",
+                "weight"
+              ],
               "title": "Rank",
               "type": "string"
             }
@@ -3695,7 +3737,10 @@
             "required": false,
             "schema": {
               "default": "genre",
-              "pattern": "^(genre|movement)$",
+              "enum": [
+                "genre",
+                "movement"
+              ],
               "title": "Kind",
               "type": "string"
             }
@@ -4169,7 +4214,11 @@
             "required": false,
             "schema": {
               "default": "label",
-              "pattern": "^(label|concerts|recordings)$",
+              "enum": [
+                "label",
+                "concerts",
+                "recordings"
+              ],
               "title": "Sort",
               "type": "string"
             }
@@ -4350,7 +4399,10 @@
             "required": false,
             "schema": {
               "default": "label",
-              "pattern": "^(label|mentions)$",
+              "enum": [
+                "label",
+                "mentions"
+              ],
               "title": "Sort",
               "type": "string"
             }

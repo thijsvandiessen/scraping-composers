@@ -2,7 +2,7 @@
 name = "composer-admin-api"
 version = "0.1.0"
 description = "Admin API: trigger scrapes, ingest snapshots, and promote gold from a browser"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "composer-bronze",
     "composer-scrapers",

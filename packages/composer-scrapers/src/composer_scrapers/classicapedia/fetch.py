@@ -77,11 +77,11 @@ class IndexEntry:
 
 def page_refs(sitemap_xml: str) -> list[PageRef]:
     """The pages this source reads, in sitemap order."""
-    refs: list[PageRef] = []
-    for loc in _LOC.findall(sitemap_xml):
-        if (match := _PAGE_URL.match(loc)) is not None:
-            refs.append(PageRef(match.group(1), match.group(2), loc))
-    return refs
+    return [
+        PageRef(match.group(1), match.group(2), loc)
+        for loc in _LOC.findall(sitemap_xml)
+        if (match := _PAGE_URL.match(loc)) is not None
+    ]
 
 
 def parse_index(script: str) -> list[IndexEntry]:

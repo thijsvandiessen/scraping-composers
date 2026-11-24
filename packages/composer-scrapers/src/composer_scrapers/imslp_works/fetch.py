@@ -47,6 +47,7 @@ from typing import Any
 
 from composer_http import SourceSession
 
+from .._parse import text as _text
 from ..imslp.fetch import PAGE_SIZE, WORKS, worklist_page
 
 log = logging.getLogger(__name__)
@@ -108,13 +109,6 @@ def _row(entry: Any) -> WorkRow | None:
         catalogue_number=_text(values.get("icatno")),
         url=permlink if isinstance(permlink, str) else f"{BASE_URL}/wiki/{page_id}",
     )
-
-
-def _text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    return stripped or None
 
 
 def iter_worklist(session: SourceSession) -> Iterator[WorkRow]:

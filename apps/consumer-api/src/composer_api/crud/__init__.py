@@ -10,8 +10,8 @@ from .works import composer_works, get_work, list_mentions, list_works
 __all__ = [
     "composer_works",
     "entity_connections",
-    "get_concert",
     "genre_people",
+    "get_concert",
     "get_ensemble",
     "get_entity",
     "get_genre",

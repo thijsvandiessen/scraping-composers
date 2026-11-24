@@ -49,7 +49,13 @@ src = ["packages", "apps", "tests"]
 # for reference). Legacy offenders carry a targeted `# noqa` pragma — remove it when
 # refactoring them, and don't add it to new code. Class-size rules (PLR0904 etc.) are
 # preview-only in ruff. File length is deliberately not capped.
-select = ["E", "F", "I", "UP", "B", "C90", "PLR091"]
+select = ["E", "F", "I", "UP", "B", "C90", "PLR091", "S", "RUF", "SIM", "PERF", "DTZ", "FAST"]
+# Classical music strings/comments intentionally use typographic en-dashes, quotes, and symbols.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "S105", "S106", "S108", "S311", "S603", "S607", "SIM117", "SIM300", "RUF012", "RUF015", "RUF043", "PERF403"]
+"**/migrations/**" = ["S608"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

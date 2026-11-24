@@ -42,9 +42,10 @@ import logging
 import math
 import uuid
 from collections import Counter
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from itertools import batched
 from typing import Any, LiteralString, cast
 
 from composer_models import CLAIMS, POOL_SIZE, ConnectionEdge, ConnectionsPayload, EntityConnections
@@ -295,17 +296,6 @@ def _focuses(snapshotter: _Snapshotter) -> Iterator[tuple[str, str]]:
             yield label, row["id"]
 
 
-def _batches(items: Iterable[dict[str, Any]], size: int) -> Iterator[list[dict[str, Any]]]:
-    batch: list[dict[str, Any]] = []
-    for item in items:
-        batch.append(item)
-        if len(batch) == size:
-            yield batch
-            batch = []
-    if batch:
-        yield batch
-
-
 def snapshot_connections(
     session: Session,
     driver: Driver,
@@ -334,8 +324,8 @@ def snapshot_connections(
     session.execute(delete(EntityConnections))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         rows = (row for row in pool.map(one, focuses) if row is not None)
-        for batch in _batches(rows, 500):
-            session.execute(insert(EntityConnections), batch)
+        for batch in batched(rows, 500):
+            session.execute(insert(EntityConnections), list(batch))
             stats.snapshots += len(batch)
             stats.edges += sum(len(row["payload"]["edges"]) for row in batch)
             if stats.snapshots % 5000 < len(batch):

@@ -189,7 +189,7 @@ def parse_biography(slug: str, page: str) -> Biography | None:
     dates = parts[0] if parts else ""
     birth_year, death_year = _life_years(dates)
     birth_place: str | None = None
-    if len(parts) >= 3:  # noqa: PLR2004 - dates, place, occupation
+    if len(parts) >= 3:  # dates, place, occupation
         if _CIRCA_SLOT.match(parts[1]):
             birth_year = None
         birth_place = _birth_place(parts[1])
@@ -201,7 +201,7 @@ def parse_biography(slug: str, page: str) -> Biography | None:
         death_year=death_year,
         dates=dates,
         birth_place=birth_place,
-        occupation=parts[-1] if len(parts) >= 2 else "",  # noqa: PLR2004
+        occupation=parts[-1] if len(parts) >= 2 else "",
         teachers=teachers,
         pupils=pupils,
         wikipedia=_wikipedia(page),

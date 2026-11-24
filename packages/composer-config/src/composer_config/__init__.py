@@ -1,3 +1,4 @@
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,11 +18,11 @@ class Settings(BaseSettings):
     # The Neo4j server export-neo4j loads gold into (see docker-compose's neo4j).
     neo4j_url: str = "bolt://localhost:7688"
     neo4j_user: str = "neo4j"
-    neo4j_password: str = "composers"
+    neo4j_password: SecretStr = SecretStr("composers")
     bucket_path: str = "./raw-data"
     scraper_contact_email: str | None = None
 
-    admin_api_key: str | None = None
+    admin_api_key: SecretStr | None = None
 
     # Log level for the CLI and the admin API. Fetches narrate themselves at
     # INFO; DEBUG adds a line per request.

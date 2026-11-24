@@ -2,7 +2,7 @@
 name = "composer-e2e"
 version = "0.1.0"
 description = "End-to-end pipeline tests (fetch → process → promote → API) over synthetic sources"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "composer-cli",
     "composer-consumer-api",

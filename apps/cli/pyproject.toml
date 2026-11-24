@@ -2,7 +2,7 @@
 name = "composer-cli"
 version = "0.1.0"
 description = "Command-line interface for the composer ingestion pipeline"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "composer-bronze",
     "composer-scrapers",

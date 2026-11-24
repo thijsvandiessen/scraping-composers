@@ -2,7 +2,7 @@
 name = "composer-consumer-api"
 version = "0.1.0"
 description = "Read-only consumer product API (serves the curated gold and raw staging datasets)"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "composer-models",
     "composer-gold",

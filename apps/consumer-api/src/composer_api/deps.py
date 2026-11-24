@@ -1,17 +1,25 @@
 import uuid
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import Depends, Query
-from sqlalchemy.orm import Session
+from fastapi import Depends, Query, Request
+from sqlalchemy.orm import Session, sessionmaker
 
 
-def get_db() -> Generator[Session, None, None]:
-    """Placeholder dependency; every app binds its own database via
-    ``create_app`` (see ``main.py``), which overrides this."""
-    raise RuntimeError("get_db must be overridden by the app; build apps via create_app")
-    yield  # pragma: no cover  # makes this a generator, matching the override's shape
+def get_db(request: Request) -> Generator[Session, None, None]:
+    """Yield a session from the app's lazily initialized session factory."""
+    factory: sessionmaker[Session] | None = getattr(request.app.state, "session_factory", None)
+    if factory is None:
+        provider: Callable[[], sessionmaker[Session]] | None = getattr(
+            request.app.state, "factory_provider", None
+        )
+        if provider is None:
+            raise RuntimeError("app has no database configured; build apps via create_app")
+        factory = provider()
+        request.app.state.session_factory = factory
+    with factory() as session:
+        yield session
 
 
 DbSession = Annotated[Session, Depends(get_db)]
@@ -62,7 +70,7 @@ class GraphBudget:
     # shared out by rank; set, it is a hard cap per relation.
     per_relation: Annotated[int | None, Query(ge=1, le=50)] = None
     min_weight: Annotated[int, Query(ge=1)] = 1
-    rank: Annotated[str, Query(pattern="^(affinity|weight)$")] = "affinity"
+    rank: Literal["affinity", "weight"] = "affinity"
     relation: str | None = None
 
 
@@ -92,7 +100,7 @@ class EnsembleFilters:
 
     anchored: bool | None = None
     type: str | None = None
-    sort: Annotated[str, Query(pattern="^(label|appearances)$")] = "label"
+    sort: Literal["label", "appearances"] = "label"
 
 
 EnsembleQuery = Annotated[EnsembleFilters, Depends()]

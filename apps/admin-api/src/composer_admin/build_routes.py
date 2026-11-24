@@ -137,13 +137,13 @@ def _gold_status(gold_url: str | None = None) -> GoldStatus:
     return _target_status(_gold_target(gold_url), GoldStatus)
 
 
-@builds.get("/gold", response_model=GoldStatus)
+@builds.get("/gold")
 def gold_status() -> GoldStatus:
     """State of the gold database: last promote, its stats, current activity."""
     return _gold_status()
 
 
-@builds.post("/promote", status_code=status.HTTP_202_ACCEPTED, response_model=GoldStatus)
+@builds.post("/promote", status_code=status.HTTP_202_ACCEPTED)
 def start_promote(background: BackgroundTasks, options: PromoteOptions | None = None) -> GoldStatus:
     """Rebuild the curated gold database from silver (background).
 
@@ -166,13 +166,13 @@ def start_promote(background: BackgroundTasks, options: PromoteOptions | None = 
     return current
 
 
-@builds.get("/rule1-config", response_model=Rule1ConfigBody)
+@builds.get("/rule1-config")
 def get_rule1_config() -> Rule1ConfigBody:
     """Rule 1's current concert/recording/composer/sitelink thresholds."""
     return _rule1_config_body(_current_rule1_config())
 
 
-@builds.put("/rule1-config", response_model=Rule1ConfigBody)
+@builds.put("/rule1-config")
 def update_rule1_config(body: Rule1ConfigBody) -> Rule1ConfigBody:
     """Replace rule 1's thresholds wholesale; effective on the next promote."""
     config = Rule1Config(
@@ -218,13 +218,13 @@ def _silver_status() -> SilverStatus:
     return _target_status(_silver_target(), SilverStatus)
 
 
-@builds.get("/silver", response_model=SilverStatus)
+@builds.get("/silver")
 def silver_status() -> SilverStatus:
     """State of the silver database: last rebuild, its stats, current activity."""
     return _silver_status()
 
 
-@builds.post("/rebuild-silver", status_code=status.HTTP_202_ACCEPTED, response_model=SilverStatus)
+@builds.post("/rebuild-silver", status_code=status.HTTP_202_ACCEPTED)
 def start_rebuild_silver(background: BackgroundTasks) -> SilverStatus:
     """Rebuild the silver database from the bucket (background)."""
     target = _silver_target()

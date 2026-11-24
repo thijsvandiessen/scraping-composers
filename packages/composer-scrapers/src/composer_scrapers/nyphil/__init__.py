@@ -24,7 +24,7 @@ from .performances import _performances
 
 log = logging.getLogger(__name__)
 
-__all__ = ["BASE_URL", "NyPhilAdapter", "ROLES"]
+__all__ = ["BASE_URL", "ROLES", "NyPhilAdapter"]
 
 
 class NyPhilAdapter(SourceAdapter):

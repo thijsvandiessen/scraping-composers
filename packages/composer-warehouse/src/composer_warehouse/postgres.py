@@ -158,7 +158,7 @@ class PostgresSchemaTarget:
             self._ensure_manifest_table(conn)
             row = conn.execute(
                 text(
-                    "SELECT status, started_at, finished_at, error, stats"
+                    "SELECT status, started_at, finished_at, error, stats"  # noqa: S608 - constant schema
                     f" FROM {_META_SCHEMA}.build_manifest WHERE target = :target"
                 ),
                 {"target": self.live},
@@ -183,7 +183,7 @@ class PostgresSchemaTarget:
             self._ensure_manifest_table(conn)
             conn.execute(
                 text(
-                    f"INSERT INTO {_META_SCHEMA}.build_manifest"
+                    f"INSERT INTO {_META_SCHEMA}.build_manifest"  # noqa: S608 - constant schema
                     " (target, status, started_at, finished_at, error, stats)"
                     " VALUES (:target, :status, :started_at, :finished_at, :error, :stats)"
                     " ON CONFLICT (target) DO UPDATE SET"

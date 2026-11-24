@@ -63,10 +63,12 @@ def require_admin_key(x_admin_key: Annotated[str | None, Header()] = None) -> No
     from composer_config import settings
 
     expected = settings.admin_api_key
-    if not expected:
+    if expected is None or not expected.get_secret_value():
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             "admin API not configured: set ADMIN_API_KEY",
         )
-    if x_admin_key is None or not hmac.compare_digest(x_admin_key.encode(), expected.encode()):
+    if x_admin_key is None or not hmac.compare_digest(
+        x_admin_key.encode(), expected.get_secret_value().encode()
+    ):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid or missing X-Admin-Key")

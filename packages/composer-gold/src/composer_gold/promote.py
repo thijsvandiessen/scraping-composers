@@ -12,9 +12,8 @@ from composer_models.alembic_support import stamp_head
 from composer_models.db import get_engine, resync_pk_sequence
 from composer_warehouse.build import BuildManifest, BuildTarget, build_target, run_build
 from composer_warehouse.postgres import schema_read_lock
-from sqlalchemy import Connection, Engine, Integer, create_engine, make_url, text
+from sqlalchemy import Connection, Engine, Integer, text
 from sqlalchemy.orm import Session
-from sqlalchemy.pool import NullPool
 
 from ._claims import (
     collect_other_literal_claims,
@@ -108,9 +107,7 @@ def gold_engine(gold_url: str | None = None) -> Engine:
     connections see the renamed-in schema on their own.
     """
     url = gold_url or settings.gold_database_url
-    if make_url(url).get_backend_name() == "sqlite":
-        return create_engine(url, poolclass=NullPool)
-    return get_engine(url, schema=settings.gold_schema)
+    return get_engine(url, schema=settings.gold_schema, follow_swap=True)
 
 
 def read_gold_manifest(gold_url: str | None = None) -> BuildManifest | None:

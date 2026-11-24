@@ -40,7 +40,7 @@ LOADABLE_STATUSES = ("completed", "unknown")
 #: source: records are flushed one at a time (see write_records), so everything
 #: written before a failed run's crash is still good data worth replaying, even
 #: though "latest" auto-pick should keep skipping unreviewed failures.
-EXPLICITLY_LOADABLE_STATUSES = LOADABLE_STATUSES + ("failed",)
+EXPLICITLY_LOADABLE_STATUSES = (*LOADABLE_STATUSES, "failed")
 
 # Record ``_type`` values that make a snapshot loadable into the warehouse.
 # A bucket may still hold raw "pages" snapshots (``_type: "crawl"``) written by

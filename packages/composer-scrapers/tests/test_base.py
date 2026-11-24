@@ -11,8 +11,14 @@ import pytest
 from composer_http import SourceSession
 from composer_http.testing import mock_session
 from composer_schema import EntityDocument, RefreshCadence
-from composer_scrapers import REGISTRY, HttpSourceAdapter
+from composer_scrapers import REGISTRY, HttpSourceAdapter, SourceRecord, SourceWorkMention, source_base_url
 from composer_scrapers.nyphil import NyPhilAdapter
+from composer_scrapers.records import (
+    SourceRecord as RecordsSourceRecord,
+)
+from composer_scrapers.records import (
+    SourceWorkMention as RecordsSourceWorkMention,
+)
 
 #: The sources that hold a record of things already given: scraped once.
 ARCHIVES = {"wienerphil", "roh", "concertgebouw_archive", "berlinphil", "nyphil"}
@@ -89,3 +95,13 @@ def test_every_source_has_the_same_shape(name: str) -> None:
 def test_archives_are_scraped_once_and_everything_else_yearly(name: str) -> None:
     expected = RefreshCadence.STATIC if name in ARCHIVES else RefreshCadence.YEARLY
     assert REGISTRY[name].cadence is expected
+
+
+def test_source_base_url_returns_adapter_url_or_empty() -> None:
+    assert source_base_url("berlinphil") == REGISTRY["berlinphil"].base_url
+    assert source_base_url("retired_source_not_in_registry") == ""
+
+
+def test_records_are_reexported_from_package_root() -> None:
+    assert SourceRecord is RecordsSourceRecord
+    assert SourceWorkMention is RecordsSourceWorkMention

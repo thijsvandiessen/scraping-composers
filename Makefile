@@ -5,7 +5,7 @@ DEV_PORTS := 8000,8001,8002,8003,4321
 
 i:
 	uv sync
-	pnpm --dir apps/frontend install
+	npm --prefix apps/frontend ci
 
 dev:
 	uvx honcho start -e .env

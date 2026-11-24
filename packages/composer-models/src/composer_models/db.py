@@ -13,6 +13,7 @@ import re
 from composer_config import settings
 from sqlalchemy import Connection, Engine, create_engine, make_url, text
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from . import Base
 
@@ -23,7 +24,7 @@ _SCHEMA_NAME = re.compile(r"^[a-z_][a-z0-9_]{0,50}$")
 _IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
 
-def get_engine(url: str | None = None, *, schema: str | None = None) -> Engine:
+def get_engine(url: str | None = None, *, schema: str | None = None, follow_swap: bool = False) -> Engine:
     """Engine for ``url`` (default ``DATABASE_URL``).
 
     On Postgres the connection is pinned to the silver schema through libpq's
@@ -32,9 +33,16 @@ def get_engine(url: str | None = None, *, schema: str | None = None) -> Engine:
     staging schema with the same models and the same code: the pin is enforced
     server-side, so nothing compiled can escape it, and a missing schema fails
     loudly instead of silently writing to the live one.
+
+    Pass ``follow_swap=True`` for long-lived readers: on SQLite that disables
+    connection pooling (``NullPool``) so atomic file swaps are seen on the next
+    query instead of serving a stale inode; on Postgres schema names resolve per
+    statement so pooled connections already follow the swap.
     """
     resolved = make_url(url or settings.database_url)
     if resolved.get_backend_name() != "postgresql":
+        if follow_swap and resolved.get_backend_name() == "sqlite":
+            return create_engine(resolved, poolclass=NullPool)
         return create_engine(resolved)
     name = schema or settings.silver_schema
     if not _SCHEMA_NAME.match(name):
@@ -79,7 +87,7 @@ def resync_pk_sequence(session: Session | Connection, table: str, column: str = 
         raise ValueError(f"invalid table or column name: {table!r}.{column!r}")
     session.execute(
         text(
-            "SELECT setval(pg_get_serial_sequence(:table, :column),"
+            "SELECT setval(pg_get_serial_sequence(:table, :column),"  # noqa: S608 - validated by _IDENTIFIER
             f" coalesce((SELECT max({column}) FROM {table}), 0) + 1, false)"
         ),
         {"table": table, "column": column},

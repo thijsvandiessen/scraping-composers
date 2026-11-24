@@ -15,8 +15,9 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable
 from dataclasses import dataclass
+from itertools import batched
 from typing import Any
 from urllib.parse import urlencode
 
@@ -44,11 +45,6 @@ class WikidataItem:
     instance_of: frozenset[str]
     birth_years: frozenset[int]
     death_years: frozenset[int]
-
-
-def _batches(values: Sequence[str]) -> Iterator[Sequence[str]]:
-    for start in range(0, len(values), BATCH_SIZE):
-        yield values[start : start + BATCH_SIZE]
 
 
 def _try_json(session: SourceSession, url: str, label: str) -> dict[str, Any] | None:
@@ -91,7 +87,7 @@ def wikipedia_qids(session: SourceSession, articles: Iterable[tuple[str, str]]) 
         by_language.setdefault(language, set()).add(title)
     found: dict[tuple[str, str], str] = {}
     for language, titles in sorted(by_language.items()):
-        for batch in _batches(sorted(titles)):
+        for batch in batched(sorted(titles), BATCH_SIZE):
             params = {
                 "action": "query",
                 "prop": "pageprops",
@@ -140,7 +136,7 @@ def parse_item(qid: str, entity: dict[str, Any]) -> WikidataItem:
 def wikidata_items(session: SourceSession, qids: Iterable[str]) -> dict[str, WikidataItem]:
     """The items *qids* name; a missing or deleted one is left out."""
     found: dict[str, WikidataItem] = {}
-    for batch in _batches(sorted(set(qids))):
+    for batch in batched(sorted(set(qids)), BATCH_SIZE):
         params = {
             "action": "wbgetentities",
             "ids": "|".join(batch),

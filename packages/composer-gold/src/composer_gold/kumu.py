@@ -38,6 +38,7 @@ from composer_models import (
     RecordingWork,
     Work,
 )
+from composer_models.normalize import distinct_ci
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -155,7 +156,8 @@ def _appearances(session: Session) -> _Appearances:
             .group_by(table.entity_id, table.role)
         )
         for entity_id, role, count in rows:
-            assert entity_id is not None  # guarded by the WHERE above
+            if entity_id is None:
+                continue  # guarded by the WHERE above
             counts[entity_id] = counts.get(entity_id, 0) + count
             roles[entity_id].add(role)
     return _Appearances(concerts=concerts, recordings=recordings, roles=dict(roles))
@@ -186,7 +188,8 @@ def _performance_edges(session: Session) -> dict[tuple[uuid.UUID, uuid.UUID], in
             .group_by(participant.entity_id, Work.composer_entity_id)
         )
         for performer_id, composer_id, count in rows:
-            assert performer_id is not None and composer_id is not None
+            if performer_id is None or composer_id is None:
+                continue
             edges[(performer_id, composer_id)] += count
     return dict(edges)
 
@@ -252,18 +255,6 @@ def _description(tags: list[str], fields: dict[str, Any]) -> str:
     return " · ".join(parts)
 
 
-def _distinct(values: list[str]) -> list[str]:
-    """Values as reported, minus the ones that differ only in case: sources
-    supply both "Piano" and "piano" for the same instrument."""
-    seen: set[str] = set()
-    distinct: list[str] = []
-    for value in values:
-        if value.casefold() not in seen:
-            seen.add(value.casefold())
-            distinct.append(value)
-    return distinct
-
-
 def _fields(
     entity_id: uuid.UUID, appearances: _Appearances, literals: dict[str, list[str]]
 ) -> dict[str, Any]:
@@ -278,7 +269,7 @@ def _fields(
             fields[label] = int(value) if predicate in _COUNT_PREDICATES and value.isdigit() else value
     for predicate, label in _LITERAL_LISTS.items():
         if values := literals.get(predicate):
-            fields[label] = ", ".join(_distinct(values))
+            fields[label] = ", ".join(distinct_ci(values))
     if concerts := appearances.concerts.get(entity_id, 0):
         fields["Concerts"] = concerts
     if recordings := appearances.recordings.get(entity_id, 0):

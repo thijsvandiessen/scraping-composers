@@ -23,7 +23,7 @@ from composer_models import (
 )
 from composer_models.db import get_engine, init_db
 from composer_models.normalize import event_uuid
-from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import pg_url as pg_url
 from composer_models.testing import requires_postgres
 from composer_schema import SourceClaim
 from composer_warehouse.build import read_build_manifest

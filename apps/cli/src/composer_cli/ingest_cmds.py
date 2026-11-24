@@ -7,7 +7,7 @@ from composer_bronze.bucket import LocalBucket, all_document_run_ids
 from composer_bronze.scraper import Scraper, iter_all_from_bucket, iter_from_bucket
 from composer_gold import PromoteConfig, Rule1Config, gold_target, promote
 from composer_models.db import get_engine, init_db
-from composer_scrapers import REGISTRY
+from composer_scrapers import REGISTRY, source_base_url
 from composer_warehouse.concerts import derive_concerts
 from composer_warehouse.derived import refresh_derived
 from composer_warehouse.ensembles import anchor_ensembles
@@ -91,16 +91,6 @@ def cmd_promote(args: argparse.Namespace) -> int:
     for key, value in asdict(stats).items():
         print(f"  {key.replace('_', ' '):<22} {value}")
     return 0
-
-
-def source_base_url(source: str) -> str:
-    """Base URL for a bucket source: a registered scraper's, else empty.
-
-    Empty for a source with no adapter — the bucket keeps data for sources whose
-    adapter was later removed, and ``rebuild-silver`` replays those too.
-    """
-    adapter = REGISTRY.get(source)
-    return adapter.base_url if adapter is not None else ""
 
 
 def _source_identity(source: str) -> tuple[str, str]:

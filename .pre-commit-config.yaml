@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.5
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+  - repo: local
+    hooks:
+      - id: oxlint
+        name: oxlint (apps/frontend)
+        entry: npm --prefix apps/frontend run lint
+        language: system
+        files: ^apps/frontend/
+        pass_filenames: false
+      - id: oxfmt
+        name: oxfmt --check (apps/frontend)
+        entry: npm --prefix apps/frontend run format:check
+        language: system
+        files: ^apps/frontend/
+        pass_filenames: false

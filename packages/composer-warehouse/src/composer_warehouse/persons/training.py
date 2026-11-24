@@ -98,7 +98,7 @@ def sample_non_match_levels(
     """
     comparisons = person_comparisons()
     counts: list[dict[str, float]] = [dict.fromkeys(c.informative_levels(), 0.0) for c in comparisons]
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 - deterministic non-cryptographic sampling
     size = len(records)
     # An empty warehouse has nothing to draw from; every column stays at zero.
     for _ in range(pairs if size else 0):
