@@ -3,12 +3,13 @@ number in one composer's catalogue are linked, conservatively."""
 
 import uuid
 
-from composer_models import Entity, PersonMatch
+from composer_models import Entity, PersonMatch, Work
 from composer_schema import SourceClaim
-from composer_warehouse.persons import dedupe_persons, parse_name
+from composer_warehouse.persons import dedupe_persons, parse_name, reset_person_links
 from composer_warehouse.persons.catalogues import catalogue_links, compatible
 from composer_warehouse.persons.corpus import PersonRecord
 from composer_warehouse.testing import FakeSource, ingest_source, mention, person
+from composer_warehouse.works.merge import merge_works
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -43,6 +44,27 @@ def test_a_surname_only_entity_links_to_the_composer_whose_numbers_it_holds(sess
     match = session.scalars(select(PersonMatch)).one()
     assert (match.status, match.method) == ("auto_linked", "shared_catalogue:1")
     assert dedupe_persons(session).catalogue == 0  # decided once
+
+
+def test_the_link_survives_the_works_merge_it_causes(session: Session) -> None:
+    """The link folds the surname-only entity's works into the composer's
+    (``merge_works``), so the work no longer names "Mozart". The mention still
+    does, and that is what holds the number: a ``--reset`` must make the same
+    link again, not lose it to the merge the first link caused."""
+    _ingest(session, *_symphonies(WOLFGANG, 550, 551), *_symphonies("Mozart", 550))
+    dedupe_persons(session)
+    assert _canonical(session)["Mozart"] == WOLFGANG
+
+    merge_works(session)
+    mozart = session.scalars(select(Entity).where(Entity.label == "Mozart")).one()
+    assert session.scalars(select(Work).where(Work.composer_entity_id == mozart.id)).all() == [], (
+        "the merge left the work with Mozart, so the regression is untested"
+    )
+
+    reset_person_links(session)
+    result = dedupe_persons(session)
+    assert result.catalogue == 1
+    assert _canonical(session)["Mozart"] == WOLFGANG
 
 
 def test_conflicting_given_names_are_two_people_whatever_they_share(session: Session) -> None:

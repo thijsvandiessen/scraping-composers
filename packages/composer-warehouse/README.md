@@ -184,7 +184,11 @@ the gap **non-destructively**:
   them, a cluster whose partners are rivals (Wolfgang Amadeus and Leopold) links
   to neither unless one shares more than twice the numbers, and the links are
   clustered with those incompatibilities as cannot-links. They are recorded as
-  `auto_linked` with method `shared_catalogue:<count>`.
+  `auto_linked` with method `shared_catalogue:<count>`. An entity holds a
+  number through the works it owns *and* the mentions crediting it: once a link
+  lets `merge_works` fold "Mozart"'s works into Wolfgang Amadeus's, only the
+  mentions still name "Mozart", and without them a `--reset` lost every
+  catalogue link the merge had consumed.
 
 A bare surname is a comparison level of its own (`one_surname_only`, or
 `both_surname_only` when neither side has given names), fitted like the others
@@ -416,7 +420,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_person_constraints.py` | Cannot-links from distinct QIDs and MusicBrainz ids, and when corroboration discharges them. |
 | `test_person_cluster.py` | Turning scored pairs into clusters: chains, cannot-links (also transitive), edge-order independence. |
 | `test_dedupe_persons.py` | The `dedupe-persons` pass over a warehouse: auto-link vs review, `--reset`, clusters and canonicals (an authority-anchored member over a fuller name, then more sources over a fuller name, #379), reviewer decisions, QID twins, and a namesake family (Johann Strauss I/II/III) never collapsed onto one member by a bare or undated record (#202). |
-| `test_person_catalogues.py` | Catalogue evidence (#362): a surname-only entity linked to the composer whose Köchel numbers it shares; conflicting given names, different surnames, rivals, years a generation apart and per-composer schemes (`WoO`) never linked; a dominant partner beating a weak rival; a review-queued pair upgraded; cluster compatibility; cannot-links honoured. |
+| `test_person_catalogues.py` | Catalogue evidence (#362): a surname-only entity linked to the composer whose Köchel numbers it shares; conflicting given names, different surnames, rivals, years a generation apart and per-composer schemes (`WoO`) never linked; a dominant partner beating a weak rival; a review-queued pair upgraded; the link surviving the `merge_works` fold it causes and a `--reset` after it; cluster compatibility; cannot-links honoured. |
 | `test_person_training.py` | Fitting the model: automatic labels, comparison vectors, non-match sampling, the prior (and that bare surnames leave it alone, #202), and `train()` end to end (including an empty warehouse). |
 | `test_person_evaluation.py` | The labelling rules, the deterministic split, downsampling weights, metrics, and that the shipped model beats the pre-#173 scorer on the committed dataset. |
 

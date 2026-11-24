@@ -38,8 +38,8 @@ from collections import Counter
 from collections.abc import Iterable, Sequence
 from itertools import combinations
 
-from composer_models import Work, WorkIdentifier
-from sqlalchemy import select
+from composer_models import RawWorkMention, Work, WorkIdentifier
+from sqlalchemy import select, union
 from sqlalchemy.orm import Session
 
 from ..works.schemes import is_composer_scoped
@@ -65,14 +65,29 @@ DOMINANCE = 2
 
 
 def composer_keys(session: Session) -> dict[uuid.UUID, set[tuple[str, str]]]:
-    """Every composer entity's numbers in composer-scoped catalogues."""
+    """Every composer entity's numbers in composer-scoped catalogues.
+
+    An entity holds a number when it owns a work carrying it *or* a mention
+    crediting it resolved to one. The mentions are what keep the evidence: a
+    link this pass makes lets ``merge_works`` fold the surname-only "Mozart"'s
+    works into Wolfgang Amadeus's, after which no work names "Mozart" any more.
+    Read from the works alone, the next ``dedupe-persons --reset`` found
+    nothing shared and dropped every link it had made (17 on the live
+    warehouse, Mozart's on 38 numbers). The mention still credits "Mozart",
+    whichever entity owns the work now.
+    """
     keys: dict[uuid.UUID, set[tuple[str, str]]] = {}
-    for composer_id, scheme, value in session.execute(
+    owners = (
         select(Work.composer_entity_id, WorkIdentifier.scheme, WorkIdentifier.value)
         .join(Work, Work.id == WorkIdentifier.work_id)
         .where(Work.composer_entity_id.is_not(None))
-        .distinct()
-    ):
+    )
+    credited = (
+        select(RawWorkMention.composer_entity_id, WorkIdentifier.scheme, WorkIdentifier.value)
+        .join(WorkIdentifier, WorkIdentifier.work_id == RawWorkMention.work_id)
+        .where(RawWorkMention.composer_entity_id.is_not(None))
+    )
+    for composer_id, scheme, value in session.execute(union(owners, credited)):
         if composer_id is not None and is_composer_scoped(scheme):
             keys.setdefault(composer_id, set()).add((scheme, value))
     return keys
