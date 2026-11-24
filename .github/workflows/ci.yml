@@ -20,8 +20,8 @@ env:
   COVERAGE_CORE: sysmon
   # Every pytest run below: one xdist worker per CPU. The Neo4j tests, which
   # each empty the database, take turns through a file lock (composer_graph.
-  # testing.exclusive_neo4j). Coverage is report-only: no --cov-fail-under
-  # until a baseline is established.
+  # testing.exclusive_neo4j). Per-member --cov-fail-under floors are enforced
+  # in the test matrix below.
   PYTEST_ADDOPTS: -n auto --cov-report=term-missing
 
 jobs:
@@ -67,7 +67,7 @@ jobs:
           | uvx pip-audit --disable-pip --no-deps -r /dev/stdin
 
   frontend:
-    name: frontend (lint, format, astro check & build)
+    name: frontend (lint, format, test, astro check & build)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -83,6 +83,7 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
+      - run: npm test
       - run: npm run check
       - run: npm run build
       - run: npm audit --audit-level=high
@@ -99,22 +100,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { member: packages/composer-schema,    cov: "--cov=composer_schema" }
-          - { member: packages/composer-models,    cov: "--cov=composer_models" }
-          - { member: packages/composer-http,      cov: "--cov=composer_http" }
-          - { member: packages/composer-bronze,    cov: "--cov=composer_bronze" }
-          - { member: packages/composer-scrapers,  cov: "--cov=composer_scrapers" }
-          - { member: packages/composer-warehouse, cov: "--cov=composer_warehouse" }
-          - { member: packages/composer-gold,      cov: "--cov=composer_gold" }
-          - { member: packages/composer-graph,     cov: "--cov=composer_graph" }
-          - { member: packages/composer-config,    cov: "--cov=composer_config" }
-          - { member: apps/consumer-api,           cov: "--cov=composer_api" }
-          - { member: apps/admin-api,              cov: "--cov=composer_admin" }
-          - { member: apps/cli,                    cov: "--cov=composer_cli" }
-          - { member: apps/dashboard,              cov: "--cov=scrapers --cov=config" }
+          - { member: packages/composer-schema,    cov: "--cov=composer_schema --cov-fail-under=94" }
+          - { member: packages/composer-models,    cov: "--cov=composer_models --cov-fail-under=86" }
+          - { member: packages/composer-http,      cov: "--cov=composer_http --cov-fail-under=91" }
+          - { member: packages/composer-bronze,    cov: "--cov=composer_bronze --cov-fail-under=96" }
+          - { member: packages/composer-scrapers,  cov: "--cov=composer_scrapers --cov-fail-under=93" }
+          - { member: packages/composer-warehouse, cov: "--cov=composer_warehouse --cov-fail-under=93" }
+          - { member: packages/composer-gold,      cov: "--cov=composer_gold --cov-fail-under=94" }
+          - { member: packages/composer-graph,     cov: "--cov=composer_graph --cov-fail-under=55" }
+          - { member: packages/composer-config,    cov: "--cov=composer_config --cov-fail-under=95" }
+          - { member: apps/consumer-api,           cov: "--cov=composer_api --cov-fail-under=95" }
+          - { member: apps/admin-api,              cov: "--cov=composer_admin --cov-fail-under=92" }
+          - { member: apps/cli,                    cov: "--cov=composer_cli --cov-fail-under=84" }
+          # pytest-django + COVERAGE_CORE=sysmon + xdist (-n auto) drops coverage
+          # data; force -n 0 so the dashboard baseline is actually measured.
+          - { member: apps/dashboard,              cov: "--cov=scrapers --cov=config --cov-fail-under=81 -n 0" }
           # end-to-end: fetch → process → promote → gold API over synthetic sources,
           # every step a real CLI subprocess against throwaway SQLite files
-          - { member: tests/e2e,                   cov: "--cov=composer_e2e" }
+          - { member: tests/e2e,                   cov: "--cov=composer_e2e --cov-fail-under=62" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-python

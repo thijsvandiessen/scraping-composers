@@ -33,8 +33,18 @@ from composer_http import SourceSession
 from composer_schema import CLASSICAL_NAME_CUES, ensemble_type_from_name
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
-from .parse import _BARE_QID, BASE_URL, _language, _literal
-from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
+from .parse import BARE_QID, BASE_URL, ENTITY, label, language, literal
+from .query import (
+    LABEL_LANGUAGES,
+    PAGE_SIZE,
+    REQUEST_DELAY_S,
+    TIMEOUT_S,
+    numeric_qids,
+    qid,
+    run_covered_query,
+    run_query,
+    values,
+)
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +114,7 @@ SETTLEMENT_CLASS = "Q486972"
 #: are every name a credit might use.
 NAME_LANGUAGES = ("en", "mul", "de", "fr", "it", "nl", "es", "cs", "sv", "da", "pl", "hu")
 
-_CLASS_VALUES = _values(list(ENSEMBLE_CLASSES))
+_CLASS_VALUES = values(list(ENSEMBLE_CLASSES))
 
 # Cheap like the composer id query: no labels, no OPTIONALs, no ORDER BY. The
 # subclasses are walked first and their instances read after, in that order:
@@ -127,8 +137,8 @@ SELECT DISTINCT ?item WHERE {{
 GENRE_GROUP_ID_QUERY = f"""\
 SELECT DISTINCT ?item WHERE {{
   hint:Query hint:optimizer "None" .
-  VALUES ?genreRoot {{ {_values(list(CLASSICAL_GENRES))} }}
-  VALUES ?group {{ {_values(list(MUSICAL_GROUPS))} }}
+  VALUES ?genreRoot {{ {values(list(CLASSICAL_GENRES))} }}
+  VALUES ?group {{ {values(list(MUSICAL_GROUPS))} }}
   ?genre wdt:P279* ?genreRoot .
   ?item wdt:P136 ?genre .
   ?item wdt:P31 ?group .
@@ -163,7 +173,7 @@ SELECT ?search ?total ?item ?otherGenre WHERE {{
     ?item wdt:P136 ?otherGenre .
     FILTER(?otherGenre != wd:{NEUTRAL_GENRE})
     FILTER NOT EXISTS {{
-      VALUES ?genreRoot {{ {_values(list(CLASSICAL_GENRES))} }}
+      VALUES ?genreRoot {{ {values(list(CLASSICAL_GENRES))} }}
       ?otherGenre wdt:P279* ?genreRoot .
     }}
   }}
@@ -227,7 +237,7 @@ def _short_searches(rows: list[dict[str, Any]]) -> dict[str, tuple[int, int]]:
     totals: dict[str, int] = {}
     for row in rows:
         search: str = row["search"]["value"]
-        titles.setdefault(search, set()).add(_qid(row))
+        titles.setdefault(search, set()).add(qid(row))
         totals[search] = int(row["total"]["value"])
     return {s: (len(titles[s]), totals[s]) for s in titles if len(titles[s]) < totals[s]}
 
@@ -239,11 +249,11 @@ def _name_group_qids(session: SourceSession) -> set[str]:
     desc = "classical-name musical group ids"
     short: dict[str, tuple[int, int]] = {}
     for attempt in range(1, NAME_QUERY_ATTEMPTS + 1):
-        rows = _run_query(session, NAME_GROUP_ID_QUERY, desc)
+        rows = run_query(session, NAME_GROUP_ID_QUERY, desc)
         short = _short_searches(rows)
         if not short:
-            hits = _floored({_qid(row) for row in rows}, "name", desc)
-            return hits - {_qid(row) for row in rows if "otherGenre" in row}
+            hits = _floored({qid(row) for row in rows}, "name", desc)
+            return hits - {qid(row) for row in rows if "otherGenre" in row}
         log.warning(
             "%s: attempt %d had %d short searches, e.g. %s", desc, attempt, len(short), min(short.items())
         )
@@ -258,52 +268,40 @@ def _fetch_ensemble_qids(session: SourceSession) -> list[str]:
     query is checked on its own, so one that lost its answer cannot hide in
     the union."""
     desc = "ensemble id list"
-    qids = _floored({_qid(row) for row in _run_query(session, ENSEMBLE_ID_QUERY, desc)}, "class", desc)
+    qids = _floored({qid(row) for row in run_query(session, ENSEMBLE_ID_QUERY, desc)}, "class", desc)
     desc = "classical-genre musical group ids"
-    qids |= _floored({_qid(row) for row in _run_query(session, GENRE_GROUP_ID_QUERY, desc)}, "genre", desc)
+    qids |= _floored({qid(row) for row in run_query(session, GENRE_GROUP_ID_QUERY, desc)}, "genre", desc)
     qids |= _name_group_qids(session)
-    return sorted(qids, key=lambda qid: (len(qid), qid))
+    return numeric_qids(qids)
 
 
 def _fetch_ensemble_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
     """The rows for one batch: single-valued first (the label is read from the
     first row of an item), then multi-valued. A short single-valued answer
     fails the run and is never mirrored (issue #181)."""
-    query = ENSEMBLE_QUERY.format(
-        values=_values(qids), settlement=SETTLEMENT_CLASS, languages=LABEL_LANGUAGES
-    )
-
-    def covered(rows: list[dict[str, Any]]) -> bool:
-        return not set(qids) - {_qid(row) for row in rows}
-
-    rows = _run_query(session, query, f"page of {len(qids)} ensembles", mirror=True, complete=covered)
-    missing = set(qids) - {_qid(row) for row in rows}
-    if missing:
-        raise RuntimeError(
-            f"wikidata page returned {len(qids) - len(missing)} of {len(qids)} requested ensembles; "
-            f"missing e.g. {sorted(missing)[:5]}"
-        )
+    query = ENSEMBLE_QUERY.format(values=values(qids), settlement=SETTLEMENT_CLASS, languages=LABEL_LANGUAGES)
+    rows = run_covered_query(session, query, qids, f"page of {len(qids)} ensembles", item_label="ensembles")
     multi = ENSEMBLE_MULTI_QUERY.format(
-        values=_values(qids),
+        values=values(qids),
         classes=_CLASS_VALUES,
         name_languages=", ".join(f'"{lang}"' for lang in NAME_LANGUAGES),
         languages=LABEL_LANGUAGES,
     )
-    return rows + _run_query(session, multi, f"multi for {len(qids)} ensembles", mirror=True)
+    return rows + run_query(session, multi, f"multi for {len(qids)} ensembles", mirror=True)
 
 
 def _item_qid(row: dict[str, Any], var: str) -> str | None:
-    value = _literal(row, var)
+    value = literal(row, var)
     return value.rsplit("/", 1)[-1] if value is not None else None
 
 
 def _named(row: dict[str, Any], var: str) -> tuple[str, str] | None:
     """(QID, label) of the item bound to ``var``, or None when the label service
     could not name it."""
-    qid, label = _item_qid(row, var), _literal(row, f"{var}Label")
-    if qid is None or label is None or _BARE_QID.match(label):
+    item_qid, item_label = _item_qid(row, var), label(row, f"{var}Label")
+    if item_qid is None or item_label is None:
         return None
-    return qid, label
+    return item_qid, item_label
 
 
 def _fold_ensemble_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -312,10 +310,10 @@ def _fold_ensemble_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
     items: dict[str, dict[str, Any]] = {}
     for row in rows:
         item = items.setdefault(
-            _qid(row),
+            qid(row),
             {
-                "label": _literal(row, "itemLabel") or "",
-                "language": _language(row, "itemLabel"),
+                "label": literal(row, "itemLabel") or "",
+                "language": language(row, "itemLabel"),
                 "classes": set(),
                 "names": set(),
                 "labels": {},
@@ -326,16 +324,16 @@ def _fold_ensemble_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]
         )
         if (root := _item_qid(row, "root")) is not None:
             item["classes"].add(root)
-        if (name := _literal(row, "name")) is not None:
+        if (name := literal(row, "name")) is not None:
             item["names"].add(name)
-            if (lang := _literal(row, "nameLang")) is not None:
+            if (lang := literal(row, "nameLang")) is not None:
                 item["labels"][lang] = name
         if (part_of := _named(row, "partOf")) is not None:
             item["part_of"].add(part_of)
-        if (musicbrainz := _literal(row, "musicbrainz")) is not None:
+        if (musicbrainz := literal(row, "musicbrainz")) is not None:
             item["musicbrainz"].add(musicbrainz)
         hq = _named(row, "hq")
-        if hq is not None and _literal(row, "hqSettlement") == "true":
+        if hq is not None and literal(row, "hqSettlement") == "true":
             item["cities"].add(hq)
         elif (admin := _named(row, "hqAdmin")) is not None:
             item["cities"].add(admin)
@@ -361,19 +359,19 @@ def _display_label(item: dict[str, Any]) -> tuple[str, str | None] | None:
     ``NAME_LANGUAGES`` the item has one in (a third of the items have names
     only in German, French, Czech, ..., #363), else None -- with the language
     of whichever was picked."""
-    label: str = item["label"]
-    if label and not _BARE_QID.match(label):
-        return label, item["language"]
+    display: str = item["label"]
+    if display and not BARE_QID.match(display):
+        return display, item["language"]
     labels: dict[str, str] = item["labels"]
     return next(((labels[lang], lang) for lang in NAME_LANGUAGES if lang in labels), None)
 
 
-def _distinct_names(label: str, names: set[str]) -> list[str]:
+def _distinct_names(display: str, names: set[str]) -> list[str]:
     """The item's names other than its label, minus case-only variants."""
-    seen = {label.casefold()}
+    seen = {display.casefold()}
     distinct: list[str] = []
     for name in sorted(names):
-        if name.casefold() not in seen and not _BARE_QID.match(name):
+        if name.casefold() not in seen and not BARE_QID.match(name):
             seen.add(name.casefold())
             distinct.append(name)
     return distinct
@@ -387,19 +385,19 @@ def _documents_from_rows(
     orchestra is part of a broadcaster or an opera house) and only stays in
     ``raw``."""
     documents: list[EntityDocument] = []
-    for qid, item in _fold_ensemble_rows(rows).items():
+    for item_qid, item in _fold_ensemble_rows(rows).items():
         display = _display_label(item)
         if display is None:
-            log.debug("skipping %s: no label", qid)
+            log.debug("skipping %s: no label", item_qid)
             continue
-        label, language = display
-        kind_of = ensemble_type(item["classes"], label, item["names"])
+        display_label, item_language = display
+        kind_of = ensemble_type(item["classes"], display_label, item["names"])
         claims = [SourceClaim("ensemble_type", value=kind_of)]
         # several headquarters are rare; the lowest QID is the stable pick
         city = min(item["cities"], default=None, key=lambda c: (len(c[0]), c[0]))
         if city is not None:
             claims.append(SourceClaim("based_in", "place", city[1], object_wikidata_id=city[0]))
-        names = _distinct_names(label, item["names"])
+        names = _distinct_names(display_label, item["names"])
         claims.extend(SourceClaim("also_known_as", value=name) for name in names)
         claims.extend(SourceClaim("musicbrainz_id", value=mbid) for mbid in sorted(item["musicbrainz"]))
         part_of = sorted(item["part_of"])
@@ -410,16 +408,16 @@ def _documents_from_rows(
         )
         documents.append(
             EntityDocument(
-                id=qid,
-                url=f"{BASE_URL}/wiki/{qid}",
+                id=item_qid,
+                url=f"{BASE_URL}/wiki/{item_qid}",
                 source_name=WikidataEnsemblesAdapter.name,
                 ingested_at=ingested_at,
-                name=label,
+                name=display_label,
                 kind="ensemble",
-                language=language,
+                language=item_language,
                 raw={
-                    "item": f"http://www.wikidata.org/entity/{qid}",
-                    "label": label,
+                    "item": f"{ENTITY}{item_qid}",
+                    "label": display_label,
                     "labels": names,
                     "classes": sorted(item["classes"]),
                     "ensemble_type": kind_of,

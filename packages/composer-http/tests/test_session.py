@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from composer_http import PageCache, SourceSession, request_fingerprint
+from composer_http import PageCache, SourceSession, parse_json_object, request_fingerprint
 from composer_http.testing import mock_session
 
 URL = "https://example.org/concert/1/"
@@ -198,3 +198,10 @@ def test_leaving_the_session_closes_its_client() -> None:
     with mock_session(_Site()) as session:
         pass
     assert session.client.is_closed
+
+
+def test_parse_json_object_accepts_objects_and_rejects_other_payloads() -> None:
+    assert parse_json_object('{"a": 1}') == {"a": 1}
+    assert parse_json_object("[1, 2]") is None
+    assert parse_json_object('"hello"') is None
+    assert parse_json_object("not json") is None

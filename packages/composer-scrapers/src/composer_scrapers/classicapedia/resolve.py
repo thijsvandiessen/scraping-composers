@@ -126,7 +126,9 @@ def parse_item(qid: str, entity: dict[str, Any]) -> WikidataItem:
         qid=qid,
         label=label if isinstance(label, str) else None,
         instance_of=frozenset(
-            str(value["id"]) for value in _item_values(claims, "P31") if isinstance(value, dict)
+            str(value["id"])  # pyright: ignore[reportUnknownArgumentType]
+            for value in _item_values(claims, "P31")
+            if isinstance(value, dict)
         ),
         birth_years=_years(claims, "P569"),
         death_years=_years(claims, "P570"),

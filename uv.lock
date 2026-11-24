@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.12"
 
 [manifest]
@@ -335,7 +335,6 @@ version = "0.1.0"
 source = { editable = "apps/consumer-api" }
 dependencies = [
     { name = "composer-config" },
-    { name = "composer-gold" },
     { name = "composer-models" },
     { name = "composer-schema" },
     { name = "fastapi" },
@@ -346,7 +345,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "composer-config", editable = "packages/composer-config" },
-    { name = "composer-gold", editable = "packages/composer-gold" },
     { name = "composer-models", editable = "packages/composer-models" },
     { name = "composer-schema", editable = "packages/composer-schema" },
     { name = "fastapi", specifier = ">=0.162.0" },
@@ -359,6 +357,7 @@ name = "composer-dashboard"
 version = "0.1.0"
 source = { virtual = "apps/dashboard" }
 dependencies = [
+    { name = "composer-config" },
     { name = "django" },
     { name = "django-unfold" },
     { name = "httpx" },
@@ -367,6 +366,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "composer-config", editable = "packages/composer-config" },
     { name = "django", specifier = ">=6.1.3" },
     { name = "django-unfold", specifier = ">=0.110.1" },
     { name = "httpx", specifier = ">=0.27" },

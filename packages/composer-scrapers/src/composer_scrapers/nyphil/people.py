@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .. import SourceClaim, SourceRecord
-from .text import _WS, _names
+from .text import WS, names
 
 ROLES = ("composer", "conductor", "soloist")
 
@@ -25,12 +25,12 @@ ROLES = ("composer", "conductor", "soloist")
 class _Person:
     """Aggregate of one (role, name) across all programs."""
 
-    programs: set[str] = field(default_factory=set)
-    seasons: set[str] = field(default_factory=set)
-    instruments: set[str] = field(default_factory=set)
+    programs: set[str] = field(default_factory=set[str])
+    seasons: set[str] = field(default_factory=set[str])
+    instruments: set[str] = field(default_factory=set[str])
 
 
-def _aggregate(programs: Iterable[dict[str, Any]]) -> dict[tuple[str, str], _Person]:
+def aggregate(programs: Iterable[dict[str, Any]]) -> dict[tuple[str, str], _Person]:
     people: dict[tuple[str, str], _Person] = {}
 
     def seen(role: str, name: str, program_id: str, season: str) -> _Person:
@@ -43,20 +43,20 @@ def _aggregate(programs: Iterable[dict[str, Any]]) -> dict[tuple[str, str], _Per
         program_id = str(program["programID"])
         season = program["season"]
         for work in program["works"]:
-            for name in _names(work.get("composerName")):
+            for name in names(work.get("composerName")):
                 seen("composer", name, program_id, season)
-            for name in _names(work.get("conductorName")):
+            for name in names(work.get("conductorName")):
                 seen("conductor", name, program_id, season)
             for soloist in work.get("soloists", ()):
-                instrument = _WS.sub(" ", soloist.get("soloistInstrument") or "").strip()
-                for name in _names(soloist.get("soloistName")):
+                instrument = WS.sub(" ", soloist.get("soloistInstrument") or "").strip()
+                for name in names(soloist.get("soloistName")):
                     person = seen("soloist", name, program_id, season)
                     if instrument:
                         person.instruments.add(instrument)
     return people
 
 
-def _record(role: str, name: str, person: _Person) -> SourceRecord:
+def record(role: str, name: str, person: _Person) -> SourceRecord:
     claims = [SourceClaim("has_profession", "profession", role)]
     claims.extend(SourceClaim("performs_as", value=instrument) for instrument in sorted(person.instruments))
     # seasons are uniformly "YYYY-YY", so lexical min/max are first and last
@@ -80,3 +80,7 @@ def _record(role: str, name: str, person: _Person) -> SourceRecord:
         raw=raw,
         claims=tuple(claims),
     )
+
+
+_aggregate = aggregate
+_record = record

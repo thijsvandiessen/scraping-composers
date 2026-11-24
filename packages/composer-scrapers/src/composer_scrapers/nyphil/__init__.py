@@ -18,9 +18,9 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from .. import EntityDocument, RefreshCadence, SourceAdapter, WorkMentionDocument
-from .fetch import BASE_URL, _load_programs
-from .people import ROLES, _aggregate, _record
-from .performances import _performances
+from .fetch import BASE_URL, load_programs
+from .people import ROLES, aggregate, record
+from .performances import performances
 
 log = logging.getLogger(__name__)
 
@@ -38,27 +38,27 @@ class NyPhilAdapter(SourceAdapter):
         work mention each). The whole source is one (kagglehub-cached) download;
         ``max_pages`` is accepted for interface compatibility and ignored."""
         ingested_at = datetime.now(UTC)
-        programs = _load_programs()
+        programs = load_programs()
         log.info("nyphil: %d programs", len(programs))
-        people = _aggregate(programs)
+        people = aggregate(programs)
         for role in ROLES:
             names = sorted(name for r, name in people if r == role)
             log.info("nyphil %s: %d records", role, len(names))
             for name in names:
-                record = _record(role, name, people[(role, name)])
+                rec = record(role, name, people[(role, name)])
                 yield EntityDocument(
-                    id=record.external_id,
-                    url=record.url,
+                    id=rec.external_id,
+                    url=rec.url,
                     source_name=self.name,
                     ingested_at=ingested_at,
-                    name=record.name,
-                    kind=record.kind,
-                    raw=record.raw,
-                    claims=record.claims,
+                    name=rec.name,
+                    kind=rec.kind,
+                    raw=rec.raw,
+                    claims=rec.claims,
                 )
 
         count = 0
-        for mention in _performances(programs):
+        for mention in performances(programs):
             count += 1
             yield WorkMentionDocument(
                 id=mention.external_id,

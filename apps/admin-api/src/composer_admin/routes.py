@@ -1,9 +1,10 @@
 import logging
+import threading
 from dataclasses import replace
 from datetime import datetime
 from typing import Annotated
 
-from composer_bronze.bucket import EXPLICITLY_LOADABLE_STATUSES, Snapshot
+from composer_bronze.bucket import EXPLICITLY_LOADABLE_STATUSES, LocalBucket, Snapshot, SnapshotManifest
 from composer_bronze.scraper import Scraper, new_snapshot_id
 from composer_models import utcnow
 from composer_scrapers import REGISTRY, SourceAdapter, is_due
@@ -28,21 +29,36 @@ from .snapshots import (
 
 log = logging.getLogger(__name__)
 
+_FETCH_LOCK = threading.Lock()
+_PROCESS_LOCK = threading.Lock()
+
 admin = APIRouter(prefix="/admin/v1", dependencies=[Depends(require_admin_key)])
 
 
 def _fetch_in_background(source_name: str, snapshot_id: str, max_pages: int | None) -> None:
     """Fetch a source to the bucket; status lives in the snapshot's manifest."""
-    adapter = REGISTRY[source_name]
+    store = bucket()
     try:
-        Scraper(adapter).fetch_to_bucket(bucket(), max_pages=max_pages, run_id=snapshot_id)
-    except Exception:
+        adapter = REGISTRY[source_name]
+        Scraper(adapter).fetch_to_bucket(store, max_pages=max_pages, run_id=snapshot_id)
+    except Exception as exc:
         # Recorded as a failed manifest by fetch_to_bucket; log for the server console.
+        # If the failure happened before write_documents ran (e.g. an eager adapter
+        # error), finalize the eagerly-written running manifest so the source isn't stuck.
         log.exception("background fetch failed for %s/%s", source_name, snapshot_id)
+        existing = store.read_manifest(source_name, snapshot_id)
+        if existing is not None and existing.status == "running":
+            store.write_manifest(existing.failed(f"{type(exc).__name__}: {exc}", record_count=0))
 
 
-def _start_fetch(background: BackgroundTasks, adapter: SourceAdapter, max_pages: int | None) -> FetchStarted:
+def _start_fetch(
+    background: BackgroundTasks, store: LocalBucket, adapter: SourceAdapter, max_pages: int | None
+) -> FetchStarted:
     snapshot_id = new_snapshot_id()
+    # Mark running synchronously before returning 202 so concurrent requests — and
+    # subsequent sources queued sequentially behind earlier ones in fetch_due —
+    # immediately see the source as in flight.
+    store.write_manifest(SnapshotManifest.start(adapter.name, snapshot_id))
     background.add_task(_fetch_in_background, adapter.name, snapshot_id, max_pages)
     return FetchStarted(source=adapter.name, snapshot_id=snapshot_id, status="running")
 
@@ -80,11 +96,12 @@ def fetch_due(background: BackgroundTasks) -> list[FetchStarted]:
     now = utcnow()
     store = bucket()
     started: list[FetchStarted] = []
-    for name, adapter in REGISTRY.items():
-        last = last_snapshot(store, name)
-        if has_running_fetch(store, name) or not is_due(adapter.cadence, last_started(last), now):
-            continue
-        started.append(_start_fetch(background, adapter, None))
+    with _FETCH_LOCK:
+        for name, adapter in REGISTRY.items():
+            last = last_snapshot(store, name)
+            if has_running_fetch(store, name) or not is_due(adapter.cadence, last_started(last), now):
+                continue
+            started.append(_start_fetch(background, store, adapter, None))
     return started
 
 
@@ -97,9 +114,11 @@ def fetch_scraper(
     adapter = REGISTRY.get(name)
     if adapter is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown scraper {name!r}")
-    if has_running_fetch(bucket(), name):
-        raise HTTPException(status.HTTP_409_CONFLICT, f"a fetch for {name!r} is already in progress")
-    return _start_fetch(background, adapter, max_pages)
+    store = bucket()
+    with _FETCH_LOCK:
+        if has_running_fetch(store, name):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"a fetch for {name!r} is already in progress")
+        return _start_fetch(background, store, adapter, max_pages)
 
 
 @admin.get("/snapshots")
@@ -167,9 +186,10 @@ def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: B
             status.HTTP_409_CONFLICT,
             f"snapshot {source}/{snapshot_id} holds crawled pages, not documents",
         )
-    if has_running(db, source):
-        raise running_conflict(source)
-    run = create_run(db, source, source_base_url(source))
+    with _PROCESS_LOCK:
+        if has_running(db, source):
+            raise running_conflict(source)
+        run = create_run(db, source, source_base_url(source))
     background.add_task(process_in_background, source, snapshot_id, run.id)
     return RunStarted(run_id=run.id, source=source, status=run.status)
 

@@ -8,13 +8,14 @@ from django.http import HttpRequest, HttpResponse
 from django.shortcuts import render
 
 from ..api import AdminAPIError, DataAPI, Filters
+from ..schemas import EnsemblePage, EntityDetail, EntityPage, MentionPage, StatsOut, WorkPage
 from .common import page_context, page_number
 
 
 def data_overview(request: HttpRequest) -> HttpResponse:
     """Data overview: dataset counts, per kind / source / mention status."""
     api = DataAPI.silver()
-    stats: dict[str, object] | None = None
+    stats: StatsOut | None = None
     error: str | None = None
     try:
         stats = api.stats()
@@ -37,19 +38,19 @@ def entities(request: HttpRequest, kind: str | None = None) -> HttpResponse:
         kind = request.GET.get("kind", "").strip()
     order = "random" if request.GET.get("order") == "random" else "label"
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: EntityPage | None = None
     kind_counts: dict[str, int] = {}
     error: str | None = None
     try:
         result = api.list_entities(q=q or None, kind=kind or None, page=page, order=order)
-        kind_counts = api.stats()["entities_by_kind"]
+        kind_counts = api.stats().entities_by_kind
     except AdminAPIError as exc:
         error = str(exc)
     params = {key: value for key, value in (("q", q), ("order", order)) if value and value != "label"}
     context = {
         **admin.site.each_context(request),
         "title": f"Entities: {kind}" if kind else "Entities",
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "q": q,
         "kind": kind,
         "kind_counts": kind_counts,
@@ -66,7 +67,7 @@ def ensembles(request: HttpRequest) -> HttpResponse:
     api = DataAPI.silver()
     q = request.GET.get("q", "").strip()
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: EnsemblePage | None = None
     error: str | None = None
     try:
         result = api.list_ensembles(Filters(q=q or None), anchored=False, page=page, sort="appearances")
@@ -75,7 +76,7 @@ def ensembles(request: HttpRequest) -> HttpResponse:
     context = {
         **admin.site.each_context(request),
         "title": "Unanchored ensembles",
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "q": q,
         "error": error,
         **page_context(result, request.path, {"q": q} if q else {}),
@@ -86,7 +87,7 @@ def ensembles(request: HttpRequest) -> HttpResponse:
 def entity_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpResponse:
     """One entity: its claims (with source provenance) and incoming claims."""
     api = DataAPI.silver()
-    entity: dict[str, object] | None = None
+    entity: EntityDetail | None = None
     error: str | None = None
     try:
         entity = api.get_entity(str(entity_id))
@@ -94,16 +95,16 @@ def entity_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpResponse:
         error = str(exc)
     concert_total: int | None = None
     recording_total: int | None = None
-    if entity is not None and entity.get("kind") == "person":
+    if entity is not None and entity.kind == "person":
         gold = DataAPI.gold()
         # silver page must render even when gold is down or unpromoted
-        with contextlib.suppress(AdminAPIError, KeyError, TypeError, ValueError):
-            concert_total = int(gold.person_concerts(str(entity_id), limit=1)["total"])
-        with contextlib.suppress(AdminAPIError, KeyError, TypeError, ValueError):
-            recording_total = int(gold.person_recordings(str(entity_id), limit=1)["total"])
+        with contextlib.suppress(AdminAPIError):
+            concert_total = gold.person_concerts(str(entity_id), limit=1).total
+        with contextlib.suppress(AdminAPIError):
+            recording_total = gold.person_recordings(str(entity_id), limit=1).total
     context = {
         **admin.site.each_context(request),
-        "title": str(entity["label"]) if entity else "Entity",
+        "title": entity.label if entity else "Entity",
         "entity": entity,
         "concert_total": concert_total,
         "recording_total": recording_total,
@@ -120,7 +121,7 @@ def review(request: HttpRequest) -> HttpResponse:
     api = DataAPI.silver()
     status = request.GET.get("status", "needs_review").strip()
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: MentionPage | None = None
     error: str | None = None
     try:
         result = api.list_mentions(status=status or None, page=page)
@@ -130,7 +131,7 @@ def review(request: HttpRequest) -> HttpResponse:
     context = {
         **admin.site.each_context(request),
         "title": "Work mentions",
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "status": status,
         "statuses": MENTION_STATUSES,
         "error": error,
@@ -145,7 +146,7 @@ def works(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
     source = request.GET.get("source", "").strip()
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: WorkPage | None = None
     error: str | None = None
     try:
         result = api.list_works(Filters(q=q or None, source=source or None), page=page)
@@ -155,7 +156,7 @@ def works(request: HttpRequest) -> HttpResponse:
     context = {
         **admin.site.each_context(request),
         "title": "Works",
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "q": q,
         # Silver works have no gold detail page: the titles here stay plain
         # text, since most of these works never make it through promote.

@@ -7,6 +7,17 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import render
 
 from ..api import AdminAPIError, DataAPI, Filters
+from ..schemas import (
+    ConcertDetail,
+    ConcertListPage,
+    PersonConcertsPage,
+    PersonPage,
+    PersonRecordingsPage,
+    RecordingDetail,
+    RecordingListPage,
+    WorkDetail,
+    WorkPage,
+)
 from .common import page_context, page_number
 
 PEOPLE_ROLES = ("composers", "soloists", "conductors")
@@ -39,7 +50,7 @@ def people(request: HttpRequest, role: str) -> HttpResponse:
     if sort not in ("concerts", "recordings"):
         sort = "label"
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: PersonPage | None = None
     error: str | None = None
     try:
         result = api.list_people(role, _filters(request), page=page, sort=sort)
@@ -49,7 +60,7 @@ def people(request: HttpRequest, role: str) -> HttpResponse:
     context = {
         **admin.site.each_context(request),
         "title": role.capitalize(),
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "role": role,
         "roles": PEOPLE_ROLES,
         "q": q,
@@ -70,19 +81,20 @@ def person_concerts(request: HttpRequest, person_id: uuid.UUID, role: str | None
         raise Http404(f"unknown role {role!r}")
     api = DataAPI.gold()
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: PersonConcertsPage | None = None
     error: str | None = None
     try:
         result = api.person_concerts(str(person_id), page=page)
     except AdminAPIError as exc:
         error = str(exc)
+    person_label = result.person_label if result is not None else None
     context = {
         **admin.site.each_context(request),
-        "title": f"Concerts — {result.get('person_label', '')}",
-        "person_label": result.get("person_label"),
+        "title": f"Concerts — {person_label or ''}",
+        "person_label": person_label,
         "person_id": person_id,
         "role": role,
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "error": error,
         **page_context(result, request.path, {}),
     }
@@ -94,7 +106,7 @@ def concerts_list(request: HttpRequest) -> HttpResponse:
     api = DataAPI.gold()
     q = request.GET.get("q", "").strip()
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: ConcertListPage | None = None
     error: str | None = None
     try:
         result = api.list_concerts(_filters(request), page=page)
@@ -104,7 +116,7 @@ def concerts_list(request: HttpRequest) -> HttpResponse:
     context = {
         **admin.site.each_context(request),
         "title": "Concerts",
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "q": q,
         "error": error,
         **page_context(result, request.path, params),
@@ -115,7 +127,7 @@ def concerts_list(request: HttpRequest) -> HttpResponse:
 def concert_detail(request: HttpRequest, concert_id: uuid.UUID) -> HttpResponse:
     """One concert: participants and its programme, from gold."""
     api = DataAPI.gold()
-    concert: dict[str, object] | None = None
+    concert: ConcertDetail | None = None
     error: str | None = None
     try:
         concert = api.get_concert(concert_id)
@@ -140,19 +152,20 @@ def person_recordings(request: HttpRequest, person_id: uuid.UUID, role: str | No
         raise Http404(f"unknown role {role!r}")
     api = DataAPI.gold()
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: PersonRecordingsPage | None = None
     error: str | None = None
     try:
         result = api.person_recordings(str(person_id), page=page)
     except AdminAPIError as exc:
         error = str(exc)
+    person_label = result.person_label if result is not None else None
     context = {
         **admin.site.each_context(request),
-        "title": f"Recordings — {result.get('person_label', '')}",
-        "person_label": result.get("person_label"),
+        "title": f"Recordings — {person_label or ''}",
+        "person_label": person_label,
         "person_id": person_id,
         "role": role,
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "error": error,
         **page_context(result, request.path, {}),
     }
@@ -164,7 +177,7 @@ def recordings_list(request: HttpRequest) -> HttpResponse:
     api = DataAPI.gold()
     q = request.GET.get("q", "").strip()
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: RecordingListPage | None = None
     error: str | None = None
     try:
         result = api.list_recordings(_filters(request), page=page)
@@ -174,7 +187,7 @@ def recordings_list(request: HttpRequest) -> HttpResponse:
     context = {
         **admin.site.each_context(request),
         "title": "Recordings",
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "q": q,
         "error": error,
         **page_context(result, request.path, params),
@@ -185,7 +198,7 @@ def recordings_list(request: HttpRequest) -> HttpResponse:
 def recording_detail(request: HttpRequest, recording_id: uuid.UUID) -> HttpResponse:
     """One recording: its credited artists and the works on it, from gold."""
     api = DataAPI.gold()
-    recording: dict[str, object] | None = None
+    recording: RecordingDetail | None = None
     error: str | None = None
     try:
         recording = api.get_recording(recording_id)
@@ -206,7 +219,7 @@ def gold_works(request: HttpRequest) -> HttpResponse:
     q = request.GET.get("q", "").strip()
     sort = "mentions" if request.GET.get("sort") == "mentions" else "label"
     page = page_number(request)
-    result: dict[str, object] = {}
+    result: WorkPage | None = None
     error: str | None = None
     try:
         result = api.list_works(_filters(request), page=page, performed_only=True, sort=sort)
@@ -216,7 +229,7 @@ def gold_works(request: HttpRequest) -> HttpResponse:
     context = {
         **admin.site.each_context(request),
         "title": "Works",
-        "items": result.get("items", []),
+        "items": result.items if result is not None else [],
         "q": q,
         "sort": sort,
         "detail_url": "gold_work_detail",
@@ -229,13 +242,13 @@ def gold_works(request: HttpRequest) -> HttpResponse:
 def gold_work_detail(request: HttpRequest, work_id: uuid.UUID) -> HttpResponse:
     """One performed work: its aliases and the proofs of performance/mentions, from gold."""
     api = DataAPI.gold()
-    work: dict[str, object] | None = None
+    work: WorkDetail | None = None
     error: str | None = None
     try:
         work = api.get_work(str(work_id))
     except AdminAPIError as exc:
         error = f"{exc} — is the gold API running, and has the gold database been promoted?"
-    title = str(work.get("canonical_title") or work_id) if work else f"Work {work_id}"
+    title = (work.canonical_title or str(work_id)) if work else f"Work {work_id}"
     context = {
         **admin.site.each_context(request),
         "title": title,

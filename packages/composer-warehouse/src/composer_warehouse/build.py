@@ -45,7 +45,7 @@ class BuildManifest:
     started_at: str
     finished_at: str | None = None
     error: str | None = None
-    stats: dict[str, int] = field(default_factory=dict)
+    stats: dict[str, int] = field(default_factory=dict[str, int])
 
     @classmethod
     def start(cls) -> BuildManifest:

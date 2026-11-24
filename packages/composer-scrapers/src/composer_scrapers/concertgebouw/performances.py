@@ -43,7 +43,9 @@ class _Perf:
     composer: str
     title: str
     conductor: str
-    soloists: list[tuple[str, str | None]] = field(default_factory=list)  # (name, discipline)
+    soloists: list[tuple[str, str | None]] = field(
+        default_factory=list[tuple[str, str | None]]
+    )  # (name, discipline)
 
 
 def _cell_text(cell: str) -> str:
@@ -87,7 +89,7 @@ def _performance_record(perf: _Perf) -> SourceWorkMention:
     )
 
 
-def _performances(page: str) -> Iterator[SourceWorkMention]:
+def performances(page: str) -> Iterator[SourceWorkMention]:
     """Yield one work mention per work-performance in the List view.
 
     A row with a DATE opens a concert (date/city carry forward); a row with a
@@ -112,3 +114,6 @@ def _performances(page: str) -> Iterator[SourceWorkMention]:
             perf.soloists.append(_parse_soloist(soloist))
     if perf is not None:
         yield _performance_record(perf)
+
+
+_performances = performances

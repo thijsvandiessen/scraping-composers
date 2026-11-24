@@ -60,7 +60,7 @@ class ParsedWork:
     recognised label/value pair verbatim; nothing is dropped or reformatted."""
 
     title: str
-    fields: dict[str, str] = field(default_factory=dict)
+    fields: dict[str, str] = field(default_factory=dict[str, str])
 
 
 def _clean(html_fragment: str) -> str:

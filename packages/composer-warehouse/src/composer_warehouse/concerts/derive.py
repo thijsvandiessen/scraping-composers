@@ -86,11 +86,11 @@ def _group_concerts(session: Session) -> dict[tuple[int, str], dict[str, Any]]:
 class _RowBatch(ParticipantResolver):
     """Accumulates the insert rows plus participant-resolution stats."""
 
-    concerts: list[dict[str, Any]] = field(default_factory=list)
-    participants: list[dict[str, Any]] = field(default_factory=list)
-    works: list[dict[str, Any]] = field(default_factory=list)
+    concerts: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    participants: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
+    works: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
     participant_links: int = 0
-    unresolved_names: set[str] = field(default_factory=set)
+    unresolved_names: set[str] = field(default_factory=set[str])
 
     def add_participant(self, concert_id: uuid.UUID, role: str, name: str, discipline: str | None) -> None:
         resolved = self._resolve_name(role, name)

@@ -132,8 +132,8 @@ def _nodes(payload: dict[str, Any]) -> dict[str, Any]:
     A null is a family or artist the API does not know — not an error, and it
     must not fail the batch around it.
     """
-    data = payload.get("data") or {}
-    root = data.get("universalMusic") or {}
+    data: dict[str, Any] = payload.get("data") or {}
+    root: dict[str, Any] = data.get("universalMusic") or {}
     return {alias: node for alias, node in root.items() if node}
 
 

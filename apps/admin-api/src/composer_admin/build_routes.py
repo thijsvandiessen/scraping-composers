@@ -1,6 +1,7 @@
 """Admin endpoints for the derived databases: promote gold, rebuild silver."""
 
 import logging
+import threading
 from dataclasses import asdict
 from pathlib import Path
 from typing import TypeVar
@@ -17,7 +18,7 @@ from composer_gold import (
     gold_target,
     promote,
 )
-from composer_warehouse.build import BuildTarget
+from composer_warehouse.build import BuildManifest, BuildTarget
 from composer_warehouse.derived import refresh_derived
 from composer_warehouse.rebuild import (
     NothingToReplayError,
@@ -36,21 +37,37 @@ log = logging.getLogger(__name__)
 
 StatusT = TypeVar("StatusT", bound=BuildStatus)
 
+_BUILD_LOCK = threading.Lock()
+_ACTIVE_BUILDS: set[str] = set()
+
 builds = APIRouter(prefix="/admin/v1", dependencies=[Depends(require_admin_key)])
 
 
-def _promote_in_background(gold_url: str, config: PromoteConfig) -> None:
+def _promote_in_background(gold_url: str, config: PromoteConfig, build_key: str) -> None:
     """Rebuild the gold database; status lives in the gold manifest."""
-    with session_scope() as session:
-        try:
-            # Place, genre and work links, ensemble anchors, concerts and recordings are silver-derived
-            # state the gold build reads; refresh them first so the Promote button
-            # never publishes stale derivations.
-            refresh_derived(session)
-            promote(session, gold_url, config)
-        except Exception:
-            # Recorded as a failed manifest by promote; log for the server console.
-            log.exception("background promote failed")
+    try:
+        with session_scope() as session:
+            try:
+                # Place, genre and work links, ensemble anchors, concerts and recordings are silver-derived
+                # state the gold build reads; refresh them first so the Promote button
+                # never publishes stale derivations.
+                refresh_derived(session)
+            except Exception as exc:
+                # refresh_derived ran before promote(), so promote() never wrote a
+                # failed manifest; record the failure here so GET /admin/v1/gold surfaces it.
+                log.exception("background promote failed during refresh_derived")
+                target = _gold_target(gold_url)
+                if target is not None:
+                    target.write_manifest(BuildManifest.start().failed(f"{type(exc).__name__}: {exc}"))
+                return
+            try:
+                promote(session, gold_url, config)
+            except Exception:
+                # Recorded as a failed manifest by promote; log for the server console.
+                log.exception("background promote failed")
+    finally:
+        with _BUILD_LOCK:
+            _ACTIVE_BUILDS.discard(build_key)
 
 
 def _current_rule1_config() -> Rule1Config:
@@ -157,10 +174,13 @@ def start_promote(background: BackgroundTasks, options: PromoteOptions | None = 
             status.HTTP_400_BAD_REQUEST,
             "promote requires a sqlite file or a Postgres GOLD_DATABASE_URL",
         )
-    manifest = target.read_manifest()
-    if manifest is not None and manifest.status == "running":
-        raise HTTPException(status.HTTP_409_CONFLICT, "a promote is already in progress")
-    background.add_task(_promote_in_background, gold_url, config)
+    build_key = f"gold:{gold_url}"
+    with _BUILD_LOCK:
+        manifest = target.read_manifest()
+        if build_key in _ACTIVE_BUILDS or (manifest is not None and manifest.status == "running"):
+            raise HTTPException(status.HTTP_409_CONFLICT, "a promote is already in progress")
+        _ACTIVE_BUILDS.add(build_key)
+    background.add_task(_promote_in_background, gold_url, config, build_key)
     current = _gold_status(gold_url)
     current.status = "running"
     return current
@@ -191,7 +211,9 @@ def _silver_target() -> BuildTarget | None:
         return None
 
 
-def _rebuild_silver_in_background(bucket: Bucket, sources: list[tuple[str, list[str]]]) -> None:
+def _rebuild_silver_in_background(
+    bucket: Bucket, sources: list[tuple[str, list[str]]], build_key: str
+) -> None:
     """Rebuild silver from the bucket; status lives in the silver manifest.
 
     ``sources`` is what the request already checked was there to replay.
@@ -212,6 +234,8 @@ def _rebuild_silver_in_background(bucket: Bucket, sources: list[tuple[str, list[
         # follow it on their own — disposing is belt and braces there, and
         # still drops any whose transaction spanned the swap.
         dispose_db()
+        with _BUILD_LOCK:
+            _ACTIVE_BUILDS.discard(build_key)
 
 
 def _silver_status() -> SilverStatus:
@@ -233,17 +257,20 @@ def start_rebuild_silver(background: BackgroundTasks) -> SilverStatus:
             status.HTTP_400_BAD_REQUEST,
             "rebuild-silver requires a sqlite file or a Postgres DATABASE_URL",
         )
-    manifest = target.read_manifest()
-    if manifest is not None and manifest.status == "running":
-        raise HTTPException(status.HTTP_409_CONFLICT, "a silver rebuild is already in progress")
-    # Checked here rather than left to the task: a refusal there only reaches
-    # the server log, while the request would already have answered 202.
-    bucket = snapshots.bucket()
-    try:
-        sources = require_replayable_sources(bucket)
-    except NothingToReplayError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    background.add_task(_rebuild_silver_in_background, bucket, sources)
+    build_key = "silver"
+    with _BUILD_LOCK:
+        manifest = target.read_manifest()
+        if build_key in _ACTIVE_BUILDS or (manifest is not None and manifest.status == "running"):
+            raise HTTPException(status.HTTP_409_CONFLICT, "a silver rebuild is already in progress")
+        # Checked here rather than left to the task: a refusal there only reaches
+        # the server log, while the request would already have answered 202.
+        bucket = snapshots.bucket()
+        try:
+            sources = require_replayable_sources(bucket)
+        except NothingToReplayError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        _ACTIVE_BUILDS.add(build_key)
+    background.add_task(_rebuild_silver_in_background, bucket, sources, build_key)
     current = _silver_status()
     current.status = "running"
     return current

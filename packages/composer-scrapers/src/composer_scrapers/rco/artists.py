@@ -22,25 +22,28 @@ from .fetch import BASE_URL
 
 
 @dataclass
-class _Credit:
+class Credit:
     """A credited person accumulated across concerts."""
 
     name: str
     role_en: str
     image_url: str | None
     profile_url: str | None = None
-    concert_ids: set[int] = field(default_factory=set)
+    concert_ids: set[int] = field(default_factory=set[int])
+
+
+_Credit = Credit
 
 
 def iter_conductor_records(page_json: dict[str, Any]) -> list[SourceRecord]:
     """Extract one SourceRecord per conductor from the conductors overview JSON."""
-    records = []
+    records: list[SourceRecord] = []
     for block in page_json.get("content", []):
         if block.get("type") != "person_group":
             continue
         for person_page in block.get("persons", []):
-            person = person_page.get("person", {})
-            person_meta = person.get("meta", {})
+            person: dict[str, Any] = person_page.get("person", {})
+            person_meta: dict[str, Any] = person.get("meta", {})
             credit_id = person_meta.get("id")
             if not credit_id:
                 continue
@@ -48,11 +51,12 @@ def iter_conductor_records(page_json: dict[str, Any]) -> list[SourceRecord]:
             if not name:
                 continue
 
-            role = (person.get("role") or {}).get("label") or "conductor"
-            function_obj = person.get("function") or {}
+            role_obj: dict[str, Any] = person.get("role") or {}
+            role: str = role_obj.get("label") or "conductor"
+            function_obj: dict[str, Any] = person.get("function") or {}
             function_label: str | None = function_obj.get("label") or None
-            asset = person.get("defaultAsset") or {}
-            renditions = asset.get("renditions") or {}
+            asset: dict[str, Any] = person.get("defaultAsset") or {}
+            renditions: dict[str, Any] = asset.get("renditions") or {}
             image_url: str | None = renditions.get("600x600") or asset.get("url") or None
             description = person.get("description") or ""
             ref_id = person_meta.get("referenceId") or ""
@@ -85,9 +89,10 @@ def iter_conductor_records(page_json: dict[str, Any]) -> list[SourceRecord]:
     return records
 
 
-def collect_credits(concert: dict[str, Any], registry: dict[str, _Credit]) -> None:
+def collect_credits(concert: dict[str, Any], registry: dict[str, Credit]) -> None:
     """Register credited persons from a concert detail dict."""
-    concert_id: int = (concert.get("meta") or {}).get("id") or 0
+    meta: dict[str, Any] = concert.get("meta") or {}
+    concert_id: int = meta.get("id") or 0
     for credit in concert.get("credits", []):
         name = (credit.get("name") or "").strip()
         role_en = (credit.get("roleEn") or "").strip()
@@ -95,8 +100,8 @@ def collect_credits(concert: dict[str, Any], registry: dict[str, _Credit]) -> No
             continue
         key = f"{role_en}:{name}"
         if key not in registry:
-            renditions = credit.get("imageRenditions") or {}
-            registry[key] = _Credit(
+            renditions: dict[str, Any] = credit.get("imageRenditions") or {}
+            registry[key] = Credit(
                 name=name,
                 role_en=role_en,
                 image_url=renditions.get("600x600"),
@@ -105,7 +110,7 @@ def collect_credits(concert: dict[str, Any], registry: dict[str, _Credit]) -> No
         registry[key].concert_ids.add(concert_id)
 
 
-def credit_record(credit: _Credit) -> SourceRecord:
+def credit_record(credit: Credit) -> SourceRecord:
     """Convert an accumulated credit to a SourceRecord."""
     is_conductor = credit.role_en == "conductor"
     profession = "conductor" if is_conductor else "soloist"

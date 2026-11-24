@@ -2779,7 +2779,10 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Health"
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
       }
     },
     "/v1/composers": {
@@ -2897,7 +2900,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Composers"
+        "summary": "List Composers",
+        "tags": [
+          "people"
+        ]
       }
     },
     "/v1/composers/{composer_id}": {
@@ -2937,7 +2943,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Composer"
+        "summary": "Get Composer",
+        "tags": [
+          "people"
+        ]
       }
     },
     "/v1/composers/{composer_id}/works": {
@@ -3015,7 +3024,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Composer Works"
+        "summary": "Get Composer Works",
+        "tags": [
+          "people"
+        ]
       }
     },
     "/v1/concerts": {
@@ -3101,7 +3113,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Concerts"
+        "summary": "Concerts",
+        "tags": [
+          "concerts"
+        ]
       }
     },
     "/v1/concerts/{concert_id}": {
@@ -3142,7 +3157,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Concert Detail"
+        "summary": "Concert Detail",
+        "tags": [
+          "concerts"
+        ]
       }
     },
     "/v1/conductors": {
@@ -3259,7 +3277,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Conductors"
+        "summary": "List Conductors",
+        "tags": [
+          "people"
+        ]
       }
     },
     "/v1/conductors/{conductor_id}": {
@@ -3299,7 +3320,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Conductor"
+        "summary": "Get Conductor",
+        "tags": [
+          "people"
+        ]
       }
     },
     "/v1/ensembles": {
@@ -3431,7 +3455,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Ensembles"
+        "summary": "Ensembles",
+        "tags": [
+          "ensembles"
+        ]
       }
     },
     "/v1/ensembles/{ensemble_id}": {
@@ -3472,7 +3499,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Ensemble Detail"
+        "summary": "Ensemble Detail",
+        "tags": [
+          "ensembles"
+        ]
       }
     },
     "/v1/entities": {
@@ -3571,7 +3601,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Entities"
+        "summary": "Entities",
+        "tags": [
+          "entities"
+        ]
       }
     },
     "/v1/entities/{entity_id}": {
@@ -3611,7 +3644,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Entity Detail"
+        "summary": "Entity Detail",
+        "tags": [
+          "entities"
+        ]
       }
     },
     "/v1/entities/{entity_id}/connections": {
@@ -3723,7 +3759,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Entity Connections Route"
+        "summary": "Entity Connections Route",
+        "tags": [
+          "entities"
+        ]
       }
     },
     "/v1/genres": {
@@ -3772,7 +3811,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Genres"
+        "summary": "Genres",
+        "tags": [
+          "genres"
+        ]
       }
     },
     "/v1/genres/{genre_id}": {
@@ -3813,7 +3855,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Genre Detail"
+        "summary": "Genre Detail",
+        "tags": [
+          "genres"
+        ]
       }
     },
     "/v1/genres/{genre_id}/people": {
@@ -3877,7 +3922,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Genre People"
+        "summary": "Get Genre People",
+        "tags": [
+          "genres"
+        ]
       }
     },
     "/v1/mentions": {
@@ -3946,7 +3994,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Mentions"
+        "summary": "Mentions",
+        "tags": [
+          "mentions"
+        ]
       }
     },
     "/v1/people/{person_id}/concerts": {
@@ -4010,7 +4061,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Person Concerts"
+        "summary": "Get Person Concerts",
+        "tags": [
+          "concerts"
+        ]
       }
     },
     "/v1/people/{person_id}/recordings": {
@@ -4074,7 +4128,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Person Recordings"
+        "summary": "Get Person Recordings",
+        "tags": [
+          "recordings"
+        ]
       }
     },
     "/v1/recordings": {
@@ -4160,7 +4217,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Recordings"
+        "summary": "Recordings",
+        "tags": [
+          "recordings"
+        ]
       }
     },
     "/v1/recordings/{recording_id}": {
@@ -4201,7 +4261,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Recording Detail"
+        "summary": "Recording Detail",
+        "tags": [
+          "recordings"
+        ]
       }
     },
     "/v1/soloists": {
@@ -4318,7 +4381,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Soloists"
+        "summary": "List Soloists",
+        "tags": [
+          "people"
+        ]
       }
     },
     "/v1/soloists/{soloist_id}": {
@@ -4358,7 +4424,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Soloist"
+        "summary": "Get Soloist",
+        "tags": [
+          "people"
+        ]
       }
     },
     "/v1/stats": {
@@ -4376,7 +4445,10 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Stats"
+        "summary": "Stats",
+        "tags": [
+          "stats"
+        ]
       }
     },
     "/v1/works": {
@@ -4485,7 +4557,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Works"
+        "summary": "Works",
+        "tags": [
+          "works"
+        ]
       }
     },
     "/v1/works/{work_id}": {
@@ -4526,7 +4601,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Work Detail"
+        "summary": "Work Detail",
+        "tags": [
+          "works"
+        ]
       }
     }
   }

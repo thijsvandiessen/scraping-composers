@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import cast
 
 from composer_models import Claim, Entity, EntityRecord, Source, WorkEntity
 from sqlalchemy import select
@@ -42,23 +42,31 @@ def _text(value: object) -> str | None:
 def _parts(raw: str) -> list[ScoringPartOut]:
     """The parts a record's ``raw["instrumentation"]`` lists, or none."""
     try:
-        payload: Any = json.loads(raw)
+        payload: object = json.loads(raw)
     except ValueError:
         return []
-    instrumentation = payload.get("instrumentation") if isinstance(payload, dict) else None
-    parts = instrumentation.get("parts") if isinstance(instrumentation, dict) else None
+    if not isinstance(payload, dict):
+        return []
+    instrumentation = cast(dict[object, object], payload).get("instrumentation")
+    if not isinstance(instrumentation, dict):
+        return []
+    parts = cast(dict[object, object], instrumentation).get("parts")
     if not isinstance(parts, list):
         return []
-    return [
-        ScoringPartOut(
-            stated=_text(part.get("stated")) or _text(part.get("label")),
-            instrument=_text(part.get("instrument")),
-            count=_count(part.get("count")),
-            solo=part.get("solo") is True,
+    out: list[ScoringPartOut] = []
+    for raw_part in cast(list[object], parts):
+        if not isinstance(raw_part, dict):
+            continue
+        part = cast(dict[object, object], raw_part)
+        out.append(
+            ScoringPartOut(
+                stated=_text(part.get("stated")) or _text(part.get("label")),
+                instrument=_text(part.get("instrument")),
+                count=_count(part.get("count")),
+                solo=part.get("solo") is True,
+            )
         )
-        for part in parts  # pyright: ignore[reportUnknownVariableType]
-        if isinstance(part, dict)
-    ]
+    return out
 
 
 def work_scoring(db: Session, work_id: uuid.UUID) -> WorkScoringOut:

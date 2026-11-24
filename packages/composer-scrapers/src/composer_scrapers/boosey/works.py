@@ -73,7 +73,7 @@ class ParsedWork:
 
     title: str
     composer: str | None
-    fields: dict[str, str] = field(default_factory=dict)
+    fields: dict[str, str] = field(default_factory=dict[str, str])
 
 
 def text_lines(html: str) -> list[str]:
@@ -82,7 +82,7 @@ def text_lines(html: str) -> list[str]:
     html = _COMMENT.sub(" ", html)
     html = _BLOCK.sub("\n", html)
     html = _TAG.sub(" ", html)
-    lines = []
+    lines: list[str] = []
     for raw in unescape(html).splitlines():
         line = re.sub(r"\s+", " ", raw).strip()
         if line:

@@ -28,23 +28,24 @@ def _soloists(concert: dict[str, Any]) -> list[dict[str, str | None]]:
     ]
 
 
-def _performances(concert: dict[str, Any]) -> list[SourceWorkMention]:
+def performances(concert: dict[str, Any]) -> list[SourceWorkMention]:
     """Return one SourceWorkMention per non-interval programme item."""
-    meta = concert.get("meta", {})
+    meta: dict[str, Any] = concert.get("meta", {})
     concert_id = meta.get("id", 0)
     slug = meta.get("slug", "")
     concert_title = concert.get("title", "")
     date = concert.get("start", "")
     venue = concert.get("location", "")
-    url = (concert.get("websiteUrls") or {}).get("en", "")
+    website_urls: dict[str, Any] = concert.get("websiteUrls") or {}
+    url: str = website_urls.get("en", "")
     conductor = _conductor(concert)
     soloists = _soloists(concert)
 
-    mentions = []
-    programme = concert.get("program") or []
+    mentions: list[SourceWorkMention] = []
+    programme: list[dict[str, Any]] = concert.get("program") or []
     for idx, item in enumerate(programme):
-        composer = item.get("relatedCredit") or ""
-        title = item.get("nameEn", "")
+        composer: str = item.get("relatedCredit") or ""
+        title: str = item.get("nameEn", "")
         if not composer or composer.startswith("--") or not title:
             continue
         mentions.append(
@@ -70,3 +71,6 @@ def _performances(concert: dict[str, Any]) -> list[SourceWorkMention]:
             )
         )
     return mentions
+
+
+_performances = performances

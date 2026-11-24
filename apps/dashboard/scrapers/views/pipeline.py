@@ -5,19 +5,29 @@ from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import redirect, render
 
 from ..api import AdminAPI, AdminAPIError
+from ..schemas import (
+    GoldStatus,
+    PromoteOptions,
+    Rule1Config,
+    Rule1EnsembleThresholds,
+    Rule1PersonThresholds,
+    RunOut,
+    ScraperOut,
+    SnapshotOut,
+)
 from .common import is_running
 
 
 def index(request: HttpRequest) -> HttpResponse:
     """Scrapers page: fetch raw data from the sources into the bucket."""
     api = AdminAPI.from_env()
-    scrapers: list[dict[str, object]] = []
+    scrapers: list[ScraperOut] = []
     error: str | None = None
     try:
         scrapers = api.list_scrapers()
     except AdminAPIError as exc:
         error = str(exc)
-    refreshing = any(is_running(s.get("last_snapshot")) for s in scrapers)
+    refreshing = any(is_running(s.last_snapshot) for s in scrapers)
     context = {
         **admin.site.each_context(request),
         "title": "Scrapers",
@@ -37,7 +47,7 @@ def start_fetch(request: HttpRequest, name: str) -> HttpResponse:
     except AdminAPIError as exc:
         messages.error(request, str(exc))
     else:
-        messages.success(request, f"fetching {started['source']} → snapshot {started['snapshot_id']}")
+        messages.success(request, f"fetching {started.source} → snapshot {started.snapshot_id}")
     return redirect("scrapers_index")
 
 
@@ -51,7 +61,7 @@ def fetch_due(request: HttpRequest) -> HttpResponse:
         messages.error(request, str(exc))
     else:
         if started:
-            names = ", ".join(str(s["source"]) for s in started)
+            names = ", ".join(s.source for s in started)
             messages.success(request, f"started {len(started)} fetch(es): {names}")
         else:
             messages.info(request, "no scrapers are due")
@@ -70,7 +80,7 @@ def abandon_snapshot(request: HttpRequest, source: str, snapshot_id: str) -> Htt
     else:
         messages.success(
             request,
-            f"abandoned snapshot {source}/{snapshot_id}: {abandoned['record_count']} record(s) kept on disk",
+            f"abandoned snapshot {source}/{snapshot_id}: {abandoned.record_count} record(s) kept on disk",
         )
     return redirect("scrapers_index")
 
@@ -78,8 +88,8 @@ def abandon_snapshot(request: HttpRequest, source: str, snapshot_id: str) -> Htt
 def load_index(request: HttpRequest) -> HttpResponse:
     """Load page: ingest raw bucket snapshots into the database."""
     api = AdminAPI.from_env()
-    snapshots: list[dict[str, object]] = []
-    runs: list[dict[str, object]] = []
+    snapshots: list[SnapshotOut] = []
+    runs: list[RunOut] = []
     error: str | None = None
     try:
         snapshots = api.list_snapshots()
@@ -107,22 +117,20 @@ def process_snapshot(request: HttpRequest, source: str, snapshot_id: str) -> Htt
     except AdminAPIError as exc:
         messages.error(request, str(exc))
     else:
-        messages.success(
-            request, f"loading snapshot {snapshot_id} into the database (run {started['run_id']})"
-        )
+        messages.success(request, f"loading snapshot {snapshot_id} into the database (run {started.run_id})")
     return redirect("load_index")
 
 
 def promote_page(request: HttpRequest) -> HttpResponse:
     """Gold status and the button to rebuild it from silver."""
     api = AdminAPI.from_env()
-    gold: dict[str, object] | None = None
+    gold: GoldStatus | None = None
     error: str | None = None
     try:
         gold = api.gold_status()
     except AdminAPIError as exc:
         error = str(exc)
-    refreshing = bool(gold) and gold.get("status") == "running"
+    refreshing = is_running(gold)
     context = {
         **admin.site.each_context(request),
         "title": "Promote",
@@ -133,20 +141,20 @@ def promote_page(request: HttpRequest) -> HttpResponse:
     return render(request, "scrapers/promote.html", context)
 
 
-PROMOTE_RULES = ("drop_unevidenced_persons", "collapse_duplicates", "prune_unreferenced")
-
-
-def _promote_options(request: HttpRequest) -> dict[str, object]:
+def _promote_options(request: HttpRequest) -> PromoteOptions:
     """Promotion options from the promote form; empty means an all-default run.
 
     Unchecked checkboxes are absent from the POST, so rule toggles are only
     read when the form marker is present — a bare POST stays a default run.
     """
-    options: dict[str, object] = {}
+    options: PromoteOptions = {}
     if request.POST.get("options_form"):
-        for rule in PROMOTE_RULES:
-            if request.POST.get(rule) != "on":
-                options[rule] = False
+        if request.POST.get("drop_unevidenced_persons") != "on":
+            options["drop_unevidenced_persons"] = False
+        if request.POST.get("collapse_duplicates") != "on":
+            options["collapse_duplicates"] = False
+        if request.POST.get("prune_unreferenced") != "on":
+            options["prune_unreferenced"] = False
     raw_referrers = request.POST.get("min_referrers", "").strip()
     if raw_referrers:
         options["min_referrers"] = int(raw_referrers)  # ValueError handled by the view
@@ -178,7 +186,7 @@ def rule1_config_page(request: HttpRequest) -> HttpResponse:
     """Rule 1's concert/recording/composer/sitelink thresholds, as stored in
     the admin API's rule1_config.json — editable here, never via Django."""
     api = AdminAPI.from_env()
-    config: dict[str, object] | None = None
+    config: Rule1Config | None = None
     error: str | None = None
     try:
         config = api.get_rule1_config()
@@ -193,7 +201,7 @@ def rule1_config_page(request: HttpRequest) -> HttpResponse:
     return render(request, "scrapers/rule1_config.html", context)
 
 
-def _rule1_config_payload(request: HttpRequest) -> dict[str, object]:
+def _rule1_config_payload(request: HttpRequest) -> Rule1Config:
     """The PUT body for the admin API; raises ValueError on non-numeric input."""
 
     def required(name: str) -> int:
@@ -203,20 +211,20 @@ def _rule1_config_payload(request: HttpRequest) -> dict[str, object]:
         raw = request.POST.get(name, "").strip()
         return int(raw) if raw else None
 
-    return {
-        "persons": {
-            "min_concert_appearances": required("persons_min_concert_appearances"),
-            "min_recording_appearances": required("persons_min_recording_appearances"),
-            "min_appearances_for_composers": required("persons_min_appearances_for_composers"),
-            "min_works_for_composers": required("persons_min_works_for_composers"),
-            "min_programmes_for_composers": required("persons_min_programmes_for_composers"),
-            "min_sitelinks": optional("persons_min_sitelinks"),
-        },
-        "ensembles": {
-            "min_concert_appearances": required("ensembles_min_concert_appearances"),
-            "min_recording_appearances": required("ensembles_min_recording_appearances"),
-        },
-    }
+    return Rule1Config(
+        persons=Rule1PersonThresholds(
+            min_concert_appearances=required("persons_min_concert_appearances"),
+            min_recording_appearances=required("persons_min_recording_appearances"),
+            min_appearances_for_composers=required("persons_min_appearances_for_composers"),
+            min_works_for_composers=required("persons_min_works_for_composers"),
+            min_programmes_for_composers=required("persons_min_programmes_for_composers"),
+            min_sitelinks=optional("persons_min_sitelinks"),
+        ),
+        ensembles=Rule1EnsembleThresholds(
+            min_concert_appearances=required("ensembles_min_concert_appearances"),
+            min_recording_appearances=required("ensembles_min_recording_appearances"),
+        ),
+    )
 
 
 def save_rule1_config(request: HttpRequest) -> HttpResponse:

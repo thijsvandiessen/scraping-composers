@@ -5,7 +5,6 @@ description = "Read-only consumer product API (serves the curated gold and raw s
 requires-python = ">=3.12"
 dependencies = [
     "composer-models",
-    "composer-gold",
     "composer-schema",
     "fastapi>=0.162.0",
     "uvicorn[standard]>=0.54.0",

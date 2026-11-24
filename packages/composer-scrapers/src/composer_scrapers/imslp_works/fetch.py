@@ -43,7 +43,7 @@ import json
 import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from composer_http import SourceSession
 
@@ -84,13 +84,15 @@ def parse_url(page_id: int) -> str:
     return f"{API_URL}?action=parse&pageid={page_id}&prop=text&format=json"
 
 
-def _row(entry: Any) -> WorkRow | None:
+def _row(raw_entry: Any) -> WorkRow | None:
     """One worklist row, or None when it is missing what identifies a work."""
-    if not isinstance(entry, dict):
+    if not isinstance(raw_entry, dict):
         return None
-    values = entry.get("intvals")
-    if not isinstance(values, dict):
+    entry = cast(dict[str, Any], raw_entry)
+    raw_values = entry.get("intvals")
+    if not isinstance(raw_values, dict):
         return None
+    values = cast(dict[str, Any], raw_values)
     page_id = values.get("pageid")
     composer = values.get("composer")
     title = entry.get("id")
@@ -179,11 +181,13 @@ def _document(raw: str, title: str, *, quiet: bool = False) -> str | None:
     except ValueError as exc:
         warn("imslp_works: unreadable API response for %r (%s)", title, exc)
         return None
-    parse = body.get("parse") if isinstance(body, dict) else None
-    if not isinstance(parse, dict):
-        error = body.get("error") if isinstance(body, dict) else None
+    body_map = cast(dict[str, Any], body) if isinstance(body, dict) else None
+    raw_parse = body_map.get("parse") if body_map is not None else None
+    if not isinstance(raw_parse, dict):
+        error = body_map.get("error") if body_map is not None else None
         warn("imslp_works: no parse output for %r (%s)", title, error)
         return None
-    text = parse.get("text")
-    document = text.get("*") if isinstance(text, dict) else None
+    parse = cast(dict[str, Any], raw_parse)
+    raw_text = parse.get("text")
+    document = cast(dict[str, Any], raw_text).get("*") if isinstance(raw_text, dict) else None
     return document if isinstance(document, str) else None

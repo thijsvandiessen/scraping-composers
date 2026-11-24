@@ -112,12 +112,143 @@ useLibraryCodeForTypes = false
 reportMissingModuleSource = false
 # Missing stubs for those same untyped packages should not be an error either.
 reportMissingTypeStubs = false
-# The checks below have no equivalent under the mypy --strict config this replaces:
-# they flag values whose type is `Unknown` because it flows in from an untyped
-# dependency (django, kagglehub, ...), tests reaching into a module's
-# private helpers, and fixtures pyright reads as unused. Keeping them on would
-# hold the code to a strictness it was never written against, so leave them off
-# and rely on the rest of strict mode for real type safety.
+# The 7 checks relaxed below are scoped via executionEnvironments to apps/dashboard
+# (untyped django/unfold) and tests/ directories (private helper access, pytest fixtures,
+# and mocks). All packages/*/src and apps/{consumer-api,admin-api,cli}/src run under
+# full strict mode.
+
+[[tool.pyright.executionEnvironments]]
+root = "apps/dashboard"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/composer-schema/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/composer-models/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/composer-http/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/composer-bronze/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/composer-scrapers/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/composer-warehouse/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/composer-gold/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/composer-graph/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "packages/composer-config/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "apps/consumer-api/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "apps/admin-api/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "apps/cli/tests"
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnknownArgumentType = false
+reportUnknownParameterType = false
+reportUnknownLambdaType = false
+reportPrivateUsage = false
+reportUnusedFunction = false
+
+[[tool.pyright.executionEnvironments]]
+root = "tests/e2e/tests"
 reportUnknownMemberType = false
 reportUnknownVariableType = false
 reportUnknownArgumentType = false

@@ -10,10 +10,10 @@ people stay cross-role and "most played" is a query over these raw records.
 from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
-from typing import Any
+from typing import Any, cast
 
 from .. import SourceWorkMention
-from .text import _WS, _names
+from .text import WS, names
 
 
 def _date(value: str | None) -> str:
@@ -26,12 +26,12 @@ def _title(value: object) -> str:
     an emphasized fragment (``{"em": "PRINCE IGOR", "_": "CHORUS FROM ..."}``);
     those are joined back into one verbatim string."""
     if isinstance(value, dict):
-        text = " ".join(str(part) for part in value.values())
+        text = " ".join(str(part) for part in cast(dict[str, Any], value).values())
     elif isinstance(value, str):
         text = value
     else:
         text = ""
-    return _WS.sub(" ", text).strip()
+    return WS.sub(" ", text).strip()
 
 
 def _performance_record(
@@ -44,15 +44,15 @@ def _performance_record(
     program_id = str(program["programID"])
     season = program["season"]
     title = _title(work.get("workTitle"))
-    composers = list(_names(work.get("composerName")))
-    conductors = list(_names(work.get("conductorName")))
+    composers = list(names(work.get("composerName")))
+    conductors = list(names(work.get("conductorName")))
     soloists = [
         {"name": name, "discipline": (s.get("soloistInstrument") or None)}
         for s in work.get("soloists", ())
-        for name in _names(s.get("soloistName"))
+        for name in names(s.get("soloistName"))
     ]
     date = _date(concert.get("Date"))
-    location = _WS.sub(" ", concert.get("Location") or "").strip()
+    location = WS.sub(" ", concert.get("Location") or "").strip()
 
     raw: dict[str, Any] = {
         "programID": program_id,
@@ -76,7 +76,7 @@ def _performance_record(
     )
 
 
-def _performances(programs: Iterable[dict[str, Any]]) -> Iterator[SourceWorkMention]:
+def performances(programs: Iterable[dict[str, Any]]) -> Iterator[SourceWorkMention]:
     """Yield one work mention per titled work at each concert of its program.
 
     ``work_idx`` is the work's position in the program's ``works`` list (kept
@@ -88,3 +88,6 @@ def _performances(programs: Iterable[dict[str, Any]]) -> Iterator[SourceWorkMent
                 if not _title(work.get("workTitle")):
                     continue
                 yield _performance_record(program, concert_idx, work_idx, concert, work)
+
+
+_performances = performances

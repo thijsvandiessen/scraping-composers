@@ -16,7 +16,7 @@ and must never be written here (the ROH keeps those under its own
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 PREMIERE_KEY = "premiere"
 
@@ -45,10 +45,11 @@ def premiere_of(raw: dict[str, Any]) -> tuple[str, str | None] | None:
     premiere = raw.get(PREMIERE_KEY)
     if not isinstance(premiere, dict):
         return None
-    date = premiere.get("date")
+    premiere_map = cast(dict[str, Any], premiere)
+    date = premiere_map.get("date")
     if not isinstance(date, str) or date_parts(date) is None:
         return None
-    place = premiere.get("place")
+    place = premiere_map.get("place")
     if not isinstance(place, str) or not place.strip():
         place = None
     return date.strip(), place.strip() if place else None
