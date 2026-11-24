@@ -1,11 +1,12 @@
 """Anchoring person identity on Wikidata before pairwise matching (#205)."""
 
 import uuid
+from dataclasses import replace
 
 from composer_models import Entity, PersonMatch
 from composer_schema import EntityDocument, SourceClaim
 from composer_warehouse.persons import AuthorityIndex, dedupe_persons, load_records, parse_name
-from composer_warehouse.persons.authority import name_keys
+from composer_warehouse.persons.authority import authority_candidates, name_keys
 from composer_warehouse.persons.corpus import PersonRecord
 from composer_warehouse.testing import FakeSource, ingest_source, person
 from sqlalchemy import select
@@ -131,8 +132,9 @@ def _williamses() -> list[EntityDocument]:
 def test_a_name_several_items_hold_stays_unlinked(session: Session) -> None:
     """The "John Williams" case: the composer and the guitarist both carry the
     name, so a record carrying only it is a detectable "cannot resolve", not a
-    coin flip. Its birth year fits only the composer, so the model links it to
-    him and nothing else, and the namesake guard of #202, which needs links to
+    coin flip. Its birth year matches only the composer, but the guitarist's is
+    nine years off, not a different lifetime, so dates rule neither out. The
+    model links it to the composer and nothing else, and the namesake guard of #202, which needs links to
     two items, never fires: the hold is what keeps it unlinked."""
     _ingest(session, *_williamses(), *_crowd())
     _ingest(
@@ -152,6 +154,39 @@ def test_a_name_several_items_hold_stays_unlinked(session: Session) -> None:
     assert touching, "the model proposed nothing, so the hold is untested"
     assert {m.status for m in touching} == {"needs_review"}
     assert result.anchor.resolution.authority == 0
+
+
+def _varlamovs() -> list[EntityDocument]:
+    return [
+        _wikidata("Alexander Varlamov", "Q2003374", *_dates("1801", "1848")),
+        _wikidata("Alexander Varlamov", "Q4103887", *_dates("1904", "1990")),
+    ]
+
+
+def test_dates_from_another_lifetime_rule_an_item_out(session: Session) -> None:
+    """Two Alexander Varlamovs a century apart: a record's dates tell them
+    apart, so it is anchored to the one it fits rather than held back."""
+    _ingest(session, *_varlamovs(), *_crowd())
+    _ingest(session, person("Varlamov, Alexander", *_dates("1904", "1990")), name="other")
+    result = dedupe_persons(session)
+
+    assert (result.anchor.ambiguous, result.anchor.dated, result.anchor.linked) == (0, 1, 1)
+    record = _by_label(session)["Varlamov, Alexander"]
+    canonical = session.get(Entity, record.canonical_entity_id)
+    assert canonical is not None
+    assert {r.external_id for r in canonical.records} == {"Q4103887"}
+    assert result.anchor.resolution.authority == 1
+
+
+def test_a_record_every_item_is_ruled_out_of_names_none() -> None:
+    items = [
+        replace(_record("Alexander Varlamov", qid="Q2003374"), birth_years=frozenset({1801})),
+        replace(_record("Alexander Varlamov", qid="Q4103887"), birth_years=frozenset({1904})),
+    ]
+    record = replace(_record("Varlamov, Alexander"), birth_years=frozenset({1950}))
+    found = authority_candidates([*items, record])
+
+    assert (found.ambiguous, found.pairs, found.unmatched, found.dated) == ({}, [], 1, 0)
 
 
 def test_the_report_splits_authority_pairwise_and_unresolved(session: Session) -> None:

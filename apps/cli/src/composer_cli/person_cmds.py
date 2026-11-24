@@ -50,7 +50,8 @@ def cmd_dedupe_persons(args: argparse.Namespace) -> int:
     anchor, resolved = result.anchor, result.anchor.resolution
     print(
         f"wikidata anchors: {anchor.linked} link(s), {anchor.queued} queued, "
-        f"{anchor.ambiguous} name(s) held by several items left unlinked, "
+        f"{anchor.dated} name(s) held by several items told apart by dates, "
+        f"{anchor.ambiguous} left unlinked, "
         f"{anchor.unmatched} naming no item\n"
         f"persons without a QID: {resolved.authority} resolved to an item, "
         f"{resolved.pairwise} pairwise only, {resolved.unresolved} unresolved"

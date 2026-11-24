@@ -13,8 +13,9 @@ single hop to a cluster canonical and never a link in a chain.
 
 The pairwise pass is preceded by an anchor pass (:mod:`authority`, #205): a
 record whose names hit exactly one Wikidata item's label or alias is scored
-against that item first, and one whose names hit several is held back from
-every machine link, since picking one namesake would be a guess. The pairwise
+against that item first. One whose names hit several items is narrowed by its
+dates (an item from another lifetime is ruled out); if several still fit it is
+held back from every machine link, since picking one namesake would be a guess. The pairwise
 pass still runs over everything, for the records no item names.
 
 Before clustering, :mod:`catalogues` adds the links the names alone cannot make: two
@@ -476,8 +477,9 @@ def dedupe_persons(session: Session) -> DedupeResult:
     for record, anchor, _qid in candidates.pairs:
         _decide_pair(state, record, anchor, anchor=True)
     log.info(
-        "anchor pass: %d record(s) name one wikidata item, %d several, %d none",
+        "anchor pass: %d record(s) name one wikidata item (%d of them by dates), %d several, %d none",
         candidates.resolved,
+        candidates.dated,
         len(candidates.ambiguous),
         candidates.unmatched,
     )
@@ -493,6 +495,7 @@ def dedupe_persons(session: Session) -> DedupeResult:
         linked=state.anchor_linked,
         queued=state.anchor_queued,
         ambiguous=len(candidates.ambiguous),
+        dated=candidates.dated,
         unmatched=candidates.unmatched,
         resolution=resolution(records, partition.clustering.clusters),
     )
