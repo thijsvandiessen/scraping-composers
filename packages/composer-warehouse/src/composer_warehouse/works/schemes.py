@@ -15,7 +15,9 @@ says that much:
   all, a publisher's or a library's among them.
 
 Everything else in :data:`~composer_schema.catalogues.CATALOGUE_SCHEMES` is a
-composer's catalogue, and only those schemes can hold range or list sets
+composer's catalogue -- one composer's even where a title's letter is not:
+Helm's H (C.P.E. Bach) and Imogen Holst's are the schemes ``H:CPE Bach`` and
+``H:Holst`` (#456) -- and only those schemes can hold range or list sets
 (#378). Because :data:`~composer_schema.catalogues.CATALOGUE_SCHEMES` is built
 from the parser's tables, a catalogue added to :mod:`composer_schema.catalogues`
 counts here without a change.

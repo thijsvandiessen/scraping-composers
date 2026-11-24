@@ -38,8 +38,15 @@ def test_a_bare_k_means_nothing_without_the_composer() -> None:
 
 def test_every_catalogue_number_in_the_title_is_an_identifier() -> None:
     f = extract_features("Sonata in D minor, K. 9, L. 413", composer="Scarlatti, Domenico")
-    assert f.identifiers == {("Kk", "9"), ("L", "413")}
+    assert f.identifiers == {("Kk", "9"), ("L:Scarlatti", "413")}
     assert (f.catalogue_prefix, f.catalogue_number) == ("Kk", "9")  # the first, for display
+
+
+def test_a_shared_letter_is_stored_per_composer_and_shown_bare() -> None:
+    # Holst's H 125 is not Helm's (C.P.E. Bach) H 125 (#456), but both print "H".
+    holst = extract_features("The Planets, Op. 32, H. 125", composer="Holst, Gustav")
+    assert holst.identifiers == {("H:Holst", "125")}
+    assert (holst.catalogue_prefix, holst.catalogue_number) == ("H", "125")
 
 
 def test_structured_fields_add_catalogue_numbers_and_an_opus() -> None:

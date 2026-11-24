@@ -11,7 +11,11 @@ Lesure for Debussy but Longo for Scarlatti.
 :func:`find_catalogues` reads every reference in a text and
 :func:`normalize_catalogue` folds one prefix and number into a
 ``(scheme, value)`` pair, where the scheme names the catalogue (``KV``,
-``Kk``, ``Hob``, ``op``...) rather than the spelling a source used. Two works
+``Kk``, ``Hob``, ``op``...) rather than the spelling a source used. A letter
+more than one composer's catalogue uses is a scheme per composer --
+``H:Holst``, ``H:Martinu``, ``B:Chopin``, ``L:Debussy`` -- so Holst's H 125
+and Martinů's are never one number (#456); :func:`scheme_label` gives back the
+letter to show. Two works
 of one composer with the same pair are the same work; the same scheme with a
 different value is a different one.
 
@@ -62,13 +66,25 @@ OPUS = "op"
 @dataclass(frozen=True)
 class CatalogueScheme:
     """One catalogue: the scheme ``code`` stored and the ``prefixes``
-    (lowercase, without the trailing dot) a title spells it with."""
+    (lowercase, without the trailing dot) a title spells it with.
+
+    ``code`` names the catalogue, so it is never shared by two of them: a
+    letter several composers' catalogues use is qualified by the composer
+    (``H:Holst``, ``H:CPE Bach``), and ``label`` keeps the letter a title
+    prints (#456)."""
 
     code: str
     prefixes: tuple[str, ...]
     #: Whether a dotted part is a number of its own (Helm's ``H 542.5``)
     #: rather than a part of the work (``BWV 846.2``, a part of BWV 846).
     dotted: bool = False
+    #: The prefix a number is shown with, when that is not ``code``.
+    label: str | None = None
+
+    @property
+    def shown(self) -> str:
+        """The prefix a number in this catalogue is shown with (``H 125``)."""
+        return self.label or self.code
 
 
 @dataclass(frozen=True)
@@ -122,7 +138,7 @@ COMPOSERS: tuple[ComposerCatalogues, ...] = (
     ),
     ComposerCatalogues(
         surname="scarlatti",
-        schemes=(CatalogueScheme("Kk", ("k", "kk")), CatalogueScheme("L", ("l",))),
+        schemes=(CatalogueScheme("Kk", ("k", "kk")), CatalogueScheme("L:Scarlatti", ("l",), label="L")),
         exclude_given=frozenset({"alessandro", "pietro", "giuseppe"}),
     ),
     ComposerCatalogues(
@@ -134,15 +150,16 @@ COMPOSERS: tuple[ComposerCatalogues, ...] = (
         surname="liszt",
         schemes=(CatalogueScheme("S", ("s",)), CatalogueScheme("LW", ("lw",))),
     ),
-    ComposerCatalogues(surname="dvorak", schemes=(CatalogueScheme("B", ("b",)),)),
-    ComposerCatalogues(surname="debussy", schemes=(CatalogueScheme("L", ("l",)),)),
+    ComposerCatalogues(surname="dvorak", schemes=(CatalogueScheme("B:Dvorak", ("b",), label="B"),)),
+    ComposerCatalogues(surname="debussy", schemes=(CatalogueScheme("L:Debussy", ("l",), label="L"),)),
     ComposerCatalogues(
         surname="holst",
-        schemes=(CatalogueScheme("H", ("h",)),),
+        schemes=(CatalogueScheme("H:Holst", ("h",), label="H"),),
         exclude_given=frozenset({"imogen"}),
     ),
-    ComposerCatalogues(surname="honegger", schemes=(CatalogueScheme("H", ("h",)),)),
-    ComposerCatalogues(surname="martinu", schemes=(CatalogueScheme("H", ("h",)),)),
+    # Halbreich catalogued both, numbering each afresh.
+    ComposerCatalogues(surname="honegger", schemes=(CatalogueScheme("H:Honegger", ("h",), label="H"),)),
+    ComposerCatalogues(surname="martinu", schemes=(CatalogueScheme("H:Martinu", ("h",), label="H"),)),
     ComposerCatalogues(
         surname="bach",
         given=frozenset({"emanuel"}),
@@ -151,7 +168,7 @@ COMPOSERS: tuple[ComposerCatalogues, ...] = (
         # BR-CPEB H 35 is not Helm 35.
         schemes=(
             CatalogueScheme("Wq", ("wq",)),
-            CatalogueScheme("H", ("h",), dotted=True),
+            CatalogueScheme("H:CPE Bach", ("h",), dotted=True, label="H"),
             CatalogueScheme("BR-CPEB", ("br cpeb",)),
         ),
     ),
@@ -183,7 +200,7 @@ COMPOSERS: tuple[ComposerCatalogues, ...] = (
         surname="chopin",
         # Brown, and Kobylańska's sections ("KK IVa/15") with their appendix.
         schemes=(
-            CatalogueScheme("B", ("b",)),
+            CatalogueScheme("B:Chopin", ("b",), label="B"),
             CatalogueScheme("KK Anh", ("kk anh",)),
             CatalogueScheme("KK", ("kk",)),
         ),
@@ -230,6 +247,18 @@ CATALOGUE_SCHEMES: frozenset[str] = frozenset(
     | {scheme.code for entry in COMPOSERS for scheme in entry.schemes}
 )
 
+_LABELS: dict[str, str] = {
+    scheme.code: scheme.label
+    for scheme in (*UNIVERSAL, *(s for entry in COMPOSERS for s in entry.schemes))
+    if scheme.label
+}
+
+
+def scheme_label(scheme: str) -> str:
+    """The prefix a number in ``scheme`` is shown with: ``H`` for Holst's
+    ``H:Holst``, the scheme itself for any other."""
+    return _LABELS.get(scheme, scheme)
+
 
 def _scheme(code: str, surname: str | None = None, given: str | None = None) -> CatalogueScheme:
     """The scheme ``code`` in :data:`UNIVERSAL`, or in the catalogues of the
@@ -266,17 +295,17 @@ WIKIDATA_CATALOGUES: dict[str, CatalogueScheme] = {
     "Q164058": _scheme("TWV"),
     "Q739093": _scheme("Hob"),
     "Q65965844": _scheme("Kk", "scarlatti"),  # Kirkpatrick (D. Scarlatti)
-    "Q71107575": _scheme("L", "scarlatti"),  # Longo (D. Scarlatti)
-    "Q29054076": _scheme("L", "debussy"),  # Lesure (Debussy)
-    "Q141568820": _scheme("H", "holst"),  # Imogen Holst's thematic catalogue
+    "Q71107575": _scheme("L:Scarlatti", "scarlatti"),  # Longo (D. Scarlatti)
+    "Q29054076": _scheme("L:Debussy", "debussy"),  # Lesure (Debussy)
+    "Q141568820": _scheme("H:Holst", "holst"),  # Imogen Holst's thematic catalogue
     "Q2594282": _scheme("Wq", "bach", "emanuel"),  # Wotquenne (C.P.E. Bach)
-    "Q138770768": _scheme("H", "bach", "emanuel"),  # Helm (C.P.E. Bach)
+    "Q138770768": _scheme("H:CPE Bach", "bach", "emanuel"),  # Helm (C.P.E. Bach)
     "Q139309403": _scheme("BR-CPEB", "bach", "emanuel"),
     "Q139743120": _scheme("Warb", "bach", "christian"),  # Warburton (J.C. Bach)
     "Q139766427": _scheme("Ty", "bach", "christian"),  # Terry (J.C. Bach)
     "Q139592007": _scheme("F", "bach", "friedemann"),  # Falck (W.F. Bach)
     "Q139592021": _scheme("BR-WFB", "bach", "friedemann"),
-    "Q16749676": _scheme("B", "chopin"),  # Brown (Chopin)
+    "Q16749676": _scheme("B:Chopin", "chopin"),  # Brown (Chopin)
     "Q16747642": _scheme("KK", "chopin"),  # Kobylańska (Chopin)
     "Q26160369": _scheme("TrV", "strauss"),  # Trenner (R. Strauss)
     "Q26160336": _scheme("AV", "strauss"),  # Asow (R. Strauss)
