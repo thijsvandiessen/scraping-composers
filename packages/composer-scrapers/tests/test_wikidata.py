@@ -2,6 +2,7 @@
 
 import re
 import urllib.parse
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -13,12 +14,15 @@ from composer_schema import SourceClaim
 from composer_scrapers.wikidata import WikidataAdapter
 from composer_scrapers.wikidata.parse import RELATIONS, _format_time, _records_from_rows
 from composer_scrapers.wikidata.query import (
+    ID_QUERY,
     LABEL_LANGUAGES,
     MULTI_QUERY,
+    OCCUPATIONS,
     QUERY,
     RELATIONS_QUERY,
     _fetch_metrics,
     _fetch_page,
+    _fetch_population,
     _fetch_qids,
     _run_query,
 )
@@ -271,6 +275,63 @@ def test_fetch_qids_orders_the_population_numerically() -> None:
 
     with mock_session(handler) as client:
         assert _fetch_qids(client) == ["Q255", "Q1339", "Q7294", "Q101424951"]
+
+
+COMPOSER, CONDUCTOR = "Q36834", "Q158852"
+
+
+def _occupation_wdqs(holders: dict[str, list[str]]) -> Callable[[httpx.Request], httpx.Response]:
+    """A WDQS answering each occupation's id query with ``holders[occupation]``."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = urllib.parse.parse_qs(request.read().decode())["query"][0]
+        (occupation,) = re.findall(r"wdt:P106 wd:(Q\d+)", query)
+        return httpx.Response(
+            200, json={"results": {"bindings": [row(q) for q in holders.get(occupation, [])]}}
+        )
+
+    return handler
+
+
+def test_the_population_is_composers_first_then_the_conductors_not_already_in() -> None:
+    """Adding an occupation appends batches: the composer batches, and so their
+    mirrored answers, stay exactly what they were before conductors (#453)."""
+    holders = {COMPOSER: ["Q7294", "Q255", "Q1339"], CONDUCTOR: ["Q1339", "Q312699", "Q57"]}
+    with mock_session(_occupation_wdqs(holders)) as client:
+        population = _fetch_population(client)
+
+    assert list(population) == ["Q255", "Q1339", "Q7294", "Q57", "Q312699"]
+    assert population["Q255"] == {"composer"}
+    assert population["Q1339"] == {"composer", "conductor"}
+    assert population["Q312699"] == {"conductor"}
+
+
+def test_an_occupation_answering_nothing_fails_the_run() -> None:
+    """An empty conductor list is WDQS failing; yielding only the composers
+    would drop every conductor from silver."""
+    with mock_session(_occupation_wdqs({COMPOSER: ["Q255"]})) as client:
+        with pytest.raises(RuntimeError, match="no conductor ids"):
+            _fetch_population(client)
+
+
+def test_each_id_query_binds_one_occupation() -> None:
+    """One VALUES query over every occupation carries the occupation on each
+    row, and WDQS truncated that answer at its 60s cap (live, 2026-11)."""
+    assert set(OCCUPATIONS) == {COMPOSER, CONDUCTOR}
+    query = ID_QUERY.format(occupation=CONDUCTOR)
+    assert "VALUES" not in query and "wdt:P106 wd:Q158852" in query
+
+
+def test_a_record_claims_the_professions_it_was_enumerated_by() -> None:
+    rows = [row("Q312699", "Zubin Mehta"), row("Q1339", "Johann Sebastian Bach")]
+    professions = {"Q312699": frozenset({"conductor"}), "Q1339": frozenset({"composer", "conductor"})}
+    mehta, bach = _records_from_rows(rows, None, professions)
+
+    def claimed(record: Any) -> list[str]:
+        return [c.object_label for c in record.claims if c.predicate == "has_profession"]
+
+    assert claimed(mehta) == ["conductor"]
+    assert claimed(bach) == ["composer", "conductor"]
 
 
 def metrics_row(qid: str, **vars: str) -> dict[str, Any]:
@@ -610,7 +671,7 @@ def test_the_id_list_is_never_mirrored(tmp_path: Path) -> None:
     session = mock_session(handler, cache=PageCache(tmp_path / "pages.db"))
     _fetch_qids(session)
     _fetch_qids(session)
-    assert len(asked) == 2
+    assert len(asked) == 2 * len(OCCUPATIONS)
 
 
 def test_a_short_detail_page_is_not_mirrored(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

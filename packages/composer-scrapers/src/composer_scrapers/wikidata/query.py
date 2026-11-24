@@ -1,7 +1,10 @@
 """SPARQL access to the Wikidata Query Service.
 
-The composer id list is fetched up front in one cheap query (~15s for the whole
-population), and the detail query then runs over batches of those ids bound
+The population is every holder of one of ``OCCUPATIONS``: composers, and
+conductors so the conductor credits of concert and recording sources have an
+item to resolve to (#453). Its id list is fetched up front, one cheap query per
+occupation (~15s for the composers, under a second for the conductors), and the
+detail query then runs over batches of those ids bound
 with VALUES. Paging on the server was tried and removed: keyset paging only
 works if the ORDER BY and the seek FILTER agree on an order, and on WDQS they
 do not. ``ORDER BY ?item`` is not lexicographic -- Q0-Q255 are inlined as byte
@@ -57,10 +60,25 @@ RETRIES = 5
 # store, say, a German name as though it were the English one.
 LABEL_LANGUAGES = "en,mul"
 
-# The whole population in one query. Cheap because it touches only the
-# occupation index: no OPTIONAL joins, no label service, no ORDER BY.
+#: Occupation (P106) -> the profession its holders are claimed as, in the
+#: order the population is paged. Composers come first and each later
+#: occupation adds only the holders not already in, so adding one appends
+#: batches and leaves every earlier batch, and its mirrored answers, as it was.
+#: Conductors, not instrumentalists or singers: 28k items, half of them
+#: composers already, against hundreds of thousands of mostly pop pianists and
+#: singers no source credits (#453).
+OCCUPATIONS: dict[str, str] = {
+    "Q36834": "composer",
+    "Q158852": "conductor",
+}
+
+# One occupation's holders. Cheap because it touches only the occupation index:
+# no OPTIONAL joins, no label service, no ORDER BY. One query per occupation,
+# not one binding them all with VALUES: that answer carries the occupation on
+# every row, and for composers plus conductors WDQS cut it off mid-stream at
+# its 60s cap (32MB, live, 2026-11).
 ID_QUERY = """\
-SELECT ?item WHERE { ?item wdt:P106 wd:Q36834 . }
+SELECT ?item WHERE {{ ?item wdt:P106 wd:{occupation} . }}
 """
 
 # The single-valued fields, plus the label. Each item contributes a handful of
@@ -208,13 +226,37 @@ def _values(qids: list[str]) -> str:
     return " ".join(f"wd:{qid}" for qid in qids)
 
 
-def _fetch_qids(session: SourceSession) -> list[str]:
-    """Every composer QID, numerically ordered."""
-    qids = {_qid(row) for row in _run_query(session, ID_QUERY, "composer id list")}
+def _numeric(qids: set[str]) -> list[str]:
     # numeric, not lexicographic: QIDs carry no leading zeros, so (length,
     # string) is numeric order. It keeps the low -- and therefore best known --
     # QIDs in the first batches, which is what a max_pages smoke run sees.
     return sorted(qids, key=lambda qid: (len(qid), qid))
+
+
+def _fetch_population(session: SourceSession) -> dict[str, frozenset[str]]:
+    """Every QID in the population with the professions it holds, in paging
+    order: each occupation's new holders numerically, after the previous
+    occupation's (see ``OCCUPATIONS``).
+
+    An occupation that comes back empty means WDQS is broken, not that
+    Wikidata has no conductors: yielding the rest would drop every one of
+    them from silver, so the run fails instead."""
+    holders: dict[str, set[str]] = {}
+    for occupation, profession in OCCUPATIONS.items():
+        query = ID_QUERY.format(occupation=occupation)
+        holders[profession] = {_qid(row) for row in _run_query(session, query, f"{profession} id list")}
+        if not holders[profession]:
+            raise RuntimeError(f"wikidata returned no {profession} ids")
+    population: dict[str, frozenset[str]] = {}
+    for qids in holders.values():
+        for qid in _numeric(qids - population.keys()):
+            population[qid] = frozenset(p for p, held in holders.items() if qid in held)
+    return population
+
+
+def _fetch_qids(session: SourceSession) -> list[str]:
+    """Every QID in the population, in paging order (see :func:`_fetch_population`)."""
+    return list(_fetch_population(session))
 
 
 def _fetch_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:

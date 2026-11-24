@@ -1,9 +1,10 @@
 """Wikidata SPARQL client.
 
-Fetches every item with occupation "composer" (Q36834) from the Wikidata Query
-Service. ``query`` holds the SPARQL access (id-list query + per-batch detail
-and metrics queries); ``parse`` folds the result rows into one SourceRecord per
-composer and formats birth/death dates to their recorded precision. ``works``
+Fetches every item with occupation "composer" (Q36834) or "conductor" (Q158852)
+from the Wikidata Query Service (``query.OCCUPATIONS``). ``query`` holds the
+SPARQL access (id-list queries + per-batch detail and metrics queries);
+``parse`` folds the result rows into one SourceRecord per person and formats
+birth/death dates to their recorded precision. ``works``
 is a second adapter over the same service: works with a recorded premiere.
 ``places`` is a third: the places composers point at, with type, hierarchy and
 coordinates. ``genres`` is a fourth: the genres and movements those composers
@@ -30,7 +31,7 @@ from .genres import WikidataGenresAdapter
 from .instrumentation import WikidataInstrumentationAdapter
 from .parse import BASE_URL, _records_from_rows
 from .places import WikidataPlacesAdapter
-from .query import PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _fetch_metrics, _fetch_page, _fetch_qids
+from .query import PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _fetch_metrics, _fetch_page, _fetch_population
 from .works import WikidataWorksAdapter
 
 log = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ class WikidataAdapter(HttpSourceAdapter[EntityDocument]):
     timeout_s = TIMEOUT_S
 
     def scrape(self, session: SourceSession, max_pages: int | None = None) -> Iterator[EntityDocument]:
-        """Yield every composer on Wikidata.
+        """Yield every composer and conductor on Wikidata (``query.OCCUPATIONS``).
 
         The full id list is fetched first, then details are fetched in
         PAGE_SIZE batches bound with VALUES -- see the ``query`` module for why
@@ -63,21 +64,20 @@ class WikidataAdapter(HttpSourceAdapter[EntityDocument]):
         cursor. ``max_pages`` caps the number of batches, for test runs; ids
         are numerically ordered, so a capped run still covers the best-known
         composers."""
-        qids = _fetch_qids(session)
-        if not qids:
-            raise RuntimeError("wikidata returned no composer ids")
+        population = _fetch_population(session)
+        qids = list(population)
         batches = [qids[i : i + PAGE_SIZE] for i in range(0, len(qids), PAGE_SIZE)]
         if max_pages is not None and max_pages < len(batches):
             log.info("stopping after max_pages=%d", max_pages)
             batches = batches[:max_pages]
-        log.info("wikidata: %d composers in %d pages", len(qids), len(batches))
+        log.info("wikidata: %d persons in %d pages", len(qids), len(batches))
 
         for page, batch in enumerate(batches, start=1):
             rows = _fetch_page(session, batch)
             metrics = _fetch_metrics(session, batch)
-            records = _records_from_rows(rows, metrics)
+            records = _records_from_rows(rows, metrics, population)
             ingested_at = datetime.now(UTC)
-            log.info("wikidata page %d/%d: %d composers", page, len(batches), len(records))
+            log.info("wikidata page %d/%d: %d persons", page, len(batches), len(records))
             for record in records:
                 yield EntityDocument(
                     id=record.external_id,
