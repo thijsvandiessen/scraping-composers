@@ -17,6 +17,35 @@ def get_or_create_source(session: Session, name: str, base_url: str) -> Source:
     return source
 
 
+PLACEHOLDER_PERSON_KEYS = frozenset(
+    {
+        # no known composer
+        "anon", "anonym", "anonyme", "anonimo", "anonymous", "anonymus",
+        "traditional", "trad", "folk song",
+        "unknown", "unknown artist", "unknown composer", "unknown composer author",
+        "unbekannt", "onbekend", "inconnu", "nn",
+        # not one person at all
+        "various", "various artists", "various composers", "audience",
+    }
+)  # fmt: skip
+"""Dedup keys of the names sources write where a person would go but none is
+known: "Anonymous", "Traditional", "Various", "N.N.", a live album's
+"Audience".
+
+Sources keep them verbatim (deciding they are not people is curation, see
+:mod:`composer_scrapers.nyphil.people`), so the warehouse decides here. Minted
+as a person, each one collects every anonymous work, compilation and applause
+track in the corpus (Anonymous alone had 3,907 credits) and enters the person
+dedupe pass as a high-reach composer. Matching is exact on the whole key, so
+the ensemble "Anonymous 4" and the theorist "Anonymous IV" stay people. The
+attribution itself is not lost: a mention keeps it in ``raw_composer``."""
+
+
+def is_placeholder_person(label: str) -> bool:
+    """Whether ``label`` names no particular person (see :data:`PLACEHOLDER_PERSON_KEYS`)."""
+    return entity_key("person", label, None) in PLACEHOLDER_PERSON_KEYS
+
+
 def get_or_create_entity(
     session: Session,
     cache: dict[tuple[str, str], uuid.UUID],

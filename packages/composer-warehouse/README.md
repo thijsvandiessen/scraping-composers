@@ -32,6 +32,15 @@ source's protocol.
      `mentioned_in` claim recording where it was found, become `claims` rows.
    - A new `WorkMentionDocument` lands in `raw_work_mentions` and immediately
      runs through the work-matching pipeline (see [Works](#works)).
+   - A **placeholder name** is never minted as a person: "Anonymous",
+     "Traditional", "Various (Artists)", "Unknown", "N.N.", "Audience" and their
+     spellings (`PLACEHOLDER_PERSON_KEYS` in `ingestion/entities.py`). Sources
+     keep them verbatim, so the warehouse decides. A mention by one gets no
+     composer (its `raw_composer` keeps the attribution), a claim pointing at
+     one is dropped, and a source's own record for one is stored with no entity.
+     The match is exact on the whole dedup key, so "Anonymous 4" (an ensemble)
+     and "Anonymous IV" (a theorist) stay people. Before this, Anonymous alone
+     collected 3,907 credits and entered the person dedupe as a top composer.
 
    Existing keys are preloaded up front and commits happen in 1000-record
    batches, so the per-record loop needs no queries. A mid-run failure commits
@@ -396,6 +405,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_ingest_premieres.py` | A mention's world premiere carried onto its work: a new work, a later source backfilling a NULL, an earlier date winning across sources and within one run, a later one not, a full date refining a year, a corrected mention, the winning source recorded, and house premieres ignored. |
 | `test_ingest_language.py` | The language a source states stored with entity records and work mentions, and filled in on a re-sighting of a record stored without one, without re-matching the mention. |
 | `test_ingest_mentions.py` | Work mentions: creating a work and alias, matching an existing work, the same title under two composers, re-ingesting with a corrected title or composer, and mentions kept when a source fails. |
+| `test_ingest_placeholders.py` | Placeholder names (Anonymous, Traditional, Various, N.N., Audience) never becoming persons: recognised in any spelling but exact on the whole key (Anonymous 4, Anonymous IV stay people); a mention keeping its verbatim attribution with no composer, also when re-sighted; a claim pointing at one dropped; a source record for one kept without an entity. |
 
 **Works**
 

@@ -9,7 +9,7 @@ from composer_schema.premiere import premiere_of, supersedes
 from sqlalchemy import update
 
 from ..works import Candidate, MatchResult, WorkFeatures, mention_features, refresh_candidate, resolve
-from .entities import get_or_create_entity
+from .entities import get_or_create_entity, is_placeholder_person
 from .state import IngestState, content_hash
 
 
@@ -124,7 +124,7 @@ def ingest_mention(state: IngestState, mention: WorkMentionDocument) -> tuple[in
     new mention's (id, content hash)."""
     session = state.session
     composer_id: uuid.UUID | None = None
-    if mention.composer:
+    if mention.composer and not is_placeholder_person(mention.composer):
         composer_id = get_or_create_entity(session, state.entities_by_key, "person", mention.composer)
         state.seen_entity_ids.add(composer_id)
 
