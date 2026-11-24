@@ -15,6 +15,7 @@ from composer_schema.catalogues import (
     normalize_catalogue,
     normalize_wikidata_code,
     parse_catalogue,
+    scheme_label,
 )
 
 MOZART = "Mozart, Wolfgang Amadeus"
@@ -50,7 +51,7 @@ def test_kv_is_koechel_even_without_a_composer() -> None:
 
 
 def test_k_is_kirkpatrick_for_domenico_scarlatti() -> None:
-    assert pairs("Sonata in D minor, K. 9, L. 413", SCARLATTI) == [("Kk", "9"), ("L", "413")]
+    assert pairs("Sonata in D minor, K. 9, L. 413", SCARLATTI) == [("Kk", "9"), ("L:Scarlatti", "413")]
     assert pairs("Sonata, Kk. 9", "Domenico Scarlatti") == [("Kk", "9")]
 
 
@@ -75,10 +76,10 @@ def test_a_hoboken_group_keeps_its_letter() -> None:
         ("Sonata in B-flat, D 960", "Schubert, Franz", [("D", "960")]),
         ("Sonata in B-flat, D 960", "Beethoven, Ludwig van", []),
         ("Sonata in B-flat, D 960", None, []),
-        ("Symphony No. 9, B. 178", "Dvořák, Antonín", [("B", "178")]),
+        ("Symphony No. 9, B. 178", "Dvořák, Antonín", [("B:Dvorak", "178")]),
         ("Symphony No. 9, B. 178", "Brahms, Johannes", []),
-        ("Clair de lune, L. 75", "Claude Debussy", [("L", "75")]),
-        ("The Planets, Op. 32, H. 125", "Holst, Gustav", [("H", "125")]),
+        ("Clair de lune, L. 75", "Claude Debussy", [("L:Debussy", "75")]),
+        ("The Planets, Op. 32, H. 125", "Holst, Gustav", [("H:Holst", "125")]),
     ],
 )
 def test_bare_letters_count_only_for_the_composer_who_uses_them(
@@ -245,7 +246,7 @@ CHOPIN = "Chopin, Frédéric"
 @pytest.mark.parametrize(
     ("title", "composer", "expected"),
     [
-        ("Flute Sonata in D major, H.561, Wq.131", CPE_BACH, [("H", "561"), ("Wq", "131")]),
+        ("Flute Sonata in D major, H.561, Wq.131", CPE_BACH, [("H:CPE Bach", "561"), ("Wq", "131")]),
         ("Polonaise in E-flat minor, F.12", WF_BACH, [("F", "12")]),
         ("Fantasia, Fk 16", "Wilhelm Friedemann Bach", [("F", "16")]),
         ("Symphony in D, Warb C 9", JC_BACH, [("Warb", "c9")]),
@@ -253,7 +254,7 @@ CHOPIN = "Chopin, Frédéric"
         ("Missa, LV 1144", "Lassus, Orlande de", [("LV", "1144")]),
         ("Ad coenam agni providi, LV Anh.1", "Orlando di Lasso", [("LV Anh", "1")]),
         ("Pange lingua, MH 395", "Haydn, Michael", [("MH", "395")]),
-        ("Waltz in E minor, B.56", CHOPIN, [("B", "56")]),
+        ("Waltz in E minor, B.56", CHOPIN, [("B:Chopin", "56")]),
         ("Nocturne in C-sharp minor, KK IVa/16", CHOPIN, [("KK", "IVa/16")]),
         ("Mazurka, KK Anh. Ia/1", CHOPIN, [("KK Anh", "Ia/1")]),
         ("Der Rosenkavalier, suite, TrV 227d, AV 145", "Strauss, Richard", [("TrV", "227d"), ("AV", "145")]),
@@ -316,8 +317,8 @@ def test_purcells_z_range_is_one_set() -> None:
         ("Wq.89.3", ("Wq", "89/3")),
         ("Wq 202:C1", ("Wq", "202/c1")),
         ("Wq 197:1-30", ("Wq", "197/1-30")),
-        ("H 542.5", ("H", "542.5")),
-        ("H.780.1-2", ("H", "780.1-2")),
+        ("H 542.5", ("H:CPE Bach", "542.5")),
+        ("H.780.1-2", ("H:CPE Bach", "780.1-2")),
         ("BR-CPEB C 48.1", ("BR-CPEB", "c48.1")),
         ("BR‑CPEB Dp 4", ("BR-CPEB", "dp4")),
     ],
@@ -346,7 +347,7 @@ def test_a_range_with_a_non_breaking_hyphen_is_a_range() -> None:
         # a catalogue item with no short name, for any composer
         ("238/3", "Q139766427", None, JC_BACH, (("Ty", "238/3"),)),
         ("345/1", "Q139766427", None, "Wilhelm Friedrich Ernst Bach", (("Ty", "345/1"),)),
-        ("545", "Q138770768", None, BACH, (("H", "545"),)),
+        ("545", "Q138770768", None, BACH, (("H:CPE Bach", "545"),)),
         # the Köchel editions: plain numbers are KV, lettered ones KV6
         ("87", "Q22338962", None, MOZART, (("KV", "87"),)),
         ("74a", "Q66069477", None, MOZART, (("KV6", "74a"),)),
@@ -354,7 +355,7 @@ def test_a_range_with_a_non_breaking_hyphen_is_a_range() -> None:
         ("K. 184/161a", "Q162478", "K.", MOZART, (("KV", "184"), ("KV6", "161a"))),
         # the item decides over a letter the code shares with another catalogue
         ("H 35", "Q139309403", "BR-CPEB", "Carl Philipp Emanuel Bach", (("BR-CPEB", "h35"),)),
-        ("H 88", "Q138770768", None, "Carl Philipp Emanuel Bach", (("H", "88"),)),
+        ("H 88", "Q138770768", None, "Carl Philipp Emanuel Bach", (("H:CPE Bach", "88"),)),
         ("C 48.1", "Q139309403", "BR-CPEB", "Carl Philipp Emanuel Bach", (("BR-CPEB", "c48.1"),)),
         ("XC 3‑5", "Q139743120", "Warb", MOZART, (("Warb", "xc3-5"),)),
         ("KK IIb/3", "Q16747642", "KK", CHOPIN, (("KK", "IIb/3"),)),
@@ -490,12 +491,50 @@ def test_hoboken_drops_the_part_of_a_work() -> None:
     assert parse_catalogue("Hob 16.52", "Haydn") == {("Hob", "XVI:52")}
 
 
-@pytest.mark.parametrize("composer", ["Martinu", "Holst, Gustav", "Arthur Honegger"])
-def test_only_helm_numbers_have_a_dotted_part_of_their_own(composer: str) -> None:
-    assert parse_catalogue("Quartet, H. 103.2", composer) == {("H", "103")}
-    assert parse_catalogue("Quartet, H. 103.2", CPE_BACH) == {("H", "103.2")}
-    assert normalize_wikidata_code("103.2", "Q141568820", None, composer) == (("H", "103"),)
-    assert normalize_wikidata_code("542.5", "Q138770768", None, composer) == (("H", "542.5"),)
+@pytest.mark.parametrize(
+    ("composer", "scheme"),
+    [("Martinu", "H:Martinu"), ("Holst, Gustav", "H:Holst"), ("Arthur Honegger", "H:Honegger")],
+)
+def test_only_helm_numbers_have_a_dotted_part_of_their_own(composer: str, scheme: str) -> None:
+    assert parse_catalogue("Quartet, H. 103.2", composer) == {(scheme, "103")}
+    assert parse_catalogue("Quartet, H. 103.2", CPE_BACH) == {("H:CPE Bach", "103.2")}
+    assert normalize_wikidata_code("103.2", "Q141568820", None, composer) == (("H:Holst", "103"),)
+    assert normalize_wikidata_code("542.5", "Q138770768", None, composer) == (("H:CPE Bach", "542.5"),)
+
+
+@pytest.mark.parametrize(
+    ("title", "composer", "scheme"),
+    [
+        ("Sonata, H. 125", CPE_BACH, "H:CPE Bach"),
+        ("The Planets, H. 125", "Gustav Holst", "H:Holst"),
+        ("Pacific 231, H. 125", "Arthur Honegger", "H:Honegger"),
+        ("Sonata, H. 125", "Bohuslav Martinů", "H:Martinu"),
+        ("Mazurka, B. 125", CHOPIN, "B:Chopin"),
+        ("Dance, B. 125", "Antonín Dvořák", "B:Dvorak"),
+        ("Sonata, L. 125", "Domenico Scarlatti", "L:Scarlatti"),
+        ("Prélude, L. 125", "Claude Debussy", "L:Debussy"),
+    ],
+)
+def test_a_shared_letter_is_a_catalogue_per_composer(title: str, composer: str, scheme: str) -> None:
+    # Helm's, Imogen Holst's and Halbreich's H 125 are four works (#456).
+    assert parse_catalogue(title, composer) == {(scheme, "125")}
+    assert scheme_label(scheme) == scheme[0]
+
+
+def test_no_two_catalogues_share_a_scheme() -> None:
+    owners: dict[str, set[str]] = {}
+    for entry in COMPOSERS:
+        for scheme in entry.schemes:
+            owners.setdefault(scheme.code, set()).add(f"{entry.surname} {sorted(entry.given)}")
+    # Mozart's K and KV are the universal KV: one catalogue, spelled two ways.
+    universal = {scheme.code for scheme in UNIVERSAL}
+    assert {code: names for code, names in owners.items() if len(names) > 1 and code not in universal} == {}
+
+
+def test_a_scheme_is_shown_by_its_label() -> None:
+    assert scheme_label("H:Holst") == "H"
+    assert scheme_label("BWV") == "BWV"
+    assert scheme_label("wd:Q123") == "wd:Q123"
 
 
 @pytest.mark.parametrize(

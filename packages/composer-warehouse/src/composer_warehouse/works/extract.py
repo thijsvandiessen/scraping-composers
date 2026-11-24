@@ -37,6 +37,7 @@ from composer_schema.catalogues import (
     find_catalogues,
     is_catalogue_set,
     parse_catalogue,
+    scheme_label,
 )
 
 #: What a derived work is of its parent; the ``work_links`` relation is
@@ -263,7 +264,8 @@ def extract_features(
     core_title = normalize_title("".join(chars))
 
     refs = frozenset(catalogues)
-    catalogue_prefix, catalogue_number = catalogues[0] if catalogues else (None, None)
+    catalogue_scheme, catalogue_number = catalogues[0] if catalogues else (None, None)
+    catalogue_prefix = scheme_label(catalogue_scheme) if catalogue_scheme else None
     return WorkFeatures(
         normalized_title=normalized,
         core_title=core_title,

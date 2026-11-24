@@ -2,14 +2,21 @@
 grouped by canonical composer at ingest, and the post-dedupe pass folding the
 works a replay split apart."""
 
+import uuid
 from typing import Any
 
 from composer_models import Entity, RawWorkMention, Work, WorkIdentifier, WorkLink, WorkTitle
 from composer_warehouse.derived import refresh_derived
 from composer_warehouse.testing import FakeSource, ingest_source, mention, perf_mention
 from composer_warehouse.works import load_candidates
+from composer_warehouse.works.extract import extract_features
 from composer_warehouse.works.links import link_works
-from composer_warehouse.works.merge import _apply, merge_works  # pyright: ignore[reportPrivateUsage]
+from composer_warehouse.works.match import Candidate
+from composer_warehouse.works.merge import (
+    _apply,  # pyright: ignore[reportPrivateUsage]
+    _owners,  # pyright: ignore[reportPrivateUsage]
+    merge_works,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -99,6 +106,25 @@ def test_a_scheme_numbered_per_composer_has_no_owner(session: Session) -> None:
 
     assert merge_works(session).merged == 0
     assert works(session) == 2
+
+
+def test_a_shared_letter_gives_each_composer_its_own_catalogue() -> None:
+    # Chopin's Brown and Dvořák's Burghauser are both "B" (#456): read as one
+    # scheme neither held more than half, and Helm's H (C.P.E. Bach) would
+    # have owned Holst's.
+    def pool(composer: str, *titles: str) -> list[Candidate]:
+        return [Candidate(uuid.uuid4(), extract_features(title, composer=composer)) for title in titles]
+
+    chopin, dvorak, cpe, holst = (uuid.uuid4() for _ in range(4))
+    owners = _owners(
+        {
+            chopin: pool("Frédéric Chopin", "Mazurka, B. 1", "Mazurka, B. 2"),
+            dvorak: pool("Antonín Dvořák", "Dance, B. 1", "Dance, B. 2"),
+            cpe: pool("C.P.E. Bach", "Sonata, H. 1", "Sonata, H. 2", "Sonata, H. 3"),
+            holst: pool("Gustav Holst", "Suite, H. 1"),
+        }
+    )
+    assert owners == {"B:Chopin": chopin, "B:Dvorak": dvorak, "H:CPE Bach": cpe, "H:Holst": holst}
 
 
 def test_two_composers_sharing_a_number_are_not_merged_without_a_person_link(session: Session) -> None:
