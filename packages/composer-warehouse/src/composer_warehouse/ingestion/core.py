@@ -10,7 +10,7 @@ from composer_schema import EntityDocument, WorkMentionDocument
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from .entities import flush_entity_timestamps, get_or_create_entity
+from .entities import flush_entity_timestamps, get_or_create_entity, is_placeholder_person
 from .mentions import (
     add_work_identifiers,
     add_work_title_alias,
@@ -60,7 +60,7 @@ def _ingest_work_mention(state: IngestState, item: WorkMentionDocument, now: dat
             state.existing_mentions[item.id] = (existing_mid, new_hash)
 
             composer_id: uuid.UUID | None = None
-            if item.composer:
+            if item.composer and not is_placeholder_person(item.composer):
                 composer_id = get_or_create_entity(
                     state.session, state.entities_by_key, "person", item.composer
                 )
@@ -111,6 +111,8 @@ def _add_record_claims(
         state.edited_entity_ids.add(entity_id)
 
     for claim in record.claims:
+        if claim.object_kind == "person" and claim.object_label and is_placeholder_person(claim.object_label):
+            continue  # "composed by Anonymous" states no composer: there is no one to point at
         object_id = (
             get_or_create_entity(
                 state.session,
@@ -140,8 +142,12 @@ def _add_record_claims(
 
 def _create_entity_record(state: IngestState, record: EntityDocument) -> None:
     wikidata_id = _extract_wikidata_id(record.url)
-    entity_id = get_or_create_entity(
-        state.session, state.entities_by_key, record.kind, record.name, wikidata_id
+    # A source's own record for "Anonymous" is kept (bronze stays complete) but
+    # attached to no entity, like a record whose entity was never resolved.
+    entity_id = (
+        None
+        if record.kind == "person" and is_placeholder_person(record.name)
+        else get_or_create_entity(state.session, state.entities_by_key, record.kind, record.name, wikidata_id)
     )
     raw_json = json.dumps(record.raw, ensure_ascii=False)
     db_record = EntityRecord(
@@ -159,9 +165,10 @@ def _create_entity_record(state: IngestState, record: EntityDocument) -> None:
     state.session.flush()
     record_hash = content_hash(record.name, record.url, raw_json)
     state.existing_records[record.id] = (db_record.id, entity_id, record_hash)
-    state.seen_entity_ids.add(entity_id)
     state.new += 1
-    _add_record_claims(state, record, db_record.id, entity_id)
+    if entity_id is not None:
+        state.seen_entity_ids.add(entity_id)
+        _add_record_claims(state, record, db_record.id, entity_id)
 
 
 def _ingest_entity_record(state: IngestState, record: EntityDocument, now: datetime) -> None:
