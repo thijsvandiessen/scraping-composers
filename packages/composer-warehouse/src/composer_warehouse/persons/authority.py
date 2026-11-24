@@ -12,10 +12,19 @@ exactly one QID becomes a candidate pair with that item's entity, which the
 dedupe pass scores with the ordinary model and links on the ordinary
 threshold. This is a candidate generator, not a bypass of the model.
 
-A record whose names hit several QIDs is the "John Williams" case: every one of
-them fits it equally well by name, and picking one would be a coin flip. It is
+A record whose names hit several QIDs first drops the items its own dates rule
+out: a birth or death year more than a decade from every one the item carries
+is a different lifetime (:attr:`~.compare.YearLevel.CONFLICT`), so "Alexander
+Varlamov, born 1904" is not the item born in 1801. If exactly one item is left
+the record is anchored to it like any other; if none is, it names no item.
+
+A record still naming several QIDs is the "John Williams" case: every one of
+them fits it equally well, and picking one would be a coin flip. It is
 recorded as ambiguous, with the candidate QIDs, and the dedupe pass holds back
-every machine link it has, so it stays unlinked until a human decides.
+every machine link it has, so it stays unlinked until a human decides. Dates
+only narrow the candidates on a conflict, never on a near miss: the composer
+(1932) and the guitarist (1941) are nine years apart, within what sources
+disagree on for one man, so a record born in 1932 still names both.
 
 The lookup is exact equality on the parsed surname and given names, which keeps
 it conservative: word order and particles don't matter ("Beethoven, Ludwig van"
@@ -32,6 +41,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from .compare import YearLevel, year_level
 from .corpus import PersonRecord
 from .match import profile_readings
 
@@ -89,6 +99,18 @@ class AuthorityIndex:
         return frozenset(found)
 
 
+def _years_conflict(ours: frozenset[int], theirs: frozenset[int]) -> bool:
+    """Whether every pairing of two non-empty year sets is a different lifetime."""
+    return bool(ours and theirs) and all(year_level(a, b) is YearLevel.CONFLICT for a in ours for b in theirs)
+
+
+def dates_rule_out(record: PersonRecord, item: PersonRecord) -> bool:
+    """Whether ``record``'s birth or death years put it in another lifetime than ``item``."""
+    return _years_conflict(record.birth_years, item.birth_years) or _years_conflict(
+        record.death_years, item.death_years
+    )
+
+
 @dataclass(frozen=True)
 class AuthorityCandidates:
     """What the lookup found for the records without a QID."""
@@ -98,9 +120,12 @@ class AuthorityCandidates:
     ambiguous: dict[uuid.UUID, frozenset[str]]
     """Records that hit several QIDs, with the QIDs they hit."""
     resolved: int
-    """How many records hit exactly one QID."""
+    """How many records hit exactly one QID (after dates ruled the others out)."""
     unmatched: int
     """How many records hit none."""
+    dated: int = 0
+    """Of ``resolved``, how many named several QIDs until their dates ruled
+    all but one out."""
 
 
 def authority_candidates(records: Sequence[PersonRecord]) -> AuthorityCandidates:
@@ -108,11 +133,17 @@ def authority_candidates(records: Sequence[PersonRecord]) -> AuthorityCandidates
     index = AuthorityIndex.build(records)
     pairs: list[tuple[PersonRecord, PersonRecord, str]] = []
     ambiguous: dict[uuid.UUID, frozenset[str]] = {}
-    resolved = unmatched = 0
+    resolved = unmatched = dated = 0
     for record in records:
         if record.wikidata_ids:
             continue
-        qids = index.lookup(record)
+        named = index.lookup(record)
+        qids = named
+        if len(named) > 1:
+            qids = frozenset(
+                qid for qid in named if not all(dates_rule_out(record, item) for item in index.entities[qid])
+            )
+            dated += len(qids) == 1
         if not qids:
             unmatched += 1
         elif len(qids) > 1:
@@ -121,7 +152,9 @@ def authority_candidates(records: Sequence[PersonRecord]) -> AuthorityCandidates
             resolved += 1
             (qid,) = qids
             pairs.extend((record, anchor, qid) for anchor in index.entities[qid])
-    return AuthorityCandidates(pairs=pairs, ambiguous=ambiguous, resolved=resolved, unmatched=unmatched)
+    return AuthorityCandidates(
+        pairs=pairs, ambiguous=ambiguous, resolved=resolved, unmatched=unmatched, dated=dated
+    )
 
 
 @dataclass(frozen=True)
@@ -165,6 +198,8 @@ class AnchorReport:
     """Pairs it queued for review."""
     ambiguous: int
     """Records whose names hit several QIDs, held back from every machine link."""
+    dated: int
+    """Records whose names hit several QIDs but whose dates ruled out all but one."""
     unmatched: int
     """Records whose names hit no QID, left to the pairwise pass."""
     resolution: Resolution
