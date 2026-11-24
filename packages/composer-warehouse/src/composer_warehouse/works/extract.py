@@ -26,7 +26,6 @@ go into ``parent_identifiers`` instead, for the link pass
 from __future__ import annotations
 
 import re
-import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -39,6 +38,7 @@ from composer_schema.catalogues import (
     parse_catalogue,
     scheme_label,
 )
+from composer_schema.text import collapse_ws, strip_diacritics
 
 #: What a derived work is of its parent; the ``work_links`` relation is
 #: ``f"{derivation}_of"``.
@@ -136,20 +136,15 @@ _TYPES: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-def _strip_diacritics(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    return "".join(c for c in text if not unicodedata.combining(c))
-
-
 def normalize_title(raw: str) -> str:
     """Lowercase, strip diacritics and punctuation, collapse whitespace.
 
     Truncated to ``MAX_KEY_CHARS``: the result is stored in ``title_key``,
     which sits in the ``uq_work_title`` btree index that Postgres caps.
     """
-    text = _strip_diacritics(raw).lower()
+    text = strip_diacritics(raw).lower()
     text = re.sub(r"[^\w\s]", " ", text)
-    return re.sub(r"\s+", " ", text).strip()[:MAX_KEY_CHARS]
+    return collapse_ws(text)[:MAX_KEY_CHARS]
 
 
 def _normalize_key(letter: str, accidental: str | None, mode: str) -> str:
@@ -229,7 +224,7 @@ def extract_features(
     in ``structured`` fields of its own (IMSLP's "Opus/Catalogue Number") or
     has already normalised into ``stated`` pairs (Wikidata's codes, read by
     their catalogue item)."""
-    text = _strip_diacritics(raw_title).lower()
+    text = strip_diacritics(raw_title).lower()
     spans: list[tuple[int, int]] = []
 
     catalogues = _find_catalogue(text, composer, spans)

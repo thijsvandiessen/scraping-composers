@@ -12,8 +12,8 @@ import logging
 from collections import Counter
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from itertools import islice
-from typing import LiteralString, TypeVar, cast
+from itertools import batched
+from typing import LiteralString, cast
 
 from neo4j import Driver, ManagedTransaction
 from sqlalchemy.orm import Session
@@ -39,8 +39,6 @@ log = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 5_000
 
-T = TypeVar("T")
-
 
 @dataclass
 class GraphStats:
@@ -58,12 +56,6 @@ class GraphStats:
         yield f"skipped: works whose composer was pruned {self.skipped.orphan_works}"
         for reason, count in sorted(self.skipped.other.items()):
             yield f"skipped: {reason} {count}"
-
-
-def _batches(rows: Iterable[T], size: int) -> Iterator[list[T]]:
-    iterator = iter(rows)
-    while batch := list(islice(iterator, size)):
-        yield batch
 
 
 def _cypher(text: str) -> LiteralString:
@@ -97,7 +89,7 @@ def _reset(driver: Driver, database: str | None) -> None:
 def _create_nodes(
     driver: Driver, database: str | None, rows: Iterable[tuple[str, Row]], stats: GraphStats, batch_size: int
 ) -> None:
-    for batch in _batches(rows, batch_size):
+    for batch in batched(rows, batch_size):
         by_label: dict[str, list[Row]] = {}
         for label, row in batch:
             by_label.setdefault(label, []).append(row)
@@ -115,7 +107,7 @@ def _create_relationships(
     stats: GraphStats,
     batch_size: int,
 ) -> None:
-    for batch in _batches(rows, batch_size):
+    for batch in batched(rows, batch_size):
         by_group: dict[RelGroup, list[Row]] = {}
         for group, row in batch:
             by_group.setdefault(group, []).append(row)

@@ -38,6 +38,15 @@ from .kinds import (
 from .kinds import (
     resolve_entity_kind as resolve_entity_kind,
 )
+from .text import (
+    collapse_ws as collapse_ws,
+)
+from .text import (
+    distinct_ci as distinct_ci,
+)
+from .text import (
+    strip_diacritics as strip_diacritics,
+)
 
 
 @dataclass(frozen=True)

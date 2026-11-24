@@ -90,10 +90,7 @@ def _selected(edges: list[ConnectionEdge], budget: GraphBudget) -> list[Connecti
 
 def _total(weights: dict[str, dict[str, int]], budget: GraphBudget) -> int:
     """How many edges cleared ``min_weight`` before the budgets."""
-    if budget.relation is None:
-        families = [*PERFORMANCE_FAMILIES, CLAIMS]
-    else:
-        families = [budget.relation]
+    families = [*PERFORMANCE_FAMILIES, CLAIMS] if budget.relation is None else [budget.relation]
     return sum(
         n
         for family in families

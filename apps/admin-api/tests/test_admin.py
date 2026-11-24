@@ -14,12 +14,13 @@ import composer_admin.build_routes as build_routes
 import composer_admin.deps as admin_deps
 import composer_admin.routes as admin_routes
 import composer_admin.snapshots as admin_snapshots
+import composer_scrapers
 import pytest
 from composer_admin import admin_app
 from composer_bronze.bucket import LocalBucket, SnapshotManifest
 from composer_config import settings
 from composer_models.db import init_db
-from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import pg_url as pg_url
 from composer_models.testing import requires_postgres
 from composer_schema import (
     EntityDocument,
@@ -92,10 +93,12 @@ def client(monkeypatch: pytest.MonkeyPatch, factory, bucket_path: Path) -> Itera
     monkeypatch.setattr(admin_deps, "_session_factory", factory)
     registry = {"fake": _FakeSource(), "archive": _ArchiveSource(), "exploding": _ExplodingSource()}
     monkeypatch.setattr(admin_routes, "REGISTRY", registry)
-    monkeypatch.setattr(admin_snapshots, "REGISTRY", registry)
+    monkeypatch.setattr(composer_scrapers, "REGISTRY", registry)
     monkeypatch.setattr(admin_snapshots, "DEFAULT_BUCKET_PATH", str(bucket_path))
 
-    monkeypatch.setattr(settings, "admin_api_key", "test-key")
+    from pydantic import SecretStr
+
+    monkeypatch.setattr(settings, "admin_api_key", SecretStr("test-key"))
     yield TestClient(admin_app, headers={"X-Admin-Key": "test-key"})
 
 
@@ -653,3 +656,11 @@ def test_admin_key_unset_fails_closed(monkeypatch: pytest.MonkeyPatch, client: T
     r = client.get("/admin/v1/scrapers")
     assert r.status_code == 503
     assert "ADMIN_API_KEY" in r.json()["detail"]
+
+
+def test_health_is_public(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "admin_api_key", None)
+    with TestClient(admin_app) as client:
+        r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}

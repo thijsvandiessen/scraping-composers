@@ -41,6 +41,8 @@ from typing import Any
 
 from composer_schema import looks_like_ensemble
 
+from .._parse import text as _text
+
 log = logging.getLogger(__name__)
 
 #: The JS global the recordings ride in on, as it appears in the parser output.
@@ -361,10 +363,3 @@ def _tracks(value: Any) -> tuple[Track, ...]:
             )
         )
     return tuple(found)
-
-
-def _text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    return stripped or None

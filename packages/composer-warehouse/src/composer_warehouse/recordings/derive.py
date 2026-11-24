@@ -29,11 +29,12 @@ from composer_models import (
     Source,
     refresh_composer_programmes,
 )
-from composer_models.normalize import dedup_key, event_uuid
+from composer_models.normalize import event_uuid
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
-from ..ensembles import alias_index, ensemble_match_key
+from ..derived import ParticipantResolver
+from ..ensembles import alias_index
 from .cluster import Key, cluster_recordings, participant_key
 
 INSERT_BATCH = 1000
@@ -169,35 +170,14 @@ def _merge_cluster(grouped: dict[Key, dict[str, Any]], members: list[Key]) -> tu
 
 
 @dataclass
-class _RowBatch:
+class _RowBatch(ParticipantResolver):
     """Accumulates the insert rows plus participant-resolution stats."""
 
-    person_by_key: dict[str, uuid.UUID]
-    ensemble_by_key: dict[str, uuid.UUID] = field(default_factory=dict)
-    # Anchor names (see :func:`~composer_warehouse.ensembles.alias_index`): the
-    # last resort for a credit no source minted an entity for.
-    anchor_by_alias: dict[str, uuid.UUID] = field(default_factory=dict)
     recordings: list[dict[str, Any]] = field(default_factory=list)
     participants: list[dict[str, Any]] = field(default_factory=list)
     works: list[dict[str, Any]] = field(default_factory=list)
     participant_links: int = 0
     unresolved_names: set[str] = field(default_factory=set)
-
-    def _resolve(self, role: str, key: str) -> uuid.UUID | None:
-        """The entity a credited name refers to.
-
-        Both maps are consulted whatever the role: a credit's slot says how the
-        source filed the name, not what the name is — sources list choirs and
-        piano trios among the soloists — and ingest kinds a name that reads as
-        an ensemble as one (see :func:`~composer_schema.resolve_entity_kind`).
-        The role only decides which map is asked first.
-        """
-        if role == "ensemble":
-            return self.ensemble_by_key.get(key) or self.person_by_key.get(key)
-        return self.person_by_key.get(key) or self.ensemble_by_key.get(key)
-
-    def _resolve_name(self, role: str, name: str) -> uuid.UUID | None:
-        return self._resolve(role, dedup_key(name)) or self.anchor_by_alias.get(ensemble_match_key(name))
 
     def add_participant(self, recording_id: uuid.UUID, role: str, name: str, discipline: str | None) -> None:
         resolved = self._resolve_name(role, name)

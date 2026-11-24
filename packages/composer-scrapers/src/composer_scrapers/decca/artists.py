@@ -23,6 +23,7 @@ from urllib.parse import quote
 
 from composer_schema import resolve_entity_kind
 
+from .._parse import text as _text
 from .products import Credit
 from .urls import artist_url
 
@@ -232,10 +233,3 @@ class Roster:
         # Deliberately not `person.composer |= isComposer`: see the module
         # docstring. The flag marks promotion, not composition.
         person.flagged_composer = person.flagged_composer or bool(node.get("isComposer"))
-
-
-def _text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    stripped = value.strip()
-    return stripped or None

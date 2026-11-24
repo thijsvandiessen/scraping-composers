@@ -59,14 +59,14 @@ def _scraper_out(adapter: SourceAdapter, snapshots: list[Snapshot], now: datetim
     )
 
 
-@admin.get("/scrapers", response_model=list[ScraperOut])
+@admin.get("/scrapers")
 def list_scrapers() -> list[ScraperOut]:
     now = utcnow()
     store = bucket()
     return [_scraper_out(adapter, store.list_snapshots(name), now) for name, adapter in REGISTRY.items()]
 
 
-@admin.get("/scrapers/{name}", response_model=ScraperOut)
+@admin.get("/scrapers/{name}")
 def get_scraper(name: str) -> ScraperOut:
     adapter = REGISTRY.get(name)
     if adapter is None:
@@ -74,7 +74,7 @@ def get_scraper(name: str) -> ScraperOut:
     return _scraper_out(adapter, bucket().list_snapshots(name), utcnow())
 
 
-@admin.post("/scrapers/fetch-due", response_model=list[FetchStarted])
+@admin.post("/scrapers/fetch-due")
 def fetch_due(background: BackgroundTasks) -> list[FetchStarted]:
     """Start a background fetch for every scraper whose raw data is stale."""
     now = utcnow()
@@ -88,7 +88,7 @@ def fetch_due(background: BackgroundTasks) -> list[FetchStarted]:
     return started
 
 
-@admin.post("/scrapers/{name}/fetch", status_code=status.HTTP_202_ACCEPTED, response_model=FetchStarted)
+@admin.post("/scrapers/{name}/fetch", status_code=status.HTTP_202_ACCEPTED)
 def fetch_scraper(
     name: str,
     background: BackgroundTasks,
@@ -102,7 +102,7 @@ def fetch_scraper(
     return _start_fetch(background, adapter, max_pages)
 
 
-@admin.get("/snapshots", response_model=list[SnapshotOut])
+@admin.get("/snapshots")
 def list_snapshots() -> list[SnapshotOut]:
     """Every snapshot in the bucket, newest first.
 
@@ -114,7 +114,7 @@ def list_snapshots() -> list[SnapshotOut]:
     return sorted(snapshots, key=lambda s: s.id, reverse=True)
 
 
-@admin.post("/snapshots/{source}/{snapshot_id}/abandon", response_model=SnapshotOut)
+@admin.post("/snapshots/{source}/{snapshot_id}/abandon")
 def abandon_snapshot(source: str, snapshot_id: str) -> SnapshotOut:
     """Mark a stuck ``running`` snapshot failed, unblocking the source.
 
@@ -150,7 +150,6 @@ def abandon_snapshot(source: str, snapshot_id: str) -> SnapshotOut:
 @admin.post(
     "/snapshots/{source}/{snapshot_id}/process",
     status_code=status.HTTP_202_ACCEPTED,
-    response_model=RunStarted,
 )
 def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: BackgroundTasks) -> RunStarted:
     """Load a snapshot's documents from the bucket into the database (background).
@@ -175,12 +174,12 @@ def process_snapshot(source: str, snapshot_id: str, db: DbSession, background: B
     return RunStarted(run_id=run.id, source=source, status=run.status)
 
 
-@admin.get("/runs", response_model=list[RunOut])
+@admin.get("/runs")
 def get_runs(db: DbSession, limit: Annotated[int, Query(ge=1, le=200)] = 50) -> list[RunOut]:
     return list_runs(db, limit)
 
 
-@admin.get("/runs/{run_id}", response_model=RunOut)
+@admin.get("/runs/{run_id}")
 def get_single_run(run_id: int, db: DbSession) -> RunOut:
     run = get_run(db, run_id)
     if run is None:

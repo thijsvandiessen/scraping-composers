@@ -23,7 +23,8 @@ reads, so the list only grows on evidence.
 from __future__ import annotations
 
 import re
-import unicodedata
+
+from .text import strip_diacritics
 
 PERSON_KIND = "person"
 ENSEMBLE_KIND = "ensemble"
@@ -121,8 +122,7 @@ def _tokens(label: str) -> list[str]:
     seeds entity uuids and must not shift underneath them, and this tier cannot
     import it anyway.
     """
-    decomposed = unicodedata.normalize("NFKD", label)
-    folded = "".join(c for c in decomposed if not unicodedata.combining(c)).lower()
+    folded = strip_diacritics(label).lower()
     return _WORD.findall(folded)
 
 

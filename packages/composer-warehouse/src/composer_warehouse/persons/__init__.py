@@ -53,13 +53,11 @@ from .match import (
 from .training import train
 
 __all__ = [
-    "AnchorReport",
-    "AuthorityIndex",
-    "Resolution",
-    "authority_candidates",
     "AUTO_THRESHOLD",
     "MODEL_PATH",
     "REVIEW_THRESHOLD",
+    "AnchorReport",
+    "AuthorityIndex",
     "Clustering",
     "Conflict",
     "Constraints",
@@ -73,10 +71,12 @@ __all__ = [
     "PersonProfile",
     "PersonRecord",
     "PersonScorer",
+    "Resolution",
     "TermFrequencyTable",
     "YearLevel",
     "alias_identity",
     "apply_clusters",
+    "authority_candidates",
     "authority_constraints",
     "build_clusters",
     "build_corpus",

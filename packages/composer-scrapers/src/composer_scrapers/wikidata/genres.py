@@ -51,6 +51,7 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from itertools import batched
 from typing import Any
 
 import httpx
@@ -331,11 +332,11 @@ class _Walk:
     def _level(self, kind: str, frontier: list[str], depth: int) -> list[Node]:
         """The kept nodes of one level, a batch at a time while the budget lasts."""
         level: list[Node] = []
-        for i in range(0, len(frontier), PAGE_SIZE):
+        for chunk in batched(frontier, PAGE_SIZE):
             if not self._take_batch():
                 log.info("%s walk: stopping at depth %d after max_pages", kind, depth)
                 break
-            level.extend(self._batch(kind, frontier[i : i + PAGE_SIZE], depth))
+            level.extend(self._batch(kind, list(chunk), depth))
         return level
 
     def _counterparts(self, kind: str, kept: dict[str, Node], visited: set[str]) -> list[Node]:

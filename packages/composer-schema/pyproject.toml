@@ -2,7 +2,7 @@
 name = "composer-schema"
 version = "0.1.0"
 description = "Source contracts: document types and the SourceAdapter interface shared across tiers"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]

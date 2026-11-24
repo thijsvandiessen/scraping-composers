@@ -19,7 +19,7 @@ from composer_graph import load_graph, snapshot_connections
 from composer_graph.testing import exclusive_neo4j
 from composer_models import ConnectionEdge, EntityConnections
 from composer_models.db import init_db
-from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import pg_url as pg_url
 from composer_models.testing import requires_postgres
 from composer_schema import EntityDocument, SourceAdapter, SourceClaim, WorkMentionDocument
 from composer_warehouse.concerts import derive_concerts
@@ -1616,3 +1616,15 @@ def test_connections_a_person_reaches_their_birthplace(place_graph: TestClient) 
     xaver = _entity_id(place_graph, "Composer, Xaver")
     data = _connections(place_graph, xaver, "?relation=born_in")
     assert [(i["label"], i["direction"], i["kind"]) for i in data["items"]] == [("Vienna", "out", "place")]
+
+
+def test_health_endpoint_and_lifespan_cleanup() -> None:
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    factory = init_db(engine)
+    app = create_app("test-health", lambda: factory)
+    with TestClient(app) as client:
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+        assert app.state.session_factory is factory
+    assert app.state.session_factory is None

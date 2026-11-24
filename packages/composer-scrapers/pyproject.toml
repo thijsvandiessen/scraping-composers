@@ -2,7 +2,7 @@
 name = "composer-scrapers"
 version = "0.1.0"
 description = "Per-source scraper adapters (IMSLP, Wikidata, orchestra archives) and the source REGISTRY"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "composer-config",
     "composer-http",

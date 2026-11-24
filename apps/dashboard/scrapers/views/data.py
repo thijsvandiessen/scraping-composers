@@ -1,5 +1,6 @@
 """Silver data browsing: overview stats, entities, unanchored ensembles, work mentions, works."""
 
+import contextlib
 import uuid
 
 from django.contrib import admin
@@ -95,14 +96,11 @@ def entity_detail(request: HttpRequest, entity_id: uuid.UUID) -> HttpResponse:
     recording_total: int | None = None
     if entity is not None and entity.get("kind") == "person":
         gold = DataAPI.gold()
-        try:
+        # silver page must render even when gold is down or unpromoted
+        with contextlib.suppress(AdminAPIError, KeyError, TypeError, ValueError):
             concert_total = int(gold.person_concerts(str(entity_id), limit=1)["total"])
-        except (AdminAPIError, KeyError, TypeError, ValueError):
-            pass  # silver page must render even when gold is down or unpromoted
-        try:
+        with contextlib.suppress(AdminAPIError, KeyError, TypeError, ValueError):
             recording_total = int(gold.person_recordings(str(entity_id), limit=1)["total"])
-        except (AdminAPIError, KeyError, TypeError, ValueError):
-            pass
     context = {
         **admin.site.each_context(request),
         "title": str(entity["label"]) if entity else "Entity",

@@ -204,8 +204,7 @@ def _item_claims(
             else:
                 # one claim per item the label names; unpinned if the row had none
                 pins: list[str | None] = sorted(item["pins"].get((var, value), ())) or [None]
-                for pin in pins:
-                    claims.append(SourceClaim(predicate, kind, value, object_wikidata_id=pin))
+                claims.extend(SourceClaim(predicate, kind, value, object_wikidata_id=pin) for pin in pins)
     for var, predicate, kind in ITEM_FIELDS:
         for obj, label in sorted(item["items"].get(var, ())):
             claims.append(SourceClaim(predicate, kind, label, object_wikidata_id=obj))

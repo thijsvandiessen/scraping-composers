@@ -7,7 +7,7 @@ must not end up pointing at a run that is then marked ``failed``.
 from composer_config import settings
 from composer_models import Base, EntityRecord, IngestRun, RawWorkMention
 from composer_models.db import get_engine, init_db
-from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import pg_url as pg_url
 from composer_models.testing import requires_postgres
 from composer_warehouse.ingestion import unconfirmed_counts
 from composer_warehouse.testing import FakeSource, ingest_source, mention, person
@@ -93,7 +93,7 @@ def test_completed_run_confirms_only_its_own_source(session: Session) -> None:
 
 
 @requires_postgres
-def test_confirmation_on_postgres(pg_url: str) -> None:  # noqa: F811 - fixture
+def test_confirmation_on_postgres(pg_url: str) -> None:
     """The confirming UPDATE compares timestamptz on Postgres, text on SQLite."""
     admin = get_engine(pg_url, schema="public")
     with admin.begin() as conn:

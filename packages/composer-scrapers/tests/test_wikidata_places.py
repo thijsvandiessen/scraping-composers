@@ -119,7 +119,7 @@ def test_the_hierarchy_stops_once_no_new_parent_turns_up(monkeypatch: pytest.Mon
 
 
 def test_max_pages_counts_parent_rounds_too(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert set(fetch(VIENNA + [row("Q40", "Austria")], monkeypatch, max_pages=1)) == {"Q1741"}
+    assert set(fetch([*VIENNA, row("Q40", "Austria")], monkeypatch, max_pages=1)) == {"Q1741"}
 
 
 def test_places_the_label_service_cannot_name_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:

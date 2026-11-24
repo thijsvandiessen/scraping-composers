@@ -59,6 +59,8 @@ import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .text import collapse_ws, strip_diacritics
+
 #: Scheme of an opus number.
 OPUS = "op"
 
@@ -377,8 +379,7 @@ _ROMAN = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
 
 
 def _folded(text: str) -> str:
-    folded = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
-    return folded.replace("ß", "ss").lower()
+    return strip_diacritics(text).replace("ß", "ss").lower()
 
 
 #: An initial: one letter standing alone, or "Ph." (Philipp).
@@ -873,7 +874,7 @@ def normalize_wikidata_code(
     """
     if catalogue_qid in NON_WORK_CATALOGUES:
         return ()
-    code = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", code).replace("‐", "-")).strip()
+    code = collapse_ws(unicodedata.normalize("NFKC", code).replace("‐", "-"))
     known = WIKIDATA_CATALOGUES.get(catalogue_qid) if catalogue_qid else None
     if catalogue_qid is not None and known is not None:
         scheme, number = _item_number(code, catalogue_qid, known)

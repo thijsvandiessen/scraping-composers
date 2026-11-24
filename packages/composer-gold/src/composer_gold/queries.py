@@ -25,7 +25,8 @@ def object_claims(session: Session) -> dict[tuple[uuid.UUID, str, uuid.UUID], li
     )
     claims: dict[tuple[uuid.UUID, str, uuid.UUID], list[str]] = defaultdict(list)
     for subject_id, predicate, object_id, source_name in rows:
-        assert object_id is not None
+        if object_id is None:
+            continue
         sources = claims[(subject_id, predicate, object_id)]
         if source_name not in sources:
             sources.append(source_name)
@@ -46,7 +47,8 @@ def literal_claims(session: Session, predicates: Collection[str]) -> dict[uuid.U
     )
     tallies: dict[uuid.UUID, dict[str, Counter[str]]] = defaultdict(lambda: defaultdict(Counter))
     for subject_id, predicate, value, count in rows:
-        assert value is not None
+        if value is None:
+            continue
         tallies[subject_id][predicate][value] += count
     return {
         subject_id: {
@@ -69,7 +71,8 @@ def entity_sources(session: Session) -> dict[uuid.UUID, tuple[list[str], str | N
     names: dict[uuid.UUID, list[str]] = defaultdict(list)
     urls: dict[uuid.UUID, str] = {}
     for entity_id, source_name, url in rows:
-        assert entity_id is not None
+        if entity_id is None:
+            continue
         if source_name not in names[entity_id]:
             names[entity_id].append(source_name)
         if url and entity_id not in urls:

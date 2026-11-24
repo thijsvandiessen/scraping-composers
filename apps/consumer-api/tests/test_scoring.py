@@ -11,7 +11,7 @@ import pytest
 from composer_api import create_app
 from composer_gold import gold_engine, promote
 from composer_models.db import init_db
-from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import pg_url as pg_url
 from composer_models.testing import requires_postgres
 from composer_schema import EntityDocument, SourceClaim, WorkMentionDocument
 from composer_warehouse.derived import refresh_derived

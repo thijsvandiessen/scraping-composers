@@ -12,7 +12,7 @@ from composer_config import settings
 from composer_gold import gold_engine, promote, read_gold_manifest
 from composer_models import Source
 from composer_models.db import get_engine
-from composer_models.testing import pg_url as pg_url  # noqa: F401 - fixture
+from composer_models.testing import pg_url as pg_url
 from composer_models.testing import requires_postgres
 from composer_warehouse.rebuild import silver_target
 from composer_warehouse.testing import FakeSource, ingest_source, mention

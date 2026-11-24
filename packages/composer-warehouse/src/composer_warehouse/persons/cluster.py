@@ -119,8 +119,9 @@ def build_clusters(
     for node, others in barred.items():
         partition.add(node, others)
 
-    refused: list[Edge] = []
-    for edge in sorted(edges, key=lambda e: (-e.score, str(e.a), str(e.b))):
-        if not partition.union(edge.a, edge.b):
-            refused.append(edge)
+    refused = [
+        edge
+        for edge in sorted(edges, key=lambda e: (-e.score, str(e.a), str(e.b)))
+        if not partition.union(edge.a, edge.b)
+    ]
     return Clustering(clusters=partition.groups(), refused=tuple(refused))

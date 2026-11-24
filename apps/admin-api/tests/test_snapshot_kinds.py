@@ -13,6 +13,7 @@ from pathlib import Path
 import composer_admin.deps as admin_deps
 import composer_admin.routes as admin_routes
 import composer_admin.snapshots as admin_snapshots
+import composer_scrapers
 import pytest
 from composer_admin import admin_app
 from composer_bronze.bucket import LocalBucket, SnapshotManifest
@@ -45,10 +46,11 @@ def client(
     monkeypatch.setattr(admin_deps, "_session_factory", factory)
     monkeypatch.setattr(admin_snapshots, "DEFAULT_BUCKET_PATH", str(bucket_path))
     monkeypatch.setattr(admin_routes, "REGISTRY", {})
-    monkeypatch.setattr(admin_snapshots, "REGISTRY", {})
+    monkeypatch.setattr(composer_scrapers, "REGISTRY", {})
     from composer_config import settings
+    from pydantic import SecretStr
 
-    monkeypatch.setattr(settings, "admin_api_key", "test-key")
+    monkeypatch.setattr(settings, "admin_api_key", SecretStr("test-key"))
     yield TestClient(admin_app, headers={"X-Admin-Key": "test-key"})
 
 

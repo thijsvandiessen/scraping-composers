@@ -1,5 +1,5 @@
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query
 
@@ -61,28 +61,28 @@ from .schemas import (
 v1 = APIRouter(prefix="/v1")
 
 
-@v1.get("/stats", response_model=StatsOut)
+@v1.get("/stats")
 def stats(db: DbSession) -> StatsOut:
     return get_stats(db)
 
 
-@v1.get("/entities", response_model=EntityPage)
+@v1.get("/entities")
 def entities(
     db: DbSession,
     pager: PageQuery,
     q: str | None = None,
     kind: str | None = None,
-    order: Annotated[str, Query(pattern="^(label|random)$")] = "label",
+    order: Literal["label", "random"] = "label",
 ) -> EntityPage:
     return list_entities(db, q, kind, pager, order)
 
 
-@v1.get("/entities/{entity_id}", response_model=EntityDetail)
+@v1.get("/entities/{entity_id}")
 def entity_detail(entity_id: uuid.UUID, db: DbSession) -> EntityDetail:
     return get_entity(db, entity_id)
 
 
-@v1.get("/entities/{entity_id}/connections", response_model=ConnectionsOut)
+@v1.get("/entities/{entity_id}/connections")
 def entity_connections_route(entity_id: uuid.UUID, db: DbSession, budget: GraphQuery) -> ConnectionsOut:
     """The strongest neighbours of one entity, budgeted so a graph can draw them.
 
@@ -98,7 +98,7 @@ def entity_connections_route(entity_id: uuid.UUID, db: DbSession, budget: GraphQ
     return entity_connections(db, entity_id, budget)
 
 
-@v1.get("/ensembles", response_model=EnsemblePage)
+@v1.get("/ensembles")
 def ensembles(
     db: DbSession, pager: PageQuery, filters: FilterQuery, ensemble_filters: EnsembleQuery
 ) -> EnsemblePage:
@@ -110,51 +110,49 @@ def ensembles(
     return list_ensembles(db, filters, pager, ensemble_filters)
 
 
-@v1.get("/ensembles/{ensemble_id}", response_model=EnsembleDetail)
+@v1.get("/ensembles/{ensemble_id}")
 def ensemble_detail(ensemble_id: uuid.UUID, db: DbSession) -> EnsembleDetail:
     """One ensemble: its other names, the groups it is part of, and its claims."""
     return get_ensemble(db, ensemble_id)
 
 
-@v1.get("/genres", response_model=list[GenreSummary])
-def genres(
-    db: DbSession, kind: Annotated[str, Query(pattern="^(genre|movement)$")] = "genre"
-) -> list[GenreSummary]:
+@v1.get("/genres")
+def genres(db: DbSession, kind: Literal["genre", "movement"] = "genre") -> list[GenreSummary]:
     """The top-level genres (or movements) as facets, each counting the persons
     tagged with it or with any genre below it."""
     return list_genre_facets(db, kind)
 
 
-@v1.get("/genres/{genre_id}", response_model=GenreDetail)
+@v1.get("/genres/{genre_id}")
 def genre_detail(genre_id: uuid.UUID, db: DbSession) -> GenreDetail:
     """One genre or movement with its direct parents and children."""
     return get_genre(db, genre_id)
 
 
-@v1.get("/genres/{genre_id}/people", response_model=GenrePeoplePage)
+@v1.get("/genres/{genre_id}/people")
 def get_genre_people(genre_id: uuid.UUID, db: DbSession, pager: PageQuery) -> GenrePeoplePage:
     """Persons tagged with the genre or any genre below it."""
     return genre_people(db, genre_id, pager)
 
 
-@v1.get("/works", response_model=WorkPage)
+@v1.get("/works")
 def works(
     db: DbSession,
     pager: PageQuery,
     filters: FilterQuery,
     performed: bool = False,
-    sort: Annotated[str, Query(pattern="^(label|mentions)$")] = "label",
+    sort: Literal["label", "mentions"] = "label",
 ) -> WorkPage:
     return list_works(db, filters, pager, performed_only=performed, sort=sort)
 
 
-@v1.get("/works/{work_id}", response_model=WorkDetail)
+@v1.get("/works/{work_id}")
 def work_detail(work_id: uuid.UUID, db: DbSession) -> WorkDetail:
     """One work with its aliases and the proof behind it."""
     return get_work(db, work_id)
 
 
-@v1.get("/mentions", response_model=MentionPage)
+@v1.get("/mentions")
 def mentions(
     db: DbSession,
     status: str | None = None,
@@ -164,7 +162,7 @@ def mentions(
     return list_mentions(db, status, page, limit)
 
 
-@v1.get("/concerts", response_model=ConcertListPage)
+@v1.get("/concerts")
 def concerts(
     db: DbSession,
     q: str | None = None,
@@ -176,13 +174,13 @@ def concerts(
     return list_concerts(db, q, source, page, limit)
 
 
-@v1.get("/concerts/{concert_id}", response_model=ConcertDetail)
+@v1.get("/concerts/{concert_id}")
 def concert_detail(concert_id: uuid.UUID, db: DbSession) -> ConcertDetail:
     """One concert: participants (with roles and disciplines) and its programme."""
     return get_concert(db, concert_id)
 
 
-@v1.get("/people/{person_id}/concerts", response_model=ConcertPage)
+@v1.get("/people/{person_id}/concerts")
 def get_person_concerts(
     person_id: uuid.UUID,
     db: DbSession,
@@ -193,7 +191,7 @@ def get_person_concerts(
     return person_concerts(db, person_id, page, limit)
 
 
-@v1.get("/recordings", response_model=RecordingListPage)
+@v1.get("/recordings")
 def recordings(
     db: DbSession,
     q: str | None = None,
@@ -205,13 +203,13 @@ def recordings(
     return list_recordings(db, q, source, page, limit)
 
 
-@v1.get("/recordings/{recording_id}", response_model=RecordingDetail)
+@v1.get("/recordings/{recording_id}")
 def recording_detail(recording_id: uuid.UUID, db: DbSession) -> RecordingDetail:
     """One recording: its credited artists and the works on it."""
     return get_recording(db, recording_id)
 
 
-@v1.get("/people/{person_id}/recordings", response_model=RecordingPage)
+@v1.get("/people/{person_id}/recordings")
 def get_person_recordings(
     person_id: uuid.UUID,
     db: DbSession,
@@ -222,59 +220,59 @@ def get_person_recordings(
     return person_recordings(db, person_id, page, limit)
 
 
-@v1.get("/composers", response_model=ComposerPage)
+@v1.get("/composers")
 def list_composers(
     db: DbSession,
     pager: PageQuery,
     filters: PeopleFilterQuery,
-    sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
+    sort: Literal["label", "concerts", "recordings"] = "label",
 ) -> ComposerPage:
     """People whose works are on at least three concerts and recordings combined, whatever their
     profession claims say. Counts and sorts are of those performances, not the person's own credits."""
     return list_people(db, filters, pager, "composer", sort=sort)
 
 
-@v1.get("/composers/{composer_id}", response_model=ComposerDetail)
+@v1.get("/composers/{composer_id}")
 def get_composer(composer_id: uuid.UUID, db: DbSession) -> ComposerDetail:
     return get_person(db, composer_id, "composer", "composer not found")
 
 
-@v1.get("/composers/{composer_id}/works", response_model=ComposerWorksPage)
+@v1.get("/composers/{composer_id}/works")
 def get_composer_works(
     composer_id: uuid.UUID,
     db: DbSession,
     pager: PageQuery,
-    sort: Annotated[str, Query(pattern="^(label|mentions)$")] = "label",
+    sort: Literal["label", "mentions"] = "label",
 ) -> ComposerWorksPage:
     """The composer's works, each with proof (source, and a concert/recording link when one exists)."""
     return composer_works(db, composer_id, pager, sort=sort)
 
 
-@v1.get("/soloists", response_model=ComposerPage)
+@v1.get("/soloists")
 def list_soloists(
     db: DbSession,
     pager: PageQuery,
     filters: PeopleFilterQuery,
-    sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
+    sort: Literal["label", "concerts", "recordings"] = "label",
 ) -> ComposerPage:
     return list_people(db, filters, pager, "soloist", sort=sort)
 
 
-@v1.get("/soloists/{soloist_id}", response_model=ComposerDetail)
+@v1.get("/soloists/{soloist_id}")
 def get_soloist(soloist_id: uuid.UUID, db: DbSession) -> ComposerDetail:
     return get_person(db, soloist_id, "soloist", "soloist not found")
 
 
-@v1.get("/conductors", response_model=ComposerPage)
+@v1.get("/conductors")
 def list_conductors(
     db: DbSession,
     pager: PageQuery,
     filters: PeopleFilterQuery,
-    sort: Annotated[str, Query(pattern="^(label|concerts|recordings)$")] = "label",
+    sort: Literal["label", "concerts", "recordings"] = "label",
 ) -> ComposerPage:
     return list_people(db, filters, pager, "conductor", sort=sort)
 
 
-@v1.get("/conductors/{conductor_id}", response_model=ComposerDetail)
+@v1.get("/conductors/{conductor_id}")
 def get_conductor(conductor_id: uuid.UUID, db: DbSession) -> ComposerDetail:
     return get_person(db, conductor_id, "conductor", "conductor not found")

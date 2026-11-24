@@ -234,7 +234,9 @@ def _add_neo4j_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument("--neo4j-user", default=settings.neo4j_user, help="(default: $NEO4J_USER)")
     parser.add_argument(
-        "--neo4j-password", default=settings.neo4j_password, help="(default: $NEO4J_PASSWORD)"
+        "--neo4j-password",
+        default=settings.neo4j_password.get_secret_value(),
+        help="(default: $NEO4J_PASSWORD)",
     )
     parser.add_argument(
         "--database", default=None, help="the Neo4j database to use (default: the server's default)"

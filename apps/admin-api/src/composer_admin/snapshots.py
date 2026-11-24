@@ -10,7 +10,7 @@ from datetime import datetime
 from composer_bronze.bucket import DEFAULT_BUCKET_PATH, LocalBucket, Snapshot
 from composer_bronze.scraper import iter_all_from_bucket, iter_from_bucket
 from composer_models import IngestRun
-from composer_scrapers import REGISTRY
+from composer_scrapers import source_base_url as source_base_url
 from composer_warehouse.ingestion import execute_run
 from fastapi import HTTPException, status
 
@@ -19,15 +19,6 @@ from .logconfig import safe_for_log
 from .schemas import SnapshotOut
 
 log = logging.getLogger(__name__)
-
-
-def source_base_url(source: str) -> str:
-    """Base URL for a bucket source: a registered scraper's, else empty. Mirrors
-    the CLI's ``source_base_url``; a bucket source with no adapter (a retired one
-    still on disk) can still open an IngestRun and be labelled by
-    ``rebuild-silver``."""
-    adapter = REGISTRY.get(source)
-    return adapter.base_url if adapter is not None else ""
 
 
 def bucket() -> LocalBucket:

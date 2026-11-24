@@ -14,7 +14,7 @@ after retraining.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -176,7 +176,7 @@ class PersonScorer:
     """A trained model plus the corpus frequencies it needs to apply."""
 
     model: LinkageModel
-    corpus: Corpus = Corpus.empty()
+    corpus: Corpus = field(default_factory=Corpus.empty)
 
     def score_names(self, a: PersonName, b: PersonName, pa: PersonProfile, pb: PersonProfile) -> float:
         levels = comparison_levels(a, b, pa, pb)

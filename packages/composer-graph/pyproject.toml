@@ -2,7 +2,7 @@
 name = "composer-graph"
 version = "0.1.0"
 description = "Load the gold database into Neo4j as a property graph, for exploring connections"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "composer-gold",
     "composer-models",

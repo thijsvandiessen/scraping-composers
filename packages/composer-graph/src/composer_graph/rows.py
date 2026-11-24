@@ -32,7 +32,7 @@ from composer_models import (
     WorkIdentifier,
     WorkLink,
 )
-from composer_models.normalize import wikidata_id
+from composer_models.normalize import distinct_ci, wikidata_id
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -127,17 +127,6 @@ def _rel(start: str, end: str, **props: Any) -> Row:
     return {"from": start, "to": end, "props": _clean(props)}
 
 
-def _distinct(values: list[str]) -> list[str]:
-    """Values as reported, minus the ones that differ only in case."""
-    seen: set[str] = set()
-    distinct: list[str] = []
-    for value in values:
-        if value.casefold() not in seen:
-            seen.add(value.casefold())
-            distinct.append(value)
-    return distinct
-
-
 def _literal_properties(literals: dict[str, list[str]]) -> Row:
     props: Row = {}
     for predicate in _LITERAL_SINGLE:
@@ -148,7 +137,7 @@ def _literal_properties(literals: dict[str, list[str]]) -> Row:
             props[predicate] = int(values[0])
     for predicate in _LITERAL_LISTS:
         if values := literals.get(predicate):
-            props[predicate] = _distinct(values)
+            props[predicate] = distinct_ci(values)
     return props
 
 
@@ -393,7 +382,8 @@ def programmed(session: Session, skipped: Skipped) -> Iterator[tuple[RelGroup, R
             .execution_options(yield_per=_YIELD_PER)
         )
         for event_id, work_id, times in rows:
-            assert work_id is not None  # guarded by the WHERE above
+            if work_id is None:
+                continue  # guarded by the WHERE above
             yield RelGroup("PROGRAMMED", event_label, "Work"), _rel(str(event_id), str(work_id), times=times)
 
 

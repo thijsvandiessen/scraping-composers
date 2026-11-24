@@ -177,7 +177,7 @@ def downsample(
         else:
             by_provenance.setdefault(pair.provenance, []).append(pair)
 
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311 - deterministic non-cryptographic sampling
     kept: list[LabelledPair] = list(protected)
     for provenance, rows in sorted(by_provenance.items()):
         cap = caps.get(provenance, len(rows))

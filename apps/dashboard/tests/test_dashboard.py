@@ -1308,3 +1308,15 @@ def test_data_pages_show_error_banner_when_api_unreachable(
         response = staff_client.get(url)
         assert response.status_code == 200
         assert "API unreachable" in response.content.decode()
+
+
+def test_client_reuses_persistent_httpx_client() -> None:
+    api = _api(lambda _req: httpx.Response(200, json=SCRAPERS_PAYLOAD))
+    try:
+        api.list_scrapers()
+        first_client = api._client
+        assert first_client is not None
+        api.list_scrapers()
+        assert api._client is first_client
+    finally:
+        api.close()

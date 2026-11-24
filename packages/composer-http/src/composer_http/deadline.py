@@ -195,6 +195,7 @@ class DeadlineTransport(httpx.HTTPTransport):
             response = super().handle_request(request)
         finally:
             _budget.reset(token)
-        assert isinstance(response.stream, httpx.SyncByteStream)
+        if not isinstance(response.stream, httpx.SyncByteStream):
+            raise TypeError(f"expected SyncByteStream, got {type(response.stream).__name__}")
         response.stream = _BudgetedBody(response.stream, budget)
         return response

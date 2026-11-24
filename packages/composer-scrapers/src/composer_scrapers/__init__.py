@@ -11,9 +11,6 @@ here so each source can keep importing them from its parent package.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
 from composer_schema import (
     EntityDocument,
     RefreshCadence,
@@ -25,6 +22,38 @@ from composer_schema import (
 )
 
 from .base import HttpSourceAdapter
+from .records import SourceRecord, SourceWorkMention
+
+# isort: split
+
+from .baerenreiter import BaerenreiterAdapter
+from .berlinphil import BerlinPhilAdapter
+from .boosey import BooseyAdapter
+from .classicalmusiconline import ClassicalMusicOnlineAdapter
+from .classicapedia import ClassicapediaAdapter
+from .classicfm import ClassicFmAdapter
+from .concertgebouw import ConcertgebouwAdapter
+from .decca import DeccaAdapter
+from .harmoniamundi import HarmoniaMundiAdapter
+from .henle import HenleAdapter
+from .imslp import ImslpAdapter
+from .imslp_recordings import ImslpRecordingsAdapter
+from .imslp_works import ImslpWorksAdapter
+from .laphil import LaPhilAdapter
+from .nyphil import NyPhilAdapter
+from .openopus import OpenOpusAdapter
+from .rco import RcoAdapter
+from .roh import RohAdapter
+from .wienerphil import WienerPhilAdapter
+from .wikidata import (
+    WikidataAdapter,
+    WikidataCatalogueAdapter,
+    WikidataEnsemblesAdapter,
+    WikidataGenresAdapter,
+    WikidataInstrumentationAdapter,
+    WikidataPlacesAdapter,
+    WikidataWorksAdapter,
+)
 
 __all__ = [
     "REGISTRY",
@@ -38,68 +67,8 @@ __all__ = [
     "SourceWorkMention",
     "WorkMentionDocument",
     "is_due",
+    "source_base_url",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Internal parse types — used by source-specific parse functions only.
-# Public adapter output uses EntityDocument / WorkMentionDocument (composer_schema).
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class SourceRecord:
-    external_id: str
-    name: str
-    url: str | None
-    raw: dict[str, Any]
-    kind: str = "person"
-    claims: tuple[SourceClaim, ...] = ()
-    #: the language the source states for ``name`` (see ``ScrapedDocument``)
-    language: str | None = None
-
-
-@dataclass(frozen=True)
-class SourceWorkMention:
-    """A (composer, title) pair as a source reported it — e.g. one work on a
-    concert programme. The ingest resolves it to a canonical work (match,
-    review or create). ``raw`` keeps the full performance context so a later
-    pass can build performance events without re-fetching."""
-
-    external_id: str
-    title: str
-    composer: str | None
-    raw: dict[str, Any]
-
-
-from .baerenreiter import BaerenreiterAdapter  # noqa: E402
-from .berlinphil import BerlinPhilAdapter  # noqa: E402
-from .boosey import BooseyAdapter  # noqa: E402
-from .classicalmusiconline import ClassicalMusicOnlineAdapter  # noqa: E402
-from .classicapedia import ClassicapediaAdapter  # noqa: E402
-from .classicfm import ClassicFmAdapter  # noqa: E402
-from .concertgebouw import ConcertgebouwAdapter  # noqa: E402
-from .decca import DeccaAdapter  # noqa: E402
-from .harmoniamundi import HarmoniaMundiAdapter  # noqa: E402
-from .henle import HenleAdapter  # noqa: E402
-from .imslp import ImslpAdapter  # noqa: E402
-from .imslp_recordings import ImslpRecordingsAdapter  # noqa: E402
-from .imslp_works import ImslpWorksAdapter  # noqa: E402
-from .laphil import LaPhilAdapter  # noqa: E402
-from .nyphil import NyPhilAdapter  # noqa: E402
-from .openopus import OpenOpusAdapter  # noqa: E402
-from .rco import RcoAdapter  # noqa: E402
-from .roh import RohAdapter  # noqa: E402
-from .wienerphil import WienerPhilAdapter  # noqa: E402
-from .wikidata import (  # noqa: E402
-    WikidataAdapter,
-    WikidataCatalogueAdapter,
-    WikidataEnsemblesAdapter,
-    WikidataGenresAdapter,
-    WikidataInstrumentationAdapter,
-    WikidataPlacesAdapter,
-    WikidataWorksAdapter,
-)
 
 REGISTRY: dict[str, SourceAdapter] = {
     "imslp": ImslpAdapter(),
@@ -129,3 +98,13 @@ REGISTRY: dict[str, SourceAdapter] = {
     "harmoniamundi": HarmoniaMundiAdapter(),
     "roh": RohAdapter(),
 }
+
+
+def source_base_url(source: str) -> str:
+    """Base URL for a bucket source: a registered scraper's, else empty.
+
+    Empty for a source with no adapter — the bucket keeps data for sources whose
+    adapter was later removed, and ``rebuild-silver`` replays those too.
+    """
+    adapter = REGISTRY.get(source)
+    return adapter.base_url if adapter is not None else ""

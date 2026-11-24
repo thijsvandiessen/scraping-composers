@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 import unicodedata
 import uuid
+from collections.abc import Iterable
 
 # Fixed project namespace — never change this; it seeds all entity UUIDs.
 _NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "scraping-composers")
@@ -107,3 +108,16 @@ def wikidata_id(key: str) -> str | None:
     """
     found = _WIKIDATA_SUFFIX.search(key) or _QID_KEY.match(key)
     return found.group(1) if found else None
+
+
+def distinct_ci(values: Iterable[str]) -> list[str]:
+    """Values as reported, minus the ones that differ only in case: sources
+    supply both "Piano" and "piano" for the same instrument."""
+    seen: set[str] = set()
+    distinct: list[str] = []
+    for value in values:
+        key = value.casefold()
+        if key not in seen:
+            seen.add(key)
+            distinct.append(value)
+    return distinct

@@ -57,7 +57,9 @@ uv run --directory apps/dashboard pytest --rootdir . --cov=scrapers --cov=config
 ```
 
 `test_dashboard.py` tests the API clients against a mock transport and the
-views against a stubbed client. No network.
+views against a stubbed client. `test_settings.py` tests fail-closed
+`DASHBOARD_SECRET_KEY` loading and production security headers in
+`config/settings.py`. No network.
 
 | Area | Covers |
 | --- | --- |

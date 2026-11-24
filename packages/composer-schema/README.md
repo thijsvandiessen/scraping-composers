@@ -74,6 +74,9 @@ or the scraper stack.
   `NON_WORK_CATALOGUES` (rights societies, record labels, libraries), whose
   codes number registrations, releases or holdings rather than works and are
   not read. The warehouse's work matcher keys on these.
+- `text.py` — small, dependency-free text helpers (`strip_diacritics`,
+  `collapse_ws`, `distinct_ci`) shared by `composer-schema` and downstream
+  tiers.
 - `testing.py` — `person()`, `genre()`, `mention()`, `FakeSource` and friends, which every
   other member's tests use (the warehouse re-exports them).
 
@@ -92,3 +95,4 @@ uv run --directory packages/composer-schema pytest --rootdir . --cov=composer_sc
 | `test_kinds.py` | The ensemble guard (#174): ensemble labels recognised, musicians left alone, and only `person` second-guessed; the name typer reads every classical name cue the way `wikidata_ensembles` admits it, without widening the guard. |
 | `test_instrumentation.py` | Scoring categories: combinations yield their parts, ensembles list their members apart, unrecognised scoring yields nothing, Wikidata's instrument labels ("string section", "human voice") found, and the category tables are consistent, `ENSEMBLES` and `SECTIONS` included. |
 | `test_shorthand.py` | Real catalogue entries in both dialects: desks, doublings, percussion, string parts, score order, German abbreviations, and refusing what is not shorthand. |
+| `test_text.py` | Shared text helpers: diacritic stripping (`strip_diacritics`), whitespace collapsing (`collapse_ws`), and case-insensitive order-preserving deduplication (`distinct_ci`). |

@@ -121,3 +121,10 @@ def test_model_round_trips_through_json(tmp_path: Path) -> None:
     assert loaded.trained_on_pairs == 17
     assert loaded.by_name("given").m == model.by_name("given").m
     assert loaded.match_weight(["EXACT"]) == model.match_weight(["EXACT"])
+
+
+def test_from_dict_rejects_malformed_comparisons() -> None:
+    with pytest.raises(ValueError, match="comparisons"):
+        LinkageModel.from_dict({"comparisons": "not-a-list", "prior": 0.01})
+    with pytest.raises(ValueError, match="comparison"):
+        LinkageModel.from_dict({"comparisons": ["not-a-dict"], "prior": 0.01})

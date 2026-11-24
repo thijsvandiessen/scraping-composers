@@ -22,6 +22,7 @@ def test_defaults() -> None:
     assert s.gold_database_url == "sqlite:///gold.db"
     assert s.gold_schema == "gold"
     assert s.gold_min_referrers == 1
+    assert s.neo4j_password.get_secret_value() == "composers"
     assert s.bucket_path == "./raw-data"
     assert s.scraper_contact_email is None
     assert s.admin_api_key is None
@@ -92,3 +93,21 @@ def test_model_config_reads_dotenv_and_ignores_extra_keys() -> None:
 
 def test_module_level_settings_singleton_is_a_settings_instance() -> None:
     assert isinstance(settings, Settings)
+
+
+def test_secrets_are_masked_in_repr(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("NEO4J_PASSWORD", "super-secret-neo4j")
+    monkeypatch.setenv("ADMIN_API_KEY", "super-secret-admin")
+
+    s = Settings()
+
+    assert s.neo4j_password.get_secret_value() == "super-secret-neo4j"
+    assert s.admin_api_key is not None
+    assert s.admin_api_key.get_secret_value() == "super-secret-admin"
+
+    rendered = repr(s)
+    assert "super-secret-neo4j" not in rendered
+    assert "super-secret-admin" not in rendered
+    assert "**********" in rendered
+    assert "super-secret-neo4j" not in str(s.neo4j_password)
+    assert "super-secret-admin" not in str(s.admin_api_key)
