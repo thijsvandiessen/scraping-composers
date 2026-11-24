@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from .. import SourceClaim, SourceRecord
@@ -188,9 +189,14 @@ def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return items
 
 
-def _item_claims(item: dict[str, Any], item_metrics: dict[str, str]) -> tuple[SourceClaim, ...]:
-    # every record matched the occupation=composer query
-    claims = [SourceClaim("has_profession", "profession", "composer")]
+_COMPOSER = frozenset({"composer"})
+
+
+def _item_claims(
+    item: dict[str, Any], item_metrics: dict[str, str], professions: frozenset[str]
+) -> tuple[SourceClaim, ...]:
+    # the occupations the item was enumerated by (see ``query.OCCUPATIONS``)
+    claims = [SourceClaim("has_profession", "profession", profession) for profession in sorted(professions)]
     for var, predicate, kind in FIELDS:
         for value in sorted(item["values"].get(var, ())):
             if kind is None or kind == _DATE:
@@ -212,11 +218,15 @@ def _item_claims(item: dict[str, Any], item_metrics: dict[str, str]) -> tuple[So
 
 
 def _records_from_rows(
-    rows: list[dict[str, Any]], metrics: dict[str, dict[str, str]] | None = None
+    rows: list[dict[str, Any]],
+    metrics: dict[str, dict[str, str]] | None = None,
+    professions: Mapping[str, frozenset[str]] | None = None,
 ) -> list[SourceRecord]:
-    """Fold SPARQL result rows (several per composer when properties have
-    multiple values) into one SourceRecord per composer, attaching the
-    composer's popularity ``metrics`` (from ``_fetch_metrics``) as claims."""
+    """Fold SPARQL result rows (several per person when properties have
+    multiple values) into one SourceRecord per person, attaching the person's
+    popularity ``metrics`` (from ``_fetch_metrics``) as claims and the
+    ``professions`` the population query found them under (composer when not
+    given)."""
     records = []
     for qid, item in _fold_rows(rows).items():
         name = item["label"]
@@ -244,7 +254,7 @@ def _records_from_rows(
                 name=name,
                 url=f"{BASE_URL}/wiki/{qid}",
                 raw=raw,
-                claims=_item_claims(item, item_metrics),
+                claims=_item_claims(item, item_metrics, (professions or {}).get(qid, _COMPOSER)),
                 language=item["language"],
             )
         )
