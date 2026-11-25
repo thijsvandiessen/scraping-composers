@@ -4,7 +4,7 @@ import pytest
 from composer_scrapers import SourceClaim, SourceRecord, SourceWorkMention
 from composer_scrapers.nyphil.people import ROLES, _aggregate, _record
 from composer_scrapers.nyphil.performances import _performances
-from composer_scrapers.nyphil.text import _names
+from composer_scrapers.nyphil.text import _names, spelling
 
 # Trimmed copy of the real structure: double-spaced names, ";"-joined
 # conductors, the "Not conducted" sentinel, soloists with and without an
@@ -218,10 +218,53 @@ def test_soloist_instrument_becomes_discipline() -> None:
         ("Timm, Henry C.; Doe, Jane", ["Timm, Henry C.", "Doe, Jane"]),
         ("Beethoven,  Ludwig  van", ["Beethoven, Ludwig van"]),  # whitespace runs collapsed
         (";Doe, Jane;", ["Doe, Jane"]),  # leading/trailing empty parts dropped
+        ("Bartok [Bartók], Béla", ["Bartók, Béla"]),  # bracketed spelling applied
     ],
 )
 def test_names(value: str | None, expected: list[str]) -> None:
     assert list(_names(value)) == expected
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("Hill, Ureli Corelli", ("Hill, Ureli Corelli", ())),
+        ("Bartok [Bartók], Béla", ("Bartók, Béla", ("Bartok, Béla",))),
+        # several brackets, a multi-word one, and the stray space before a comma
+        (
+            "Gretry [Grétry], Andre [André] Ernest Modeste",
+            ("Grétry, André Ernest Modeste", ("Gretry, Andre Ernest Modeste",)),
+        ),
+        ("Andre [André] , José", ("André, José", ("Andre, José",))),
+        ("Paert [Pärt], Arvo", ("Pärt, Arvo", ("Paert, Arvo",))),
+        # not a respelling: dropped from the name, no guessed alias
+        ("Bucharoff [Buchalter], Simon", ("Bucharoff, Simon", ())),
+        ("Heller, Stephen [István]", ("Heller, Stephen", ())),
+        ("Carrer [Karrer, Karreris], Pavlos", ("Carrer, Pavlos", ())),
+        # refers further back than the word before it
+        ("Herold, Louis Joseph Ferdinand [Hérold]", ("Herold, Louis Joseph Ferdinand", ())),
+    ],
+)
+def test_spelling(name: str, expected: tuple[str, tuple[str, ...]]) -> None:
+    assert spelling(name) == expected
+
+
+def test_a_bracketed_spelling_is_one_record_with_the_ascii_alias() -> None:
+    program = {
+        "season": "1950-51",
+        "programID": "1",
+        "concerts": [],
+        "works": [
+            {"ID": "1", "workTitle": "X", "composerName": "Bartok [Bartók], Béla"},
+            {"ID": "2", "workTitle": "Y", "composerName": "Bartók, Béla"},
+        ],
+    }
+    people = _aggregate([program])
+    assert list(people) == [("composer", "Bartók, Béla")]
+    record = _record("composer", "Bartók, Béla", people[("composer", "Bartók, Béla")])
+    assert record.external_id == "composer:Bartók, Béla"
+    assert SourceClaim("also_known_as", value="Bartok, Béla") in record.claims
+    assert record.raw["aliases"] == ["Bartok, Béla"]
 
 
 def test_dict_work_title_is_joined_into_one_string() -> None:

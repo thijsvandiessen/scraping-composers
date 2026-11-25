@@ -136,7 +136,10 @@ def _composer(html: str, title: str, fields: dict[str, str]) -> str | None:
     header's credit reads ``Abel, Karl Friedrich``, or ``Dvorák - A Rihm`` for an
     arrangement, and links to ``/composer/...`` only if the composer has a page.
     So a link is only the fallback, and the URL slug is no use at all (composer
-    and title run together with no separator that can be split on).
+    and title run together with no separator that can be split on). A fallback
+    credit is cut at its " - ": what follows names the arrangers and editors
+    (``Jenkins - Jenkins, Karl (Arranger); Häusler, Walter (Arranger)``), and
+    kept whole it became a person of its own (#457).
     """
     if match := _TITLE_TAG.search(html):
         full = re.sub(r"\s+", " ", unescape(_TAG.sub(" ", match.group(1)))).strip()
@@ -145,8 +148,14 @@ def _composer(html: str, title: str, fields: dict[str, str]) -> str | None:
     for match in _COMPOSER_LINK.finditer(html):
         name = re.sub(r"\s+", " ", unescape(_TAG.sub(" ", match.group(1)))).strip()
         if name and name.lower() not in {"composers", "all composers", "browse composers"}:
-            return name
-    return fields.get("composer")
+            return _credited_composer(name)
+    credit = fields.get("composer")
+    return _credited_composer(credit) if credit else None
+
+
+def _credited_composer(credit: str) -> str | None:
+    """The composer in a header credit: ``Dvorák - A Rihm`` -> "Dvorák"."""
+    return credit.split(" - ", 1)[0].strip() or None
 
 
 def duration_minutes(raw: str | None) -> int | None:

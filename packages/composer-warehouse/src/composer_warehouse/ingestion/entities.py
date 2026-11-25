@@ -1,11 +1,16 @@
+import logging
+import re
 import uuid
 from datetime import datetime
 
 from composer_models import Entity, Source
 from composer_models.normalize import entity_key, entity_uuid
 from composer_schema import resolve_entity_kind
+from composer_schema.spelling import apply_bracketed_spellings
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
+
+log = logging.getLogger(__name__)
 
 
 def get_or_create_source(session: Session, name: str, base_url: str) -> Source:
@@ -41,9 +46,55 @@ the ensemble "Anonymous 4" and the theorist "Anonymous IV" stay people. The
 attribution itself is not lost: a mention keeps it in ``raw_composer``."""
 
 
+#: ``[Mozart](https://theclassicreview.com/tag/mozart/)``: a tag link kept as markdown.
+_MARKDOWN_LINK = re.compile(r"\[([^\[\]]+)\]\(https?://[^()\s]*\)")
+#: ``[Senfl, Ludwig]``: the whole name bracketed, an editor's attribution.
+_BRACKETED = re.compile(r"^\[([^\[\]]+)\]$")
+#: ``Frédéric Chopin (arr. Liszt)``, ``Bach (Arr: Gounod)``, ``(arranged by …)``,
+#: ``(arrangement)``, ``Crüger, Johann (nach Loys Bourgeois)``: the arranger or
+#: the model, not part of the name. Whole words only, so "(Arrigo Boito)" stays.
+_ARRANGER_NOTE = re.compile(r"\s*\((?:arr|arranged|arrangement|nach)\b[^()]*\)\s*$", re.IGNORECASE)
+#: ``Jenkins - Jenkins, Karl (Arranger); Häusler, Walter (Arranger)``: a publisher's
+#: credit line, the composer before the " - " and the arrangers and editors after.
+_CREDIT_LINE = re.compile(r"^(.+?) - .*\((?:Arranger|Editor)\)", re.IGNORECASE)
+#: A bare URL (Wikidata's ``.well-known/genid/…`` "unknown value") names no one.
+_URL = re.compile(r"^https?://\S+$")
+#: What should not survive :func:`clean_person_label`; seeing it means a source
+#: writes a shape nobody has handled yet.
+_NOISE = re.compile(r"\]\(http|https?://|\[")
+
+
+def clean_person_label(label: str) -> str:
+    """``label`` with the annotations sources wrap around a person's name removed.
+
+    A markdown tag link becomes its text, a bracketed respelling is applied
+    (``Bartok [Bartók], Béla`` -> "Bartók, Béla", see
+    :mod:`composer_schema.spelling`), a wholly bracketed name becomes its inside,
+    a trailing arranger or "nach" note is dropped, and of a publisher's credit
+    line (``Britten - Tircuit, Heuwell (Arranger)``) only the composer is kept
+    (#457). Bronze keeps snapshots written before a scraper learnt any of this,
+    and a rebuild replays them, so the warehouse applies it to every label.
+    Each leaves a label
+    that shares no key with the plain name: ``[Mozart](…/tag/mozart/)`` is keyed
+    "mozarthttpstheclassicreviewcomtagmozart" and collects a year conflict
+    instead of folding into the bare "Mozart". Sources keep the verbatim string
+    (bronze, ``raw_composer``), so this is the warehouse's reading of it, like
+    :func:`is_placeholder_person`. A label that would clean to nothing is kept.
+    """
+    cleaned = apply_bracketed_spellings(_MARKDOWN_LINK.sub(r"\1", label))
+    cleaned = _BRACKETED.sub(r"\1", cleaned.strip())
+    cleaned = _CREDIT_LINE.sub(r"\1", cleaned)
+    cleaned = _ARRANGER_NOTE.sub("", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned or label
+
+
 def is_placeholder_person(label: str) -> bool:
-    """Whether ``label`` names no particular person (see :data:`PLACEHOLDER_PERSON_KEYS`)."""
-    return entity_key("person", label, None) in PLACEHOLDER_PERSON_KEYS
+    """Whether ``label`` names no particular person: a placeholder (see
+    :data:`PLACEHOLDER_PERSON_KEYS`) or a bare URL, such as the Wikidata
+    "unknown value" (``…/.well-known/genid/…``) older bronze snapshots carry."""
+    cleaned = clean_person_label(label)
+    return bool(_URL.match(cleaned)) or entity_key("person", cleaned, None) in PLACEHOLDER_PERSON_KEYS
 
 
 def get_or_create_entity(
@@ -62,12 +113,18 @@ def get_or_create_entity(
     :func:`~composer_schema.resolve_entity_kind` re-reads the label before the
     kind is baked into the entity's uuid (see #174). The key follows the
     resolved kind: a genre or movement with a QID is keyed on the QID alone
-    (see :func:`~composer_models.normalize.entity_key`).
+    (see :func:`~composer_models.normalize.entity_key`). A person's label is
+    cleaned first (:func:`clean_person_label`), and one that still carries
+    markup or a URL is logged, not dropped, so a new source's shape is noticed.
     """
+    if kind == "person":
+        label = clean_person_label(label)
     kind = resolve_entity_kind(kind, label)
     key = entity_key(kind, label, wikidata_id)
     entity_id = cache.get((kind, key))
     if entity_id is None:
+        if kind == "person" and _NOISE.search(label):
+            log.warning("person label still carries markup or a URL: %r", label)
         entity_id = entity_uuid(kind, key)
         session.add(Entity(id=entity_id, kind=kind, dedup_key=key, label=label))
         cache[(kind, key)] = entity_id

@@ -41,6 +41,23 @@ source's protocol.
      The match is exact on the whole dedup key, so "Anonymous 4" (an ensemble)
      and "Anonymous IV" (a theorist) stay people. Before this, Anonymous alone
      collected 3,907 credits and entered the person dedupe as a top composer.
+   - A person's **label is cleaned** before it is keyed (`clean_person_label`
+     in `ingestion/entities.py`): a markdown tag link becomes its text
+     (`[Mozart](https://theclassicreview.com/tag/mozart/)` → "Mozart"), a
+     bracketed respelling is applied (`Bartok [Bartók], Béla` → "Bartók, Béla",
+     `composer_schema.spelling`; this also folds the nyphil runs bronze kept
+     from before the scraper applied it), a wholly bracketed name becomes its
+     inside (`[Senfl, Ludwig]`), and a trailing arranger or
+     model note is dropped ("Chopin (arr. Liszt)", "Bach (Arr: Gounod)",
+     "Crüger, Johann (nach Loys Bourgeois)"), and a publisher's credit line
+     keeps only its composer (`Britten - Tircuit, Heuwell (Arranger)` →
+     "Britten"). A bare URL, like the Wikidata "unknown value"
+     (`…/.well-known/genid/…`), counts as a placeholder and is never a person.
+     The scrapers clean these themselves now, but bronze keeps their older
+     snapshots and a rebuild replays them. Kept, each was a person of its own
+     that shared no key with the plain name. Bronze and `raw_composer` keep the
+     verbatim string. A new person whose label still carries `[`, `](http` or a
+     URL is logged (not dropped), so a new source's shape gets noticed.
 
    Existing keys are preloaded up front and commits happen in 1000-record
    batches, so the per-record loop needs no queries. A mid-run failure commits
@@ -405,6 +422,7 @@ factories) come from `composer_warehouse.testing`.
 | `test_ingest_premieres.py` | A mention's world premiere carried onto its work: a new work, a later source backfilling a NULL, an earlier date winning across sources and within one run, a later one not, a full date refining a year, a corrected mention, the winning source recorded, and house premieres ignored. |
 | `test_ingest_language.py` | The language a source states stored with entity records and work mentions, and filled in on a re-sighting of a record stored without one, without re-matching the mention. |
 | `test_ingest_mentions.py` | Work mentions: creating a work and alias, matching an existing work, the same title under two composers, re-ingesting with a corrected title or composer, and mentions kept when a source fails. |
+| `test_ingest_noisy_names.py` | Person labels cleaned at ingest: markdown tag links, bracketed respellings, wholly bracketed names and arranger/"nach" notes and publisher credit lines handled (but not "(Arrigo Boito)" or a bracket that is no respelling); an older nyphil snapshot's bracketed name folding into the newer plain one; a placeholder behind markup still recognised; a Wikidata blank-node URL minting no person; a markdown record folding into the plain name another source gives, with bronze verbatim; a mention's and a claim's arranger note dropped; a label still carrying markup logged, not dropped. |
 | `test_ingest_placeholders.py` | Placeholder names (Anonymous, Traditional, Various, N.N., Audience) never becoming persons: recognised in any spelling but exact on the whole key (Anonymous 4, Anonymous IV stay people); a mention keeping its verbatim attribution with no composer, also when re-sighted; a claim pointing at one dropped; a source record for one kept without an entity. |
 
 **Works**
