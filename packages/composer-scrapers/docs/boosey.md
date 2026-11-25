@@ -38,3 +38,7 @@ Two things to know before running it wide:
   aliases to `_LABELS` rather than writing new regexes. Discovery
   (`boosey/catalogue.py`) keys only on the stable `/cr/music/<slug>/<id>` URL
   shape; the id is the trailing integer, and the slug is decorative.
+- **The composer comes from the `<title>`** ("Antonín Dvorák - Humoresque").
+  Only when that does not end in the work's title does the header credit stand
+  in, cut at its " - ": the rest names arrangers and editors
+  (`Jenkins - Jenkins, Karl (Arranger); Häusler, Walter (Arranger)` → "Jenkins").

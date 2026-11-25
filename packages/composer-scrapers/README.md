@@ -209,7 +209,7 @@ Most sources are tested in three layers, one file each:
 | `imslp_recordings` | ✓ | ✓ | ✓ |
 | `imslp_works` | ✓ | ✓ | ✓ |
 | `laphil` | ✓ | ✓ | ✓ |
-| `nyphil` | `test_nyphil.py` (aggregation into records and mentions) | — | — |
+| `nyphil` | `test_nyphil.py` (aggregation into records and mentions, bracketed spellings read as the name with the ASCII form as alias) | — | — |
 | `openopus` | `test_openopus.py` covers all three | | |
 | `rco` | ✓ | — | `test_rco_fetch.py` (calendar slugs only) |
 | `roh` | ✓ | ✓ | ✓ |

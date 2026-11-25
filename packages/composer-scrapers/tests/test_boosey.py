@@ -203,6 +203,21 @@ def test_composer_of_an_arrangement_excludes_the_arranger() -> None:
     assert work.composer == "Antín Dvorák"
 
 
+def test_a_fallback_credit_drops_its_arrangers() -> None:
+    """When the title tag does not end in the title, the header credit's
+    arrangers and editors are not part of the composer (#457)."""
+    html = """
+    <head><title>Benedictus | Boosey &amp; Hawkes</title></head>
+    <div class="page-header__composer">
+      <a href="/composer/Karl+Jenkins">Jenkins - Jenkins, Karl (Arranger); H&auml;usler, Walter (Arranger)</a>
+    </div>
+    <h1 class="page-header__title">Benedictus</h1>
+    """
+    work = parse_work(html)
+    assert work is not None
+    assert work.composer == "Jenkins"
+
+
 def test_composer_drops_the_arranger_the_title_tag_names() -> None:
     html = "<head><title>Adolphe Adam (John Lanchbery) - Giselle</title></head><h1>Giselle</h1>"
     work = parse_work(html)
