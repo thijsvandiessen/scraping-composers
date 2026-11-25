@@ -60,12 +60,20 @@ from composer_schema.instrumentation import (
 )
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
-from .parse import _BARE_QID, BASE_URL, _language, _literal
-from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
+from .parse import BASE_URL, ENTITY, entity_qid, label, language, literal
+from .query import (
+    LABEL_LANGUAGES,
+    PAGE_SIZE,
+    REQUEST_DELAY_S,
+    TIMEOUT_S,
+    numeric_qids,
+    qid,
+    run_covered_query,
+    run_query,
+    values,
+)
 
 log = logging.getLogger(__name__)
-
-ENTITY = "http://www.wikidata.org/entity/"
 
 #: The most instruments a list may name, ensembles and soloists aside, and
 #: still be read as what the work is for. A piano quartet's four forces pass; a
@@ -138,17 +146,6 @@ class Scoring:
     includes: tuple[str, ...]
 
 
-def _entity_qid(row: dict[str, Any], var: str) -> str | None:
-    value = _literal(row, var)
-    return value.removeprefix(ENTITY) if value and value.startswith(ENTITY) else None
-
-
-def _label(row: dict[str, Any], var: str) -> str | None:
-    """A label, unless the label service echoed a bare QID for want of one."""
-    label = _literal(row, var)
-    return label if label and not _BARE_QID.match(label) else None
-
-
 def _count(value: str | None) -> int | None:
     """A positive whole quantity, or ``None``: "2", "+2" and "2.0" are 2."""
     if value is None:
@@ -196,19 +193,19 @@ def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, _Work]:
     works: dict[str, _Work] = {}
     for row in rows:
         work = works.setdefault(
-            _qid(row), _Work(label=_label(row, "itemLabel"), language=_language(row, "itemLabel"))
+            qid(row), _Work(label=label(row, "itemLabel"), language=language(row, "itemLabel"))
         )
-        if (composer := _entity_qid(row, "composer")) and (name := _label(row, "composerLabel")):
+        if (composer := entity_qid(row, "composer")) and (name := label(row, "composerLabel")):
             work.composers[composer] = name
         # An "unknown value" instrument is no item, and says nothing to keep.
-        if (statement := _literal(row, "statement")) is None or (
-            instrument := _entity_qid(row, "instrument")
+        if (statement := literal(row, "statement")) is None or (
+            instrument := entity_qid(row, "instrument")
         ) is None:
             continue
-        part = work.parts.setdefault(statement, Part(item=instrument, label=_label(row, "instrumentLabel")))
-        if (count := _count(_literal(row, "quantity"))) is not None:
+        part = work.parts.setdefault(statement, Part(item=instrument, label=label(row, "instrumentLabel")))
+        if (count := _count(literal(row, "quantity"))) is not None:
             part.count = count if part.count is None else max(part.count, count)
-        if _entity_qid(row, "role") is not None and (role := _label(row, "roleLabel")):
+        if entity_qid(row, "role") is not None and (role := label(row, "roleLabel")):
             part.roles.add(role)
     return works
 
@@ -297,28 +294,17 @@ def documents_from_rows(
 
 def _fetch_instrumentation_qids(session: SourceSession) -> list[str]:
     """Every QID with a composer and a P870 statement, numerically ordered."""
-    rows = _run_query(session, INSTRUMENTATION_ID_QUERY, "instrumentation work id list")
-    return sorted({_qid(row) for row in rows}, key=lambda qid: (len(qid), qid))
+    rows = run_query(session, INSTRUMENTATION_ID_QUERY, "instrumentation work id list")
+    return numeric_qids({qid(row) for row in rows})
 
 
 def _fetch_instrumentation_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
     """The detail rows for one batch of works; a batch missing a bound id
     fails the run and is never mirrored (issue #181)."""
-    query = INSTRUMENTATION_QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
-
-    def covered(rows: list[dict[str, Any]]) -> bool:
-        return not set(qids) - {_qid(row) for row in rows}
-
-    rows = _run_query(
-        session, query, f"page of {len(qids)} instrumented works", mirror=True, complete=covered
+    query = INSTRUMENTATION_QUERY.format(values=values(qids), languages=LABEL_LANGUAGES)
+    return run_covered_query(
+        session, query, qids, f"page of {len(qids)} instrumented works", item_label="works"
     )
-    missing = set(qids) - {_qid(row) for row in rows}
-    if missing:
-        raise RuntimeError(
-            f"wikidata page returned {len(qids) - len(missing)} of {len(qids)} requested works; "
-            f"missing e.g. {sorted(missing)[:5]}"
-        )
-    return rows
 
 
 class WikidataInstrumentationAdapter(HttpSourceAdapter[WorkMentionDocument | EntityDocument]):

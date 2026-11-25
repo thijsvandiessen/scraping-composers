@@ -111,7 +111,7 @@ class Skipped:
 
     unmatched_mentions: int = 0
     orphan_works: int = 0
-    other: dict[str, int] = field(default_factory=dict)
+    other: dict[str, int] = field(default_factory=dict[str, int])
 
     def add(self, reason: str, count: int = 1) -> None:
         self.other[reason] = self.other.get(reason, 0) + count

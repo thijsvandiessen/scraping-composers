@@ -24,7 +24,7 @@ import httpx
 
 from .deadline import DeadlineTransport
 from .pages import PageCache, open_page_cache, request_fingerprint
-from .session import SourceSession, Validator
+from .session import SourceSession, Validator, parse_json_object
 
 __all__ = [
     "DEFAULT_RETRIES",
@@ -40,6 +40,7 @@ __all__ = [
     "get_text",
     "new_client",
     "open_page_cache",
+    "parse_json_object",
     "request_fingerprint",
     "user_agent",
 ]

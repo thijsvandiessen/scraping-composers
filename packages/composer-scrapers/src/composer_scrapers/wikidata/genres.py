@@ -58,16 +58,17 @@ import httpx
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
-from .parse import _BARE_QID, BASE_URL, _language, _literal
+from .parse import BARE_QID, BASE_URL, language, literal
 from .query import (
     LABEL_LANGUAGES,
     PAGE_SIZE,
     REQUEST_DELAY_S,
     TIMEOUT_S,
-    _fetch_qids,
-    _qid,
-    _run_query,
-    _values,
+    fetch_qids,
+    numeric_qids,
+    qid,
+    run_query,
+    values,
 )
 
 log = logging.getLogger(__name__)
@@ -175,11 +176,6 @@ class Node:
     counterparts: set[str] = field(default_factory=set[str])
 
 
-def _numeric(qids: set[str]) -> list[str]:
-    """QIDs in numeric order -- (length, string) is numeric for QIDs."""
-    return sorted(qids, key=lambda qid: (len(qid), qid))
-
-
 def _same_name(seed: str, other: str) -> bool:
     """Whether ``other`` names what ``seed`` does: the same English label, or
     the label followed by "music", ignoring case."""
@@ -193,12 +189,12 @@ def _uri_qid(binding: dict[str, Any] | None) -> str | None:
     if not binding or binding.get("type") != "uri":
         return None
     value: str = binding["value"]
-    qid = value.rsplit("/", 1)[-1]
-    return qid if _BARE_QID.match(qid) else None
+    item_qid = value.rsplit("/", 1)[-1]
+    return item_qid if BARE_QID.match(item_qid) else None
 
 
 def _seed_values(rows: list[dict[str, Any]]) -> set[str]:
-    return {qid for row in rows if (qid := _uri_qid(row.get("value"))) is not None}
+    return {item_qid for row in rows if (item_qid := _uri_qid(row.get("value"))) is not None}
 
 
 def _fetch_seeds(session: SourceSession, prop: str) -> list[str]:
@@ -207,17 +203,17 @@ def _fetch_seeds(session: SourceSession, prop: str) -> list[str]:
     One query over the occupation index usually answers in seconds; should it
     time out, the same values are asked a composer batch at a time instead."""
     try:
-        rows = _run_query(session, SEED_QUERY.format(prop=prop), f"{prop} values")
-        return _numeric(_seed_values(rows))
+        rows = run_query(session, SEED_QUERY.format(prop=prop), f"{prop} values")
+        return numeric_qids(_seed_values(rows))
     except (httpx.HTTPError, ValueError, KeyError):
         log.warning("%s value list failed; asking per composer batch instead", prop, exc_info=True)
-    composers = _fetch_qids(session)
+    composers = fetch_qids(session)
     seeds: set[str] = set()
     for i in range(0, len(composers), PAGE_SIZE):
         batch = composers[i : i + PAGE_SIZE]
-        query = SEED_BATCH_QUERY.format(values=_values(batch), prop=prop)
-        seeds |= _seed_values(_run_query(session, query, f"{prop} values for {len(batch)} composers"))
-    return _numeric(seeds)
+        query = SEED_BATCH_QUERY.format(values=values(batch), prop=prop)
+        seeds |= _seed_values(run_query(session, query, f"{prop} values for {len(batch)} composers"))
+    return numeric_qids(seeds)
 
 
 def _fetch_nodes(
@@ -229,28 +225,28 @@ def _fetch_nodes(
     Every bound item must come back (see NODE_QUERY); a short answer fails the
     run and is never mirrored, as for the composer detail pages."""
     query = NODE_QUERY.format(
-        values=_values(qids),
-        classes=_values(sorted(classes)),
-        forms=_values(sorted(forms)),
+        values=values(qids),
+        classes=values(sorted(classes)),
+        forms=values(sorted(forms)),
         languages=LABEL_LANGUAGES,
     )
 
     def covered(rows: list[dict[str, Any]]) -> bool:
-        return not set(qids) - {_qid(row) for row in rows}
+        return not set(qids) - {qid(row) for row in rows}
 
-    rows = _run_query(session, query, f"nodes for {len(qids)} items", mirror=True, complete=covered)
+    rows = run_query(session, query, f"nodes for {len(qids)} items", mirror=True, complete=covered)
     found: dict[str, dict[str, Any]] = {}
     for row in rows:
         node = found.setdefault(
-            _qid(row), {"label": "", "language": None, "classes": set(), "forms": set(), "aliases": set()}
+            qid(row), {"label": "", "language": None, "classes": set(), "forms": set(), "aliases": set()}
         )
-        if not node["label"] and (label := _literal(row, "itemLabel")):
-            node["label"], node["language"] = label, _language(row, "itemLabel")
+        if not node["label"] and (item_label := literal(row, "itemLabel")):
+            node["label"], node["language"] = item_label, language(row, "itemLabel")
         if (cls := _uri_qid(row.get("class"))) is not None:
             node["classes"].add(cls)
         if (form := _uri_qid(row.get("form"))) is not None:
             node["forms"].add(form)
-        if (alias := _literal(row, "alias")) is not None:
+        if (alias := literal(row, "alias")) is not None:
             node["aliases"].add(alias)
     missing = set(qids) - found.keys()
     if missing:
@@ -265,11 +261,11 @@ def _fetch_edges(session: SourceSession, template: str, var: str, qids: list[str
     """The ``var`` items of one batch through ``template`` (PARENT_QUERY or
     COUNTERPART_QUERY), keyed by QID. An item with none has no row, so there is
     nothing to check coverage against."""
-    query = template.format(values=_values(qids))
+    query = template.format(values=values(qids))
     edges: dict[str, set[str]] = {}
-    for row in _run_query(session, query, f"{var}s of {len(qids)} items", mirror=True):
+    for row in run_query(session, query, f"{var}s of {len(qids)} items", mirror=True):
         if (target := _uri_qid(row.get(var))) is not None:
-            edges.setdefault(_qid(row), set()).add(target)
+            edges.setdefault(qid(row), set()).add(target)
     return edges
 
 
@@ -318,7 +314,7 @@ class _Walk:
                 log.warning("%s walk: depth cap %d reached, %d parents left", kind, MAX_DEPTH, len(above))
                 break
             visited |= above
-            frontier = _numeric(above)
+            frontier = numeric_qids(above)
             depth += 1
 
         dropped = 0
@@ -370,17 +366,17 @@ class _Walk:
                 self.session, [node.qid for node in stranded[i : i + PAGE_SIZE]]
             )
         wanted = {other for others in candidates.values() for other in others} - visited
-        fetched = {node.qid: node for node in self._level(kind, _numeric(wanted), 1)}
+        fetched = {node.qid: node for node in self._level(kind, numeric_qids(wanted), 1)}
         new: dict[str, Node] = {}
         for seed in stranded:
-            for qid in _numeric(candidates.get(seed.qid, set()) - {seed.qid}):
-                other = kept.get(qid) or fetched.get(qid)
+            for other_qid in numeric_qids(candidates.get(seed.qid, set()) - {seed.qid}):
+                other = kept.get(other_qid) or fetched.get(other_qid)
                 if other is None or not other.classes or not _same_name(seed.label, other.label):
                     continue
-                seed.parents.add(qid)
-                seed.counterparts.add(qid)
-                if qid in fetched:
-                    new[qid] = other
+                seed.parents.add(other_qid)
+                seed.counterparts.add(other_qid)
+                if other_qid in fetched:
+                    new[other_qid] = other
         visited |= new.keys()
         linked = sum(1 for seed in stranded if seed.counterparts)
         log.info("%s walk: %d stranded seeds, %d given a counterpart", kind, len(stranded), linked)
@@ -388,18 +384,20 @@ class _Walk:
 
     def _batch(self, kind: str, qids: list[str], depth: int) -> list[Node]:
         nodes: list[Node] = []
-        for qid, found in sorted(_fetch_nodes(self.session, qids, CLASSES[kind], FORM_CLASSES[kind]).items()):
-            label: str = found["label"]
-            if not label or _BARE_QID.match(label):
-                log.debug("%s %s: no label, dropped", kind, qid)
+        for item_qid, found in sorted(
+            _fetch_nodes(self.session, qids, CLASSES[kind], FORM_CLASSES[kind]).items()
+        ):
+            item_label: str = found["label"]
+            if not item_label or BARE_QID.match(item_label):
+                log.debug("%s %s: no label, dropped", kind, item_qid)
                 continue
             if depth > 0 and not found["classes"]:
-                log.debug("%s %s (%s): not of the kind's classes, dropped", kind, qid, label)
+                log.debug("%s %s (%s): not of the kind's classes, dropped", kind, item_qid, item_label)
                 continue
             nodes.append(
                 Node(
-                    qid,
-                    label,
+                    item_qid,
+                    item_label,
                     depth,
                     found["language"],
                     found["classes"],
@@ -440,7 +438,7 @@ class WikidataGenresAdapter(HttpSourceAdapter[EntityDocument]):
     def _document(
         self, kind: str, node: Node, labels: dict[str, str], ingested_at: datetime
     ) -> EntityDocument:
-        parents = _numeric(node.parents)
+        parents = numeric_qids(node.parents)
         claims = [
             SourceClaim("subclass_of", kind, labels[parent], object_wikidata_id=parent) for parent in parents
         ]
@@ -459,9 +457,9 @@ class WikidataGenresAdapter(HttpSourceAdapter[EntityDocument]):
                 "item": node.qid,
                 "label": node.label,
                 "classes": sorted(node.classes),
-                "forms": _numeric(node.forms),
+                "forms": numeric_qids(node.forms),
                 "parents": parents,
-                "counterparts": _numeric(node.counterparts),
+                "counterparts": numeric_qids(node.counterparts),
                 "depth": node.depth,
             },
             claims=tuple(claims),

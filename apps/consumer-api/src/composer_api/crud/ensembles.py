@@ -22,11 +22,11 @@ _DESCRIBING = ("ensemble_type", "based_in", "also_known_as", "musicbrainz_id", "
 class _Facts:
     """What an ensemble's claims say about it."""
 
-    types: list[str] = field(default_factory=list)
-    cities: list[EntityRef] = field(default_factory=list)
-    aliases: list[str] = field(default_factory=list)
-    musicbrainz: list[str] = field(default_factory=list)
-    part_of: list[EntityRef] = field(default_factory=list)
+    types: list[str] = field(default_factory=list[str])
+    cities: list[EntityRef] = field(default_factory=list[EntityRef])
+    aliases: list[str] = field(default_factory=list[str])
+    musicbrainz: list[str] = field(default_factory=list[str])
+    part_of: list[EntityRef] = field(default_factory=list[EntityRef])
 
 
 def _anchored() -> ColumnElement[bool]:

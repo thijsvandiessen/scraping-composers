@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim, WorkMentionDocument
-from .fetch import BASE_URL, TIMEOUT_S, _fetch_dump
+from .fetch import BASE_URL, TIMEOUT_S, fetch_dump
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class OpenOpusAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument]):
         """Yield one ``person`` record per composer in the dump, followed by
         one work mention per catalogued work. ``max_pages`` caps the number of
         composers processed, for test runs."""
-        composers = _fetch_dump(session)
+        composers = fetch_dump(session)
         ingested_at = datetime.now(UTC)
         seen = 0
         mentions = 0

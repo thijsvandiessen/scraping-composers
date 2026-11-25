@@ -150,7 +150,7 @@ class ComposerBlock:
     name: str | None = None
     born: str | None = None
     died: str | None = None
-    works: list[WorkEntry] = field(default_factory=list)
+    works: list[WorkEntry] = field(default_factory=list[WorkEntry])
     #: Whether the last work was opened by a heading. A track goes *under* a
     #: heading, but a run of bare bullets is a list of separate pieces — without
     #: this, a recital of 24 Dowland lute pieces loads as one 24-movement work.

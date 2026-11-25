@@ -32,8 +32,18 @@ from typing import Any
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, SourceClaim
-from .parse import _BARE_QID, BASE_URL, _language, _literal
-from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
+from .parse import BARE_QID, BASE_URL, ENTITY, label, language, literal
+from .query import (
+    LABEL_LANGUAGES,
+    PAGE_SIZE,
+    REQUEST_DELAY_S,
+    TIMEOUT_S,
+    numeric_qids,
+    qid,
+    run_covered_query,
+    run_query,
+    values,
+)
 
 log = logging.getLogger(__name__)
 
@@ -105,31 +115,21 @@ _POINT = re.compile(r"Point\((-?[\d.]+) (-?[\d.]+)\)")
 def _fetch_place_qids(session: SourceSession) -> list[str]:
     """Every place a composer claim points at, numerically ordered. An "unknown
     value" birthplace binds a blank node, not an item, and is left out."""
-    qids = {_qid(row) for row in _run_query(session, PLACE_ID_QUERY, "place id list")}
-    qids = {qid for qid in qids if _QID.fullmatch(qid)}
-    return sorted(qids, key=lambda qid: (len(qid), qid))
+    qids = {qid(row) for row in run_query(session, PLACE_ID_QUERY, "place id list")}
+    qids = {item_qid for item_qid in qids if _QID.fullmatch(item_qid)}
+    return numeric_qids(qids)
 
 
 def _fetch_place_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
     """The detail rows, then the class rows, for one batch of places. Every
     bound item returns a detail row, so a short answer fails the run and is not
     mirrored (issue #181)."""
-    query = PLACE_QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
-
-    def covered(rows: list[dict[str, Any]]) -> bool:
-        return not set(qids) - {_qid(row) for row in rows}
-
-    rows = _run_query(session, query, f"page of {len(qids)} places", mirror=True, complete=covered)
-    missing = set(qids) - {_qid(row) for row in rows}
-    if missing:
-        raise RuntimeError(
-            f"wikidata page returned {len(qids) - len(missing)} of {len(qids)} requested places; "
-            f"missing e.g. {sorted(missing)[:5]}"
-        )
+    query = PLACE_QUERY.format(values=values(qids), languages=LABEL_LANGUAGES)
+    rows = run_covered_query(session, query, qids, f"page of {len(qids)} places", item_label="places")
     types = PLACE_TYPE_QUERY.format(
-        values=_values(qids), classes=" ".join(f"wd:{cls}" for _, cls in PLACE_CLASSES)
+        values=values(qids), classes=" ".join(f"wd:{cls}" for _, cls in PLACE_CLASSES)
     )
-    return rows + _run_query(session, types, f"types of {len(qids)} places", mirror=True)
+    return rows + run_query(session, types, f"types of {len(qids)} places", mirror=True)
 
 
 def _coordinates(value: str) -> str | None:
@@ -141,10 +141,10 @@ def _coordinates(value: str) -> str | None:
 def _linked(row: dict[str, Any], var: str) -> tuple[str, str] | None:
     """The (QID, label) a row binds for item variable ``var``, or None when the
     label service cannot name it."""
-    item, label = _literal(row, var), _literal(row, f"{var}Label")
-    if item is None or label is None or _BARE_QID.match(label):
+    item, item_label = literal(row, var), label(row, f"{var}Label")
+    if item is None or item_label is None:
         return None
-    return item.rsplit("/", 1)[-1], label
+    return item.rsplit("/", 1)[-1], item_label
 
 
 def _fold_place_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -153,7 +153,7 @@ def _fold_place_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     places: dict[str, dict[str, Any]] = {}
     for row in rows:
         place = places.setdefault(
-            _qid(row),
+            qid(row),
             {
                 "label": "",
                 "language": None,
@@ -165,16 +165,16 @@ def _fold_place_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
                 "countries": {},
             },
         )
-        if not place["label"] and (label := _literal(row, "itemLabel")):
-            place["label"], place["language"] = label, _language(row, "itemLabel")
-        if (cls := _literal(row, "class")) is not None and (
+        if not place["label"] and (item_label := literal(row, "itemLabel")):
+            place["label"], place["language"] = item_label, language(row, "itemLabel")
+        if (cls := literal(row, "class")) is not None and (
             kind := _TYPE_OF_CLASS.get(cls.rsplit("/", 1)[-1])
         ):
             place["types"].add(kind)
-        if (coord := _literal(row, "coord")) is not None and (point := _coordinates(coord)) is not None:
+        if (coord := literal(row, "coord")) is not None and (point := _coordinates(coord)) is not None:
             place["coordinates"].add(point)
         for var, key in (("geonames", "geonames"), ("iso", "iso")):
-            if (value := _literal(row, var)) is not None:
+            if (value := literal(row, var)) is not None:
                 place[key].add(value)
         for var, key in (("parent", "parents"), ("country", "countries")):
             if (linked := _linked(row, var)) is not None:
@@ -187,7 +187,7 @@ def _place_type(types: set[str]) -> str | None:
     return min(types, key=_PRECEDENCE.__getitem__) if types else None
 
 
-def _place_document(qid: str, place: dict[str, Any], ingested_at: datetime) -> EntityDocument:
+def _place_document(item_qid: str, place: dict[str, Any], ingested_at: datetime) -> EntityDocument:
     claims: list[SourceClaim] = []
     place_type = _place_type(place["types"])
     if place_type is not None:
@@ -195,9 +195,9 @@ def _place_document(qid: str, place: dict[str, Any], ingested_at: datetime) -> E
     # a place listing itself as its own country (Germany, P17 Germany) is not
     # a containment edge
     for predicate, key in (("located_in", "parents"), ("in_country", "countries")):
-        for other, label in sorted(place[key].items()):
-            if other != qid:
-                claims.append(SourceClaim(predicate, "place", label, object_wikidata_id=other))
+        for other, other_label in sorted(place[key].items()):
+            if other != item_qid:
+                claims.append(SourceClaim(predicate, "place", other_label, object_wikidata_id=other))
     for predicate, key in (
         ("coordinates", "coordinates"),
         ("geonames_id", "geonames"),
@@ -205,15 +205,15 @@ def _place_document(qid: str, place: dict[str, Any], ingested_at: datetime) -> E
     ):
         claims.extend(SourceClaim(predicate, value=value) for value in sorted(place[key]))
     return EntityDocument(
-        id=qid,
-        url=f"{BASE_URL}/wiki/{qid}",
+        id=item_qid,
+        url=f"{BASE_URL}/wiki/{item_qid}",
         source_name=WikidataPlacesAdapter.name,
         ingested_at=ingested_at,
         name=place["label"],
         kind="place",
         language=place["language"],
         raw={
-            "item": f"http://www.wikidata.org/entity/{qid}",
+            "item": f"{ENTITY}{item_qid}",
             "label": place["label"],
             "place_type": place_type,
             "types": sorted(place["types"]),
@@ -255,15 +255,15 @@ class WikidataPlacesAdapter(HttpSourceAdapter[EntityDocument]):
                 ingested_at = datetime.now(UTC)
                 places = _fold_place_rows(_fetch_place_page(session, batch))
                 named = 0
-                for qid, place in places.items():
-                    if not place["label"] or _BARE_QID.match(place["label"]):
-                        log.debug("skipping %s: no label", qid)
+                for item_qid, place in places.items():
+                    if not place["label"] or BARE_QID.match(place["label"]):
+                        log.debug("skipping %s: no label", item_qid)
                         continue
                     named += 1
                     parents.update(place["parents"], place["countries"])
-                    yield _place_document(qid, place, ingested_at)
+                    yield _place_document(item_qid, place, ingested_at)
                 log.info("wikidata_places round %d, page of %d: %d places", round_no, len(batch), named)
-            pending = sorted(parents - seen, key=lambda qid: (len(qid), qid))
+            pending = numeric_qids(parents - seen)
             if not pending:
                 return
             seen.update(pending)

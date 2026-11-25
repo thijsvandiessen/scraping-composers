@@ -19,12 +19,11 @@ paired with a composer.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from .credits import Credit, read, unknown_labels
 from .listings import PerformanceRef, performances
-from .text import body, table, text
+from .text import body, genre, table, title
 
 #: Labels on a production page that credit a person. An allowlist, as on the
 #: work page and for the same reason (see :mod:`.credits`): the tempting
@@ -101,10 +100,6 @@ FIELDS = frozenset(
 #: and parsing it as a name would file a fundraising list as a cast member.
 NOT_CREDITS = frozenset({"sponsor", "supported"})
 
-_HEADING_RE = re.compile(r"<h2\b[^>]*>(.*?)</h2\s*>", re.DOTALL | re.IGNORECASE)
-_TITLE_RE = re.compile(r"<h1\b[^>]*>(.*?)</h1\s*>", re.DOTALL | re.IGNORECASE)
-_DETAILS_RE = re.compile(r"^(.*?):\s*production details$", re.IGNORECASE)
-
 
 @dataclass(frozen=True)
 class ProductionPage:
@@ -117,7 +112,7 @@ class ProductionPage:
     title: str
     genre: str | None
     credits: tuple[Credit, ...] = ()
-    fields: dict[str, str] = field(default_factory=dict)
+    fields: dict[str, str] = field(default_factory=dict[str, str])
     performances: tuple[PerformanceRef, ...] = ()
     unknown: frozenset[str] = frozenset()
 
@@ -138,23 +133,10 @@ def parse(production_id: int, work_id: int, page: str) -> ProductionPage:
     return ProductionPage(
         production_id=production_id,
         work_id=work_id,
-        title=_title(panel),
-        genre=_genre(panel),
+        title=title(panel),
+        genre=genre(panel, "production"),
         credits=credits,
         fields=fields,
         performances=performances(panel),
         unknown=frozenset(unknown_labels(detail, ROLES, FIELDS | NOT_CREDITS)),
     )
-
-
-def _title(panel: str) -> str:
-    match = _TITLE_RE.search(panel)
-    return text(match.group(1)) if match else ""
-
-
-def _genre(panel: str) -> str | None:
-    for heading in _HEADING_RE.findall(panel):
-        match = _DETAILS_RE.match(text(heading))
-        if match is not None:
-            return match.group(1).strip()
-    return None

@@ -37,7 +37,7 @@ import logging
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from composer_schema import looks_like_ensemble
 
@@ -323,17 +323,18 @@ def commercial_recordings(document: str) -> list[Album]:
     if not isinstance(payload, list):
         return []
     albums: list[Album] = []
-    for entry in payload:
+    for entry in cast(list[object], payload):
         album = _album(entry)
         if album is not None:
             albums.append(album)
     return albums
 
 
-def _album(entry: Any) -> Album | None:
+def _album(raw_entry: Any) -> Album | None:
     """One ``JGCommRec`` entry, or None without the album id that identifies it."""
-    if not isinstance(entry, dict):
+    if not isinstance(raw_entry, dict):
         return None
+    entry = cast(dict[str, Any], raw_entry)
     album_id = entry.get("aid")
     if not isinstance(album_id, int):
         return None
@@ -352,9 +353,10 @@ def _tracks(value: Any) -> tuple[Track, ...]:
     if not isinstance(value, list):
         return ()
     found: list[Track] = []
-    for entry in value:
-        if not isinstance(entry, dict):
+    for raw_entry in cast(list[object], value):
+        if not isinstance(raw_entry, dict):
             continue
+        entry = cast(dict[str, Any], raw_entry)
         duration = entry.get("dur")
         found.append(
             Track(

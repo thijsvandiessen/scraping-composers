@@ -36,12 +36,20 @@ from typing import Any
 from composer_http import SourceSession
 
 from .. import HttpSourceAdapter, RefreshCadence, WorkMentionDocument
-from .parse import _BARE_QID, BASE_URL, _language, _literal
-from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
+from .parse import BASE_URL, ENTITY, entity_qid, label, language, literal
+from .query import (
+    LABEL_LANGUAGES,
+    PAGE_SIZE,
+    REQUEST_DELAY_S,
+    TIMEOUT_S,
+    numeric_qids,
+    qid,
+    run_covered_query,
+    run_query,
+    values,
+)
 
 log = logging.getLogger(__name__)
-
-ENTITY = "http://www.wikidata.org/entity/"
 
 # The code's value is required as well as its catalogue: a P528 statement with
 # a P972 qualifier but no value (novalue/somevalue) would put the work in the
@@ -78,37 +86,17 @@ WHERE {{
 
 def _fetch_catalogue_qids(session: SourceSession) -> list[str]:
     """Every QID with a composer and a qualified catalogue code, numerically ordered."""
-    qids = {_qid(row) for row in _run_query(session, CATALOGUE_ID_QUERY, "catalogued work id list")}
-    return sorted(qids, key=lambda qid: (len(qid), qid))
+    qids = {qid(row) for row in run_query(session, CATALOGUE_ID_QUERY, "catalogued work id list")}
+    return numeric_qids(qids)
 
 
 def _fetch_catalogue_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
     """The detail rows for one batch of works; a batch missing a bound id
     fails the run and is never mirrored (issue #181)."""
-    query = CATALOGUE_QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
-
-    def covered(rows: list[dict[str, Any]]) -> bool:
-        return not set(qids) - {_qid(row) for row in rows}
-
-    rows = _run_query(session, query, f"page of {len(qids)} catalogued works", mirror=True, complete=covered)
-    missing = set(qids) - {_qid(row) for row in rows}
-    if missing:
-        raise RuntimeError(
-            f"wikidata page returned {len(qids) - len(missing)} of {len(qids)} requested works; "
-            f"missing e.g. {sorted(missing)[:5]}"
-        )
-    return rows
-
-
-def _label(row: dict[str, Any], var: str) -> str | None:
-    """A label, unless the label service echoed a bare QID for want of one."""
-    label = _literal(row, var)
-    return label if label and not _BARE_QID.match(label) else None
-
-
-def _entity_qid(row: dict[str, Any], var: str) -> str | None:
-    value = _literal(row, var)
-    return value.removeprefix(ENTITY) if value and value.startswith(ENTITY) else None
+    query = CATALOGUE_QUERY.format(values=values(qids), languages=LABEL_LANGUAGES)
+    return run_covered_query(
+        session, query, qids, f"page of {len(qids)} catalogued works", item_label="works"
+    )
 
 
 def _fold_catalogue_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -117,10 +105,10 @@ def _fold_catalogue_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]
     works: dict[str, dict[str, Any]] = {}
     for row in rows:
         work = works.setdefault(
-            _qid(row),
+            qid(row),
             {
-                "label": _label(row, "itemLabel"),
-                "language": _language(row, "itemLabel"),
+                "label": label(row, "itemLabel"),
+                "language": language(row, "itemLabel"),
                 "composers": {},
                 "codes": {},
                 "mbids": set(),
@@ -128,21 +116,21 @@ def _fold_catalogue_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]
                 "parts": set(),
             },
         )
-        if (composer := _entity_qid(row, "composer")) and (name := _label(row, "composerLabel")):
+        if (composer := entity_qid(row, "composer")) and (name := label(row, "composerLabel")):
             work["composers"][composer] = name
-        if code := _literal(row, "code"):
+        if code := literal(row, "code"):
             entry = work["codes"].setdefault(
-                (code, _entity_qid(row, "catalogue")),
-                {"code": code, "catalogue": _label(row, "catalogueLabel"), "catalogue_short": None},
+                (code, entity_qid(row, "catalogue")),
+                {"code": code, "catalogue": label(row, "catalogueLabel"), "catalogue_short": None},
             )
-            short = _literal(row, "catalogueShort")
+            short = literal(row, "catalogueShort")
             if short and (entry["catalogue_short"] is None or short < entry["catalogue_short"]):
                 entry["catalogue_short"] = short
-        if mbid := _literal(row, "musicbrainz"):
+        if mbid := literal(row, "musicbrainz"):
             work["mbids"].add(mbid)
-        if iswc := _literal(row, "iswc"):
+        if iswc := literal(row, "iswc"):
             work["iswcs"].add(iswc)
-        if part := _entity_qid(row, "partOf"):
+        if part := entity_qid(row, "partOf"):
             work["parts"].add(part)
     return works
 
@@ -150,10 +138,10 @@ def _fold_catalogue_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]
 def _mentions_from_rows(rows: list[dict[str, Any]], ingested_at: datetime) -> list[WorkMentionDocument]:
     """One work mention per (work, composer) with a nameable title and composer."""
     mentions: list[WorkMentionDocument] = []
-    for qid, work in _fold_catalogue_rows(rows).items():
+    for work_qid, work in _fold_catalogue_rows(rows).items():
         title: str | None = work["label"]
         if not title:
-            log.debug("skipping %s: no label", qid)
+            log.debug("skipping %s: no label", work_qid)
             continue
         codes = [
             {"catalogue_item": catalogue, **entry}
@@ -162,18 +150,18 @@ def _mentions_from_rows(rows: list[dict[str, Any]], ingested_at: datetime) -> li
             )
         ]
         raw = {
-            "item": f"{ENTITY}{qid}",
+            "item": f"{ENTITY}{work_qid}",
             "catalogue_codes": codes,
             "musicbrainz_work": sorted(work["mbids"]),
             "iswc": sorted(work["iswcs"]),
-            "part_of": [f"{ENTITY}{part}" for part in sorted(work["parts"], key=lambda q: (len(q), q))],
+            "part_of": [f"{ENTITY}{part}" for part in numeric_qids(work["parts"])],
         }
         for composer_qid, composer in sorted(work["composers"].items()):
             mentions.append(
                 WorkMentionDocument(
                     # keyed by composer too, as in ``wikidata_works``
-                    id=f"{qid}:{composer_qid}",
-                    url=f"{BASE_URL}/wiki/{qid}",
+                    id=f"{work_qid}:{composer_qid}",
+                    url=f"{BASE_URL}/wiki/{work_qid}",
                     source_name=WikidataCatalogueAdapter.name,
                     ingested_at=ingested_at,
                     title=title,

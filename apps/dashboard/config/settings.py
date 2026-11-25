@@ -7,30 +7,59 @@ nothing else); scraper data cannot end up in it because the ``scrapers`` app
 defines no models.
 """
 
-import os
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import reverse_lazy
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-DEBUG = os.environ.get("DASHBOARD_DEBUG", "0") == "1"
-_secret_key = os.environ.get("DASHBOARD_SECRET_KEY")
+
+class DashboardSettings(BaseSettings):
+    """Typed environment configuration for the Django dashboard.
+
+    Follows ``composer_config.Settings`` conventions (``.env`` loading,
+    ``extra="ignore"``, ``SecretStr`` for credentials) without coupling the
+    dashboard to backend-only database/Neo4j settings.
+    """
+
+    dashboard_debug: bool = False
+    dashboard_secret_key: SecretStr | None = None
+    dashboard_allowed_hosts: str = "localhost,127.0.0.1"
+    dashboard_db_path: str | None = None
+
+    admin_api_url: str = "http://localhost:8001"
+    admin_api_key: SecretStr | None = None
+    gold_api_url: str = "http://localhost:8000"
+    silver_api_url: str = "http://localhost:8003"
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @property
+    def allowed_hosts(self) -> list[str]:
+        return [host.strip() for host in self.dashboard_allowed_hosts.split(",") if host.strip()]
+
+
+_env = DashboardSettings()
+
+DEBUG = _env.dashboard_debug
+_secret_key = _env.dashboard_secret_key.get_secret_value() if _env.dashboard_secret_key else None
 if not _secret_key:
     if not DEBUG:
         raise ImproperlyConfigured("DASHBOARD_SECRET_KEY must be set when DASHBOARD_DEBUG is off")
     _secret_key = "dev-only-insecure-key"  # noqa: S105 - DEBUG-only fallback; fail-closed when not DEBUG
 SECRET_KEY = _secret_key
-ALLOWED_HOSTS = os.environ.get("DASHBOARD_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = _env.allowed_hosts
 
 # Where the FastAPI apps live; everything the dashboard shows comes from
 # these values plus what the APIs return. Gold is the curated database
 # (built by promote), silver the staging database.
-ADMIN_API_URL = os.environ.get("ADMIN_API_URL", "http://localhost:8001")
-ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY")
-GOLD_API_URL = os.environ.get("GOLD_API_URL", "http://localhost:8000")
-SILVER_API_URL = os.environ.get("SILVER_API_URL", "http://localhost:8003")
+ADMIN_API_URL = _env.admin_api_url
+ADMIN_API_KEY = _env.admin_api_key.get_secret_value() if _env.admin_api_key else None
+GOLD_API_URL = _env.gold_api_url
+SILVER_API_URL = _env.silver_api_url
 
 INSTALLED_APPS = [
     "unfold",  # must precede django.contrib.admin
@@ -76,7 +105,7 @@ TEMPLATES = [
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": os.environ.get("DASHBOARD_DB_PATH", str(BASE_DIR / "dashboard.sqlite3")),
+        "NAME": _env.dashboard_db_path or str(BASE_DIR / "dashboard.sqlite3"),
     }
 }
 

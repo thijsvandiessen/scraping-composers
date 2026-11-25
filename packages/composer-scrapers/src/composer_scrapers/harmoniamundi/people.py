@@ -117,8 +117,8 @@ class Person:
     name: str
     ref: tuple[str, str] | None = None
     kind: str = "person"
-    roles: set[str] = field(default_factory=set)
-    columns: set[str] = field(default_factory=set)
+    roles: set[str] = field(default_factory=set[str])
+    columns: set[str] = field(default_factory=set[str])
     born: str | None = None
     died: str | None = None
     hero: str | None = None

@@ -166,7 +166,7 @@ def list_works(
             titles_by_work.setdefault(work_id, []).append(title)
 
     identifiers = identifiers_by_work(db, work_ids)
-    items = []
+    items: list[WorkSummary] = []
     for work, composer_label, mention_count in rows:
         aliases = [title for title in titles_by_work.get(work.id, []) if title != work.canonical_title]
         catalogue = f"{work.catalogue_prefix or ''} {work.catalogue_number or ''}".strip() or None
@@ -330,7 +330,7 @@ def get_work(db: Session, work_id: uuid.UUID) -> WorkDetail:
     catalogue = f"{work.catalogue_prefix or ''} {work.catalogue_number or ''}".strip() or None
 
     proofs: list[WorkProofOut] = []
-    seen = set()
+    seen: set[tuple[str, str | None]] = set()
     proof_rows = db.execute(
         select(
             Source.name,

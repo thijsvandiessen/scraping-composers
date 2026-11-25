@@ -23,8 +23,18 @@ from composer_http import SourceSession
 from composer_schema.premiere import PREMIERE_KEY, supersedes
 
 from .. import HttpSourceAdapter, RefreshCadence, WorkMentionDocument
-from .parse import _BARE_QID, BASE_URL, _format_time, _language, _literal
-from .query import LABEL_LANGUAGES, PAGE_SIZE, REQUEST_DELAY_S, TIMEOUT_S, _qid, _run_query, _values
+from .parse import BARE_QID, BASE_URL, ENTITY, format_time, label, language, literal
+from .query import (
+    LABEL_LANGUAGES,
+    PAGE_SIZE,
+    REQUEST_DELAY_S,
+    TIMEOUT_S,
+    numeric_qids,
+    qid,
+    run_covered_query,
+    run_query,
+    values,
+)
 
 log = logging.getLogger(__name__)
 
@@ -53,8 +63,8 @@ WHERE {{
 
 def _fetch_work_qids(session: SourceSession) -> list[str]:
     """Every QID with a premiere date and a composer, numerically ordered."""
-    qids = {_qid(row) for row in _run_query(session, WORK_ID_QUERY, "work id list")}
-    return sorted(qids, key=lambda qid: (len(qid), qid))
+    qids = {qid(row) for row in run_query(session, WORK_ID_QUERY, "work id list")}
+    return numeric_qids(qids)
 
 
 def _fetch_work_page(session: SourceSession, qids: list[str]) -> list[dict[str, Any]]:
@@ -62,19 +72,8 @@ def _fetch_work_page(session: SourceSession, qids: list[str]) -> list[dict[str, 
     query's required patterns, so each must come back; a short answer means
     rows went missing in transit (issue #181) and fails the run -- and is
     never mirrored."""
-    query = WORK_QUERY.format(values=_values(qids), languages=LABEL_LANGUAGES)
-
-    def covered(rows: list[dict[str, Any]]) -> bool:
-        return not set(qids) - {_qid(row) for row in rows}
-
-    rows = _run_query(session, query, f"page of {len(qids)} works", mirror=True, complete=covered)
-    missing = set(qids) - {_qid(row) for row in rows}
-    if missing:
-        raise RuntimeError(
-            f"wikidata page returned {len(qids) - len(missing)} of {len(qids)} requested works; "
-            f"missing e.g. {sorted(missing)[:5]}"
-        )
-    return rows
+    query = WORK_QUERY.format(values=values(qids), languages=LABEL_LANGUAGES)
+    return run_covered_query(session, query, qids, f"page of {len(qids)} works", item_label="works")
 
 
 def _fold_work_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -82,26 +81,24 @@ def _fold_work_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     dates (at their precision) and premiere places."""
     works: dict[str, dict[str, Any]] = {}
     for row in rows:
-        qid = _qid(row)
+        work_qid = qid(row)
         work = works.setdefault(
-            qid,
+            work_qid,
             {
-                "label": _literal(row, "itemLabel") or "",
-                "language": _language(row, "itemLabel"),
+                "label": literal(row, "itemLabel") or "",
+                "language": language(row, "itemLabel"),
                 "composers": {},
                 "dates": set(),
                 "places": set(),
             },
         )
-        composer = row.get("composer") or {}
-        composer_label = _literal(row, "composerLabel")
-        if composer.get("type") == "uri" and composer_label and not _BARE_QID.match(composer_label):
+        composer: dict[str, Any] | None = row.get("composer")
+        if composer and composer.get("type") == "uri" and (composer_label := label(row, "composerLabel")):
             work["composers"][composer["value"].rsplit("/", 1)[-1]] = composer_label
-        premiere = _literal(row, "premiere")
+        premiere = literal(row, "premiere")
         if premiere is not None:
-            work["dates"].add(_format_time(premiere, _literal(row, "premierePrecision")))
-        place = _literal(row, "premierePlaceLabel")
-        if place and not _BARE_QID.match(place):
+            work["dates"].add(format_time(premiere, literal(row, "premierePrecision")))
+        if place := label(row, "premierePlaceLabel"):
             work["places"].add(place)
     return works
 
@@ -119,14 +116,14 @@ def _mentions_from_rows(rows: list[dict[str, Any]], ingested_at: datetime) -> li
     """One work mention per (work, composer) with a nameable title, composer
     and premiere date."""
     mentions: list[WorkMentionDocument] = []
-    for qid, work in _fold_work_rows(rows).items():
+    for work_qid, work in _fold_work_rows(rows).items():
         title: str = work["label"]
-        if not title or _BARE_QID.match(title):
-            log.debug("skipping %s: no label", qid)
+        if not title or BARE_QID.match(title):
+            log.debug("skipping %s: no label", work_qid)
             continue
         date = _earliest(work["dates"])
         if date is None:
-            log.debug("skipping %s: no usable premiere date", qid)
+            log.debug("skipping %s: no usable premiere date", work_qid)
             continue
         places = sorted(work["places"])
         premiere = {"date": date, "place": "; ".join(places) or None}
@@ -135,16 +132,16 @@ def _mentions_from_rows(rows: list[dict[str, Any]], ingested_at: datetime) -> li
                 WorkMentionDocument(
                     # keyed by composer too, so a collaboration's mentions stay
                     # distinct and an added co-composer doesn't rename the rest
-                    id=f"{qid}:{composer_qid}",
-                    url=f"{BASE_URL}/wiki/{qid}",
+                    id=f"{work_qid}:{composer_qid}",
+                    url=f"{BASE_URL}/wiki/{work_qid}",
                     source_name=WikidataWorksAdapter.name,
                     ingested_at=ingested_at,
                     title=title,
                     composer=composer,
                     language=work["language"],
                     raw={
-                        "item": f"http://www.wikidata.org/entity/{qid}",
-                        "composer_item": f"http://www.wikidata.org/entity/{composer_qid}",
+                        "item": f"{ENTITY}{work_qid}",
+                        "composer_item": f"{ENTITY}{composer_qid}",
                         "premiere_dates": sorted(work["dates"]),
                         "premiere_places": places,
                         PREMIERE_KEY: premiere,

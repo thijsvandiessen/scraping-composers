@@ -18,6 +18,7 @@ from typing import Any
 from .. import SourceClaim, SourceRecord
 
 BASE_URL = "https://www.wikidata.org"
+ENTITY = "http://www.wikidata.org/entity/"
 
 log = logging.getLogger(__name__)
 
@@ -83,14 +84,15 @@ METRICS: tuple[tuple[str, str], ...] = (
 # What the label service echoes for an item it cannot name: the bare QID, or,
 # for an "unknown value" statement, the blank node's skolem IRI. Neither is a
 # name, and the IRI is not an item either.
-_BARE_QID = re.compile(r"^(Q\d+|http://www\.wikidata\.org/\.well-known/genid/\w+)$")
+BARE_QID = re.compile(r"^(Q\d+|http://www\.wikidata\.org/\.well-known/genid/\w+)$")
+_BARE_QID = BARE_QID
 
 # A Wikidata time literal: optional BCE sign, year (>=1 digit), zero-padded
 # month and day. The time component is split off before this matches.
 _TIME = re.compile(r"(-?)(\d+)-(\d{2})-(\d{2})")
 
 
-def _format_time(value: str, precision: str | None) -> str:
+def format_time(value: str, precision: str | None) -> str:
     """Truncate a Wikidata time literal to the granularity its ``precision``
     warrants: day (11) keeps YYYY-MM-DD, month (10) keeps YYYY-MM, year (9) or
     coarser keeps just the year. Wikidata pads unknown components to 01, so
@@ -119,7 +121,7 @@ def _format_time(value: str, precision: str | None) -> str:
     return sign + body
 
 
-def _literal(row: dict[str, Any], var: str) -> str | None:
+def literal(row: dict[str, Any], var: str) -> str | None:
     """The row's value for ``var``, or None if absent or not a plain literal
     (Wikidata's "unknown value" comes back as a blank node)."""
     binding = row.get(var)
@@ -129,7 +131,7 @@ def _literal(row: dict[str, Any], var: str) -> str | None:
     return value
 
 
-def _language(row: dict[str, Any], var: str) -> str | None:
+def language(row: dict[str, Any], var: str) -> str | None:
     """The language tag of the row's literal for ``var`` ("en", "mul", "de"),
     or None when it has none: the label service echoes a bare QID untagged."""
     binding = row.get(var)
@@ -139,16 +141,28 @@ def _language(row: dict[str, Any], var: str) -> str | None:
     return lang or None
 
 
+def label(row: dict[str, Any], var: str) -> str | None:
+    """A label, unless the label service echoed a bare QID for want of one."""
+    value = literal(row, var)
+    return value if value and not BARE_QID.match(value) else None
+
+
+def entity_qid(row: dict[str, Any], var: str) -> str | None:
+    """The QID of an entity URI bound to ``var``, or ``None`` if absent or not an entity URI."""
+    value = literal(row, var)
+    return value.removeprefix(ENTITY) if value and value.startswith(ENTITY) else None
+
+
 def _relation(row: dict[str, Any]) -> tuple[str, str, str] | None:
     """A RELATIONS_QUERY row as (predicate, other QID, other label), or None
     for any other row -- or one whose other end the label service cannot name."""
-    relation, other, label = (_literal(row, var) for var in ("relation", "other", "otherLabel"))
-    if relation is None or other is None or label is None or _BARE_QID.match(label):
+    relation, other, other_label = (literal(row, var) for var in ("relation", "other", "otherLabel"))
+    if relation is None or other is None or other_label is None or BARE_QID.match(other_label):
         return None
     predicate = _RELATION_PREDICATES.get(relation.rsplit("/", 1)[-1])
     if predicate is None:
         return None
-    return predicate, other.rsplit("/", 1)[-1], label
+    return predicate, other.rsplit("/", 1)[-1], other_label
 
 
 def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -160,8 +174,8 @@ def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         item = items.setdefault(
             qid,
             {
-                "label": _literal(row, "itemLabel") or "",
-                "language": _language(row, "itemLabel"),
+                "label": literal(row, "itemLabel") or "",
+                "language": language(row, "itemLabel"),
                 "values": {},
                 "pins": {},
                 "items": {},
@@ -171,20 +185,20 @@ def _fold_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         if (relation := _relation(row)) is not None:
             item["relations"].add(relation)
         for var, _, _ in ITEM_FIELDS:
-            obj, label = _literal(row, var), _literal(row, f"{var}Label")
-            if obj is None or label is None or _BARE_QID.match(label):
+            obj, item_label = literal(row, var), literal(row, f"{var}Label")
+            if obj is None or item_label is None or BARE_QID.match(item_label):
                 continue  # unbound, or the object has no label
-            item["items"].setdefault(var, set()).add((obj.rsplit("/", 1)[-1], label))
+            item["items"].setdefault(var, set()).add((obj.rsplit("/", 1)[-1], item_label))
         for var, _, kind in FIELDS:
-            value = _literal(row, var)
+            value = literal(row, var)
             if value is None:
                 continue
             if kind == _DATE:
-                value = _format_time(value, _literal(row, f"{var}Precision"))
-            elif kind is not None and _BARE_QID.match(value):
+                value = format_time(value, literal(row, f"{var}Precision"))
+            elif kind is not None and BARE_QID.match(value):
                 continue  # claim object has no label
             item["values"].setdefault(var, set()).add(value)
-            if kind in _PINNED_KINDS and (pin := _literal(row, var.removesuffix("Label"))) is not None:
+            if kind in _PINNED_KINDS and (pin := literal(row, var.removesuffix("Label"))) is not None:
                 item["pins"].setdefault((var, value), set()).add(pin.rsplit("/", 1)[-1])
     return items
 
@@ -216,35 +230,35 @@ def _item_claims(
     return tuple(claims)
 
 
-def _records_from_rows(
+def records_from_rows(
     rows: list[dict[str, Any]],
     metrics: dict[str, dict[str, str]] | None = None,
     professions: Mapping[str, frozenset[str]] | None = None,
 ) -> list[SourceRecord]:
     """Fold SPARQL result rows (several per person when properties have
     multiple values) into one SourceRecord per person, attaching the person's
-    popularity ``metrics`` (from ``_fetch_metrics``) as claims and the
+    popularity ``metrics`` (from ``fetch_metrics``) as claims and the
     ``professions`` the population query found them under (composer when not
     given)."""
-    records = []
+    records: list[SourceRecord] = []
     for qid, item in _fold_rows(rows).items():
-        name = item["label"]
-        if not name or _BARE_QID.match(name):
+        name: str = item["label"]
+        if not name or BARE_QID.match(name):
             log.debug("skipping %s: no label", qid)
             continue
         item_metrics = (metrics or {}).get(qid, {})
-        raw: dict[str, Any] = {"item": f"http://www.wikidata.org/entity/{qid}", "label": name}
+        raw: dict[str, Any] = {"item": f"{ENTITY}{qid}", "label": name}
         raw.update({var: sorted(values) for var, values in item["values"].items()})
         pinned: dict[str, set[str]] = {}
         for (var, _), pins in item["pins"].items():
             pinned.setdefault(var.removesuffix("Label"), set()).update(pins)
         raw.update({var: sorted(pins) for var, pins in pinned.items()})
         for var, pairs in item["items"].items():
-            raw[var] = [{"item": obj, "label": label} for obj, label in sorted(pairs)]
+            raw[var] = [{"item": obj, "label": obj_label} for obj, obj_label in sorted(pairs)]
         if item["relations"]:
             raw["relations"] = [
-                {"predicate": predicate, "item": other, "label": label}
-                for predicate, other, label in sorted(item["relations"])
+                {"predicate": predicate, "item": other, "label": other_label}
+                for predicate, other, other_label in sorted(item["relations"])
             ]
         raw.update(item_metrics)
         records.append(
@@ -258,3 +272,9 @@ def _records_from_rows(
             )
         )
     return records
+
+
+_format_time = format_time
+_literal = literal
+_language = language
+_records_from_rows = records_from_rows

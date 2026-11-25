@@ -30,29 +30,30 @@ _SOLOIST_ROLES = frozenset({"instrument", "voice"})
 
 
 @dataclass
-class _Artist:
+class Artist:
     """An artist accumulated across the concerts they appear in."""
 
     id: str
     name: str
     is_group: bool
-    professions: set[str] = field(default_factory=set)
-    disciplines: set[str] = field(default_factory=set)
+    professions: set[str] = field(default_factory=set[str])
+    disciplines: set[str] = field(default_factory=set[str])
 
 
-def _register(registry: dict[str, _Artist], artist: dict[str, Any]) -> None:
+def _register(registry: dict[str, Artist], artist: dict[str, Any]) -> None:
     artist_id = artist.get("id")
     name = artist.get("group_name") if artist.get("display_type") == "group" else artist.get("name")
     if not artist_id or not name:
         return
     info = registry.get(artist_id)
     if info is None:
-        info = _Artist(id=artist_id, name=name, is_group=artist.get("display_type") == "group")
+        info = Artist(id=artist_id, name=name, is_group=artist.get("display_type") == "group")
         registry[artist_id] = info
 
     role: dict[str, Any] = artist.get("role") or {}
     role_type, role_name = role.get("type"), role.get("name")
-    for field_of_work in artist.get("fields_of_work") or []:
+    fields_of_work: list[str] = artist.get("fields_of_work") or []
+    for field_of_work in fields_of_work:
         info.professions.add(field_of_work)
     if isinstance(role_type, str):
         profession = _ROLE_PROFESSION.get(role_type)
@@ -62,7 +63,7 @@ def _register(registry: dict[str, _Artist], artist: dict[str, Any]) -> None:
             info.disciplines.add(role_name)
 
 
-def _collect(concert: dict[str, Any], registry: dict[str, _Artist]) -> None:
+def collect(concert: dict[str, Any], registry: dict[str, Artist]) -> None:
     """Register every artist of a concert: the concert-level ones (orchestra,
     conductor) and the per-work ones (composer, soloist, arranger)."""
     for artist in concert.get("_links", {}).get("artist", []):
@@ -72,7 +73,7 @@ def _collect(concert: dict[str, Any], registry: dict[str, _Artist]) -> None:
             _register(registry, artist)
 
 
-def _artist_record(info: _Artist) -> SourceRecord:
+def artist_record(info: Artist) -> SourceRecord:
     kind = "ensemble" if info.is_group else "person"
     claims: list[SourceClaim] = []
     if not info.is_group:
@@ -91,3 +92,8 @@ def _artist_record(info: _Artist) -> SourceRecord:
         kind=kind,
         claims=tuple(claims),
     )
+
+
+_Artist = Artist
+_collect = collect
+_artist_record = artist_record

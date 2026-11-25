@@ -40,10 +40,10 @@ class ParticipantResolver:
     """Shared participant credit resolution for concert and recording derivation."""
 
     person_by_key: dict[str, uuid.UUID]
-    ensemble_by_key: dict[str, uuid.UUID] = field(default_factory=dict)
+    ensemble_by_key: dict[str, uuid.UUID] = field(default_factory=dict[str, uuid.UUID])
     # Anchor names (see :func:`~composer_warehouse.ensembles.alias_index`): the
     # last resort for a credit no source minted an entity for.
-    anchor_by_alias: dict[str, uuid.UUID] = field(default_factory=dict)
+    anchor_by_alias: dict[str, uuid.UUID] = field(default_factory=dict[str, uuid.UUID])
 
     def _resolve(self, role: str, key: str) -> uuid.UUID | None:
         """The entity a credited name refers to.

@@ -24,9 +24,9 @@ from typing import ClassVar
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, WorkMentionDocument
-from .artists import _Artist, _artist_record, _collect
+from .artists import Artist, artist_record, collect
 from .fetch import BASE_URL, REQUEST_DELAY_S, iter_concerts
-from .performances import _performances
+from .performances import performances
 
 log = logging.getLogger(__name__)
 
@@ -48,11 +48,11 @@ class BerlinPhilAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument])
         then one ``person``/``ensemble`` record per distinct artist seen along the
         way. ``max_pages`` caps the number of concerts fetched, for test runs."""
         ingested_at = datetime.now(UTC)
-        registry: dict[str, _Artist] = {}
+        registry: dict[str, Artist] = {}
         works = 0
         for concert in iter_concerts(session, max_pages=max_pages):
-            _collect(concert, registry)
-            for mention in _performances(concert):
+            collect(concert, registry)
+            for mention in performances(concert):
                 works += 1
                 yield WorkMentionDocument(
                     id=mention.external_id,
@@ -65,7 +65,7 @@ class BerlinPhilAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocument])
                 )
         log.info("berlinphil: %d work-performances, %d artists", works, len(registry))
         for info in registry.values():
-            record = _artist_record(info)
+            record = artist_record(info)
             yield EntityDocument(
                 id=record.external_id,
                 url=record.url,

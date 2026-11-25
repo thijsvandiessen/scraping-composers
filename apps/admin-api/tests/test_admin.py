@@ -664,3 +664,105 @@ def test_health_is_public(monkeypatch: pytest.MonkeyPatch) -> None:
         r = client.get("/health")
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
+
+
+def test_fetch_due_writes_running_manifests_before_background_runs(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Eager running manifests prevent duplicate triggers while fetch-due tasks wait in queue."""
+    from fastapi import BackgroundTasks
+
+    queued: list[tuple[object, tuple[object, ...]]] = []
+
+    def defer(self: BackgroundTasks, func: object, *args: object, **kwargs: object) -> None:
+        queued.append((func, args))
+
+    monkeypatch.setattr(BackgroundTasks, "add_task", defer)
+
+    first = client.post("/admin/v1/scrapers/fetch-due")
+    assert first.status_code == 200
+    started = {s["source"] for s in first.json()}
+    assert {"fake", "exploding"} <= started
+    assert len(queued) == len(started)
+
+    # Before any background task runs, a second fetch-due or fetch sees the eager running manifests.
+    assert client.post("/admin/v1/scrapers/fetch-due").json() == []
+    assert client.post("/admin/v1/scrapers/fake/fetch").status_code == 409
+
+
+def test_eager_adapter_error_finalizes_running_manifest(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, bucket_path: Path
+) -> None:
+    """If an adapter raises before streaming begins, the eager running manifest still flips to failed."""
+
+    class _EagerFailSource(SourceAdapter):
+        name = "eagerfail"
+        base_url = "https://eagerfail.example"
+        cadence = RefreshCadence.MONTHLY
+
+        def fetch(self, max_pages: int | None = None) -> Iterator[EntityDocument]:
+            raise RuntimeError("boom before generator")
+
+    monkeypatch.setitem(admin_routes.REGISTRY, "eagerfail", _EagerFailSource())
+    r = client.post("/admin/v1/scrapers/eagerfail/fetch")
+    assert r.status_code == 202
+    snapshot_id = r.json()["snapshot_id"]
+
+    manifest = json.loads((bucket_path / "eagerfail" / snapshot_id / "manifest.json").read_text())
+    assert manifest["status"] == "failed"
+    assert "boom before generator" in manifest["error"]
+
+
+def test_process_background_unexpected_error_marks_run_failed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unexpected non-IngestError failures in background processing must not strand IngestRun in running."""
+    snapshot_id = client.post("/admin/v1/scrapers/fake/fetch").json()["snapshot_id"]
+
+    def crash(*args: object, **kwargs: object) -> None:
+        raise OSError("corrupt bucket file")
+
+    monkeypatch.setattr(admin_snapshots, "execute_run", crash)
+
+    r = client.post(f"/admin/v1/snapshots/fake/{snapshot_id}/process")
+    assert r.status_code == 202
+    run_id = r.json()["run_id"]
+
+    detail = client.get(f"/admin/v1/runs/{run_id}").json()
+    assert detail["status"] == "failed"
+    assert "corrupt bucket file" in detail["error"]
+    assert detail["finished_at"] is not None
+
+
+def test_promote_refresh_derived_failure_is_recorded_in_gold_manifest(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A failure in refresh_derived before promote() runs is still surfaced via GET /admin/v1/gold."""
+    monkeypatch.setattr(settings, "gold_database_url", f"sqlite:///{tmp_path / 'gold.db'}")
+
+    def broken_refresh(_session: object) -> None:
+        raise RuntimeError("derived refresh exploded")
+
+    monkeypatch.setattr(build_routes, "refresh_derived", broken_refresh)
+
+    assert client.post("/admin/v1/promote").status_code == 202
+    gold = client.get("/admin/v1/gold").json()
+    assert gold["status"] == "failed"
+    assert "derived refresh exploded" in gold["error"]
+    # And the in-flight build guard was released so a retry is not blocked.
+    assert not build_routes._ACTIVE_BUILDS
+
+
+def test_promote_rejects_duplicate_while_in_flight(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """In-process build lock rejects concurrent promote even before promote() writes its manifest."""
+    from fastapi import BackgroundTasks
+
+    monkeypatch.setattr(settings, "gold_database_url", f"sqlite:///{tmp_path / 'gold.db'}")
+    monkeypatch.setattr(BackgroundTasks, "add_task", lambda self, func, *a, **kw: None)
+    try:
+        assert client.post("/admin/v1/promote").status_code == 202
+        assert client.post("/admin/v1/promote").status_code == 409
+    finally:
+        build_routes._ACTIVE_BUILDS.clear()

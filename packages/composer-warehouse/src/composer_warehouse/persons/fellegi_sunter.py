@@ -57,6 +57,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, cast
 
 # Weights are carried in bits (log base 2) throughout: a weight of +1 doubles
 # the odds of a match, -1 halves them, which makes the numbers readable.
@@ -224,9 +225,10 @@ class LinkageModel:
         if not isinstance(raw_comparisons, list):
             raise ValueError(f"expected 'comparisons' to be a list, got {type(raw_comparisons).__name__}")
         comparisons: list[Comparison] = []
-        for raw in raw_comparisons:
-            if not isinstance(raw, dict):
-                raise ValueError(f"expected each comparison to be a dict, got {type(raw).__name__}")
+        for raw_item in cast(list[object], raw_comparisons):
+            if not isinstance(raw_item, dict):
+                raise ValueError(f"expected each comparison to be a dict, got {type(raw_item).__name__}")
+            raw = cast(dict[str, Any], raw_item)
             comparisons.append(
                 Comparison(
                     name=str(raw["name"]),

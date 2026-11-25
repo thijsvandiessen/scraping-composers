@@ -65,7 +65,9 @@ class _Sweep:
     mentions: int = 0
     contentless: int = 0
     profiles: int = 0
-    life_dates: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
+    life_dates: dict[str, tuple[str | None, str | None]] = field(
+        default_factory=dict[str, tuple[str | None, str | None]]
+    )
 
 
 @dataclass

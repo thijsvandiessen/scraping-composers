@@ -51,16 +51,16 @@ class Person:
 
     name: str
     #: Printed label -> how many times it credited them, e.g. {"Composer": 41}.
-    labels: Counter[str] = field(default_factory=Counter)
+    labels: Counter[str] = field(default_factory=Counter[str])
     #: Slugged roles, for the profession claims.
-    roles: set[str] = field(default_factory=set)
+    roles: set[str] = field(default_factory=set[str])
     #: Cast parts, capped. Ordered on the way out for a stable record.
-    parts: set[str] = field(default_factory=set)
+    parts: set[str] = field(default_factory=set[str])
     #: Genres they were credited in, e.g. {"Opera", "Ballet"}.
-    genres: set[str] = field(default_factory=set)
-    works: set[int] = field(default_factory=set)
-    productions: set[int] = field(default_factory=set)
-    performances: set[int] = field(default_factory=set)
+    genres: set[str] = field(default_factory=set[str])
+    works: set[int] = field(default_factory=set[int])
+    productions: set[int] = field(default_factory=set[int])
+    performances: set[int] = field(default_factory=set[int])
     first_date: str | None = None
     last_date: str | None = None
 

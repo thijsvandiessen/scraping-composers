@@ -35,7 +35,7 @@ import re
 from dataclasses import dataclass, field
 
 from .credits import Credit, read, unknown_labels
-from .text import body, cells, row_html, table, tables, text
+from .text import body, cells, genre, row_html, table, tables, text, title
 from .urls import page_ref
 
 #: Labels on a performance page that credit a person — the musicians of the
@@ -87,9 +87,6 @@ FIELDS = frozenset(
 #: :data:`~.productions.NOT_CREDITS`.
 NOT_CREDITS = frozenset({"sponsor", "supported"})
 
-_TITLE_RE = re.compile(r"<h1\b[^>]*>(.*?)</h1\s*>", re.DOTALL | re.IGNORECASE)
-_HEADING_RE = re.compile(r"<h2\b[^>]*>(.*?)</h2\s*>", re.DOTALL | re.IGNORECASE)
-_DETAILS_RE = re.compile(r"^(.*?):\s*performance details$", re.IGNORECASE)
 _PARENT_RE = re.compile(r"""uiPerfLinkAll["'][^>]*\bhref\s*=\s*["']?([^"'\s>]+)""", re.IGNORECASE)
 _ITALIC_RE = re.compile(r"<i\b[^>]*>(.*?)</i\s*>", re.DOTALL | re.IGNORECASE)
 
@@ -124,7 +121,7 @@ class PerformancePage:
     genre: str | None
     credits: tuple[Credit, ...] = ()
     cast: tuple[CastEntry, ...] = ()
-    fields: dict[str, str] = field(default_factory=dict)
+    fields: dict[str, str] = field(default_factory=dict[str, str])
     #: What the page's own "List All" link points at — a production or a work.
     #: Read as a cross-check on the walk, never as the route to this page.
     parent: tuple[str, int] | None = None
@@ -166,7 +163,7 @@ def parse(
         work_id=work_id,
         production_id=production_id,
         title=_title(panel, date),
-        genre=_genre(panel),
+        genre=genre(panel, "performance"),
         credits=credits,
         cast=_cast(panel),
         fields=fields,
@@ -182,22 +179,11 @@ def _title(panel: str, date: str) -> str:
     better a title with a date stuck to it than a title truncated at the wrong
     hyphen.
     """
-    match = _TITLE_RE.search(panel)
-    if match is None:
-        return ""
-    heading = text(match.group(1))
-    if not date:
+    heading = title(panel)
+    if not heading or not date:
         return heading
     cut = heading.rfind(date)
     return heading[:cut].rstrip(" -–") if cut > 0 else heading
-
-
-def _genre(panel: str) -> str | None:
-    for heading in _HEADING_RE.findall(panel):
-        match = _DETAILS_RE.match(text(heading))
-        if match is not None:
-            return match.group(1).strip()
-    return None
 
 
 def _parent(panel: str) -> tuple[str, int] | None:

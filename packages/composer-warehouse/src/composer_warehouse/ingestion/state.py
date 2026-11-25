@@ -56,13 +56,15 @@ class IngestState:
     # identifier, during the run.
     work_candidates: WorkCandidates
     # (work id, scheme, value) identifiers already stored for this source
-    existing_work_identifiers: set[tuple[uuid.UUID, str, str]] = field(default_factory=set)
+    existing_work_identifiers: set[tuple[uuid.UUID, str, str]] = field(
+        default_factory=set[tuple[uuid.UUID, str, str]]
+    )
     # work id -> the premiere date it carries, for works that carry one
-    work_premieres: dict[uuid.UUID, str] = field(default_factory=dict)
+    work_premieres: dict[uuid.UUID, str] = field(default_factory=dict[uuid.UUID, str])
     seen: int = 0
     new: int = 0
-    seen_entity_ids: set[uuid.UUID] = field(default_factory=set)
-    edited_entity_ids: set[uuid.UUID] = field(default_factory=set)
+    seen_entity_ids: set[uuid.UUID] = field(default_factory=set[uuid.UUID])
+    edited_entity_ids: set[uuid.UUID] = field(default_factory=set[uuid.UUID])
 
 
 def load_state(session: Session, source: Source, run: IngestRun) -> IngestState:

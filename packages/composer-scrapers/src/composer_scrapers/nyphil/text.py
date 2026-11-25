@@ -14,14 +14,18 @@ from collections.abc import Iterator
 # conductorName sentinel for works performed without a conductor
 _NOT_CONDUCTED = "not conducted"
 
-_WS = re.compile(r"\s+")
+WS = re.compile(r"\s+")
+_WS = WS
 
 
-def _names(value: str | None) -> Iterator[str]:
+def names(value: str | None) -> Iterator[str]:
     """Person names in a composerName/conductorName/soloistName value:
     ";"-separated, whitespace runs collapsed, empties and the "Not conducted"
     sentinel dropped."""
     for part in (value or "").split(";"):
-        name = _WS.sub(" ", part).strip()
+        name = WS.sub(" ", part).strip()
         if name and name.lower() != _NOT_CONDUCTED:
             yield name
+
+
+_names = names

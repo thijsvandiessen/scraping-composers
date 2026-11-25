@@ -209,7 +209,7 @@ class GoldBuild:
         suffices). Candidates absent from ``appearance_counts`` have zero of
         both, which still clears thresholds of 0."""
         candidate_roots = {self.root(c) for c in candidates}
-        kept = set()
+        kept: set[uuid.UUID] = set()
         for r in candidate_roots:
             count = self.appearance_counts.get(r, AppearanceCount())
             if count.concerts >= min_concert or count.recordings >= min_recording:
@@ -226,7 +226,7 @@ class GoldBuild:
         concerts+recordings."""
         candidate_roots = {self.root(c) for c in candidates}
         reach = _composer_reach(self.silver, self.root)
-        kept = set()
+        kept: set[uuid.UUID] = set()
         for r in candidate_roots:
             count = self.appearance_counts.get(r, AppearanceCount())
             composer = reach.get(r, ComposerReach())

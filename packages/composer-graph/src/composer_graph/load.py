@@ -68,12 +68,12 @@ def _write(driver: Driver, database: str | None, query: LiteralString, rows: lis
     def work(tx: ManagedTransaction) -> None:
         tx.run(query, rows=rows).consume()
 
-    with driver.session(database=database) as session:
+    with driver.session(database=database) as session:  # pyright: ignore[reportUnknownMemberType]
         session.execute_write(work)
 
 
 def _reset(driver: Driver, database: str | None) -> None:
-    with driver.session(database=database) as session:
+    with driver.session(database=database) as session:  # pyright: ignore[reportUnknownMemberType]
         # In batches of its own: one transaction deleting a million nodes would
         # need the whole delete set in heap.
         session.run("MATCH (n) CALL (n) { DETACH DELETE n } IN TRANSACTIONS OF 10000 ROWS").consume()
@@ -152,7 +152,7 @@ def _annotate_reach(driver: Driver, database: str | None) -> None:
         f"MATCH (n)-[:{claim_pattern()}]-(other) WITH n, count(DISTINCT other) AS n_other "
         "SET n.claim_degree = n_other"
     )
-    with driver.session(database=database) as session:
+    with driver.session(database=database) as session:  # pyright: ignore[reportUnknownMemberType]
         for query in (*_REACH_QUERIES, claim_degree):
             session.run(query).consume()
 

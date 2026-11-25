@@ -97,10 +97,13 @@ def _performance_record(
     )
 
 
-def _performances(concert: dict[str, Any]) -> Iterator[SourceWorkMention]:
+def performances(concert: dict[str, Any]) -> Iterator[SourceWorkMention]:
     """Yield one work mention per titled work in the concert's programme."""
     season = next((s.get("label") for s in concert.get("_links", {}).get("season", [])), "")
     for work in concert.get("_embedded", {}).get("work", []):
         record = _performance_record(concert, season or "", work)
         if record is not None:
             yield record
+
+
+_performances = performances

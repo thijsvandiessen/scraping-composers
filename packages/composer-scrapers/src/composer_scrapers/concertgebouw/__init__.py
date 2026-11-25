@@ -19,9 +19,9 @@ from datetime import UTC, datetime
 from composer_http import SourceSession
 
 from .. import EntityDocument, HttpSourceAdapter, RefreshCadence, WorkMentionDocument
-from .dropdowns import SELECTS, _options, _record
-from .fetch import BASE_URL, REQUEST_DELAY_S, _fetch_list_page, _fetch_search_page
-from .performances import _performances
+from .dropdowns import SELECTS, options, record
+from .fetch import BASE_URL, REQUEST_DELAY_S, fetch_list_page, fetch_search_page
+from .performances import performances
 
 log = logging.getLogger(__name__)
 
@@ -43,28 +43,28 @@ class ConcertgebouwAdapter(HttpSourceAdapter[EntityDocument | WorkMentionDocumen
         view (one work mention each). The whole source is two fetches;
         ``max_pages`` is accepted for interface compatibility and ignored."""
         ingested_at = datetime.now(UTC)
-        page = _fetch_search_page(session)
-        list_page = _fetch_list_page(session)
+        page = fetch_search_page(session)
+        list_page = fetch_list_page(session)
         for select_id, profession in SELECTS:
             count = 0
-            for value, label in _options(page, select_id):
-                record = _record(select_id, profession, value, label)
-                if record is not None:
+            for value, label in options(page, select_id):
+                rec = record(select_id, profession, value, label)
+                if rec is not None:
                     count += 1
                     yield EntityDocument(
-                        id=record.external_id,
-                        url=record.url,
+                        id=rec.external_id,
+                        url=rec.url,
                         source_name=self.name,
                         ingested_at=ingested_at,
-                        name=record.name,
-                        kind=record.kind,
-                        raw=record.raw,
-                        claims=record.claims,
+                        name=rec.name,
+                        kind=rec.kind,
+                        raw=rec.raw,
+                        claims=rec.claims,
                     )
             log.info("concertgebouw %s: %d records", select_id, count)
 
         count = 0
-        for mention in _performances(list_page):
+        for mention in performances(list_page):
             count += 1
             yield WorkMentionDocument(
                 id=mention.external_id,
